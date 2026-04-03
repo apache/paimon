@@ -21,6 +21,7 @@ package org.apache.paimon.flink.btree;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.LogicalTypeConversion;
@@ -34,7 +35,6 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
-import org.apache.paimon.globalindex.RowIdIndexFieldsExtractor;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.options.Options;
@@ -46,9 +46,13 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -59,69 +63,169 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Supplier;
 
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.calcRowRange;
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
 
 /** The {@link BTreeIndexTopoBuilder} for BTree index in Flink. */
 public class BTreeIndexTopoBuilder {
 
-    public static void buildIndex(
+    public static boolean buildIndex(
+            StreamExecutionEnvironment env,
+            Supplier<BTreeGlobalIndexBuilder> indexBuilderSupplier,
+            FileStoreTable table,
+            List<String> indexColumns,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        DataStream<Committable> allCommitMessages = null;
+        for (String indexColumn : indexColumns) {
+            BTreeGlobalIndexBuilder indexBuilder =
+                    indexBuilderSupplier.get().withIndexField(indexColumn);
+            if (partitionPredicate != null) {
+                indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
+            }
+
+            Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
+                    indexBuilder.scan();
+            if (!indexRangeAndSplits.isPresent()) {
+                return false;
+            }
+
+            Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
+            List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
+            if (splits.isEmpty()) {
+                return false;
+            }
+            Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
+                    groupSplitsByRange(scanResult.getLeft(), splits);
+            if (partitionRangeSplits.isEmpty()) {
+                return false;
+            }
+
+            // 2. Select necessary columns (index field + ROW_ID)
+            List<String> selectedColumns = new ArrayList<>();
+            selectedColumns.add(indexColumn);
+
+            RowType readType =
+                    SpecialFields.rowTypeWithRowId(table.rowType().project(selectedColumns));
+            int indexFieldPos = readType.getFieldIndex(indexColumn);
+            int rowIdPos = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+            DataType indexFieldType = readType.getTypeAt(indexFieldPos);
+
+            // 3. Calculate maximum parallelism bound
+            long recordsPerRange = userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
+            int maxParallelism =
+                    userOptions.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
+
+            // 4. Build one topology per contiguous row range
+            CoreOptions coreOptions = table.coreOptions();
+            ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+            List<String> sortColumns = new ArrayList<>();
+            sortColumns.add(indexColumn);
+            int partitionFieldSize = table.partitionKeys().size();
+            BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
+            for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
+                    partitionRangeSplits.entrySet()) {
+                BinaryRow partition = partitionEntry.getKey();
+                for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
+                    Range range = entry.getKey();
+                    List<Split> rangeSplits = entry.getValue();
+                    if (rangeSplits.isEmpty()) {
+                        continue;
+                    }
+
+                    DataStream<Committable> commitMessages =
+                            executeForPartitionRange(
+                                    env,
+                                    range,
+                                    rangeSplits,
+                                    readBuilder,
+                                    indexBuilder,
+                                    partitionFieldSize,
+                                    binaryRowSerializer.serializeToBytes(partition),
+                                    indexFieldPos,
+                                    rowIdPos,
+                                    indexFieldType,
+                                    sortColumns,
+                                    coreOptions,
+                                    readType,
+                                    recordsPerRange,
+                                    maxParallelism);
+
+                    allCommitMessages =
+                            allCommitMessages == null
+                                    ? commitMessages
+                                    : allCommitMessages.union(commitMessages);
+                }
+            }
+        }
+        if (allCommitMessages != null) {
+            commit(table, allCommitMessages);
+        }
+
+        return true;
+    }
+
+    public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        // 1. Create BTree index builder and scan splits
-        BTreeGlobalIndexBuilder indexBuilder =
-                new BTreeGlobalIndexBuilder(table)
-                        .withIndexType("btree")
-                        .withIndexField(indexColumn);
-        if (partitionPredicate != null) {
-            indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
+        if (buildIndex(
+                env,
+                () -> new BTreeGlobalIndexBuilder(table),
+                table,
+                Collections.singletonList(indexColumn),
+                partitionPredicate,
+                userOptions)) {
+            env.execute("Create btree global index for table: " + table.name());
         }
+    }
 
-        List<DataSplit> splits = indexBuilder.scan();
-        Range range = calcRowRange(splits);
-        if (splits.isEmpty() || range == null) {
-            return;
-        }
-
-        // 2. Select necessary columns (partition keys + index field + ROW_ID)
-        List<String> selectedColumns = new ArrayList<>(table.partitionKeys());
-        selectedColumns.add(indexColumn);
-
-        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType().project(selectedColumns));
-
-        // 3. Calculate parallelism and sort
-        long recordsPerRange = userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
+    protected static DataStream<Committable> executeForPartitionRange(
+            StreamExecutionEnvironment env,
+            Range range,
+            List<Split> rangeSplits,
+            ReadBuilder readBuilder,
+            BTreeGlobalIndexBuilder indexBuilder,
+            int partitionFieldSize,
+            byte[] partition,
+            int indexFieldPos,
+            int rowIdPos,
+            DataType indexFieldType,
+            List<String> sortColumns,
+            CoreOptions coreOptions,
+            RowType readType,
+            long recordsPerRange,
+            int maxParallelism) {
         int parallelism = Math.max((int) (range.count() / recordsPerRange), 1);
-        int maxParallelism = userOptions.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
         parallelism = Math.min(parallelism, maxParallelism);
 
-        // 4. Create source from splits and select columns
-        DataStream<DataSplit> sourceStream =
-                env.fromData(new JavaTypeInfo<>(DataSplit.class), splits.toArray(new DataSplit[0]))
-                        .name("Global Index Source")
+        DataStream<Split> sourceStream =
+                env.fromData(new JavaTypeInfo<>(Split.class), rangeSplits.toArray(new Split[0]))
+                        .name("Global Index Source " + " range=" + range)
                         .setParallelism(1);
 
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
         DataStream<RowData> rowDataStream =
                 sourceStream
                         .transform(
-                                "Read Data",
+                                "Read Data " + range,
                                 InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(readType)),
                                 new ReadDataOperator(readBuilder))
                         .setParallelism(parallelism);
 
-        // 5. Sort data using TableSorter style
-        // Configure sort info similar to SortCompactAction
-        CoreOptions coreOptions = table.coreOptions();
         TableSortInfo sortInfo =
                 new TableSortInfo.Builder()
-                        .setSortColumns(selectedColumns)
+                        .setSortColumns(sortColumns)
                         .setSortStrategy(CoreOptions.OrderType.ORDER)
                         .setSinkParallelism(parallelism)
                         .setLocalSampleSize(parallelism * coreOptions.getLocalSampleMagnification())
@@ -129,24 +233,23 @@ public class BTreeIndexTopoBuilder {
                         .setRangeNumber(parallelism * 10)
                         .build();
 
-        // Use TableSorter for sorting
         TableSorter sorter =
                 TableSorter.getSorter(env, rowDataStream, coreOptions, readType, sortInfo);
         DataStream<RowData> sortedStream = sorter.sort();
 
-        // 6. Build index for each partition
-        DataStream<Committable> commitMessages =
-                sortedStream
-                        .transform(
-                                "write-btree-index",
-                                new CommittableTypeInfo(),
-                                new WriteIndexOperator(range, indexBuilder))
-                        .setParallelism(parallelism);
-
-        // 7. Commit all commit messages
-        commit(table, commitMessages);
-
-        env.execute("Create btree global index for table: " + table.name());
+        return sortedStream
+                .transform(
+                        "write-btree-index " + range,
+                        new CommittableTypeInfo(),
+                        new WriteIndexOperator(
+                                range,
+                                partitionFieldSize,
+                                partition,
+                                indexBuilder,
+                                indexFieldPos,
+                                rowIdPos,
+                                indexFieldType))
+                .setParallelism(parallelism);
     }
 
     private static void commit(FileStoreTable table, DataStream<Committable> written) {
@@ -154,7 +257,7 @@ public class BTreeIndexTopoBuilder {
                 new CommitterOperatorFactory<>(
                         false,
                         true,
-                        "BTreeIndexCommitter",
+                        "BTreeIndexCommitter-" + UUID.randomUUID(),
                         context ->
                                 new StoreCommitter(
                                         table, table.newCommit(context.commitUser()), context),
@@ -169,7 +272,7 @@ public class BTreeIndexTopoBuilder {
     private static class ReadDataOperator
             extends org.apache.flink.table.runtime.operators.TableStreamOperator<RowData>
             implements org.apache.flink.streaming.api.operators.OneInputStreamOperator<
-                    DataSplit, RowData> {
+                    Split, RowData> {
 
         private static final long serialVersionUID = 1L;
 
@@ -188,8 +291,8 @@ public class BTreeIndexTopoBuilder {
         }
 
         @Override
-        public void processElement(StreamRecord<DataSplit> element) throws Exception {
-            DataSplit split = element.getValue();
+        public void processElement(StreamRecord<Split> element) throws Exception {
+            Split split = element.getValue();
             try (RecordReader<InternalRow> reader = tableRead.createReader(split)) {
                 reader.forEachRemaining(
                         row -> output.collect(new StreamRecord<>(new FlinkRowData(row))));
@@ -200,59 +303,75 @@ public class BTreeIndexTopoBuilder {
     private static class WriteIndexOperator extends BoundedOneInputOperator<RowData, Committable> {
 
         private final Range rowRange;
+        private final byte[] partition;
+        private final int partitionFieldSize;
         private final BTreeGlobalIndexBuilder builder;
+        private final int indexFieldPos;
+        private final int rowIdPos;
+        private final DataType indexFieldType;
 
         private transient long counter;
-        private transient BinaryRow currentPart;
         private transient GlobalIndexParallelWriter currentWriter;
         private transient List<CommitMessage> commitMessages;
+        private transient InternalRow.FieldGetter indexFieldGetter;
+        private transient BinaryRowSerializer binaryRowSerializer;
 
-        public WriteIndexOperator(Range rowRange, BTreeGlobalIndexBuilder builder) {
+        public WriteIndexOperator(
+                Range rowRange,
+                int partitionFieldSize,
+                byte[] partition,
+                BTreeGlobalIndexBuilder builder,
+                int indexFieldPos,
+                int rowIdPos,
+                DataType indexFieldType) {
             this.rowRange = rowRange;
+            this.partitionFieldSize = partitionFieldSize;
+            this.partition = partition;
             this.builder = builder;
+            this.indexFieldPos = indexFieldPos;
+            this.rowIdPos = rowIdPos;
+            this.indexFieldType = indexFieldType;
         }
 
         @Override
         public void open() throws Exception {
             super.open();
             commitMessages = new ArrayList<>();
+            indexFieldGetter = InternalRow.createFieldGetter(indexFieldType, indexFieldPos);
+            this.binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
         }
 
         @Override
         public void processElement(StreamRecord<RowData> element) throws IOException {
             InternalRow row = new FlinkRowWrapper(element.getValue());
-
-            RowIdIndexFieldsExtractor extractor = builder.extractor();
-            BinaryRow partRow = extractor.extractPartition(row);
-
-            // the input is sorted by <partition, indexedField>
-            if (currentWriter != null) {
-                if (!Objects.equals(partRow, currentPart) || counter >= builder.recordsPerRange()) {
-                    commitMessages.add(
-                            builder.flushIndex(rowRange, currentWriter.finish(), currentPart));
-                    currentWriter = null;
-                    counter = 0;
-                }
+            if (currentWriter != null && counter >= builder.recordsPerRange()) {
+                commitMessages.add(
+                        builder.flushIndex(
+                                rowRange,
+                                currentWriter.finish(),
+                                binaryRowSerializer.deserializeFromBytes(partition)));
+                currentWriter = null;
+                counter = 0;
             }
 
-            // write <value, rowId> pair to index file
-            currentPart = partRow;
             counter++;
 
             if (currentWriter == null) {
                 currentWriter = builder.createWriter();
             }
 
-            // convert the original rowId to local rowId
-            long localRowId = extractor.extractRowId(row) - rowRange.from;
-            currentWriter.write(extractor.extractIndexField(row), localRowId);
+            long localRowId = row.getLong(rowIdPos) - rowRange.from;
+            currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
         }
 
         @Override
         public void endInput() throws IOException {
             if (counter > 0) {
                 commitMessages.add(
-                        builder.flushIndex(rowRange, currentWriter.finish(), currentPart));
+                        builder.flushIndex(
+                                rowRange,
+                                currentWriter.finish(),
+                                binaryRowSerializer.deserializeFromBytes(partition)));
             }
             for (CommitMessage message : commitMessages) {
                 output.collect(

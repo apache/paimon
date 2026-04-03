@@ -84,7 +84,7 @@ This statement updates only the `b` column in the target table `target_table` ba
 `source_table`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values. The difference between this and table those are not enabled with data evolution is that only the `b` column data is written to new files.
 
 Note that: 
-* Data Evolution Table does not support 'Delete', 'Update', or 'Compact' statement yet.
+* Data Evolution Table does not support 'Delete' and 'Update' statement yet.
 * Merge Into for Data Evolution Table does not support 'WHEN NOT MATCHED BY SOURCE' clause.
 
 ### Flink
@@ -113,6 +113,43 @@ SELECT * FROM source_table
 ```
 Note that:
 * Compared to Spark implementation, Flink data_evolution_merge_into procedure only supports updating/inserting new columns now. Inserting new rows is not supported yet.
+
+#### Self Merge
+
+Self-merge refers to the case where the source and target of the merge operation are the **same table**. This is useful
+when you want to transform existing column values in place — for example, applying a UDF to rewrite a column.
+
+Since the source table cannot be the same as the target table directly, you need to create a **temporary view** based on
+the system table `T$row_tracking` (which exposes the hidden `_ROW_ID` column) and use `_ROW_ID` as the merge condition.
+
+```sql
+-- 1. Register a UDF
+CREATE TEMPORARY FUNCTION concat_string AS 'com.example.StringConcatUdf';
+
+-- 2. Create a view from the row-tracking system table
+CREATE TEMPORARY VIEW source_view AS
+SELECT _ROW_ID, concat_string(name) AS name
+FROM my_db.target_table$row_tracking;
+
+-- 3. Self-merge: update the name column using the UDF result
+CALL sys.data_evolution_merge_into(
+    'my_db.target_table',
+    'TempT',
+    -- alternatively, you could also pass the create sqls in procedure directly
+    -- like: 'CREATE TEMPORARY FUNCTION concat_string AS ''com.example.StringConcatUdf''; CREATE TEMPORARY VIEW XXX'
+    '',
+    'source_view',
+    'TempT._ROW_ID=source_view._ROW_ID',
+    'name=source_view.name',
+    2
+);
+```
+
+Note that:
+* The source and target table name cannot be the same. You must create a temporary view as the source.
+* use `view._ROW_ID` = `source._ROW_ID` to identify the self-merge pattern.
+* `_ROW_ID` is only available via the `$row_tracking` system table.
+* Self-merge only supports `WHEN MATCHED THEN UPDATE` semantics.
 
 ## File Group Spec
 

@@ -488,6 +488,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('name', pa.string()),
             ('price', pa.float64()),
         ])
+        pk_write_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
         pk_schema = Schema.from_pyarrow_schema(
             pk_pa_schema,
             primary_keys=['id'],
@@ -500,7 +505,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-        }, schema=pk_pa_schema)
+        }, schema=pk_write_schema)
 
         pk_write_builder = pk_table.new_batch_write_builder()
         pk_writer = pk_write_builder.new_write()
@@ -558,6 +563,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('name', pa.string()),
             ('price', pa.float64()),
         ])
+        pk_pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
@@ -570,7 +580,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-        }, schema=pa_schema)
+        }, schema=pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
@@ -635,7 +645,7 @@ class ReaderBasicTest(unittest.TestCase):
             DataField(5, "f5", AtomicType('DOUBLE'), 'desc'),
             DataField(6, "f6", AtomicType('BOOLEAN'), 'desc'),
             DataField(7, "f7", AtomicType('STRING'), 'desc'),
-            DataField(8, "f8", AtomicType('BINARY(12)'), 'desc'),
+            DataField(8, "f8", AtomicType('BYTES'), 'desc'),
             DataField(9, "f9", AtomicType('DECIMAL(10, 6)'), 'desc'),
             DataField(10, "f10", AtomicType('BYTES'), 'desc'),
             DataField(11, "f11", AtomicType('DATE'), 'desc'),
@@ -1047,6 +1057,12 @@ class ReaderBasicTest(unittest.TestCase):
             ('price', pa.float64()),
             ('category', pa.string())
         ])
+        pk_pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+            ('category', pa.string())
+        ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
@@ -1060,7 +1076,7 @@ class ReaderBasicTest(unittest.TestCase):
             'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             'price': [10.5, 20.3, 30.7, 40.1, 50.9],
             'category': ['A', 'B', 'C', 'D', 'E']
-        }, schema=pa_schema)
+        }, schema=pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()

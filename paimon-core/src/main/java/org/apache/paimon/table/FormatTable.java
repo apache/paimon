@@ -31,7 +31,9 @@ import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.FullTextSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
@@ -273,6 +275,17 @@ public interface FormatTable extends Table {
         }
 
         @Override
+        public VectorSearchBuilder newVectorSearchBuilder() {
+            throw new UnsupportedOperationException("FormatTable does not support vector search.");
+        }
+
+        @Override
+        public FullTextSearchBuilder newFullTextSearchBuilder() {
+            throw new UnsupportedOperationException(
+                    "FormatTable does not support full-text search.");
+        }
+
+        @Override
         public CatalogContext catalogContext() {
             return this.catalogContext;
         }
@@ -375,6 +388,11 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void rollbackSchema(long schemaId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void createBranch(String branchName) {
         throw new UnsupportedOperationException();
     }
@@ -396,6 +414,11 @@ public interface FormatTable extends Table {
 
     @Override
     default void deleteBranch(String branchName) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default void renameBranch(String fromBranch, String toBranch) {
         throw new UnsupportedOperationException();
     }
 

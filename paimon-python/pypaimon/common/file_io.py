@@ -254,6 +254,9 @@ class FileIO(ABC):
         """Write Blob format file."""
         raise NotImplementedError("write_blob must be implemented by FileIO subclasses")
 
+    def write_vortex(self, path: str, data, **kwargs):
+        raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
+
     def close(self):
         pass
 

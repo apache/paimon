@@ -57,10 +57,15 @@ case class PaimonCopyOnWriteScan(
   // Track whether filter() has been called
   @volatile private var filterApplied: Boolean = false
 
+  @volatile private var splitsLoaded: Boolean = false
+
   private val filteredFileNames: mutable.Set[String] = mutable.Set[String]()
 
   protected def getInputSplits: Array[Split] = {
-    loadSplits()
+    if (!splitsLoaded) {
+      loadSplits()
+      splitsLoaded = true
+    }
     dataSplits.asInstanceOf[Array[Split]]
   }
 
@@ -89,6 +94,7 @@ case class PaimonCopyOnWriteScan(
 
   override def filter(predicates: Array[SparkPredicate]): Unit = {
     filterApplied = true
+    splitsLoaded = false
     val runtimeFilters: Array[Filter] = predicates.flatMap(PaimonUtils.filterV2ToV1)
     for (filter <- runtimeFilters) {
       filter match {

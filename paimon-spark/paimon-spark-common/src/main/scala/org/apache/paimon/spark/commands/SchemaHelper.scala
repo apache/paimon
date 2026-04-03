@@ -25,9 +25,9 @@ import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.{DataFrame, PaimonUtils, SparkSession}
-import org.apache.spark.sql.functions.{col, lit}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{Column, DataFrame, PaimonUtils, SparkSession}
+import org.apache.spark.sql.functions.{col, lit, struct}
+import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -44,16 +44,55 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
     val newTableSchema = mergeSchema(input.schema, options)
     if (!PaimonUtils.sameType(newTableSchema, dataSchema)) {
       val resolve = sparkSession.sessionState.conf.resolver
-      val cols = newTableSchema.map {
-        field =>
-          dataSchema.find(f => resolve(f.name, field.name)) match {
-            case Some(f) => col(f.name)
-            case _ => lit(null).as(field.name)
-          }
-      }
+      val cols = alignColumns(newTableSchema, dataSchema, resolve)
       input.select(cols: _*)
     } else {
       input
+    }
+  }
+
+  /**
+   * Recursively align columns from dataSchema to targetSchema by name. For nested struct fields,
+   * reorder and fill nulls for missing sub-fields.
+   */
+  private def alignColumns(
+      targetSchema: StructType,
+      dataSchema: StructType,
+      resolve: (String, String) => Boolean): Seq[Column] = {
+    targetSchema.map {
+      targetField =>
+        dataSchema.find(f => resolve(f.name, targetField.name)) match {
+          case Some(dataField) =>
+            alignColumn(col(dataField.name), dataField.dataType, targetField, resolve)
+          case _ =>
+            lit(null).cast(targetField.dataType).as(targetField.name)
+        }
+    }
+  }
+
+  private def alignColumn(
+      sourceCol: Column,
+      sourceType: DataType,
+      targetField: StructField,
+      resolve: (String, String) => Boolean): Column = {
+    (sourceType, targetField.dataType) match {
+      case (s: StructType, t: StructType) if !PaimonUtils.sameType(s, t) =>
+        val subCols = t.map {
+          subTargetField =>
+            s.find(f => resolve(f.name, subTargetField.name)) match {
+              case Some(subDataField) =>
+                alignColumn(
+                  sourceCol.getField(subDataField.name),
+                  subDataField.dataType,
+                  subTargetField,
+                  resolve)
+              case _ =>
+                lit(null).cast(subTargetField.dataType).as(subTargetField.name)
+            }
+        }
+        struct(subCols: _*).as(targetField.name)
+      case _ =>
+        sourceCol.as(targetField.name)
     }
   }
 

@@ -67,7 +67,10 @@ class FileIOTest(unittest.TestCase):
 
         lt7 = _pyarrow_lt_7()
         oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
-            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
+            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+            OssOptions.OSS_IMPL.key(): 'legacy',
         }))
         got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
         self.assertEqual(got, "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
@@ -286,7 +289,10 @@ class FileIOTest(unittest.TestCase):
             file_io.delete_directory_quietly("file:///some/path")
 
             oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
-                OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
+                OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+                OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+                OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+                OssOptions.OSS_IMPL.key(): 'legacy',
             }))
             mock_fs = MagicMock()
             mock_fs.get_file_info.return_value = [

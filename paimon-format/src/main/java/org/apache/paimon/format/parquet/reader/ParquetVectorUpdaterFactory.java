@@ -498,7 +498,7 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void skipValues(int total, VectorizedValuesReader valuesReader) {
-            valuesReader.skipBytes(12);
+            valuesReader.skipFixedLenByteArray(total, 12);
         }
 
         @Override
@@ -729,7 +729,7 @@ public class ParquetVectorUpdaterFactory {
                 ((HeapLongVector) values).setLong(offset, decimal.unscaledValue().longValue());
             } else {
                 byte[] bytes = decimal.unscaledValue().toByteArray();
-                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
+                ((HeapBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
             }
         }
     }
@@ -886,7 +886,7 @@ public class ParquetVectorUpdaterFactory {
                 ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
             } else {
                 byte[] bytes = binary.getBytesUnsafe();
-                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
+                ((HeapBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
             }
         }
 
@@ -920,7 +920,7 @@ public class ParquetVectorUpdaterFactory {
                 ((HeapLongVector) values).setLong(offset, heapBinaryToLong(binary));
             } else {
                 byte[] bytes = binary.getBytesUnsafe();
-                ((WritableBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
+                ((HeapBytesVector) values).putByteArray(offset, bytes, 0, bytes.length);
             }
         }
     }

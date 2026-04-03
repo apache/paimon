@@ -36,6 +36,16 @@ class ExternalPathStrategy(str, Enum):
     SPECIFIC_FS = "specific-fs"
 
 
+class ChangelogProducer(str, Enum):
+    """
+    Available changelog producer modes.
+    """
+    NONE = "none"
+    INPUT = "input"
+    FULL_COMPACTION = "full-compaction"
+    LOOKUP = "lookup"
+
+
 class MergeEngine(str, Enum):
     """
     Specifies the merge engine for table with primary key.
@@ -54,6 +64,7 @@ class CoreOptions:
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_LANCE: str = "lance"
+    FILE_FORMAT_VORTEX: str = "vortex"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -273,6 +284,14 @@ class CoreOptions:
         .with_description("Whether to enable deletion vectors.")
     )
 
+    CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
+        ConfigOptions.key("changelog-producer")
+        .enum_type(ChangelogProducer)
+        .default_value(ChangelogProducer.NONE)
+        .with_description("The changelog producer for streaming reads. "
+                          "Options: none, input, full-compaction, lookup.")
+    )
+
     MERGE_ENGINE: ConfigOption[MergeEngine] = (
         ConfigOptions.key("merge-engine")
         .enum_type(MergeEngine)
@@ -374,6 +393,26 @@ class CoreOptions:
         .int_type()
         .default_value(1024)
         .with_description("Read batch size for any file format if it supports.")
+    )
+
+    ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
+        ConfigOptions.key("add-column-before-partition")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "When adding a new column, if the table has partition keys, "
+            "insert the new column before the first partition column by default."
+        )
+    )
+
+    PARTITION_DEFAULT_NAME: ConfigOption[str] = (
+        ConfigOptions.key("partition.default-name")
+        .string_type()
+        .default_value("__DEFAULT_PARTITION__")
+        .with_description(
+            "The default partition name in case the dynamic partition"
+            " column value is null/empty string."
+        )
     )
 
     def __init__(self, options: Options):
@@ -500,6 +539,9 @@ class CoreOptions:
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
 
+    def changelog_producer(self, default=None):
+        return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
+
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
 
@@ -540,3 +582,6 @@ class CoreOptions:
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def add_column_before_partition(self) -> bool:
+        return self.options.get(CoreOptions.ADD_COLUMN_BEFORE_PARTITION, False)

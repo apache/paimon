@@ -49,8 +49,10 @@ import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
+import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -712,6 +714,24 @@ public class RESTApi {
     }
 
     /**
+     * Rollback schema for table.
+     *
+     * @param identifier database name and table name.
+     * @param schemaId the target schema version to rollback to
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void rollbackSchema(Identifier identifier, long schemaId) {
+        RollbackSchemaRequest request = new RollbackSchemaRequest(schemaId);
+        client.post(
+                resourcePaths.rollbackSchemaTable(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
      * Create table.
      *
      * @param identifier database name and table name.
@@ -943,6 +963,27 @@ public class RESTApi {
         client.delete(
                 resourcePaths.branch(
                         identifier.getDatabaseName(), identifier.getObjectName(), branch),
+                restAuthFunction);
+    }
+
+    /**
+     * Rename branch for table.
+     *
+     * @param identifier database name and table name.
+     * @param fromBranch source branch name
+     * @param toBranch target branch name
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the branch not exists
+     * @throws AlreadyExistsException Exception thrown on HTTP 409 means the target branch already
+     *     exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch) {
+        RenameBranchRequest request = new RenameBranchRequest(toBranch);
+        client.post(
+                resourcePaths.renameBranch(
+                        identifier.getDatabaseName(), identifier.getObjectName(), fromBranch),
+                request,
                 restAuthFunction);
     }
 

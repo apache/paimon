@@ -51,7 +51,7 @@ class SplitGeneratorTest(unittest.TestCase):
                       deletion_vectors_enabled=False,
                       split_target_size=None, split_open_file_cost=None):
         pa_schema = pa.schema([
-            ('id', pa.int64()),
+            pa.field('id', pa.int64(), nullable=False),
             ('value', pa.string())
         ])
         options = {
@@ -81,7 +81,7 @@ class SplitGeneratorTest(unittest.TestCase):
     
     def _write_data(self, table, data_list):
         pa_schema = pa.schema([
-            ('id', pa.int64()),
+            pa.field('id', pa.int64(), nullable=False),
             ('value', pa.string())
         ])
         for data in data_list:
@@ -220,7 +220,7 @@ class SplitGeneratorTest(unittest.TestCase):
 
     def test_shard_with_empty_partition(self):
         pa_schema = pa.schema([
-            ('id', pa.int64()),
+            pa.field('id', pa.int64(), nullable=False),
             ('value', pa.string())
         ])
         schema = Schema.from_pyarrow_schema(
@@ -274,7 +274,7 @@ class SplitGeneratorTest(unittest.TestCase):
     def test_sliced_split_merged_row_count(self):
         """Test merged_row_count() for SlicedSplit with explicit slicing."""
         pa_schema = pa.schema([
-            ('id', pa.int64()),
+            pa.field('id', pa.int64(), nullable=False),
             ('value', pa.string())
         ])
         schema = Schema.from_pyarrow_schema(

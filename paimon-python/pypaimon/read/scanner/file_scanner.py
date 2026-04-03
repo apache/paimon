@@ -15,38 +15,39 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 import os
 import time
-import logging
-from typing import List, Optional, Dict, Set, Callable
+from typing import Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
-from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (
-    remove_row_id_filter,
-    trim_and_transform_predicate,
-)
-from pypaimon.read.scanner.append_table_split_generator import AppendTableSplitGenerator
-from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
-from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
+from pypaimon.read.push_down_utils import (remove_row_id_filter,
+                                           trim_and_transform_predicate)
+from pypaimon.read.scanner.append_table_split_generator import \
+    AppendTableSplitGenerator
+from pypaimon.read.scanner.data_evolution_split_generator import \
+    DataEvolutionSplitGenerator
+from pypaimon.read.scanner.primary_key_table_split_generator import \
+    PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
+from pypaimon.table.source.deletion_file import DeletionFile
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
-    from pypaimon.utils.range import Range
     from pypaimon.table.special_fields import SpecialFields
+    from pypaimon.utils.range import Range
 
     if predicate is None:
         return None
@@ -166,8 +167,7 @@ class FileScanner:
         table,
         manifest_scanner: Callable[[], List[ManifestFileMeta]],
         predicate: Optional[Predicate] = None,
-        limit: Optional[int] = None,
-        vector_search: Optional['VectorSearch'] = None
+        limit: Optional[int] = None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -176,7 +176,6 @@ class FileScanner:
         self.predicate = predicate
         self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
         self.limit = limit
-        self.vector_search = vector_search
 
         self.snapshot_manager = SnapshotManager(table)
         self.manifest_list_manager = ManifestListManager(table)
@@ -200,6 +199,7 @@ class FileScanner:
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self._global_index_result = None
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -263,7 +263,8 @@ class FileScanner:
     def _create_data_evolution_split_generator(self):
         row_ranges = None
         score_getter = None
-        global_index_result = self._eval_global_index()
+        global_index_result = self._global_index_result if self._global_index_result is not None \
+            else self._eval_global_index()
         if global_index_result is not None:
             row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
@@ -298,70 +299,31 @@ class FileScanner:
         return self.read_manifest_entries(manifest_files)
 
     def _eval_global_index(self):
-        from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scan_builder import (
-            GlobalIndexScanBuilder
-        )
-        from pypaimon.utils.range import Range
-
-        # No filter and no vector search - nothing to evaluate
-        if self.predicate is None and self.vector_search is None:
+        # No filter - nothing to evaluate
+        if self.predicate is None:
             return None
 
         # Check if global index is enabled
         if not self.table.options.global_index_enabled():
             return None
 
-        # Get latest snapshot
-        snapshot = self.snapshot_manager.get_latest_snapshot()
-        if snapshot is None:
+        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+
+        try:
+            scanner = GlobalIndexScanner.create(
+                self.table,
+                partition_filter=self.partition_key_predicate,
+                predicate=self.predicate
+            )
+            if scanner is None:
+                return None
+            with scanner:
+                return scanner.scan(self.predicate)
+        except Exception:
             return None
-
-        # Check if table has store with global index scan builder
-        index_scan_builder = self.table.new_global_index_scan_builder()
-        if index_scan_builder is None:
-            return None
-
-        # Set partition predicate and snapshot
-        index_scan_builder.with_partition_predicate(
-            self.partition_key_predicate
-        ).with_snapshot(snapshot)
-
-        # Get indexed row ranges
-        indexed_row_ranges = index_scan_builder.shard_list()
-        if not indexed_row_ranges:
-            return None
-
-        # Get next row ID from snapshot
-        next_row_id = snapshot.next_row_id
-        if next_row_id is None:
-            return None
-
-        # Calculate non-indexed row ranges
-        non_indexed_row_ranges = Range(0, next_row_id - 1).exclude(indexed_row_ranges)
-
-        # Get thread number from options (can be None, meaning use default)
-        thread_num = self.table.options.global_index_thread_num()
-
-        # Scan global index in parallel
-        result = GlobalIndexScanBuilder.parallel_scan(
-            indexed_row_ranges,
-            index_scan_builder,
-            self.predicate,
-            self.vector_search,
-            thread_num
-        )
-
-        if result is None:
-            return None
-
-        for row_range in non_indexed_row_ranges:
-            result = result.or_(GlobalIndexResult.from_range(row_range))
-
-        return result
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
-        max_workers = max(8, self.table.options.scan_manifest_parallelism(os.cpu_count() or 8))
+        max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         manifest_files = [entry for entry in manifest_files if self._filter_manifest_file(entry)]
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
@@ -387,6 +349,10 @@ class FileScanner:
         self.end_pos_of_this_subtask = end_pos
         return self
 
+    def with_global_index_result(self, result) -> 'FileScanner':
+        self._global_index_result = result
+        return self
+
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
         if self.limit is None:
             return splits
@@ -400,7 +366,7 @@ class FileScanner:
                 if scanned_row_count >= self.limit:
                     return limited_splits
 
-        return limited_splits
+        return splits
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
         if not self.partition_key_predicate:
@@ -421,12 +387,30 @@ class FileScanner:
         if self.table.is_primary_key_table:
             if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
                 return False
-            if not self.primary_key_predicate:
-                return True
-            return self.primary_key_predicate.test_by_simple_stats(
-                entry.file.key_stats,
-                entry.file.row_count
-            )
+            if self.primary_key_predicate:
+                if not self.primary_key_predicate.test_by_simple_stats(
+                    entry.file.key_stats,
+                    entry.file.row_count
+                ):
+                    return False
+            # In DV mode, files within a bucket don't overlap (level 0 excluded above),
+            # so we can safely filter by value stats per file.
+            if self.deletion_vectors_enabled and self.predicate_for_stats:
+                if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
+                    stats_fields = entry.file.write_cols
+                else:
+                    stats_fields = entry.file.value_stats_cols
+                evolved_stats = evolution.evolution(
+                    entry.file.value_stats,
+                    entry.file.row_count,
+                    stats_fields
+                )
+                if not self.predicate_for_stats.test_by_simple_stats(
+                    evolved_stats,
+                    entry.file.row_count
+                ):
+                    return False
+            return True
         else:
             if not self.predicate:
                 return True

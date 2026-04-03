@@ -39,9 +39,13 @@ class Snapshot:
     commit_kind: str = json_field("commitKind")
     time_millis: int = json_field("timeMillis")
     # Optional fields with defaults
+    base_manifest_list_size: Optional[int] = optional_json_field("baseManifestListSize", "non_null")
+    delta_manifest_list_size: Optional[int] = optional_json_field("deltaManifestListSize", "non_null")
     changelog_manifest_list: Optional[str] = optional_json_field("changelogManifestList", "non_null")
+    changelog_manifest_list_size: Optional[int] = optional_json_field("changelogManifestListSize", "non_null")
     index_manifest: Optional[str] = optional_json_field("indexManifest", "non_null")
     changelog_record_count: Optional[int] = optional_json_field("changelogRecordCount", "non_null")
     watermark: Optional[int] = optional_json_field("watermark", "non_null")
     statistics: Optional[str] = optional_json_field("statistics", "non_null")
     next_row_id: Optional[int] = optional_json_field("nextRowId", "non_null")
+    properties: Optional[dict] = optional_json_field("properties", "non_null")

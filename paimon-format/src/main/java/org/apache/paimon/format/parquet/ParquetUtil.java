@@ -54,25 +54,38 @@ public class ParquetUtil {
                     throws IOException {
         try (ParquetFileReader reader = getParquetReader(fileIO, path, length, options)) {
             ParquetMetadata parquetMetadata = reader.getFooter();
-            List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
-            Map<String, Statistics<?>> resultStats = new HashMap<>();
-            for (BlockMetaData blockMetaData : blockMetaDataList) {
-                List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
-                for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
-                    Statistics<?> stats = columnChunkMetaData.getStatistics();
-                    String columnName = columnChunkMetaData.getPath().toDotString();
-                    Statistics<?> midStats;
-                    if (!resultStats.containsKey(columnName)) {
-                        midStats = stats;
-                    } else {
-                        midStats = resultStats.get(columnName);
-                        midStats.mergeStatistics(stats);
-                    }
-                    resultStats.put(columnName, midStats);
-                }
-            }
+            Map<String, Statistics<?>> resultStats = extractColumnStats(parquetMetadata);
             return Pair.of(resultStats, new SimpleStatsExtractor.FileInfo(reader.getRecordCount()));
         }
+    }
+
+    /**
+     * Extract column stats from in-memory {@link ParquetMetadata}. This avoids re-reading the file
+     * from storage, which is critical for object stores (like OSS/S3) where the file may not be
+     * immediately visible after close.
+     *
+     * @param parquetMetadata the in-memory Parquet metadata (footer)
+     * @return result sets as map, key is column name, value is statistics
+     */
+    public static Map<String, Statistics<?>> extractColumnStats(ParquetMetadata parquetMetadata) {
+        List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
+        Map<String, Statistics<?>> resultStats = new HashMap<>();
+        for (BlockMetaData blockMetaData : blockMetaDataList) {
+            List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
+            for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
+                Statistics<?> stats = columnChunkMetaData.getStatistics();
+                String columnName = columnChunkMetaData.getPath().toDotString();
+                Statistics<?> midStats;
+                if (!resultStats.containsKey(columnName)) {
+                    midStats = stats;
+                } else {
+                    midStats = resultStats.get(columnName);
+                    midStats.mergeStatistics(stats);
+                }
+                resultStats.put(columnName, midStats);
+            }
+        }
+        return resultStats;
     }
 
     /**

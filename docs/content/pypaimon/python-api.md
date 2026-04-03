@@ -551,6 +551,140 @@ table.rollback_to('v3')  # tag name
 The `rollback_to` method accepts either an `int` (snapshot ID) or a `str` (tag name) and automatically dispatches
 to the appropriate rollback logic.
 
+## Streaming Read
+
+Streaming reads allow you to continuously read new data as it arrives in a Paimon table. This is useful for building
+real-time data pipelines and ETL jobs.
+
+### Basic Streaming Read
+
+Use `StreamReadBuilder` to create a streaming scan that continuously polls for new snapshots:
+
+```python
+table = catalog.get_table('database_name.table_name')
+
+# Create streaming read builder
+stream_builder = table.new_stream_read_builder()
+stream_builder.with_poll_interval_ms(1000)  # Poll every 1 second
+
+# Create streaming scan and table read
+scan = stream_builder.new_streaming_scan()
+table_read = stream_builder.new_read()
+
+# Async streaming (recommended for ETL pipelines)
+import asyncio
+
+async def process_stream():
+    async for plan in scan.stream():
+        for split in plan.splits():
+            arrow_batch = table_read.to_arrow([split])
+            # Process the data
+            print(f"Received {arrow_batch.num_rows} rows")
+
+asyncio.run(process_stream())
+```
+
+### Synchronous Streaming
+
+For simpler use cases, you can use the synchronous wrapper:
+
+```python
+# Synchronous streaming
+for plan in scan.stream_sync():
+    arrow_table = table_read.to_arrow(plan.splits())
+    process(arrow_table)
+```
+
+### Manual Position Control
+
+You can directly read and set the scan position via `next_snapshot_id`:
+
+```python
+# Save current position
+saved_position = scan.next_snapshot_id
+
+# Later, restore position
+scan.next_snapshot_id = saved_position
+
+# Or start from a specific snapshot
+scan.next_snapshot_id = 42
+```
+
+### Filtering Streaming Data
+
+You can apply predicates and projections to streaming reads:
+
+```python
+stream_builder = table.new_stream_read_builder()
+
+# Build predicate
+predicate_builder = stream_builder.new_predicate_builder()
+predicate = predicate_builder.greater_than('timestamp', 1704067200000)
+
+# Apply filter and projection
+stream_builder.with_filter(predicate)
+stream_builder.with_projection(['id', 'name', 'timestamp'])
+
+scan = stream_builder.new_streaming_scan()
+```
+
+Key points about streaming reads:
+
+- **Poll Interval**: Controls how often to check for new snapshots (default: 1000ms)
+- **Initial Scan**: First iteration returns all existing data, subsequent iterations return only new data
+- **Commit Types**: By default, only APPEND commits are processed; COMPACT and OVERWRITE are skipped
+
+### Parallel Consumption
+
+For high-throughput streaming, you can run multiple consumers in parallel, each reading a disjoint subset of buckets.
+This is similar to Kafka consumer groups.
+
+**Using `with_buckets()` for explicit bucket assignment**:
+
+```python
+# Consumer 0 reads buckets 0, 1, 2
+stream_builder.with_buckets([0, 1, 2])
+
+# Consumer 1 reads buckets 3, 4, 5
+stream_builder.with_buckets([3, 4, 5])
+```
+
+**Using `with_bucket_filter()` for custom filtering**:
+
+```python
+# Read only even buckets
+stream_builder.with_bucket_filter(lambda b: b % 2 == 0)
+```
+
+### Row Kind Support
+
+For changelog streams, you can include the row kind to distinguish between inserts, updates, and deletes:
+
+```python
+stream_builder = table.new_stream_read_builder()
+stream_builder.with_include_row_kind(True)
+
+scan = stream_builder.new_streaming_scan()
+table_read = stream_builder.new_read()
+
+async for plan in scan.stream():
+    arrow_table = table_read.to_arrow(plan.splits())
+    for row in arrow_table.to_pylist():
+        row_kind = row['_row_kind']  # +I, -U, +U, or -D
+        if row_kind == '+I':
+            handle_insert(row)
+        elif row_kind == '-D':
+            handle_delete(row)
+        elif row_kind in ('-U', '+U'):
+            handle_update(row)
+```
+
+Row kind values:
+- `+I`: Insert
+- `-U`: Update before (old value)
+- `+U`: Update after (new value)
+- `-D`: Delete
+
 ## Data Types
 
 | Python Native Type  | PyArrow Type                                     | Paimon Type                       |
@@ -591,6 +725,239 @@ to the appropriate rollback logic.
 | f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
 | lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
 
+## Consumer Management
+
+Consumer management allows you to track consumption progress, prevent snapshot expiration, and resume from breakpoints.
+
+### Create ConsumerManager
+
+```python
+from pypaimon import CatalogFactory
+
+# Get table and file_io
+catalog = CatalogFactory.create({'warehouse': 'file:///path/to/warehouse'})
+table = catalog.get_table('database_name.table_name')
+file_io = table.file_io()
+
+# Create consumer manager
+manager = table.consumer_manager()
+```
+
+### Get Consumer
+
+Retrieve a consumer by its ID:
+
+```python
+from pypaimon.consumer.consumer import Consumer
+
+consumer = manager.consumer('consumer_id')
+if consumer:
+    print(f"Next snapshot: {consumer.next_snapshot}")
+else:
+    print("Consumer not found")
+```
+
+### Reset Consumer
+
+Create or reset a consumer with a new snapshot ID:
+
+```python
+# Reset consumer to snapshot 10
+manager.reset_consumer('consumer_id', Consumer(next_snapshot=10))
+```
+
+### Delete Consumer
+
+Delete a consumer by its ID:
+
+```python
+manager.delete_consumer('consumer_id')
+```
+
+### List Consumers
+
+Get all consumers with their next snapshot IDs:
+
+```python
+consumers = manager.consumers()
+for consumer_id, next_snapshot in consumers.items():
+    print(f"Consumer {consumer_id}: next snapshot {next_snapshot}")
+```
+
+### List All Consumer IDs
+
+List all consumer IDs:
+
+```python
+consumer_ids = manager.list_all_ids()
+for consumer_id in consumer_ids:
+    print(consumer_id)
+```
+
+### Get Minimum Next Snapshot
+
+Get the minimum next snapshot across all consumers:
+
+```python
+min_snapshot = manager.min_next_snapshot()
+if min_snapshot:
+    print(f"Minimum next snapshot: {min_snapshot}")
+```
+
+### Expire Consumers
+
+Expire consumers modified before a given datetime:
+
+```python
+from datetime import datetime, timedelta
+
+# Expire consumers older than 1 day
+expire_time = datetime.now() - timedelta(days=1)
+manager.expire(expire_time)
+```
+
+### Clear Consumers
+
+Clear consumers matching regular expression patterns:
+
+```python
+# Clear all consumers starting with "test_"
+manager.clear_consumers('test_.*')
+
+# Clear all consumers except those starting with "prod_"
+manager.clear_consumers(
+    '.*',
+    'prod_.*'
+)
+```
+
+### Branch Support
+
+ConsumerManager supports multiple branches:
+
+```python
+# Custom branch
+branch_manager = manager.with_branch('feature_branch')
+
+# Each branch maintains its own consumers
+print(branch_manager.consumers())  # Consumers on feature branch
+```
+
+## Branch Management
+
+Branch management allows you to create multiple versions of a table, enabling parallel development and experimentation. Paimon supports creating branches from the current state or from specific tags.
+
+{{< hint info >}}
+PyPaimon provides two implementations of `BranchManager`:
+- **FileSystemBranchManager**: For tables accessed directly via filesystem (default for filesystem catalog)
+- **CatalogBranchManager**: For tables accessed via catalog (e.g., REST catalog)
+
+The `table.branch_manager()` method automatically returns the appropriate implementation based on the table's catalog environment.
+{{< /hint >}}
+
+### Create Branch
+
+Create a new branch from the current table state:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog = CatalogFactory.create({'warehouse': 'file:///path/to/warehouse'})
+table = catalog.get_table('database_name.table_name')
+
+# Create a branch from current state
+table.branch_manager().create_branch('feature_branch')
+```
+
+Create a branch from a specific tag:
+
+```python
+# Create a branch from tag 'v1.0'
+table.branch_manager().create_branch('feature_branch', tag_name='v1.0')
+```
+
+Create a branch and ignore if it already exists:
+
+```python
+# No error if branch already exists
+table.branch_manager().create_branch('feature_branch', ignore_if_exists=True)
+```
+
+### List Branches
+
+List all branches for a table:
+
+```python
+# Get all branch names
+branches = table.branch_manager().branches()
+
+for branch in branches:
+    print(f"Branch: {branch}")
+```
+
+### Check Branch Exists
+
+Check if a specific branch exists:
+
+```python
+if table.branch_manager().branch_exists('feature_branch'):
+    print("Branch exists")
+else:
+    print("Branch does not exist")
+```
+
+### Drop Branch
+
+Delete an existing branch:
+
+```python
+# Drop a branch
+table.branch_manager().drop_branch('feature_branch')
+```
+
+### Rename Branch
+
+Rename an existing branch to a new name:
+
+```python
+# Rename a branch
+table.branch_manager().rename_branch('old_branch_name', 'new_branch_name')
+```
+
+{{< hint warning >}}
+The source branch must exist and cannot be the main branch. The target branch name must be valid and not already exist.
+{{< /hint >}}
+
+### Fast Forward
+
+Fast forward the main branch to a specific branch:
+
+```python
+# Fast forward main to feature branch
+# This is useful when you want to merge changes from a feature branch back to main
+table.branch_manager().fast_forward('feature_branch')
+```
+
+{{< hint warning >}}
+Fast forward operation is irreversible and will replace the current state of the main branch with the target branch's state.
+{{< /hint >}}
+
+### Branch Path Structure
+
+Paimon organizes branches in the file system as follows:
+
+- **Main branch**: Stored directly in the table directory (e.g., `/path/to/table/`)
+- **Feature branches**: Stored in a `branch` subdirectory (e.g., `/path/to/table/branch/branch-feature_branch/`)
+
+### Branch Name Validation
+
+Branch names have the following constraints:
+
+- Cannot be "main" (the default branch)
+- Cannot be blank or whitespace only
+- Cannot be a pure numeric string
+- Valid examples: `feature`, `develop`, `feature-123`, `my-branch`
+
 ## Supported Features
 
 The following shows the supported features of Python Paimon compared to Java Paimon:
@@ -624,3 +991,6 @@ The following shows the supported features of Python Paimon compared to Java Pai
     - Reading and writing blob data
     - `with_shard` feature
     - Rollback feature
+    - Streaming reads
+    - Parallel consumption with bucket filtering
+    - Row kind support for changelog streams

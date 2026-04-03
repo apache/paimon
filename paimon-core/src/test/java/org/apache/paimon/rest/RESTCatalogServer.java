@@ -61,8 +61,10 @@ import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -104,6 +106,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
@@ -417,6 +420,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.ROLLBACK.equals(resources[3]);
+                        boolean isRollbackSchema =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "rollback-schema".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -538,6 +545,8 @@ public class RESTCatalogServer {
                                                 .getTagName();
                                 return rollbackTableByTagNameHandle(identifier, tagName);
                             }
+                        } else if (isRollbackSchema) {
+                            return rollbackSchemaHandle(identifier, restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),
@@ -1007,6 +1016,30 @@ public class RESTCatalogServer {
         }
         return mockResponse(
                 new ErrorResponse(ErrorResponse.RESOURCE_TYPE_TAG, "" + tagName, "", 404), 404);
+    }
+
+    private MockResponse rollbackSchemaHandle(Identifier identifier, String data) throws Exception {
+        RollbackSchemaRequest requestBody = RESTApi.fromJson(data, RollbackSchemaRequest.class);
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        FileStoreTable table = getFileTable(identifier);
+        long schemaId = requestBody.getSchemaId();
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        try {
+            schemaManager.rollbackTo(
+                    schemaId,
+                    table.snapshotManager(),
+                    table.tagManager(),
+                    new ChangelogManager(table.fileIO(), table.location(), null));
+        } catch (Exception e) {
+            return mockResponse(new ErrorResponse(null, null, e.getMessage(), 500), 500);
+        }
+
+        return new MockResponse().setResponseCode(200);
     }
 
     private void cleanSnapshot(Identifier identifier, Long snapshotId, Long latestSnapshotId)
@@ -1805,15 +1838,42 @@ public class RESTCatalogServer {
                 case "POST":
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
-                        branchManager.fastForward(branch);
-                        branchIdentifier =
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getTableName(),
-                                        branch);
-                        tableLatestSnapshotStore.put(
-                                identifier.getFullName(),
-                                tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        if ("rename".equals(resources[5])) {
+                            // Rename branch: /branches/{branch}/rename
+                            RenameBranchRequest requestBody =
+                                    RESTApi.fromJson(data, RenameBranchRequest.class);
+                            String toBranch = requestBody.toBranch();
+                            table.renameBranch(branch, toBranch);
+                            // Update store for renamed branch
+                            Identifier fromBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            Identifier toBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            toBranch);
+                            tableLatestSnapshotStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableLatestSnapshotStore.get(
+                                            fromBranchIdentifier.getFullName()));
+                            tableMetadataStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableMetadataStore.get(fromBranchIdentifier.getFullName()));
+                        } else if ("forward".equals(resources[5])) {
+                            // Fast forward branch
+                            branchManager.fastForward(branch);
+                            branchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            tableLatestSnapshotStore.put(
+                                    identifier.getFullName(),
+                                    tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        }
                     } else {
                         CreateBranchRequest requestBody =
                                 RESTApi.fromJson(data, CreateBranchRequest.class);

@@ -318,6 +318,18 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>rename_branch</td>
+      <td>
+         To rename a branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>from_branch: name of the branch to be renamed.</li>
+            <li>to_branch: new name of the branch.</li>
+      </td>
+      <td>
+          CALL sys.rename_branch(table => 'test_db.T', from_branch => 'test_branch', to_branch => 'new_branch')
+      </td>
+    </tr>
+    <tr>
       <td>fast_forward</td>
       <td>
          To fast_forward a branch to main branch. Arguments:

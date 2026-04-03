@@ -42,7 +42,7 @@ class RaySinkTest(unittest.TestCase):
         self.catalog.create_database("test_db", ignore_if_exists=True)
 
         pa_schema = pa.schema([
-            ('id', pa.int64()),
+            pa.field('id', pa.int64(), nullable=False),
             ('name', pa.string()),
             ('value', pa.float64())
         ])
@@ -58,6 +58,7 @@ class RaySinkTest(unittest.TestCase):
         self.table_identifier = "test_db.test_table"
         self.catalog.create_table(self.table_identifier, schema, ignore_if_exists=False)
         self.table = self.catalog.get_table(self.table_identifier)
+        self.pk_pa_schema = pa_schema
 
     def tearDown(self):
         import shutil
@@ -142,7 +143,7 @@ class RaySinkTest(unittest.TestCase):
             'id': pa.array([], type=pa.int64()),
             'name': pa.array([], type=pa.string()),
             'value': pa.array([], type=pa.float64())
-        })
+        }, schema=self.pk_pa_schema)
         result = datasink.write([empty_table], ctx)
         self.assertEqual(result, [])
 
@@ -151,7 +152,7 @@ class RaySinkTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'value': [1.1, 2.2, 3.3]
-        })
+        }, schema=self.pk_pa_schema)
         result = datasink.write([single_block], ctx)
         self.assertIsInstance(result, list)
         if result:
@@ -161,12 +162,12 @@ class RaySinkTest(unittest.TestCase):
             'id': [4, 5],
             'name': ['David', 'Eve'],
             'value': [4.4, 5.5]
-        })
+        }, schema=self.pk_pa_schema)
         block2 = pa.table({
             'id': [6, 7],
             'name': ['Frank', 'Grace'],
             'value': [6.6, 7.7]
-        })
+        }, schema=self.pk_pa_schema)
         result = datasink.write([block1, block2], ctx)
         self.assertIsInstance(result, list)
         if result:

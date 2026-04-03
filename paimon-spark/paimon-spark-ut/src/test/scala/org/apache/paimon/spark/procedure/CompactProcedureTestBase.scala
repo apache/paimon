@@ -1308,6 +1308,37 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: sort compact with null values in string clustering column") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a STRING, b INT)
+                   |TBLPROPERTIES ('bucket'='-1')
+                   |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (null, 1), ('abc', 2), (null, 3), ('def', 4)")
+      spark.sql("INSERT INTO T VALUES ('ghi', 5), (null, 6)")
+
+      // zorder compact with null string clustering column should not NPE
+      checkAnswer(
+        spark.sql(
+          "CALL paimon.sys.compact(table => 'T', order_strategy => 'zorder', order_by => 'a,b')"),
+        Row(true) :: Nil)
+
+      val zorderResult = spark.sql("SELECT * FROM T").collect()
+      Assertions.assertThat(zorderResult.length).isEqualTo(6)
+
+      // hilbert compact with null string clustering column should not NPE
+      spark.sql("INSERT INTO T VALUES (null, 7), ('jkl', 8)")
+      checkAnswer(
+        spark.sql(
+          "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'a,b')"),
+        Row(true) :: Nil)
+
+      val hilbertResult = spark.sql("SELECT * FROM T").collect()
+      Assertions.assertThat(hilbertResult.length).isEqualTo(8)
+    }
+  }
+
   def checkSnapshot(table: FileStoreTable): Unit = {
     Assertions
       .assertThat(table.latestSnapshot().get().commitKind().toString)

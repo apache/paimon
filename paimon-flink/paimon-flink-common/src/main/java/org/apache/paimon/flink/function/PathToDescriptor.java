@@ -30,7 +30,7 @@ public class PathToDescriptor extends ScalarFunction {
             return null;
         }
 
-        BlobDescriptor descriptor = new BlobDescriptor(path, 0, Long.MAX_VALUE);
+        BlobDescriptor descriptor = new BlobDescriptor(path, 0, -1);
         return descriptor.serialize();
     }
 }

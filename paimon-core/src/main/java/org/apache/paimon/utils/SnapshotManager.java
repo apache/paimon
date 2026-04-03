@@ -272,11 +272,12 @@ public class SnapshotManager implements Serializable {
         }
 
         for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
-            if (snapshotExists(snapshotId)) {
-                Snapshot snapshot = snapshot(snapshotId);
+            try {
+                Snapshot snapshot = tryGetSnapshot(snapshotId);
                 if (predicate.test(snapshot)) {
                     return snapshot.id();
                 }
+            } catch (FileNotFoundException ignored) {
             }
         }
 
@@ -599,31 +600,14 @@ public class SnapshotManager implements Serializable {
         if (latestId == null) {
             return Optional.empty();
         }
-        if (earliestId == null) {
-            earliestId =
-                    Preconditions.checkNotNull(
-                            earliestSnapshotId(),
-                            "Latest snapshot id is not null, but earliest snapshot id is null. "
-                                    + "This is unexpected.");
-        }
 
-        for (long id = latestId; id >= earliestId; id--) {
+        long searchEnd = earliestId != null ? earliestId : Snapshot.FIRST_SNAPSHOT_ID;
+        for (long id = latestId; id >= searchEnd; id--) {
             Snapshot snapshot;
             try {
-                snapshot = snapshot(id);
-            } catch (Exception e) {
-                long newEarliestId =
-                        Preconditions.checkNotNull(
-                                earliestSnapshotId(),
-                                "Latest snapshot id is not null, but earliest snapshot id is null. "
-                                        + "This is unexpected.");
-
-                // this is a valid snapshot, should throw exception
-                if (id >= newEarliestId) {
-                    throw e;
-                }
-
-                // this is an expired snapshot
+                snapshot = tryGetSnapshot(id);
+            } catch (FileNotFoundException e) {
+                // this snapshot has been expired, stop searching
                 LOG.warn(
                         "Snapshot #"
                                 + id
@@ -631,6 +615,7 @@ public class SnapshotManager implements Serializable {
                                 + user
                                 + ") is not found.");
                 break;
+                // other exceptions will be thrown
             }
 
             if (user.equals(snapshot.commitUser())) {

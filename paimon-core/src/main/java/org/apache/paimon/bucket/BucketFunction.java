@@ -41,6 +41,8 @@ public interface BucketFunction extends Serializable {
                 return new DefaultBucketFunction();
             case MOD:
                 return new ModBucketFunction(bucketKeyType);
+            case HIVE:
+                return new HiveBucketFunction(bucketKeyType);
             default:
                 throw new IllegalArgumentException(
                         "Unsupported bucket type: " + bucketFunctionType);

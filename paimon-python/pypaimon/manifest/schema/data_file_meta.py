@@ -26,6 +26,7 @@ from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.simple_stats import (KEY_STATS_SCHEMA, VALUE_STATS_SCHEMA,
                                                    SimpleStats)
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import _is_null_or_whitespace_only
 
 
 @dataclass
@@ -130,11 +131,14 @@ class DataFileMeta:
             file_path=file_path,
         )
 
-    def set_file_path(self, table_path: str, partition: GenericRow, bucket: int):
+    def set_file_path(
+            self, table_path: str, partition: GenericRow, bucket: int,
+            default_part_value: str = "__DEFAULT_PARTITION__"):
         path_builder = table_path.rstrip('/')
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
-            path_builder = f"{path_builder}/{field_name}={str(field_value)}"
+            part_value = default_part_value if _is_null_or_whitespace_only(field_value) else str(field_value)
+            path_builder = f"{path_builder}/{field_name}={part_value}"
         path_builder = f"{path_builder}/bucket-{str(bucket)}/{self.file_name}"
         self.file_path = path_builder
 

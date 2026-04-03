@@ -76,9 +76,9 @@ public class DataEvolutionPartialWriteOperator
     // data type excludes of _ROW_ID field.
     private final RowType writeType;
 
-    private List<Committable> committables = new ArrayList<>();
-
     // --------------------- transient fields ---------------------------
+
+    private transient List<Committable> committables;
 
     // first-row-id related fields
     private transient FirstRowIdLookup firstRowIdLookup;
@@ -137,6 +137,8 @@ public class DataEvolutionPartialWriteOperator
                 (TableWriteImpl<InternalRow>)
                         table.newBatchWriteBuilder().newWrite().withWriteType(writeType);
         tableWrite = (AbstractFileStoreWrite<InternalRow>) (writeImpl.getWrite());
+
+        committables = new ArrayList<>();
     }
 
     @Override
@@ -298,24 +300,28 @@ public class DataEvolutionPartialWriteOperator
                             writtenNum, rowCount));
 
             // 2. finish writer
-            CommitIncrement written = writer.prepareCommit(false);
-            List<DataFileMeta> fileMetas = written.newFilesIncrement().newFiles();
-            Preconditions.checkState(
-                    fileMetas.size() == 1, "This is a bug, Writer could only produce one file");
-            DataFileMeta fileMeta = fileMetas.get(0).assignFirstRowId(firstRowId);
+            try {
+                CommitIncrement written = writer.prepareCommit(false);
+                List<DataFileMeta> fileMetas = written.newFilesIncrement().newFiles();
+                Preconditions.checkState(
+                        fileMetas.size() == 1, "This is a bug, Writer could only produce one file");
+                DataFileMeta fileMeta = fileMetas.get(0).assignFirstRowId(firstRowId);
 
-            CommitMessage commitMessage =
-                    new CommitMessageImpl(
-                            partition,
-                            0,
-                            null,
-                            new DataIncrement(
-                                    Collections.singletonList(fileMeta),
-                                    Collections.emptyList(),
-                                    Collections.emptyList()),
-                            CompactIncrement.emptyIncrement());
+                CommitMessage commitMessage =
+                        new CommitMessageImpl(
+                                partition,
+                                0,
+                                null,
+                                new DataIncrement(
+                                        Collections.singletonList(fileMeta),
+                                        Collections.emptyList(),
+                                        Collections.emptyList()),
+                                CompactIncrement.emptyIncrement());
 
-            return new Committable(Long.MAX_VALUE, commitMessage);
+                return new Committable(Long.MAX_VALUE, commitMessage);
+            } finally {
+                writer.close();
+            }
         }
 
         private boolean contains(long rowId) {

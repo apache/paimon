@@ -29,7 +29,6 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
-import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackReadScan;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -139,8 +138,7 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableScan newScan() {
         if (wrapped instanceof FallbackReadFileStoreTable) {
-            FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) wrapped;
-            return new FallbackReadScan(newScan(table.wrapped()), newScan(table.fallback()));
+            return ((FallbackReadFileStoreTable) wrapped).newScan(this::newScan);
         }
         return newScan(wrapped);
     }

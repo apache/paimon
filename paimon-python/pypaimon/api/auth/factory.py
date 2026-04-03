@@ -62,7 +62,7 @@ class DLFAuthProviderFactory:
 
         host = host.split('/')[0].split(':')[0]
 
-        if host.startswith("dlfnext") or "openapi" in host:
+        if "dlfnext" in host:
             return DLFAuthProviderFactory.OPENAPI_IDENTIFIER
 
         return DLFAuthProviderFactory.DEFAULT_IDENTIFIER

@@ -271,6 +271,64 @@ class PkReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
+    def test_pk_reader_with_limit(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_limit', schema, False)
+        table = self.catalog.get_table('default.test_pk_limit')
+
+        num_commits = 5
+        rows_per_commit = 25
+
+        for commit_idx in range(num_commits):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+
+            start_id = commit_idx * rows_per_commit
+            end_id = start_id + rows_per_commit
+
+            if commit_idx > 0:
+                start_id -= 10
+
+            batch = pa.Table.from_pydict({
+                'user_id': list(range(start_id, end_id)),
+                'item_id': [1000 + i for i in range(start_id, end_id)],
+                'behavior': [f'val-{i}' for i in range(start_id, end_id)],
+                'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(start_id, end_id)],
+            }, schema=self.pa_schema)
+
+            writer.write_arrow(batch)
+            commit_messages = writer.prepare_commit()
+            commit = write_builder.new_commit()
+            commit.commit(commit_messages)
+            writer.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        all_splits = table_scan.plan().splits()
+        merge_splits = [s for s in all_splits if not s.raw_convertible]
+        self.assertGreater(
+            len(merge_splits), 0,
+            "Should have at least one merge split to test limit with merge scenario")
+
+        total_unique_rows = 125
+        for limit in [5, 10, 20, 50]:
+            read_builder = table.new_read_builder().with_limit(limit)
+            table_read = read_builder.new_read()
+            table_scan = read_builder.new_scan()
+            splits = table_scan.plan().splits()
+            self.assertGreater(
+                len(splits), 0,
+                f"with_limit({limit}) should not produce empty splits for PK table")
+            result = table_read.to_arrow(splits)
+            row_count = result.num_rows if result is not None else 0
+            self.assertEqual(
+                row_count, total_unique_rows,
+                f"with_limit({limit}) should return all rows for PK table "
+                f"(read-level limit not yet implemented)")
+
     def test_incremental_timestamp(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],

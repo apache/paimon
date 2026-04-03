@@ -256,6 +256,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void rollbackSchema(long schemaId) {
+        wrapped.rollbackSchema(schemaId);
+    }
+
+    @Override
     public void createBranch(String branchName) {
         wrapped.createBranch(branchName);
     }
@@ -278,6 +283,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void deleteBranch(String branchName) {
         wrapped.deleteBranch(branchName);
+    }
+
+    @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        wrapped.renameBranch(fromBranch, toBranch);
     }
 
     @Override

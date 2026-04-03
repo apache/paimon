@@ -234,6 +234,14 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     }
 
     public Tuple2<DataStream<RowData>, RowType> buildSource() {
+        if (targetTableName().equals(sourceTableName())) {
+            throw new RuntimeException(
+                    String.format(
+                            "Source table '%s' and target table '%s' are the same, not permitted now."
+                                    + "Please lookup docs for how to merge on self.",
+                            sourceTableName(), targetTableName()));
+        }
+
         // handle sqls
         handleSqls();
 

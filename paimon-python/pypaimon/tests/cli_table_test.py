@@ -932,6 +932,192 @@ class CliTableTest(unittest.TestCase):
         after_id_idx = field_names.index('after_id_col')
         self.assertEqual(after_id_idx, id_idx + 1)
 
+    def test_cli_table_read_with_where_equal(self):
+        """Test table read with --where equal filter via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--where', "name = 'Alice'"]):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Alice', output)
+                self.assertNotIn('Bob', output)
+                self.assertNotIn('Charlie', output)
+
+    def test_cli_table_read_with_where_greater_than(self):
+        """Test table read with --where greater-than filter via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '-w', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age > 30: Charlie(35), Eve(32)
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Bob', output)
+
+    def test_cli_table_read_with_where_and(self):
+        """Test table read with --where AND condition via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--where', 'age >= 28 AND age <= 32']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age >= 28 AND age <= 32: Bob(30), David(28), Eve(32)
+                self.assertIn('Bob', output)
+                self.assertIn('David', output)
+                self.assertIn('Eve', output)
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Charlie', output)
+
+    def test_cli_table_read_with_where_in(self):
+        """Test table read with --where IN filter via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--where', "city IN ('Beijing', 'Shanghai')"]):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Alice', output)
+                self.assertIn('Bob', output)
+                self.assertNotIn('Charlie', output)
+
+    def test_cli_table_read_with_where_and_select(self):
+        """Test table read with both --where and --select via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,age',
+                    '--where', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertNotIn('Alice', output)
+
+    def test_cli_table_read_where_field_not_in_select(self):
+        """Test that where filter works even when the filtered field is not in select."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,city',
+                    '--where', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age > 30: Charlie(35,Guangzhou), Eve(32,Hangzhou)
+                # Filter should work even though 'age' is not in select
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertIn('Guangzhou', output)
+                self.assertIn('Hangzhou', output)
+                # Excluded rows should not appear
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Bob', output)
+                self.assertNotIn('David', output)
+                # The 'age' column should NOT appear in output (it was only needed for filtering)
+                self.assertNotIn(' 35', output)
+                self.assertNotIn(' 32', output)
+                self.assertNotIn(' 25', output)
+
+    def test_cli_table_read_with_where_and_limit(self):
+        """Test that where + limit returns correct filtered results without limit push-down.
+
+        Writes data in two batches to produce multiple splits, so that limit
+        push-down would actually take effect and potentially miss matching rows
+        in later splits.
+        """
+
+        # Create a dedicated table for this test with two batches of data
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+            ('score', pa.int32()),
+        ])
+        # Important: multiple splits are required for the limit to take effect
+        schema = Schema.from_pyarrow_schema(pa_schema, options={'source.split.target-size': '1b'})
+        self.catalog.create_table('test_db.limit_test', schema, True)
+        table = self.catalog.get_table('test_db.limit_test')
+
+        def write_batch():
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            batch = pa.Table.from_pydict({
+                'id': [1, 2, 3],
+                'val': ['a', 'b', 'c'],
+                'score': [10, 20, 30],
+            }, schema=pa_schema)
+            table_write.write_arrow(batch)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        write_batch()
+        write_batch()
+        write_batch()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.limit_test',
+                    '--where', 'score = 20',
+                    '--limit', '2']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                lines = [line for line in output.strip().split('\n') if line.strip()]
+                self.assertEqual(len(lines), 3)
+                self.assertNotIn(' a ', output)
+                self.assertNotIn(' c ', output)
+
+    def test_cli_table_read_with_invalid_where(self):
+        """Test table read with invalid --where clause via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--where', 'age INVALID 30']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                error_output = mock_stderr.getvalue()
+                self.assertIn('Error', error_output)
+
     def test_cli_table_rename_basic(self):
         """Test basic table rename via CLI."""
         import json
@@ -981,6 +1167,190 @@ class CliTableTest(unittest.TestCase):
         # Verify source table no longer exists
         with self.assertRaises(Exception):
             self.catalog.get_table('test_db.rename_source')
+
+    @classmethod
+    def _create_partitioned_table(cls):
+        """Create a partitioned test table and insert sample data."""
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('region', pa.string()),
+            ('id', pa.int32()),
+            ('value', pa.string())
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt', 'region'])
+        cls.catalog.create_table('test_db.partitioned', schema, True)
+
+        table = cls.catalog.get_table('test_db.partitioned')
+
+        # Write data for partition dt=2024-01-01, region=us
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'dt': ['2024-01-01', '2024-01-01'],
+            'region': ['us', 'us'],
+            'id': [1, 2],
+            'value': ['a', 'b'],
+        }, schema=pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Write data for partition dt=2024-01-02, region=eu
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'dt': ['2024-01-02', '2024-01-02', '2024-01-02'],
+            'region': ['eu', 'eu', 'eu'],
+            'id': [3, 4, 5],
+            'value': ['c', 'd', 'e'],
+        }, schema=pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def test_cli_table_list_partitions(self):
+        """Test list-partitions command with real partitioned table."""
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.partitioned']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # Verify header columns
+                self.assertIn('Partition', output)
+                self.assertIn('RecordCount', output)
+                self.assertIn('FileSizeInBytes', output)
+                self.assertIn('FileCount', output)
+                # Verify partition specs
+                self.assertIn('dt=2024-01-01,region=us', output)
+                self.assertIn('dt=2024-01-02,region=eu', output)
+
+    def test_cli_table_list_partitions_with_pattern(self):
+        """Test list-partitions command with --pattern filter."""
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.partitioned',
+                    '--pattern', 'dt=2024-01-01*']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('dt=2024-01-01,region=us', output)
+                self.assertNotIn('dt=2024-01-02', output)
+
+    def test_cli_table_read_format_json(self):
+        """Test table read with --format json output."""
+        import json
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                rows = json.loads(output)
+                self.assertIsInstance(rows, list)
+                self.assertGreaterEqual(len(rows), 5)
+                names = {r['name'] for r in rows}
+                self.assertIn('Alice', names)
+                self.assertIn('Bob', names)
+                for r in rows:
+                    self.assertIn('id', r)
+                    self.assertIn('name', r)
+                    self.assertIn('age', r)
+                    self.assertIn('city', r)
+
+    def test_cli_table_read_format_json_with_select(self):
+        """Test table read with --format json and --select."""
+        import json
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,age', '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                rows = json.loads(output)
+                self.assertIsInstance(rows, list)
+                for r in rows:
+                    self.assertIn('name', r)
+                    self.assertIn('age', r)
+                    self.assertNotIn('id', r)
+                    self.assertNotIn('city', r)
+
+    def test_cli_table_list_partitions_format_json(self):
+        """Test list-partitions with --format json output."""
+        import json
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.partitioned',
+                    '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                rows = json.loads(output)
+                self.assertIsInstance(rows, list)
+                self.assertEqual(len(rows), 2)
+                for r in rows:
+                    self.assertIn('Partition', r)
+                    self.assertIn('RecordCount', r)
+                    self.assertIn('FileSizeInBytes', r)
+                    self.assertIn('FileCount', r)
+                partitions = {r['Partition'] for r in rows}
+                self.assertIn('dt=2024-01-01,region=us', partitions)
+                self.assertIn('dt=2024-01-02,region=eu', partitions)
+
+    def test_cli_table_list_partitions_empty(self):
+        """Test list-partitions on non-partitioned table (no snapshot = empty)."""
+        # Create a table with no data
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('test_db.empty_part', schema, True)
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.empty_part']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('No partitions found', output)
+
 
 if __name__ == '__main__':
     unittest.main()

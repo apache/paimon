@@ -154,3 +154,32 @@ class DialectAlreadyExistException(CatalogException):
         self.identifier = identifier
         self.dialect = dialect
         super().__init__(f"Dialect {dialect} already exists in {identifier.get_full_name()}")
+
+
+class BranchNotExistException(CatalogException):
+    """Branch not exist exception"""
+
+    def __init__(self, branch: str):
+        self.branch = branch
+        super().__init__(f"Branch {branch} does not exist")
+
+
+class BranchAlreadyExistException(CatalogException):
+    """Branch already exist exception"""
+
+    def __init__(self, branch: str):
+        self.branch = branch
+        super().__init__(f"Branch {branch} already exists")
+
+
+class TagNotExistException(CatalogException):
+    """Tag not exist exception"""
+
+    def __init__(self, tag: str):
+        self.tag = tag
+        super().__init__(f"Tag {tag} does not exist")
+
+
+class IllegalArgumentError(CatalogException):
+    """Illegal argument exception"""
+    pass

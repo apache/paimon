@@ -129,6 +129,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -509,7 +510,9 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private List<SchemaChange> toSchemaChange(
-            TableChange change, Map<String, Integer> oldTableNonPhysicalColumnIndex) {
+            TableChange change,
+            Map<String, Integer> oldTableNonPhysicalColumnIndex,
+            @Nullable String primaryKeyConstraintName) {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             if (((AddColumn) change).getColumn().isPhysical()) {
@@ -626,6 +629,15 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof MaterializedTableChange
                 && handleMaterializedTableChange(change, schemaChanges)) {
             return schemaChanges;
+        } else if (change instanceof TableChange.DropConstraint) {
+            TableChange.DropConstraint dropConstraint = (TableChange.DropConstraint) change;
+            if (primaryKeyConstraintName == null
+                    || !primaryKeyConstraintName.equals(dropConstraint.getConstraintName())) {
+                throw new UnsupportedOperationException(
+                        "Only dropping primary key constraint is supported.");
+            }
+            schemaChanges.add(SchemaChange.dropPrimaryKey());
+            return schemaChanges;
         }
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
     }
@@ -739,10 +751,17 @@ public class FlinkCatalog extends AbstractCatalog {
         checkArgument(
                 table instanceof FileStoreTable,
                 "Only support alter data table, but is: " + table.getClass());
-        validateAlterTable(toCatalogTable(table), newTable);
+        CatalogBaseTable oldCatalogTable = toCatalogTable(table);
+        validateAlterTable(oldCatalogTable, newTable);
         Map<String, Integer> oldTableNonPhysicalColumnIndex =
                 FlinkCatalogPropertiesUtil.nonPhysicalColumns(
                         table.options(), table.rowType().getFieldNames());
+        String primaryKeyConstraintName =
+                oldCatalogTable
+                        .getUnresolvedSchema()
+                        .getPrimaryKey()
+                        .map(pk -> pk.getConstraintName())
+                        .orElse(null);
 
         List<SchemaChange> changes = new ArrayList<>();
 
@@ -772,7 +791,9 @@ public class FlinkCatalog extends AbstractCatalog {
                             .flatMap(
                                     tableChange ->
                                             toSchemaChange(
-                                                    tableChange, oldTableNonPhysicalColumnIndex)
+                                                    tableChange,
+                                                    oldTableNonPhysicalColumnIndex,
+                                                    primaryKeyConstraintName)
                                                     .stream())
                             .collect(Collectors.toList());
             changes.addAll(schemaChanges);
@@ -847,10 +868,10 @@ public class FlinkCatalog extends AbstractCatalog {
         if (!table1IsMaterialized) {
             org.apache.flink.table.api.Schema ts1 = ct1.getUnresolvedSchema();
             org.apache.flink.table.api.Schema ts2 = ct2.getUnresolvedSchema();
-            boolean pkEquality = false;
+            boolean allowAlterPk = false;
 
             if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
-                pkEquality =
+                allowAlterPk =
                         Objects.equals(
                                         ts1.getPrimaryKey().get().getConstraintName(),
                                         ts2.getPrimaryKey().get().getConstraintName())
@@ -858,10 +879,14 @@ public class FlinkCatalog extends AbstractCatalog {
                                         ts1.getPrimaryKey().get().getColumnNames(),
                                         ts2.getPrimaryKey().get().getColumnNames());
             } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
-                pkEquality = true;
+                allowAlterPk = true;
+            } else if (ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
+                // dropping primary key is allowed on empty tables,
+                // SchemaManager will validate this
+                allowAlterPk = true;
             }
 
-            if (!pkEquality) {
+            if (!allowAlterPk) {
                 throw new UnsupportedOperationException(
                         "Altering primary key is not supported yet.");
             }
@@ -1055,14 +1080,9 @@ public class FlinkCatalog extends AbstractCatalog {
         if (blobFields.contains(fieldName)) {
             return toBlobType(logicalType);
         }
-        if (logicalType instanceof org.apache.flink.table.types.logical.ArrayType) {
-            String vectorDim = options.get(String.format("field.%s.vector-dim", fieldName));
-            if (vectorDim != null) {
-                org.apache.flink.table.types.logical.LogicalType elementType =
-                        ((org.apache.flink.table.types.logical.ArrayType) logicalType)
-                                .getElementType();
-                return toVectorType(elementType, vectorDim);
-            }
+        Set<String> vectorFields = CoreOptions.vectorField(options);
+        if (vectorFields.contains(fieldName)) {
+            return toVectorType(fieldName, logicalType, options);
         }
         return toDataType(logicalType);
     }

@@ -19,7 +19,10 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.configuration.BatchExecutionOptions;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -28,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for custom lookup shuffle. */
 public class LookupJoinBucketShuffleITCase extends CatalogITCaseBase {
@@ -187,6 +191,36 @@ public class LookupJoinBucketShuffleITCase extends CatalogITCaseBase {
                                 + "D.col4 = CAST('2024-06-09' AS DATE) AND D.col5 = 123.45")
                         .replace("DIM", primaryKeyDimTable);
         testBucketNumberCases(query);
+    }
+
+    @Test
+    public void testBucketShuffleNotAllowedWithAQE() {
+        String nonPrimaryKeyDimTable = createNonPrimaryKeyDimTable("col1");
+        String query =
+                ("SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ T.col1, D.col2 FROM T JOIN DIM "
+                                + "for system_time as of T.proc_time AS D ON T.col1 = D.col1")
+                        .replace("DIM", nonPrimaryKeyDimTable);
+
+        tEnv.getConfig().set(BatchExecutionOptions.ADAPTIVE_AUTO_PARALLELISM_ENABLED, true);
+
+        if (isFlinkVersionGreaterThanOrEqualTo("2.0")) {
+            assertThatThrownBy(
+                            () ->
+                                    BlockingIterator.of(tEnv.executeSql(query).collect())
+                                            .collect(ROW_NUMBER))
+                    .rootCause()
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(
+                            "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
+        } else {
+            // Custom shuffle lookup join is not supported in Flink 1.x.
+            assertThatThrownBy(
+                            () ->
+                                    BlockingIterator.of(tEnv.executeSql(query).collect())
+                                            .collect(ROW_NUMBER))
+                    .isInstanceOf(ValidationException.class)
+                    .hasMessage("Unknown join strategy : LOOKUP");
+        }
     }
 
     private void testBucketNumberCases(String query) throws Exception {

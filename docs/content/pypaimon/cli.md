@@ -83,7 +83,9 @@ paimon table read mydb.users
 **Options:**
 
 - `--select, -s`: Select specific columns to read (comma-separated)
+- `--where, -w`: Filter condition in SQL-like syntax
 - `--limit, -l`: Maximum number of results to display (default: 100)
+- `--format, -f`: Output format: `table` (default) or `json`
 
 **Examples:**
 
@@ -94,9 +96,55 @@ paimon table read mydb.users -l 50
 # Read specific columns
 paimon table read mydb.users -s id,name,age
 
-# Combine select and limit
-paimon table read mydb.users -s id,name -l 50
+# Filter with WHERE clause
+paimon table read mydb.users --where "age > 18"
+
+# Combine select, where, and limit
+paimon table read mydb.users -s id,name -w "age >= 20 AND city = 'Beijing'" -l 50
+
+# Output as JSON (for programmatic use)
+paimon table read mydb.users --format json
 ```
+
+**WHERE Operators**
+
+The `--where` option supports SQL-like filter expressions:
+
+| Operator | Example |
+|---|---|
+| `=`, `!=`, `<>` | `name = 'Alice'` |
+| `<`, `<=`, `>`, `>=` | `age > 18` |
+| `IS NULL`, `IS NOT NULL` | `deleted_at IS NULL` |
+| `IN (...)`, `NOT IN (...)` | `status IN ('active', 'pending')` |
+| `BETWEEN ... AND ...` | `age BETWEEN 20 AND 30` |
+| `LIKE` | `name LIKE 'A%'` |
+
+Multiple conditions can be combined with `AND` and `OR` (AND has higher precedence). Parentheses are supported for grouping:
+
+```shell
+# AND condition
+paimon table read mydb.users -w "age >= 20 AND age <= 30"
+
+# OR condition
+paimon table read mydb.users -w "city = 'Beijing' OR city = 'Shanghai'"
+
+# Parenthesized grouping
+paimon table read mydb.users -w "(age > 18 OR name = 'Bob') AND city = 'Beijing'"
+
+# IN list
+paimon table read mydb.users -w "city IN ('Beijing', 'Shanghai', 'Hangzhou')"
+
+# BETWEEN
+paimon table read mydb.users -w "age BETWEEN 25 AND 35"
+
+# LIKE pattern
+paimon table read mydb.users -w "name LIKE 'A%'"
+
+# IS NULL / IS NOT NULL
+paimon table read mydb.users -w "email IS NOT NULL"
+```
+
+Literal values are automatically cast to the appropriate Python type based on the table schema (e.g., `INT` fields cast to `int`, `DOUBLE` to `float`).
 
 Output:
 ```
@@ -265,6 +313,40 @@ Successfully imported 3 rows into 'mydb.users'.
 - Data types should be compatible with the table schema
 - The import operation appends data to the existing table
 
+### Table List Partitions
+
+List partitions of a Paimon table. Supports optional pattern filtering to match specific partitions.
+
+```shell
+paimon table list-partitions mydb.orders
+```
+
+**Options:**
+
+- `--pattern, -p`: Partition name pattern to filter partitions
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# List all partitions
+paimon table list-partitions mydb.orders
+
+# List partitions matching a pattern
+paimon table list-partitions mydb.orders --pattern "dt=2024*"
+
+# Output as JSON (for programmatic use)
+paimon table list-partitions mydb.orders --format json
+```
+
+Output:
+```
+              Partition  RecordCount  FileSizeInBytes  FileCount  LastFileCreationTime       UpdatedAt  UpdatedBy
+dt=2024-01-01,region=us          500          1048576         10         1704067200000  1704153600000      admin
+dt=2024-01-02,region=eu          300           524288          5         1704153600000  1704240000000      user1
+dt=2024-01-03,region=us          200           262144          3         1704240000000  1704326400000      admin
+```
+
 ### Table Rename
 
 Rename a table in the catalog. Both source and target must be specified in `database.table` format.
@@ -279,6 +361,48 @@ Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
 ```
 
 **Note:** Both filesystem and REST catalogs support table rename. For filesystem catalogs, the rename is performed by renaming the underlying table directory.
+
+### Table Full-Text Search
+
+Perform full-text search on a Paimon table with a Tantivy full-text index and display matching rows.
+
+```shell
+paimon table full-text-search mydb.articles --column content --query "paimon lake"
+```
+
+**Options:**
+
+- `--column, -c`: Text column to search on - **Required**
+- `--query, -q`: Query text to search for - **Required**
+- `--limit, -l`: Maximum number of results to return (default: 10)
+- `--select, -s`: Select specific columns to display (comma-separated)
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# Basic full-text search
+paimon table full-text-search mydb.articles -c content -q "paimon lake"
+
+# Search with limit
+paimon table full-text-search mydb.articles -c content -q "streaming data" -l 20
+
+# Search with column projection
+paimon table full-text-search mydb.articles -c content -q "paimon" -s "id,title,content"
+
+# Output as JSON
+paimon table full-text-search mydb.articles -c content -q "paimon" -f json
+```
+
+Output:
+```
+ id                                            content
+  0  Apache Paimon is a streaming data lake platform
+  2  Paimon supports real-time data ingestion and...
+  4  Data lake platforms like Paimon handle large-...
+```
+
+**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index]({{< ref "append-table/global-index" >}}) for how to create full-text indexes.
 
 ### Table Drop
 

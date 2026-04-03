@@ -28,7 +28,9 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.FullTextSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
@@ -157,6 +159,10 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(String tagName);
 
+    /** Rollback table's schema to a specific schema version. */
+    @Experimental
+    void rollbackSchema(long schemaId);
+
     /** Create an empty branch. */
     @Experimental
     void createBranch(String branchName);
@@ -196,6 +202,10 @@ public interface Table extends Serializable {
         }
     }
 
+    /** Rename a branch. */
+    @Experimental
+    void renameBranch(String fromBranch, String toBranch);
+
     /** Merge a branch to main branch. */
     @Experimental
     void fastForward(String branchName);
@@ -208,6 +218,12 @@ public interface Table extends Serializable {
     ExpireSnapshots newExpireChangelog();
 
     // =============== Read & Write Operations ==================
+
+    /** Returns a new vector search builder. */
+    VectorSearchBuilder newVectorSearchBuilder();
+
+    /** Returns a new full-text search builder. */
+    FullTextSearchBuilder newFullTextSearchBuilder();
 
     /** Returns a new read builder. */
     ReadBuilder newReadBuilder();

@@ -223,6 +223,15 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       parent: NamedExpression,
       source: StructType,
       target: StructType): NamedExpression = {
+    // If source struct has fields not in target, reject so that merge-schema
+    // can handle the evolution instead of silently dropping the extra fields.
+    val targetFieldNames = target.fieldNames.toSet
+    val extraFields = source.fieldNames.filterNot(targetFieldNames.contains)
+    if (extraFields.nonEmpty) {
+      throw new RuntimeException(
+        s"Cannot write incompatible data: nested struct has extra fields: ${extraFields.mkString(", ")}.")
+    }
+
     val fields = target.map {
       case targetField @ StructField(name, nested: StructType, _, _) =>
         val sourceIndex = source.fieldIndex(name)

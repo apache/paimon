@@ -404,6 +404,53 @@ class TestFileStoreCommit(unittest.TestCase):
         # Verify results
         self.assertEqual(len(statistics), 0)
 
+    def test_null_partition_value(
+            self, mock_manifest_list_manager, mock_manifest_file_manager, mock_snapshot_manager):
+        from pypaimon.data.timestamp import Timestamp
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        from pypaimon.schema.data_types import DataField, AtomicType
+
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.partition_keys = ['dt']
+        self.mock_table.partition_keys_fields = [
+            DataField(0, 'dt', AtomicType('STRING'))
+        ]
+        self.mock_table.table_schema = Mock()
+        self.mock_table.table_schema.id = 0
+
+        file_store_commit.manifest_file_manager = Mock()
+        file_store_commit.manifest_file_manager.manifest_path = '/test/manifest'
+        self.mock_table.file_io.get_file_size.return_value = 1024
+
+        creation_time = Timestamp.from_local_date_time(datetime(2024, 1, 15, 10, 30, 0))
+
+        def make_file(name):
+            return DataFileMeta.create(
+                file_name=name,
+                file_size=1024,
+                row_count=100,
+                min_key=GenericRow([], []),
+                max_key=GenericRow([], []),
+                key_stats=SimpleStats.empty_stats(),
+                value_stats=SimpleStats.empty_stats(),
+                min_sequence_number=1,
+                max_sequence_number=10,
+                schema_id=0,
+                level=0,
+                extra_files=[],
+                creation_time=creation_time,
+            )
+
+        entries = [
+            ManifestEntry(kind=0, partition=GenericRow([None], None), bucket=0, total_buckets=None,
+                          file=make_file("f1.parquet")),
+            ManifestEntry(kind=0, partition=GenericRow(['2024-01-15'], None), bucket=0, total_buckets=None,
+                          file=make_file("f2.parquet")),
+        ]
+
+        result = file_store_commit._write_manifest_file(entries, "manifest-test")
+        self.assertIsNotNone(result)
+
     @staticmethod
     def _to_entries(commit_messages):
         commit_entries = []

@@ -395,7 +395,26 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
-    
+
+    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import vortex
+            from vortex._lib.io import write as vortex_write
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            from pypaimon.read.reader.vortex_utils import to_vortex_specified
+            _, store_kwargs = to_vortex_specified(self, path)
+
+            if store_kwargs:
+                from vortex import store
+                vortex_store = store.from_url(path, **store_kwargs)
+                vortex_store.write(vortex.array(data))
+            else:
+                vortex_write(vortex.array(data), path)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
+
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:
@@ -453,3 +472,27 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
+
+
+class FuseLocalFileIO(LocalFileIO):
+    """LocalFileIO that translates remote OSS paths to FUSE-mounted local paths.
+
+    All file operations receive paths like:
+        oss://clg-paimon-xxx/db-xxx/tbl-xxx/manifest/manifest-xxx
+    This class replaces the path prefix with fuse_path so the actual
+    I/O goes through the FUSE mount point.
+    """
+
+    def __init__(self, path: str, fuse_path: str,
+                 catalog_options: Optional[Options] = None):
+        super().__init__(path=fuse_path, catalog_options=catalog_options)
+        self.path = path
+        self.fuse_path = fuse_path
+
+    def _to_file(self, path: str) -> Path:
+        return super()._to_file(self._translate(path))
+
+    def _translate(self, path: str) -> str:
+        if path == self.path or path.startswith(self.path + "/"):
+            return self.fuse_path + path[len(self.path):]
+        return path

@@ -32,17 +32,21 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.SetUtils;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
+import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Data evolution table compaction task. */
@@ -68,6 +72,17 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             // TODO: support blob file compaction
             throw new UnsupportedOperationException("Blob task is not supported");
         }
+        if (isVectorStoreFile(compactBefore.get(0).fileName())) {
+            // TODO: support vector-store file compaction
+            throw new UnsupportedOperationException("Vector-store task is not supported");
+        }
+
+        CoreOptions options = table.coreOptions();
+
+        Set<String> fieldsInDedicatedFile =
+                SetUtils.union(
+                        fieldNamesInBlobFile(table.rowType(), options.blobDescriptorField()),
+                        fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
 
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
@@ -75,7 +90,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         RowType readWriteType =
                 new RowType(
                         table.rowType().getFields().stream()
-                                .filter(f -> f.type().getTypeRoot() != DataTypeRoot.BLOB)
+                                .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
                                 .collect(Collectors.toList()));
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();

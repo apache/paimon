@@ -41,7 +41,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
@@ -347,5 +349,10 @@ public interface DataFileMeta {
                 .map(DataFileMeta::maxSequenceNumber)
                 .max(Long::compare)
                 .orElse(-1L);
+    }
+
+    static Map<Integer, List<DataFileMeta>> groupByLevel(List<DataFileMeta> files) {
+        return files.stream()
+                .collect(Collectors.groupingBy(DataFileMeta::level, Collectors.toList()));
     }
 }

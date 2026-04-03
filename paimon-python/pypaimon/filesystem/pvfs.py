@@ -829,7 +829,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 rest_api = self.__rest_api(pvfs_table_identifier)
                 load_token_response: GetTableTokenResponse = rest_api.load_table_token(
                     Identifier.create(pvfs_table_identifier.database, pvfs_table_identifier.table))
-                fs = self._get_oss_filesystem(load_token_response.token)
+                merged_token = self._merge_token_with_catalog_options(load_token_response.token)
+                fs = self._get_oss_filesystem(Options(merged_token))
                 paimon_real_storage = PaimonRealStorage(
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
@@ -843,6 +844,14 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return fs
         finally:
             write_lock.release()
+
+    def _merge_token_with_catalog_options(self, token: dict) -> dict:
+        """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
+        merged_token = dict(token)
+        dlf_oss_endpoint = self.options.get(CatalogOptions.DLF_OSS_ENDPOINT)
+        if dlf_oss_endpoint and dlf_oss_endpoint.strip():
+            merged_token[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
+        return merged_token
 
     @staticmethod
     def _get_storage_type(path: str):

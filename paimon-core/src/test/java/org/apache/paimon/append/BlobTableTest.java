@@ -38,7 +38,10 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.system.RowTrackingTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
@@ -56,6 +59,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -112,7 +116,8 @@ public class BlobTableTest extends TableTestBase {
                         .collect(Collectors.toList());
 
         List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
-                DataEvolutionSplitRead.splitFieldBunches(filesMetas, key -> 0);
+                DataEvolutionSplitRead.splitFieldBunches(
+                        filesMetas, key -> makeBlobRowType(key.writeCols(), f -> 0));
 
         assertThat(fieldGroups.size()).isEqualTo(2);
         assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
@@ -162,7 +167,8 @@ public class BlobTableTest extends TableTestBase {
         assertThat(batches.size()).isEqualTo(2);
         for (List<DataFileMeta> batch : batches) {
             List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
-                    DataEvolutionSplitRead.splitFieldBunches(batch, file -> 0);
+                    DataEvolutionSplitRead.splitFieldBunches(
+                            batch, file -> makeBlobRowType(file.writeCols(), f -> 0));
             assertThat(fieldGroups.size()).isEqualTo(2);
             assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
             assertThat(fieldGroups.get(1).files().size()).isEqualTo(10);
@@ -474,6 +480,38 @@ public class BlobTableTest extends TableTestBase {
                                 + "'.");
     }
 
+    @Test
+    public void testReadRowTrackingWithBlobProjection() throws Exception {
+        createTableDefault();
+        writeDataDefault(
+                Collections.singletonList(
+                        GenericRow.of(
+                                1,
+                                BinaryString.fromString("test_row_id_projection"),
+                                new BlobData(blobBytes))));
+
+        // read from RowTrackingTable which appends _ROW_ID and _SEQUENCE_NUMBER to the schema
+        FileStoreTable fileStoreTable = getTableDefault();
+        RowTrackingTable rowTrackingTable = new RowTrackingTable(fileStoreTable);
+
+        // read with projection: only _ROW_ID and f2 (blob)
+        // row tracking schema indices: 0=f0, 1=f1, 2=f2, 3=_ROW_ID, 4=_SEQUENCE_NUMBER
+        ReadBuilder projectedBuilder =
+                rowTrackingTable.newReadBuilder().withProjection(new int[] {3, 2});
+        RecordReader<InternalRow> projectedReader =
+                projectedBuilder.newRead().createReader(projectedBuilder.newScan().plan());
+        AtomicInteger projectedCount = new AtomicInteger(0);
+        projectedReader.forEachRemaining(
+                row -> {
+                    projectedCount.incrementAndGet();
+                    // field 0 = _ROW_ID
+                    assertThat(row.isNullAt(0)).isFalse();
+                    // field 1 = f2 (blob)
+                    assertThat(row.getBlob(1).toData()).isEqualTo(blobBytes);
+                });
+        assertThat(projectedCount.get()).isEqualTo(1);
+    }
+
     private void createExternalStorageTable() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
@@ -572,6 +610,20 @@ public class BlobTableTest extends TableTestBase {
     protected InternalRow dataDefault(int time, int size) {
         return GenericRow.of(
                 RANDOM.nextInt(), BinaryString.fromBytes(randomBytes()), new BlobData(blobBytes));
+    }
+
+    private static RowType makeBlobRowType(
+            List<String> fieldNames, Function<String, Integer> fieldIdFunc) {
+        List<DataField> fields = new ArrayList<>();
+        if (fieldNames == null) {
+            fieldNames = Collections.emptyList();
+        }
+        for (String fieldName : fieldNames) {
+            int fieldId = fieldIdFunc.apply(fieldName);
+            DataField blobField = new DataField(fieldId, fieldName, DataTypes.BLOB());
+            fields.add(blobField);
+        }
+        return new RowType(fields);
     }
 
     @Override

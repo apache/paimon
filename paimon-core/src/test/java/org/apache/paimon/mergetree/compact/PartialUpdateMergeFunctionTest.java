@@ -133,6 +133,46 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testSequenceGroupPartialDeleteWithProjection() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2");
+        options.set("fields.f6.sequence-group", "f4,f5");
+        options.set("partial-update.remove-record-on-sequence-group", "f3,f6");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+
+        // Reordered fields
+        RowType projectedType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT()
+                        },
+                        new String[] {"f3", "f6", "f0", "f1", "f2", "f4", "f5"});
+        MergeFunction<KeyValue> func = factory.create(projectedType);
+
+        func.reset();
+        add(func, 11, 22, 100, 200, 1, 12, 21);
+        add(func, RowKind.DELETE, 11, 22, 100, 200, 1, 12, 21);
+
+        validate(func, null, null, null, null, null, null, null);
+    }
+
+    @Test
     public void testMultiSequenceFields() {
         Options options = new Options();
         options.set("fields.f3,f4.sequence-group", "f1,f2");

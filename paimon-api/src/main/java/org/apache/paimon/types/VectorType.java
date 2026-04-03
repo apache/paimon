@@ -24,8 +24,12 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Data type of fixed-size vector type. The elements are densely stored.
@@ -174,5 +178,32 @@ public class VectorType extends DataType {
     @Override
     public void collectFieldIds(Set<Integer> fieldIds) {
         elementType.collectFieldIds(fieldIds);
+    }
+
+    public static boolean isVectorStoreFile(String fileName) {
+        return fileName.contains(".vector.");
+    }
+
+    public static Set<String> fieldNamesInVectorFile(RowType rowType, boolean withVectorFormat) {
+        return fieldsInVectorFile(rowType, withVectorFormat).stream()
+                .map(DataField::name)
+                .collect(Collectors.toSet());
+    }
+
+    public static List<DataField> fieldsInVectorFile(RowType rowType, boolean withVectorFormat) {
+        if (!withVectorFormat) {
+            return Collections.emptyList();
+        }
+
+        List<DataField> result = new ArrayList<>();
+        rowType.getFields()
+                .forEach(
+                        field -> {
+                            DataTypeRoot type = field.type().getTypeRoot();
+                            if (type == DataTypeRoot.VECTOR) {
+                                result.add(field);
+                            }
+                        });
+        return result;
     }
 }

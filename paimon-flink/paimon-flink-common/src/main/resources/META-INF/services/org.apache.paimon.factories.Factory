@@ -62,6 +62,7 @@ org.apache.paimon.flink.procedure.ExpireTagsProcedure
 org.apache.paimon.flink.procedure.ReplaceTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure
 org.apache.paimon.flink.procedure.DeleteBranchProcedure
+org.apache.paimon.flink.procedure.RenameBranchProcedure
 org.apache.paimon.flink.procedure.DropPartitionProcedure
 org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
@@ -100,3 +101,4 @@ org.apache.paimon.flink.procedure.TriggerTagAutomaticCreationProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingManifestsProcedure
 org.apache.paimon.flink.procedure.DataEvolutionMergeIntoProcedure
 org.apache.paimon.flink.procedure.CreateGlobalIndexProcedure
+org.apache.paimon.flink.procedure.VectorSearchProcedure

@@ -21,9 +21,14 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.TestHttpWebServer;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.types.Row;
@@ -39,6 +44,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test write and read table with blob type. */
@@ -249,6 +255,123 @@ public class BlobTableITCase extends CatalogITCaseBase {
                     stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
             assertThat(externalStorageFiles).isGreaterThanOrEqualTo(2);
         }
+    }
+
+    @Test
+    public void testDynamicOptions() throws Exception {
+        batchSql("INSERT INTO blob_table VALUES (1, 'paimon', X'48656C6C6F')");
+        assertThat(batchSql("SELECT * FROM blob_table"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "paimon", new byte[] {72, 101, 108, 108, 111}));
+
+        // set blob-as-descriptor to true
+        tEnv.getConfig().set("paimon.*.*.blob_table.blob-as-descriptor", "true");
+        List<Row> result = batchSql("SELECT * FROM blob_table$row_tracking");
+        assertThat(result).size().isEqualTo(1);
+
+        byte[] descriptorBytes = result.get(0).getFieldAs(2);
+        BlobDescriptor descriptor = BlobDescriptor.deserialize(descriptorBytes);
+
+        UriReader reader = UriReader.fromFile(LocalFileIO.INSTANCE);
+        Blob blob = new BlobRef(reader, descriptor);
+        assertThat(blob.toData()).isEqualTo(new byte[] {72, 101, 108, 108, 111});
+    }
+
+    @Test
+    public void testRowTrackingWithBlobProjection() {
+        batchSql("INSERT INTO blob_table VALUES (1, 'paimon', X'48656C6C6F')");
+
+        // query _ROW_ID and blob field from row_tracking system table
+        // this previously caused ArrayIndexOutOfBoundsException because BlobFormatReader
+        // ignored the projectedRowType and always returned a single-field row
+        List<Row> result = batchSql("SELECT _ROW_ID, picture FROM blob_table$row_tracking");
+        assertThat(result).hasSize(1);
+        Row row = result.get(0);
+        assertThat(row.getField(0)).isNotNull();
+        assertThat((byte[]) row.getField(1)).isEqualTo(new byte[] {72, 101, 108, 108, 111});
+
+        // also verify selecting only _ROW_ID works
+        List<Row> rowIdOnly = batchSql("SELECT _ROW_ID FROM blob_table$row_tracking");
+        assertThat(rowIdOnly).hasSize(1);
+        assertThat(rowIdOnly.get(0).getField(0)).isNotNull();
+
+        // verify selecting all columns from row_tracking works
+        List<Row> allColumns = batchSql("SELECT * FROM blob_table$row_tracking");
+        assertThat(allColumns).hasSize(1);
+    }
+
+    @Test
+    public void testWriteBlobWithHttpUrlDescriptor() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/blob_data");
+        httpServer.start();
+        try {
+            String blobContent = "hello-http-blob";
+            String httpUrl = httpServer.getBaseUrl();
+
+            // Enqueue response for the write phase
+            httpServer.enqueueResponse(blobContent, 200);
+
+            // Use sys.path_to_descriptor with HTTP URL
+            batchSql(
+                    "INSERT INTO blob_table_descriptor VALUES (1, 'http-blob', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            // Read back with blob-as-descriptor=false to get raw data
+            batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
+            List<Row> result = batchSql("SELECT * FROM blob_table_descriptor");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("http-blob");
+            assertThat((byte[]) result.get(0).getField(2))
+                    .isEqualTo(blobContent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testBlobTypeSchemaEquals() throws Exception {
+        // Step 1: Create a Paimon table with blob field via Flink SQL
+        tEnv.executeSql(
+                "CREATE TABLE blob_schema_test ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "picture BYTES"
+                        + ") WITH ("
+                        + "'row-tracking.enabled'='true',"
+                        + "'data-evolution.enabled'='true',"
+                        + "'blob-field'='picture'"
+                        + ")");
+
+        // Step 2: Get the Paimon FileStoreTable and its RowType
+        FileStoreTable paimonTable = paimonTable("blob_schema_test");
+        RowType paimonRowType = paimonTable.rowType();
+
+        // Step 3: Create a Flink temporary table with the same schema (BYTES column)
+        tEnv.executeSql(
+                "CREATE TEMPORARY TABLE flink_temp_table ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "picture BYTES"
+                        + ") WITH ("
+                        + "'row-tracking.enabled'='true',"
+                        + "'data-evolution.enabled'='true',"
+                        + "'connector'='blackhole'"
+                        + ")");
+        org.apache.flink.table.types.logical.RowType flinkRowType =
+                (org.apache.flink.table.types.logical.RowType)
+                        tEnv.from("flink_temp_table")
+                                .getResolvedSchema()
+                                .toPhysicalRowDataType()
+                                .getLogicalType();
+
+        // Step 4: Convert Paimon RowType to Flink RowType via LogicalTypeConversion
+        org.apache.flink.table.types.logical.RowType convertedRowType =
+                toLogicalType(paimonRowType);
+
+        // Step 5: Assert that schemaEquals considers them equal
+        assertThat(AbstractFlinkTableFactory.schemaEquals(convertedRowType, flinkRowType)).isTrue();
     }
 
     private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();

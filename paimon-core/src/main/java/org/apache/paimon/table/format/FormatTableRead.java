@@ -96,7 +96,7 @@ public class FormatTableRead implements TableRead {
         if (readType != null) {
             int[] projection = tableRowType.getFieldIndices(readType.getFieldNames());
             Optional<Predicate> optional =
-                    predicate.visit(new PredicateProjectionConverter(projection));
+                    predicate.visit(PredicateProjectionConverter.fromProjection(projection));
             if (!optional.isPresent()) {
                 return reader;
             }

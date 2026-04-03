@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 
@@ -65,73 +66,82 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * A {@link FileStoreTable} which mainly read from the current branch. However, if the current
- * branch does not have a partition, it will read that partition from the fallback branch.
+ * A {@link FileStoreTable} which reads from two branches with partition-level merging. When {@code
+ * wrappedFirst} is true, the wrapped table has read priority (fallback mode). When {@code
+ * wrappedFirst} is false, the other table has read priority (primary mode). Write operations are
+ * always delegated to the wrapped table (current branch).
  */
 public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FallbackReadFileStoreTable.class);
 
-    private final FileStoreTable fallback;
+    private final FileStoreTable other;
+    private final boolean wrappedFirst;
 
-    public FallbackReadFileStoreTable(FileStoreTable wrapped, FileStoreTable fallback) {
+    public FallbackReadFileStoreTable(
+            FileStoreTable wrapped, FileStoreTable other, boolean wrappedFirst) {
         super(wrapped);
-        this.fallback = fallback;
+        this.other = other;
+        this.wrappedFirst = wrappedFirst;
 
         Preconditions.checkArgument(!(wrapped instanceof FallbackReadFileStoreTable));
-        if (fallback instanceof FallbackReadFileStoreTable) {
+        if (other instanceof FallbackReadFileStoreTable) {
             // ChainGroupReadTable need to be wrapped again
-            if (!(fallback instanceof ChainGroupReadTable)) {
+            if (!(other instanceof ChainGroupReadTable)) {
                 throw new IllegalArgumentException(
                         "This is a bug, perhaps there is a recursive call.");
             }
         }
     }
 
-    public FileStoreTable fallback() {
-        return fallback;
+    public FileStoreTable other() {
+        return other;
     }
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new FallbackReadFileStoreTable(
                 wrapped.copy(dynamicOptions),
-                fallback.copy(rewriteFallbackOptions(dynamicOptions)));
+                other.copy(rewriteOtherOptions(dynamicOptions)),
+                wrappedFirst);
     }
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         return new FallbackReadFileStoreTable(
                 wrapped.copy(newTableSchema),
-                fallback.copy(
-                        newTableSchema.copy(rewriteFallbackOptions(newTableSchema.options()))));
+                other.copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))),
+                wrappedFirst);
     }
 
     @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         return new FallbackReadFileStoreTable(
                 wrapped.copyWithoutTimeTravel(dynamicOptions),
-                fallback.copyWithoutTimeTravel(rewriteFallbackOptions(dynamicOptions)));
+                other.copyWithoutTimeTravel(rewriteOtherOptions(dynamicOptions)),
+                wrappedFirst);
     }
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
         return new FallbackReadFileStoreTable(
-                wrapped.copyWithLatestSchema(), fallback.copyWithLatestSchema());
+                wrapped.copyWithLatestSchema(), other.copyWithLatestSchema(), wrappedFirst);
     }
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
-        return new FallbackReadFileStoreTable(switchWrappedToBranch(branchName), fallback);
+        return new FallbackReadFileStoreTable(
+                switchWrappedToBranch(branchName), other, wrappedFirst);
     }
 
     @Override
     public void setManifestCache(SegmentsCache<Path> manifestCache) {
         super.setManifestCache(manifestCache);
-        fallback.setManifestCache(manifestCache);
+        other.setManifestCache(manifestCache);
     }
 
     protected FileStoreTable switchWrappedToBranch(String branchName) {
@@ -152,35 +162,35 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 wrapped.catalogEnvironment());
     }
 
-    protected Map<String, String> rewriteFallbackOptions(Map<String, String> options) {
+    protected Map<String, String> rewriteOtherOptions(Map<String, String> options) {
         Map<String, String> result = new HashMap<>(options);
 
-        // branch of fallback table should never change
+        // branch of other table should never change
         String branchKey = CoreOptions.BRANCH.key();
         if (options.containsKey(branchKey)) {
-            result.put(branchKey, fallback.options().get(branchKey));
+            result.put(branchKey, other.options().get(branchKey));
         }
 
-        // snapshot ids may be different between the main branch and the fallback branch,
+        // snapshot ids may be different between the main branch and the other branch,
         // so we need to convert main branch snapshot id to millisecond,
-        // then convert millisecond to fallback branch snapshot id
+        // then convert millisecond to other branch snapshot id
         String scanSnapshotIdOptionKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
         String scanSnapshotId = options.get(scanSnapshotIdOptionKey);
         if (scanSnapshotId != null) {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
-            Snapshot fallbackSnapshot = fallback.snapshotManager().earlierOrEqualTimeMills(millis);
-            long fallbackId;
-            if (fallbackSnapshot == null) {
-                fallbackId = Snapshot.FIRST_SNAPSHOT_ID;
+            Snapshot otherSnapshot = other.snapshotManager().earlierOrEqualTimeMills(millis);
+            long otherId;
+            if (otherSnapshot == null) {
+                otherId = Snapshot.FIRST_SNAPSHOT_ID;
             } else {
-                fallbackId = fallbackSnapshot.id();
+                otherId = otherSnapshot.id();
             }
-            result.put(scanSnapshotIdOptionKey, String.valueOf(fallbackId));
+            result.put(scanSnapshotIdOptionKey, String.valueOf(otherId));
         }
 
-        // bucket number of main branch and fallback branch are very likely different,
-        // so we remove bucket in options to use fallback branch's bucket number
+        // bucket number of main branch and other branch are very likely different,
+        // so we remove bucket in options to use other branch's bucket number
         result.remove(CoreOptions.BUCKET.key());
 
         return result;
@@ -188,60 +198,66 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public DataTableScan newScan() {
+        return newScan(FileStoreTable::newScan);
+    }
+
+    public DataTableScan newScan(Function<FileStoreTable, DataTableScan> scanCreator) {
         validateSchema();
-        return new FallbackReadScan(wrapped.newScan(), fallback.newScan());
+        FileStoreTable first = wrappedFirst ? wrapped : other;
+        FileStoreTable second = wrappedFirst ? other : wrapped;
+        return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
     }
 
     protected void validateSchema() {
         String mainBranch = wrapped.coreOptions().branch();
-        String fallbackBranch = fallback.coreOptions().branch();
+        String otherBranch = other.coreOptions().branch();
         RowType mainRowType = wrapped.schema().logicalRowType();
-        RowType fallbackRowType = fallback.schema().logicalRowType();
+        RowType otherRowType = other.schema().logicalRowType();
         Preconditions.checkArgument(
-                sameRowTypeIgnoreNullable(mainRowType, fallbackRowType),
+                sameRowTypeIgnoreNullable(mainRowType, otherRowType),
                 "Branch %s and %s does not have the same row type.\n"
                         + "Row type of branch %s is %s.\n"
                         + "Row type of branch %s is %s.",
                 mainBranch,
-                fallbackBranch,
+                otherBranch,
                 mainBranch,
                 mainRowType,
-                fallbackBranch,
-                fallbackRowType);
+                otherBranch,
+                otherRowType);
 
         List<String> mainPrimaryKeys = wrapped.schema().primaryKeys();
-        List<String> fallbackPrimaryKeys = fallback.schema().primaryKeys();
+        List<String> otherPrimaryKeys = other.schema().primaryKeys();
         if (!mainPrimaryKeys.isEmpty()) {
-            if (fallbackPrimaryKeys.isEmpty()) {
+            if (otherPrimaryKeys.isEmpty()) {
                 throw new IllegalArgumentException(
                         "Branch "
                                 + mainBranch
-                                + " has primary keys while fallback branch "
-                                + fallbackBranch
+                                + " has primary keys while branch "
+                                + otherBranch
                                 + " does not. This is not allowed.");
             }
             Preconditions.checkArgument(
-                    mainPrimaryKeys.equals(fallbackPrimaryKeys),
+                    mainPrimaryKeys.equals(otherPrimaryKeys),
                     "Branch %s and %s both have primary keys but are not the same.\n"
                             + "Primary keys of %s are %s.\n"
                             + "Primary keys of %s are %s.",
                     mainBranch,
-                    fallbackBranch,
+                    otherBranch,
                     mainBranch,
                     mainPrimaryKeys,
-                    fallbackBranch,
-                    fallbackPrimaryKeys);
+                    otherBranch,
+                    otherPrimaryKeys);
         }
     }
 
-    private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType fallbackRowType) {
-        if (mainRowType.getFieldCount() != fallbackRowType.getFieldCount()) {
+    private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType otherRowType) {
+        if (mainRowType.getFieldCount() != otherRowType.getFieldCount()) {
             return false;
         }
         for (int i = 0; i < mainRowType.getFieldCount(); i++) {
             DataType mainType = mainRowType.getFields().get(i).type();
-            DataType fallbackType = fallbackRowType.getFields().get(i).type();
-            if (!mainType.equalsIgnoreNullable(fallbackType)) {
+            DataType otherType = otherRowType.getFields().get(i).type();
+            if (!mainType.equalsIgnoreNullable(otherType)) {
                 return false;
             }
         }
@@ -354,12 +370,25 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     /** Scan implementation for {@link FallbackReadFileStoreTable}. */
     public static class FallbackReadScan implements DataTableScan {
 
+        protected final FileStoreTable wrappedTable;
+        protected final FileStoreTable fallbackTable;
+        protected final TableSchema tableSchema;
+        protected final Function<FileStoreTable, DataTableScan> scanCreator;
         protected final DataTableScan mainScan;
         protected final DataTableScan fallbackScan;
+        private PartitionPredicate partitionPredicate;
 
-        public FallbackReadScan(DataTableScan mainScan, DataTableScan fallbackScan) {
-            this.mainScan = mainScan;
-            this.fallbackScan = fallbackScan;
+        public FallbackReadScan(
+                FileStoreTable wrappedTable,
+                FileStoreTable fallbackTable,
+                TableSchema tableSchema,
+                Function<FileStoreTable, DataTableScan> scanCreator) {
+            this.wrappedTable = wrappedTable;
+            this.fallbackTable = fallbackTable;
+            this.tableSchema = tableSchema;
+            this.scanCreator = scanCreator;
+            this.mainScan = scanCreator.apply(wrappedTable);
+            this.fallbackScan = scanCreator.apply(fallbackTable);
         }
 
         @Override
@@ -373,6 +402,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withFilter(Predicate predicate) {
             mainScan.withFilter(predicate);
             fallbackScan.withFilter(predicate);
+            if (predicate != null) {
+                Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                        PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
+                                predicate,
+                                tableSchema.logicalRowType(),
+                                tableSchema.partitionKeys());
+                setPartitionPredicate(pair.getLeft().orElse(null));
+            }
             return this;
         }
 
@@ -387,6 +424,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withPartitionFilter(Map<String, String> partitionSpec) {
             mainScan.withPartitionFilter(partitionSpec);
             fallbackScan.withPartitionFilter(partitionSpec);
+            if (partitionSpec != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMap(
+                                tableSchema.logicalPartitionType(),
+                                partitionSpec,
+                                CoreOptions.fromMap(tableSchema.options()).partitionDefaultName()));
+            }
             return this;
         }
 
@@ -394,6 +438,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withPartitionFilter(List<BinaryRow> partitions) {
             mainScan.withPartitionFilter(partitions);
             fallbackScan.withPartitionFilter(partitions);
+            if (partitions != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMultiple(
+                                tableSchema.logicalPartitionType(), partitions));
+            }
             return this;
         }
 
@@ -401,6 +450,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
             mainScan.withPartitionsFilter(partitions);
             fallbackScan.withPartitionsFilter(partitions);
+            if (partitions != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMaps(
+                                tableSchema.logicalPartitionType(),
+                                partitions,
+                                CoreOptions.fromMap(tableSchema.options()).partitionDefaultName()));
+            }
             return this;
         }
 
@@ -408,6 +464,21 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
             mainScan.withPartitionFilter(partitionPredicate);
             fallbackScan.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate != null) {
+                setPartitionPredicate(partitionPredicate);
+            }
+            return this;
+        }
+
+        @Override
+        public FallbackReadScan withPartitionFilter(Predicate partitionPredicate) {
+            mainScan.withPartitionFilter(partitionPredicate);
+            fallbackScan.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromPredicate(
+                                tableSchema.logicalPartitionType(), partitionPredicate));
+            }
             return this;
         }
 
@@ -446,18 +517,26 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             return this;
         }
 
+        /**
+         * Builds a plan for fallback read.
+         *
+         * <p>Partitions that exist in the main branch (based on partition predicates only) are
+         * treated as complete and are read from the main branch with the full predicate. Partitions
+         * that exist only in the fallback branch are read from the fallback branch.
+         */
         @Override
         public TableScan.Plan plan() {
             List<Split> splits = new ArrayList<>();
-            Set<BinaryRow> completePartitions = new HashSet<>();
+            Set<BinaryRow> completePartitions =
+                    new HashSet<>(
+                            newPartitionListingScan(true, partitionPredicate).listPartitions());
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
                 splits.add(toFallbackSplit(dataSplit, false));
-                completePartitions.add(dataSplit.partition());
             }
 
             List<BinaryRow> remainingPartitions =
-                    fallbackScan.listPartitions().stream()
+                    newPartitionListingScan(false, partitionPredicate).listPartitions().stream()
                             .filter(p -> !completePartitions.contains(p))
                             .collect(Collectors.toList());
             if (!remainingPartitions.isEmpty()) {
@@ -471,17 +550,37 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
+            DataTableScan mainListingScan = newPartitionListingScan(true, partitionPredicate);
+            DataTableScan fallbackListingScan = newPartitionListingScan(false, partitionPredicate);
             List<PartitionEntry> partitionEntries =
-                    new ArrayList<>(mainScan.listPartitionEntries());
+                    new ArrayList<>(mainListingScan.listPartitionEntries());
             Set<BinaryRow> partitions =
                     partitionEntries.stream()
                             .map(PartitionEntry::partition)
                             .collect(Collectors.toSet());
-            List<PartitionEntry> fallBackPartitionEntries = fallbackScan.listPartitionEntries();
+            List<PartitionEntry> fallBackPartitionEntries =
+                    fallbackListingScan.listPartitionEntries();
             fallBackPartitionEntries.stream()
                     .filter(e -> !partitions.contains(e.partition()))
                     .forEach(partitionEntries::add);
             return partitionEntries;
+        }
+
+        protected void setPartitionPredicate(PartitionPredicate predicate) {
+            this.partitionPredicate = predicate;
+        }
+
+        protected PartitionPredicate getPartitionPredicate() {
+            return partitionPredicate;
+        }
+
+        private DataTableScan newPartitionListingScan(
+                boolean isMain, PartitionPredicate scanPartitionPredicate) {
+            DataTableScan scan = scanCreator.apply(isMain ? wrappedTable : fallbackTable);
+            if (scanPartitionPredicate != null) {
+                scan.withPartitionFilter(scanPartitionPredicate);
+            }
+            return scan;
         }
     }
 
@@ -496,8 +595,10 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         private final InnerTableRead fallbackRead;
 
         private Read() {
-            this.mainRead = wrapped.newRead();
-            this.fallbackRead = fallback.newRead();
+            FileStoreTable first = wrappedFirst ? wrapped : other;
+            FileStoreTable second = wrappedFirst ? other : wrapped;
+            this.mainRead = first.newRead();
+            this.fallbackRead = second.newRead();
         }
 
         @Override
@@ -544,7 +645,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                         return fallbackRead.createReader(fallbackSplit.wrapped());
                     } catch (Exception ignored) {
                         LOG.error(
-                                "Reading from fallback branch has problems: {}",
+                                "Reading from supplemental branch has problems: {}",
                                 fallbackSplit.wrapped());
                     }
                 }

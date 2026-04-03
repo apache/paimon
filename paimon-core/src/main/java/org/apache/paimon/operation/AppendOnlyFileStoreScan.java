@@ -86,6 +86,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.inputFilter = predicate;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withCompleteFilter(Predicate predicate) {
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }

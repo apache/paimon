@@ -40,6 +40,7 @@ class ManifestListManager:
         self.file_io = self.table.file_io
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
+        """Read base + delta manifest lists for full file state."""
         if snapshot is None:
             return []
         manifest_files = []

@@ -34,6 +34,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
@@ -56,9 +57,25 @@ class PyArrowFileIO(FileIO):
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._oss_bucket = None
+        _oss_impl = self.properties.get(OssOptions.OSS_IMPL)
+        self._use_jindo = False
+
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
-            self.filesystem = self._initialize_oss_fs(path)
+            if _oss_impl not in ("jindo", "legacy"):
+                raise ValueError(
+                    f"Unsupported fs.oss.impl value: '{_oss_impl}'. "
+                    f"Supported values are 'jindo' and 'legacy'.")
+            if _oss_impl == "legacy":
+                self.filesystem = self._initialize_oss_fs(path)
+            elif JINDO_AVAILABLE:
+                self.filesystem = self._initialize_jindo_fs(path)
+            else:
+                self.logger.info(
+                    "fs.oss.impl is 'jindo' but pyjindosdk is not installed. "
+                    "Falling back to legacy PyArrow S3FileSystem implementation. "
+                    "Install pyjindosdk for better performance: pip install pyjindosdk")
+                self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
             self.filesystem = self._initialize_s3_fs()
         elif scheme in {"hdfs", "viewfs"}:
@@ -116,7 +133,22 @@ class PyArrowFileIO(FileIO):
             raise ValueError("Invalid OSS URI without bucket: {}".format(location))
         return bucket
 
+    def _initialize_jindo_fs(self, path) -> FileSystem:
+        """Initialize JindoFileSystem for OSS access."""
+        self.logger.info(f"Initializing JindoFileSystem for OSS access: {path}")
+        root_path = f"oss://{self._oss_bucket}/"
+        fs_handler = JindoFileSystemHandler(root_path, self.properties)
+        self._use_jindo = True
+        return pafs.PyFileSystem(fs_handler)
+
     def _initialize_oss_fs(self, path) -> FileSystem:
+        if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
+            # When explicit credentials are provided, disable the EC2 Instance Metadata
+            # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
+            # Uses setdefault so that an explicit user setting is never overridden.
+            # Note: this is process-wide and affects all AWS SDK clients.
+            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
@@ -137,6 +169,13 @@ class PyArrowFileIO(FileIO):
         return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
+        if self.properties.get(S3Options.S3_ACCESS_KEY_ID):
+            # When explicit credentials are provided, disable the EC2 Instance Metadata
+            # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
+            # Uses setdefault so that an explicit user setting is never overridden.
+            # Note: this is process-wide and affects all AWS SDK clients.
+            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+
         client_kwargs = {
             "endpoint_override": self.properties.get(S3Options.S3_ENDPOINT),
             "access_key": self.properties.get(S3Options.S3_ACCESS_KEY_ID),
@@ -184,7 +223,9 @@ class PyArrowFileIO(FileIO):
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
 
-        if self._is_oss and not self._pyarrow_gte_7:
+        if self._use_jindo:
+            pass
+        elif self._is_oss and not self._pyarrow_gte_7:
             # For PyArrow 6.x + OSS, path_str is already just the key part
             if '/' in path_str:
                 parent_dir = '/'.join(path_str.split('/')[:-1])
@@ -480,6 +521,24 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
 
+    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import vortex
+            from vortex import store
+
+            from pypaimon.read.reader.vortex_utils import to_vortex_specified
+            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
+
+            if store_kwargs:
+                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
+                vortex_store.write(vortex.array(data))
+            else:
+                from vortex._lib.io import write as vortex_write
+                vortex_write(vortex.array(data), file_path_for_vortex)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
+
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:
@@ -545,6 +604,11 @@ class PyArrowFileIO(FileIO):
             drive_letter = parsed.netloc.rstrip(':')
             path_part = normalized_path.lstrip('/')
             return f"{drive_letter}:/{path_part}" if path_part else f"{drive_letter}:"
+
+        if self._use_jindo:
+            # For JindoFileSystem, pass key only
+            path_part = normalized_path.lstrip('/')
+            return path_part if path_part else '.'
 
         if isinstance(self.filesystem, S3FileSystem):
             if parsed.scheme:

@@ -231,6 +231,100 @@ public class JdbcUtils {
                     + CATALOG_KEY
                     + " = ?";
 
+    // Table Properties
+    static final String TABLE_PROPERTIES_TABLE_NAME = "paimon_table_properties";
+    static final String TABLE_PROPERTY_KEY = "property_key";
+    static final String TABLE_PROPERTY_VALUE = "property_value";
+
+    static final String CREATE_TABLE_PROPERTIES_TABLE =
+            "CREATE TABLE "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + "("
+                    + CATALOG_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_DATABASE
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_NAME
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_PROPERTY_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_PROPERTY_VALUE
+                    + " VARCHAR(1000),"
+                    + "PRIMARY KEY ("
+                    + CATALOG_KEY
+                    + ", "
+                    + TABLE_DATABASE
+                    + ", "
+                    + TABLE_NAME
+                    + ", "
+                    + TABLE_PROPERTY_KEY
+                    + ")"
+                    + ")";
+
+    static final String INSERT_TABLE_PROPERTIES_SQL =
+            "INSERT INTO "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " ("
+                    + CATALOG_KEY
+                    + ", "
+                    + TABLE_DATABASE
+                    + ", "
+                    + TABLE_NAME
+                    + ", "
+                    + TABLE_PROPERTY_KEY
+                    + ", "
+                    + TABLE_PROPERTY_VALUE
+                    + ") VALUES ";
+    static final String INSERT_TABLE_PROPERTIES_VALUES_BASE = "(?,?,?,?,?)";
+
+    static final String DELETE_ALL_TABLE_PROPERTIES_SQL =
+            "DELETE FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ?";
+
+    static final String DELETE_ALL_TABLE_PROPERTIES_FOR_DB_SQL =
+            "DELETE FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ?";
+
+    static final String RENAME_TABLE_PROPERTIES_SQL =
+            "UPDATE "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " SET "
+                    + TABLE_DATABASE
+                    + " = ? , "
+                    + TABLE_NAME
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ? ";
+
+    static final String GET_ALL_TABLE_PROPERTIES_SQL =
+            "SELECT * "
+                    + " FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ? ";
+
     // Distributed locks table
     static final String DISTRIBUTED_LOCKS_TABLE_NAME = "paimon_distributed_locks";
     static final String LOCK_ID = "lock_id";
@@ -423,6 +517,52 @@ public class JdbcUtils {
                 String.format(
                         "Failed to insert: %d of %d succeeded",
                         insertedRecords, properties.size()));
+    }
+
+    public static boolean insertTableProperties(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String tableName,
+            Map<String, String> properties) {
+        if (properties.isEmpty()) {
+            return true;
+        }
+        String[] args =
+                properties.entrySet().stream()
+                        .flatMap(
+                                entry ->
+                                        Stream.of(
+                                                storeKey,
+                                                databaseName,
+                                                tableName,
+                                                entry.getKey(),
+                                                entry.getValue()))
+                        .toArray(String[]::new);
+
+        int insertedRecords =
+                execute(
+                        connections,
+                        JdbcUtils.insertTablePropertiesStatement(properties.size()),
+                        args);
+        if (insertedRecords == properties.size()) {
+            return true;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Failed to insert: %d of %d succeeded",
+                        insertedRecords, properties.size()));
+    }
+
+    private static String insertTablePropertiesStatement(int size) {
+        StringBuilder sqlStatement = new StringBuilder(JdbcUtils.INSERT_TABLE_PROPERTIES_SQL);
+        for (int i = 0; i < size; i++) {
+            if (i != 0) {
+                sqlStatement.append(", ");
+            }
+            sqlStatement.append(JdbcUtils.INSERT_TABLE_PROPERTIES_VALUES_BASE);
+        }
+        return sqlStatement.toString();
     }
 
     private static String insertPropertiesStatement(int size) {

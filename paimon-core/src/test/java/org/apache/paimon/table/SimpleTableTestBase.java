@@ -1218,9 +1218,8 @@ public abstract class SimpleTableTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "can not delete the fallback branch. "
-                                        + "branchName to be deleted is fallback. you have set 'scan.fallback-branch' = 'fallback'. "
-                                        + "you should reset 'scan.fallback-branch' before deleting this branch."));
+                                "Cannot delete branch 'fallback' because it is configured as"
+                                        + " 'scan.fallback-branch'. Unset 'scan.fallback-branch' first."));
 
         table.deleteBranch("fallback");
     }
@@ -1843,5 +1842,56 @@ public abstract class SimpleTableTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(expectedLatest);
         assertThat(table.tagManager().allTagNames())
                 .containsExactlyInAnyOrderElementsOf(expectedTags);
+    }
+
+    @Test
+    public void testRollbackSchemaSuccess() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        SchemaManager schemaManager = table.schemaManager();
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema twice
+        schemaManager.commitChanges(SchemaChange.setOption("aa", "bb"));
+        long secondSchemaId = schemaManager.latest().get().id();
+        schemaManager.commitChanges(SchemaChange.setOption("cc", "dd"));
+        long thirdSchemaId = schemaManager.latest().get().id();
+
+        // rollback to first schema
+        table.rollbackSchema(firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+        assertThat(schemaManager.schemaExists(thirdSchemaId)).isFalse();
+    }
+
+    @Test
+    public void testRollbackSchemaFailedWithSnapshotReference() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        SchemaManager schemaManager = table.schemaManager();
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing firstSchemaId
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(rowData(0, 0, 0L));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        // evolve schema
+        schemaManager.commitChanges(SchemaChange.setOption("aa", "bb"));
+
+        // write data to create a snapshot referencing secondSchemaId
+        table = table.copyWithLatestSchema();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 100L));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // rollback should fail because snapshot references secondSchemaId
+        FileStoreTable finalTable = table;
+        assertThatThrownBy(() -> finalTable.rollbackSchema(firstSchemaId))
+                .hasMessageContaining("Cannot rollback to schema");
     }
 }

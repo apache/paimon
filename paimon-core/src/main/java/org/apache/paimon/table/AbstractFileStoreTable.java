@@ -72,6 +72,8 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -80,6 +82,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
+import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
@@ -558,6 +561,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
     }
 
+    @Override
+    public void rollbackSchema(long schemaId) {
+        LongConsumer schemaRollback = catalogEnvironment.catalogSchemaRollback();
+        if (schemaRollback != null) {
+            schemaRollback.accept(schemaId);
+        } else {
+            try {
+                schemaManager()
+                        .rollbackTo(schemaId, snapshotManager(), tagManager(), changelogManager());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+    }
+
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
         SnapshotManager snapshotManager = snapshotManager();
         Snapshot snapshot = null;
@@ -691,13 +709,27 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 && branchName.equals(fallbackBranch)) {
             throw new IllegalArgumentException(
                     String.format(
-                            "can not delete the fallback branch. "
-                                    + "branchName to be deleted is %s. you have set 'scan.fallback-branch' = '%s'. "
-                                    + "you should reset 'scan.fallback-branch' before deleting this branch.",
-                            branchName, fallbackBranch));
+                            "Cannot delete branch '%s' because it is configured as"
+                                    + " 'scan.fallback-branch'. Unset 'scan.fallback-branch' first.",
+                            branchName));
+        }
+
+        String primaryBranch = coreOptions().toConfiguration().get(CoreOptions.SCAN_PRIMARY_BRANCH);
+        if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)
+                && branchName.equals(primaryBranch)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot delete branch '%s' because it is configured as"
+                                    + " 'scan.primary-branch'. Unset 'scan.primary-branch' first.",
+                            branchName));
         }
 
         branchManager().dropBranch(branchName);
+    }
+
+    @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        branchManager().renameBranch(fromBranch, toBranch);
     }
 
     @Override

@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>1.4-SNAPSHOT</version>
+    <version>1.5-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -72,6 +72,9 @@ under the License.
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-api</module>
+        <module>paimon-lumina</module>
+        <module>paimon-vortex</module>
+        <module>paimon-tantivy</module>
     </modules>
 
     <properties>
@@ -510,6 +513,17 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+
+        <profile>
+            <id>fast-build</id>
+            <properties>
+                <checkstyle.skip>true</checkstyle.skip>
+                <spotless.check.skip>true</spotless.check.skip>
+                <scalastyle.skip>true</scalastyle.skip>
+                <enforcer.skip>true</enforcer.skip>
+                <rat.skip>true</rat.skip>
+            </properties>
+        </profile>
     </profiles>
 
     <build>
@@ -614,6 +628,8 @@ under the License.
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                         <exclude>paimon-python/pypaimon/sample/data/**</exclude>
+                        <exclude>**/*.proto</exclude>
+                        <exclude>**/Cargo*</exclude>
                     </excludes>
                 </configuration>
             </plugin>

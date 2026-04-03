@@ -282,13 +282,13 @@ public class FilesTable implements ReadonlyTable {
         }
     }
 
-    private static class FilesSplit extends SingletonSplit {
+    static class FilesSplit extends SingletonSplit {
 
         @Nullable private final BinaryRow partition;
         @Nullable private final LeafPredicate bucketPredicate;
         @Nullable private final LeafPredicate levelPredicate;
 
-        private FilesSplit(
+        FilesSplit(
                 @Nullable BinaryRow partition,
                 @Nullable LeafPredicate bucketPredicate,
                 @Nullable LeafPredicate levelPredicate) {

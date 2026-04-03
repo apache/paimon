@@ -18,6 +18,7 @@ limitations under the License.
 from abc import ABC, abstractmethod
 from typing import Callable, List, Optional, Dict, Tuple
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.split import Split
@@ -45,6 +46,8 @@ class AbstractSplitGenerator(ABC):
         self.target_split_size = target_split_size
         self.open_file_cost = open_file_cost
         self.deletion_files_map = deletion_files_map or {}
+        self.default_part_value = table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         
         # Shard configuration
         self.idx_of_this_subtask = None
@@ -102,7 +105,8 @@ class AbstractSplitGenerator(ABC):
                 data_file.set_file_path(
                     self.table.table_path,
                     file_entries[0].partition,
-                    file_entries[0].bucket
+                    file_entries[0].bucket,
+                    self.default_part_value
                 )
 
             if file_group:

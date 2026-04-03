@@ -23,11 +23,13 @@ import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, Paimon
 
 import org.apache.spark.sql.Row
 
+import java.util.UUID
 import java.util.concurrent.Executors
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.DurationInt
+import scala.util.Random
 
 abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTableTest {
 
@@ -790,8 +792,9 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent merge and compact") {
     for (dvEnabled <- Seq("true", "false")) {
-      val source = s"mc_s_$dvEnabled"
-      val target = s"mc_t_$dvEnabled"
+      val className = getClass.getSimpleName
+      val source = s"mc_s_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      val target = s"mc_t_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
       withTable(source, target) {
         sql(s"CREATE TABLE $source (id INT, b INT, c INT)")
         sql(s"INSERT INTO $source VALUES (1, 1, 1)")
@@ -841,8 +844,9 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent two merge") {
     for (dvEnabled <- Seq("true", "false")) {
-      val source = s"tm_s_$dvEnabled"
-      val target = s"tm_t_$dvEnabled"
+      val className = getClass.getSimpleName
+      val source = s"tm_s_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      val target = s"tm_t_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
       withTable(source, target) {
         sql(s"CREATE TABLE $source (id INT, b INT, c INT)")
         sql(
@@ -888,5 +892,11 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
         executor.shutdown()
       }
     }
+  }
+
+  def createPositiveRandomInt(): Int = {
+    val random = new Random()
+    val positiveInt = random.nextInt()
+    if (positiveInt > 0) positiveInt else -positiveInt
   }
 }

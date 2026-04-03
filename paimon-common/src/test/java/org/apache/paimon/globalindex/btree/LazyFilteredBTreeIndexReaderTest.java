@@ -28,7 +28,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -96,13 +95,22 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
             try (BTreeIndexReader reader =
                     new BTreeIndexReader(keySerializer, fileReader, index, CACHE_MANAGER)) {
 
-                Iterator<Pair<Object, long[]>> iter = reader.createIterator();
+                TreeSet<Long> nullRowIds = new TreeSet<>();
+                reader.scanNullRowIds(nullRowIds::add);
+                if (!nullRowIds.isEmpty()) {
+                    if (!actualMap.containsKey(null)) {
+                        actualMap.put(null, new TreeSet<>());
+                    }
+                    actualMap.get(null).addAll(nullRowIds);
+                }
+
+                BTreeIndexReader.EntryIterator iter = reader.entryIterator();
 
                 // Collect all entries from iterator
                 while (iter.hasNext()) {
-                    Pair<Object, long[]> entry = iter.next();
-                    Object key = entry.getLeft();
-                    long[] rowIds = entry.getRight();
+                    BTreeIndexReader.KeyRowIds entry = iter.next();
+                    Object key = entry.key();
+                    long[] rowIds = entry.rowIds();
 
                     if (!actualMap.containsKey(key)) {
                         actualMap.put(key, new TreeSet<>());

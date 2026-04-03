@@ -151,7 +151,8 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
     @Override
     public LogicalType visit(BlobType blobType) {
         // TODO introduce blob type in Flink SQL?
-        return new org.apache.flink.table.types.logical.VarBinaryType(BlobType.DEFAULT_SIZE);
+        return new org.apache.flink.table.types.logical.VarBinaryType(
+                org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
     }
 
     @Override

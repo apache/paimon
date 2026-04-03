@@ -98,7 +98,15 @@ class IcebergTable(Table):
             "IcebergTable does not support batch write operation in paimon-python yet."
         )
 
+    def new_stream_read_builder(self):
+        raise NotImplementedError(
+            "IcebergTable does not support stream read operation in paimon-python yet."
+        )
+
     def new_stream_write_builder(self):
         raise NotImplementedError(
             "IcebergTable does not support stream write operation in paimon-python yet."
         )
+
+    def new_full_text_search_builder(self):
+        raise NotImplementedError("IcebergTable does not support full text search.")

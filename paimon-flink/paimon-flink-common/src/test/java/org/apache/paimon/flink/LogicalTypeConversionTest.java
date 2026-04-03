@@ -23,8 +23,13 @@ import org.apache.paimon.types.VectorType;
 
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.FloatType;
+import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
 import org.junit.jupiter.api.Test;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,17 +39,61 @@ public class LogicalTypeConversionTest {
 
     @Test
     public void testToVectorType() {
-        VectorType vectorType = LogicalTypeConversion.toVectorType(new FloatType(), "3");
+        Map<String, String> options = new HashMap<>();
+        options.put("vector-field", "v");
+        options.put("field.v.vector-dim", "3");
+        LogicalType flinkType = makeVectorLogicalType(new FloatType());
+        VectorType vectorType = LogicalTypeConversion.toVectorType("v", flinkType, options);
         assertThat(vectorType).isEqualTo(DataTypes.VECTOR(3, DataTypes.FLOAT()));
     }
 
     @Test
+    public void testToVectorTypeInvalidLogicalType() {
+        Map<String, String> options = new HashMap<>();
+        options.put("vector-field", "v");
+        options.put("field.v.vector-dim", "3");
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", new FloatType(), options))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", new IntType(), options))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void testToVectorTypeInvalidElementType() {
+        Map<String, String> options = new HashMap<>();
+        options.put("vector-field", "v");
+        options.put("field.v.vector-dim", "3");
+        LogicalType type1 = makeVectorLogicalType(new ArrayType(new FloatType()));
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", type1, options))
+                .isInstanceOf(IllegalArgumentException.class);
+        LogicalType type2 = makeVectorLogicalType(new MapType(new IntType(), new FloatType()));
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", type2, options))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void testToVectorTypeNoDim() {
+        Map<String, String> options = new HashMap<>();
+        options.put("vector-field", "v");
+        // options.put("field.v.vector-dim", "3");
+        LogicalType flinkType = makeVectorLogicalType(new FloatType());
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", flinkType, options))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     public void testToVectorTypeInvalidDim() {
-        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType(new FloatType(), ""))
+        Map<String, String> options = new HashMap<>();
+        options.put("vector-field", "v");
+        LogicalType flinkType = makeVectorLogicalType(new FloatType());
+        options.put("field.v.vector-dim", "");
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", flinkType, options))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType(new FloatType(), "abc"))
+        options.put("field.v.vector-dim", "abc");
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", flinkType, options))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType(new FloatType(), "0"))
+        options.put("field.v.vector-dim", "0");
+        assertThatThrownBy(() -> LogicalTypeConversion.toVectorType("v", flinkType, options))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -55,5 +104,9 @@ public class LogicalTypeConversionTest {
         assertThat(logicalType).isInstanceOf(ArrayType.class);
         ArrayType arrayType = (ArrayType) logicalType;
         assertThat(arrayType.getElementType()).isInstanceOf(FloatType.class);
+    }
+
+    private LogicalType makeVectorLogicalType(LogicalType elementType) {
+        return new ArrayType(elementType);
     }
 }

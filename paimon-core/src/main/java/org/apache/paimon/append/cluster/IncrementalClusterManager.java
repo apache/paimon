@@ -319,6 +319,10 @@ public class IncrementalClusterManager {
         return clusterCurve;
     }
 
+    public CoreOptions.ClusteringIncrementalMode clusteringIncrementalMode() {
+        return table.coreOptions().clusteringIncrementalMode();
+    }
+
     public List<String> clusterKeys() {
         return clusterKeys;
     }

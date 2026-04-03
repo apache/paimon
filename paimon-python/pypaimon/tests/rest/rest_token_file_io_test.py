@@ -18,10 +18,12 @@
 import os
 import pickle
 import tempfile
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
+from pypaimon.catalog.rest.rest_token import RESTToken
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
@@ -101,13 +103,13 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             target_dir = os.path.join(self.temp_dir, "target_dir")
             os.makedirs(target_dir)
-            
+
             result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
             self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
-            
+
             self.assertTrue(os.path.isdir(target_dir))
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
-            
+
             normal_file = os.path.join(self.temp_dir, "normal_file.txt")
             result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
             self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
@@ -146,9 +148,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.catalog_options
             )
 
-            self.assertTrue(hasattr(original_file_io, 'lock'))
-            self.assertIsNotNone(original_file_io.lock)
-
             pickled = pickle.dumps(original_file_io)
 
             deserialized_file_io = pickle.loads(pickled)
@@ -156,10 +155,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.identifier, original_file_io.identifier)
             self.assertEqual(deserialized_file_io.path, original_file_io.path)
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
-
-            self.assertTrue(hasattr(deserialized_file_io, 'lock'))
-            self.assertIsNotNone(deserialized_file_io.lock)
-            self.assertIsNot(deserialized_file_io.lock, original_file_io.lock)
 
             self.assertIsNone(deserialized_file_io.api_instance)
 
@@ -223,35 +218,35 @@ class RESTTokenFileIOTest(unittest.TestCase):
             CatalogOptions.URI.key(): "http://test-uri",
             "custom.key": "custom.value"
         })
-        
+
         catalog_options_copy = Options(original_catalog_options.to_map())
-        
+
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
             file_io = RESTTokenFileIO(
                 self.identifier,
                 self.warehouse_path,
                 original_catalog_options
             )
-            
+
             token_dict = {
                 OssOptions.OSS_ACCESS_KEY_ID.key(): "token-access-key",
                 OssOptions.OSS_ACCESS_KEY_SECRET.key(): "token-secret-key",
                 OssOptions.OSS_ENDPOINT.key(): "token-endpoint"
             }
-            
+
             merged_token = file_io._merge_token_with_catalog_options(token_dict)
-            
+
             self.assertEqual(
                 original_catalog_options.to_map(),
                 catalog_options_copy.to_map(),
                 "Original catalog_options should not be modified"
             )
-            
+
             merged_properties = RESTUtil.merge(
                 original_catalog_options.to_map(),
                 merged_token
             )
-            
+
             self.assertIn("custom.key", merged_properties)
             self.assertEqual(merged_properties["custom.key"], "custom.value")
             self.assertIn(OssOptions.OSS_ACCESS_KEY_ID.key(), merged_properties)
@@ -264,11 +259,11 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-            
+
             self.assertTrue(hasattr(file_io, 'filesystem'), "RESTTokenFileIO should have filesystem property")
             filesystem = file_io.filesystem
             self.assertIsNotNone(filesystem, "filesystem should not be None")
-            
+
             self.assertTrue(hasattr(filesystem, 'open_input_file'),
                             "filesystem should support open_input_file method")
 
@@ -279,12 +274,12 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-            
+
             self.assertTrue(hasattr(file_io, 'uri_reader_factory'),
                             "RESTTokenFileIO should have uri_reader_factory property")
             uri_reader_factory = file_io.uri_reader_factory
             self.assertIsNotNone(uri_reader_factory, "uri_reader_factory should not be None")
-            
+
             self.assertTrue(hasattr(uri_reader_factory, 'create'),
                             "uri_reader_factory should support create method")
 
@@ -295,14 +290,231 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-            
+
             pickled = pickle.dumps(original_file_io)
             restored_file_io = pickle.loads(pickled)
-            
+
             self.assertIsNotNone(restored_file_io.filesystem,
                                  "filesystem should work after deserialization")
             self.assertIsNotNone(restored_file_io.uri_reader_factory,
                                  "uri_reader_factory should work after deserialization")
+
+    def test_build_cache_key_with_dlf_auth(self):
+        """Test that _build_cache_key includes DLF access_key_id for cache isolation."""
+        from pypaimon.api.auth.dlf_provider import DLFAuthProvider
+        from pypaimon.api.token_loader import DLFToken
+
+        catalog_options = Options({
+            CatalogOptions.URI.key(): "http://test-uri",
+            CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+            CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+            CatalogOptions.DLF_ACCESS_KEY_ID.key(): "test-ak-123",
+            CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "test-sk-456",
+        })
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                catalog_options
+            )
+
+        mock_api = MagicMock()
+        mock_dlf_provider = MagicMock(spec=DLFAuthProvider)
+        mock_dlf_provider.get_token.return_value = DLFToken(
+            access_key_id="test-ak-123",
+            access_key_secret="test-sk-456",
+            security_token=None
+        )
+        mock_api.rest_auth_function.auth_provider = mock_dlf_provider
+        file_io.api_instance = mock_api
+
+        cache_key = file_io._build_cache_key()
+        self.assertTrue(cache_key.startswith("test-ak-123:"),
+                        f"Cache key should start with access_key_id, got: {cache_key}")
+        self.assertIn(str(self.identifier), cache_key)
+
+    def test_build_cache_key_with_bear_auth(self):
+        """Test that _build_cache_key includes bearer token for cache isolation."""
+        from pypaimon.api.auth.bearer import BearTokenAuthProvider
+
+        catalog_options = Options({
+            CatalogOptions.URI.key(): "http://test-uri",
+            CatalogOptions.TOKEN_PROVIDER.key(): "bear",
+            CatalogOptions.TOKEN.key(): "my-bearer-token",
+        })
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                catalog_options
+            )
+
+        mock_api = MagicMock()
+        mock_bear_provider = MagicMock(spec=BearTokenAuthProvider)
+        mock_bear_provider.token = "my-bearer-token"
+        mock_api.rest_auth_function.auth_provider = mock_bear_provider
+        file_io.api_instance = mock_api
+
+        cache_key = file_io._build_cache_key()
+        self.assertTrue(cache_key.startswith("my-bearer-token:"),
+                        f"Cache key should start with bearer token, got: {cache_key}")
+        self.assertIn(str(self.identifier), cache_key)
+
+    def test_different_ak_same_table_token_isolation(self):
+        """Test that two RESTTokenFileIO instances with different AKs on the same table
+        do not share cached tokens."""
+        from pypaimon.api.auth.dlf_provider import DLFAuthProvider
+        from pypaimon.api.token_loader import DLFToken
+
+        # Clear class-level token cache before test
+        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._TOKEN_LOCKS.clear()
+
+        identifier = Identifier.from_string("db.same_table")
+        future_expiry = int(time.time() * 1000) + 7_200_000  # 2 hours from now
+
+        # Create file_io_1 with AK "read-ak"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io_1 = RESTTokenFileIO(
+                identifier, self.warehouse_path,
+                Options({
+                    CatalogOptions.URI.key(): "http://test-uri",
+                    CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                    CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+                    CatalogOptions.DLF_ACCESS_KEY_ID.key(): "read-ak",
+                    CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "read-sk",
+                })
+            )
+
+        mock_api_1 = MagicMock()
+        mock_dlf_1 = MagicMock(spec=DLFAuthProvider)
+        mock_dlf_1.get_token.return_value = DLFToken("read-ak", "read-sk", None)
+        mock_api_1.rest_auth_function.auth_provider = mock_dlf_1
+        file_io_1.api_instance = mock_api_1
+
+        read_token = RESTToken({"fs.oss.accessKeyId": "read-data-ak"}, future_expiry)
+        file_io_1.token = read_token
+        cache_key_1 = file_io_1._build_cache_key()
+        file_io_1._set_cached_token(cache_key_1, read_token)
+
+        # Create file_io_2 with AK "write-ak"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io_2 = RESTTokenFileIO(
+                identifier, self.warehouse_path,
+                Options({
+                    CatalogOptions.URI.key(): "http://test-uri",
+                    CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                    CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+                    CatalogOptions.DLF_ACCESS_KEY_ID.key(): "write-ak",
+                    CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "write-sk",
+                })
+            )
+
+        mock_api_2 = MagicMock()
+        mock_dlf_2 = MagicMock(spec=DLFAuthProvider)
+        mock_dlf_2.get_token.return_value = DLFToken("write-ak", "write-sk", None)
+        mock_api_2.rest_auth_function.auth_provider = mock_dlf_2
+        file_io_2.api_instance = mock_api_2
+
+        cache_key_2 = file_io_2._build_cache_key()
+
+        # Cache keys should be different
+        self.assertNotEqual(cache_key_1, cache_key_2,
+                            "Different AKs on the same table should produce different cache keys")
+
+        # file_io_2 should NOT get file_io_1's cached token
+        cached_for_2 = file_io_2._get_cached_token(cache_key_2)
+        self.assertIsNone(cached_for_2,
+                          "file_io_2 should not see file_io_1's cached token")
+
+    def test_same_ak_same_table_token_reuse(self):
+        """Test that two RESTTokenFileIO instances with the same AK on the same table
+        can share cached tokens."""
+        from pypaimon.api.auth.dlf_provider import DLFAuthProvider
+        from pypaimon.api.token_loader import DLFToken
+
+        # Clear class-level token cache before test
+        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._TOKEN_LOCKS.clear()
+
+        identifier = Identifier.from_string("db.same_table")
+        future_expiry = int(time.time() * 1000) + 7_200_000
+
+        def make_file_io():
+            with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+                fio = RESTTokenFileIO(
+                    identifier, self.warehouse_path,
+                    Options({
+                        CatalogOptions.URI.key(): "http://test-uri",
+                        CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                        CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+                        CatalogOptions.DLF_ACCESS_KEY_ID.key(): "same-ak",
+                        CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "same-sk",
+                    })
+                )
+            mock_api = MagicMock()
+            mock_dlf = MagicMock(spec=DLFAuthProvider)
+            mock_dlf.get_token.return_value = DLFToken("same-ak", "same-sk", None)
+            mock_api.rest_auth_function.auth_provider = mock_dlf
+            fio.api_instance = mock_api
+            return fio
+
+        file_io_1 = make_file_io()
+        file_io_2 = make_file_io()
+
+        # Cache keys should be the same
+        self.assertEqual(file_io_1._build_cache_key(), file_io_2._build_cache_key(),
+                         "Same AK on the same table should produce the same cache key")
+
+        # Set token via file_io_1
+        shared_token = RESTToken({"fs.oss.accessKeyId": "shared-data-ak"}, future_expiry)
+        file_io_1._set_cached_token(file_io_1._build_cache_key(), shared_token)
+
+        # file_io_2 should see the same token
+        cached = file_io_2._get_cached_token(file_io_2._build_cache_key())
+        self.assertIsNotNone(cached, "file_io_2 should see file_io_1's cached token")
+        self.assertEqual(cached.token.get("fs.oss.accessKeyId"), "shared-data-ak")
+
+    def test_refresh_token_strips_system_table_suffix(self):
+        """refresh_token() strips $snapshots suffix before requesting token."""
+        system_identifier = Identifier.create("db", "my_table$snapshots")
+        file_io = RESTTokenFileIO(
+            system_identifier, self.warehouse_path, self.catalog_options)
+
+        mock_response = MagicMock()
+        mock_response.token = {'ak': 'test-ak'}
+        mock_response.expires_at_millis = int(time.time() * 1000) + 7_200_000
+
+        mock_api = MagicMock()
+        mock_api.load_table_token.return_value = mock_response
+        file_io.api_instance = mock_api
+
+        file_io.refresh_token()
+
+        called_identifier = mock_api.load_table_token.call_args[0][0]
+        self.assertEqual(called_identifier.get_database_name(), "db")
+        self.assertEqual(called_identifier.get_object_name(), "my_table")
+
+    def test_refresh_token_keeps_normal_identifier(self):
+        """refresh_token() does not modify normal (non-system) identifiers."""
+        normal_identifier = Identifier.create("db", "my_table")
+        file_io = RESTTokenFileIO(
+            normal_identifier, self.warehouse_path, self.catalog_options)
+
+        mock_response = MagicMock()
+        mock_response.token = {'ak': 'test-ak'}
+        mock_response.expires_at_millis = int(time.time() * 1000) + 7_200_000
+
+        mock_api = MagicMock()
+        mock_api.load_table_token.return_value = mock_response
+        file_io.api_instance = mock_api
+
+        file_io.refresh_token()
+
+        called_identifier = mock_api.load_table_token.call_args[0][0]
+        self.assertEqual(called_identifier.get_object_name(), "my_table")
 
 
 if __name__ == '__main__':

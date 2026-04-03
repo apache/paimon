@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.globalindex.GlobalIndexResult
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, PaimonSupportsRuntimeFiltering}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
@@ -42,12 +45,53 @@ abstract class PaimonBaseScan(table: InnerTable)
   protected def getInputSplits: Array[Split] = {
     readBuilder
       .newScan()
+      .withGlobalIndexResult(evalGlobalIndexSearch())
       .asInstanceOf[InnerTableScan]
       .withMetricRegistry(paimonMetricsRegistry)
       .plan()
       .splits()
       .asScala
       .toArray
+  }
+
+  private def evalGlobalIndexSearch(): GlobalIndexResult = {
+    if (pushedVectorSearch.isDefined && pushedFullTextSearch.isDefined) {
+      throw new UnsupportedOperationException(
+        "Cannot push down both vector search and full-text search simultaneously.")
+    }
+    if (pushedVectorSearch.isDefined) {
+      return evalVectorSearch()
+    }
+    if (pushedFullTextSearch.isDefined) {
+      return evalFullTextSearch()
+    }
+    null
+  }
+
+  private def evalVectorSearch(): GlobalIndexResult = {
+    val vectorSearch = pushedVectorSearch.get
+    val vectorBuilder = table
+      .newVectorSearchBuilder()
+      .withVector(vectorSearch.vector())
+      .withVectorColumn(vectorSearch.fieldName())
+      .withLimit(vectorSearch.limit())
+    if (pushedPartitionFilters.nonEmpty) {
+      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+    }
+    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+  }
+
+  private def evalFullTextSearch(): GlobalIndexResult = {
+    val fullTextSearch = pushedFullTextSearch.get
+    val ftBuilder = table
+      .newFullTextSearchBuilder()
+      .withQueryText(fullTextSearch.queryText())
+      .withTextColumn(fullTextSearch.fieldName())
+      .withLimit(fullTextSearch.limit())
+    ftBuilder.newFullTextRead().read(ftBuilder.newFullTextScan().scan())
   }
 
   override def toBatch: Batch = {

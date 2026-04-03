@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>add-column-before-partition</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, when adding a new column without specifying a position, the column will be placed before the first partition column instead of at the end of the schema. This only takes effect for partitioned tables.</td>
+        </tr>
+        <tr>
             <td><h5>aggregation.remove-record-on-delete</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -108,7 +114,7 @@ under the License.
             <td><h5>bucket-function.type</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
-            <td>The bucket function for paimon bucket.<br /><br />Possible values:<ul><li>"default": The default bucket function which will use arithmetic: bucket_id = Math.abs(hash_bucket_binary_row % numBuckets) to get bucket.</li><li>"mod": The modulus bucket function which will use modulus arithmetic: bucket_id = Math.floorMod(bucket_key_value, numBuckets) to get bucket. Note: the bucket key must be a single field of INT or BIGINT datatype.</li></ul></td>
+            <td>The bucket function for paimon bucket.<br /><br />Possible values:<ul><li>"default": The default bucket function which will use arithmetic: bucket_id = Math.abs(hash_bucket_binary_row % numBuckets) to get bucket.</li><li>"mod": The modulus bucket function which will use modulus arithmetic: bucket_id = Math.floorMod(bucket_key_value, numBuckets) to get bucket. Note: the bucket key must be a single field of INT or BIGINT datatype.</li><li>"hive": The hive bucket function which will use hive-compatible hash arithmetic to get bucket.</li></ul></td>
         </tr>
         <tr>
             <td><h5>bucket-key</h5></td>
@@ -121,6 +127,12 @@ under the License.
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
             <td>Memory page size for caching.</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.chain-partition-keys</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition keys that participate in chain logic. Must be a contiguous suffix of the table's partition keys. Comma-separated. If not set, all partition keys participate in chain.</td>
         </tr>
         <tr>
             <td><h5>chain-table.enabled</h5></td>
@@ -213,6 +225,12 @@ under the License.
             <td>Whether enable incremental clustering.</td>
         </tr>
         <tr>
+            <td><h5>clustering.incremental.mode</h5></td>
+            <td style="word-wrap: break-word;">global-sort</td>
+            <td><p>Enum</p></td>
+            <td>The sort mode for incremental clustering compaction. 'global-sort' (default) performs a global range shuffle so output files are globally ordered. 'local-sort' skips the global shuffle and only sorts rows within each compaction task, producing files that are internally ordered. 'local-sort' is cheaper and sufficient for Parquet lookup optimizations.<br /><br />Possible values:<ul><li>"global-sort": Perform global range shuffle and then local sort. Output files are globally ordered but require network shuffling.</li><li>"local-sort": Sort rows only within each compaction task without global shuffle. Every output file is internally ordered.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>clustering.incremental.optimize-write</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -297,6 +315,12 @@ under the License.
             <td>Ratio of the deleted rows in a data file to be forced compacted for append-only table.</td>
         </tr>
         <tr>
+            <td><h5>compaction.file-num-limit</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Integer</td>
+            <td>To avoid OOM caused by scanning compaction files, you can use this option to limit the for unaware-bucket append table compaction.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.force-rewrite-all-files</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -367,6 +391,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Consumer id for recording the offset of consumption in the storage.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer.changelog-only</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, consumer will only affect changelog expiration and will not prevent snapshot from being expired.</td>
         </tr>
         <tr>
             <td><h5>consumer.expiration-time</h5></td>
@@ -631,6 +661,18 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.build.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Integer</td>
+            <td>The max parallelism of Flink/Spark for building global index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.build.max-shard</h5></td>
+            <td style="word-wrap: break-word;">32</td>
+            <td>Integer</td>
+            <td>The preferred max number of shards for building global index. If the number of shards calculated by 'global-index.row-count-per-shard' exceeds this value, max-shard will be automatically increased to accommodate the data volume while keeping 'global-index.row-count-per-shard' unchanged.</td>
         </tr>
         <tr>
             <td><h5>global-index.column-update-action</h5></td>
@@ -1038,6 +1080,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>
         </tr>
         <tr>
+            <td><h5>partition.timestamp-format.strict</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, if a partition value does not match the 'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration, an error will be thrown during writing. This helps prevent dirty partition directories caused by incorrectly specified partition fields.</td>
+        </tr>
+        <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1048,6 +1096,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>pk-clustering-override</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
             <td><h5>postpone.batch-write-fixed-bucket</h5></td>
@@ -1180,6 +1234,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to sort plan files by partition fields, this allows you to read according to the partition order, even if your partition writes are out of order.<br />It is recommended that you use this for streaming read of the 'append-only' table. By default, streaming read will read the full snapshot first. In order to avoid the disorder reading for partitions, you can open this option.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.primary-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a table, if a partition exists in the primary branch, the reader will read this partition from the primary branch. Otherwise, the reader will read this partition from the current branch.</td>
         </tr>
         <tr>
             <td><h5>scan.snapshot-id</h5></td>
@@ -1493,6 +1553,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
+        </tr>
+        <tr>
+            <td><h5>vector.file.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the vector store file format.</td>
+        </tr>
+        <tr>
+            <td><h5>vector.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a vector-store file. Default is 10 * TARGET_FILE_SIZE.</td>
         </tr>
         <tr>
             <td><h5>visibility-callback.check-interval</h5></td>

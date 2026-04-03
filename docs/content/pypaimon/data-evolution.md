@@ -106,6 +106,134 @@ rb = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 0))
 result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
 ```
 
+## Upsert By Key
+
+If you want to **upsert** (update-or-insert) rows by one or more business key columns — without manually providing
+`_ROW_ID` — use `upsert_by_arrow_with_key`. For each input row:
+
+- **Key matches** an existing row → update that row in place.
+- **No match** → append as a new row.
+
+**Requirements**
+
+- The table must have `data-evolution.enabled = true` and `row-tracking.enabled = true`.
+- All `upsert_keys` must exist in both the table schema and the input data.
+- For **partitioned tables**, the input data must contain all partition key columns. Partition keys are
+  **automatically stripped** from `upsert_keys` during matching (since each partition is processed independently),
+  so you do **not** need to include them in `upsert_keys`.
+
+**Example: basic upsert**
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', False)
+
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('age', pa.int32()),
+])
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+)
+catalog.create_table('default.users', schema, False)
+table = catalog.get_table('default.users')
+
+# write initial data
+write_builder = table.new_batch_write_builder()
+write = write_builder.new_write()
+commit = write_builder.new_commit()
+write.write_arrow(pa.Table.from_pydict(
+    {'id': [1, 2], 'name': ['Alice', 'Bob'], 'age': [30, 25]},
+    schema=pa_schema,
+))
+commit.commit(write.prepare_commit())
+write.close()
+commit.close()
+
+# upsert: update id=1, insert id=3
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update()
+table_commit = write_builder.new_commit()
+
+upsert_data = pa.Table.from_pydict(
+    {'id': [1, 3], 'name': ['Alice_v2', 'Charlie'], 'age': [31, 28]},
+    schema=pa_schema,
+)
+cmts = table_update.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
+table_commit.commit(cmts)
+table_commit.close()
+
+# content should be:
+#   id=1: name='Alice_v2', age=31   (updated)
+#   id=2: name='Bob',      age=25   (unchanged)
+#   id=3: name='Charlie',  age=28   (new)
+```
+
+**Example: partial-column upsert with `update_cols`**
+
+Combine `with_update_type` with `upsert_by_arrow_with_key` to update only specific columns for
+matched rows while still appending full rows for new keys:
+
+```python
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update().with_update_type(['age'])
+table_commit = write_builder.new_commit()
+
+upsert_data = pa.Table.from_pydict(
+    {'id': [1, 4], 'name': ['ignored', 'David'], 'age': [99, 22]},
+    schema=pa_schema,
+)
+cmts = table_update.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
+table_commit.commit(cmts)
+table_commit.close()
+
+# id=1: only 'age' is updated to 99; 'name' remains 'Alice_v2'
+# id=4: appended as a full new row
+```
+
+**Example: partitioned table with composite key**
+
+```python
+partitioned_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('region', pa.string()),
+])
+schema = Schema.from_pyarrow_schema(
+    partitioned_schema,
+    partition_keys=['region'],
+    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+)
+catalog.create_table('default.users_partitioned', schema, False)
+table = catalog.get_table('default.users_partitioned')
+
+# ... write initial data ...
+
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update()
+table_commit = write_builder.new_commit()
+
+upsert_data = pa.Table.from_pydict(
+    {'id': [1, 3], 'name': ['Alice_v2', 'Charlie'], 'region': ['US', 'EU']},
+    schema=partitioned_schema,
+)
+# upsert_keys=['id'] only; partition key 'region' is auto-stripped
+cmts = table_update.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
+table_commit.commit(cmts)
+table_commit.close()
+```
+
+**Notes**
+
+- Execution is driven **partition-by-partition**: only one partition's key set is loaded into memory at a time.
+- Duplicate keys in the input data are automatically deduplicated — the **last occurrence** is kept.
+- The upsert is atomic per commit — all matched updates and new appends are included in the same commit.
+
 ## Update Columns By Shards
 
 If you want to **compute a derived column** (or **update an existing column based on other columns**) without providing

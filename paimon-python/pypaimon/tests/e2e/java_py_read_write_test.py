@@ -235,14 +235,15 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Format: {file_format}, Result:\n{res}")
 
         # Verify data
-        self.assertEqual(len(res), 6)
+        self.assertEqual(len(res), 7)
         if file_format != "lance":
             self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
             self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
             self.assertEqual(table.fields[6].type.type, "TIME(0)")
+            self.assertEqual(table.fields[7].type.type, "BINARY(20)")
             from pypaimon.schema.data_types import RowType
-            self.assertIsInstance(table.fields[7].type, RowType)
-            metadata_fields = table.fields[7].type.fields
+            self.assertIsInstance(table.fields[8].type, RowType)
+            metadata_fields = table.fields[8].type.fields
             self.assertEqual(len(metadata_fields), 3)
             self.assertEqual(metadata_fields[0].name, 'source')
             self.assertEqual(metadata_fields[1].name, 'created_at')
@@ -250,9 +251,20 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertIsInstance(metadata_fields[2].type, RowType)
         
         # Data order may vary due to partitioning/bucketing, so compare as sets
-        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef', 'Tofu'}
         actual_names = set(res['name'].tolist())
         self.assertEqual(actual_names, expected_names)
+
+        # Verify null partition value (default partition) is readable
+        tofu_row = res[res['name'] == 'Tofu']
+        self.assertEqual(len(tofu_row), 1)
+        self.assertTrue(pd.isna(tofu_row['category'].iloc[0]))
+
+        if file_format != "lance" and 'bin_data' in res.columns:
+            apple_row = res[res['name'] == 'Apple']
+            self.assertEqual(apple_row['bin_data'].iloc[0], b'apple_bin_data')
+            carrot_row = res[res['name'] == 'Carrot']
+            self.assertEqual(carrot_row['bin_data'].iloc[0], b'carrot')
 
         # Verify metadata column can be read and contains nested structures
         if 'metadata' in res.columns:
@@ -309,6 +321,48 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
+
+    def test_pk_dv_read_multi_batch_with_value_filter(self):
+        """Test that DV-enabled PK table filters files by value stats during scan."""
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+
+        # Unfiltered scan: count total files
+        rb_all = table.new_read_builder()
+        all_splits = rb_all.new_scan().plan().splits()
+        all_files_count = sum(len(s.files) for s in all_splits)
+
+        # Filtered scan: b < 500 should only match a few rows (b in {100,200,300,400})
+        # and prune files whose value stats don't overlap
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        pred = predicate_builder.less_than('b', 500)
+        rb_filtered = table.new_read_builder().with_filter(pred)
+        filtered_splits = rb_filtered.new_scan().plan().splits()
+        filtered_files_count = sum(len(s.files) for s in filtered_splits)
+        filtered_result = table_sort_by(
+            rb_filtered.new_read().to_arrow(filtered_splits), 'a')
+
+        # Verify correctness: rows with b < 500 are a=10,b=100 / a=20,b=200 / a=30,b=300 / a=40,b=400
+        expected = pa.Table.from_pydict({
+            'pt': [1, 1, 1, 1],
+            'a': [10, 20, 30, 40],
+            'b': [100, 200, 300, 400]
+        }, schema=pa_schema)
+        self.assertEqual(expected, filtered_result)
+
+        # Verify file pruning: filtered scan should read fewer files
+        self.assertLess(
+            filtered_files_count, all_files_count,
+            f"DV value filter should prune files: filtered={filtered_files_count}, all={all_files_count}")
 
     def test_pk_dv_read_multi_batch_raw_convertable(self):
         pa_schema = pa.schema([
@@ -429,3 +483,84 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'v': ["v1", "v2", "v4"]
         })
         self.assertEqual(expected, actual)
+
+    @parameterized.expand([('json',), ('csv',)])
+    def test_read_compressed_text_append_table(self, file_format):
+        table = self.catalog.get_table(
+            f'default.mixed_test_append_tablej_{file_format}_gz')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        with self.assertRaises(NotImplementedError) as ctx:
+            table_read.to_arrow(splits)
+        self.assertIn(file_format, str(ctx.exception))
+        self.assertIn("not yet supported", str(ctx.exception))
+
+    def test_read_tantivy_full_text_index(self):
+        """Test reading a Tantivy full-text index built by Java."""
+        table = self.catalog.get_table('default.test_tantivy_fulltext')
+
+        # Use FullTextSearchBuilder to search
+        builder = table.new_full_text_search_builder()
+        builder.with_text_column('content')
+        builder.with_query_text('paimon')
+        builder.with_limit(10)
+
+        result = builder.execute_local()
+        # Row 0, 2, 4 mention "paimon"
+        row_ids = sorted(list(result.results()))
+        print(f"Tantivy full-text search for 'paimon': row_ids={row_ids}")
+        self.assertEqual(row_ids, [0, 2, 4])
+
+        # Read matching rows using withGlobalIndexResult
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        self.assertEqual(ids, [0, 2, 4])
+
+        # Search for "tantivy" - only row 1
+        builder2 = table.new_full_text_search_builder()
+        builder2.with_text_column('content')
+        builder2.with_query_text('tantivy')
+        builder2.with_limit(10)
+
+        result2 = builder2.execute_local()
+        row_ids2 = sorted(list(result2.results()))
+        print(f"Tantivy full-text search for 'tantivy': row_ids={row_ids2}")
+        self.assertEqual(row_ids2, [1])
+
+        # Read matching rows
+        read_builder2 = table.new_read_builder()
+        scan2 = read_builder2.new_scan().with_global_index_result(result2)
+        plan2 = scan2.plan()
+        pa_table2 = read_builder2.new_read().to_arrow(plan2.splits())
+        self.assertEqual(pa_table2.num_rows, 1)
+        self.assertEqual(pa_table2.column('id').to_pylist(), [1])
+
+        # Search for "full-text search" - rows 1, 3
+        builder3 = table.new_full_text_search_builder()
+        builder3.with_text_column('content')
+        builder3.with_query_text('full-text search')
+        builder3.with_limit(10)
+
+        result3 = builder3.execute_local()
+        row_ids3 = sorted(list(result3.results()))
+        print(f"Tantivy full-text search for 'full-text search': row_ids={row_ids3}")
+        self.assertIn(1, row_ids3)
+        self.assertIn(3, row_ids3)
+
+        # Read matching rows
+        read_builder3 = table.new_read_builder()
+        scan3 = read_builder3.new_scan().with_global_index_result(result3)
+        plan3 = scan3.plan()
+        pa_table3 = read_builder3.new_read().to_arrow(plan3.splits())
+        pa_table3 = table_sort_by(pa_table3, 'id')
+        ids3 = pa_table3.column('id').to_pylist()
+        self.assertIn(1, ids3)
+        self.assertIn(3, ids3)

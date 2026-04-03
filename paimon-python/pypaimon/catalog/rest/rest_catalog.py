@@ -15,24 +15,28 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 from typing import Any, Callable, Dict, List, Optional, Union
-
-from pypaimon.api.api_response import GetTableResponse, PagedList
+from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
+from pypaimon.catalog.catalog_exception import IllegalArgumentError
+from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
+                                         ForbiddenException, BadRequestException)
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_exception import (
     TableNotExistException, DatabaseAlreadyExistException,
     TableAlreadyExistException, DatabaseNotExistException,
-    TableNoPermissionException, DatabaseNoPermissionException
+    TableNoPermissionException, DatabaseNoPermissionException,
+    FunctionNotExistException, FunctionAlreadyExistException,
+    DefinitionAlreadyExistException, DefinitionNotExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
-from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
@@ -44,9 +48,13 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
+from pypaimon.table.object.object_table import ObjectTable
+
+logger = logging.getLogger(__name__)
 
 FORMAT_TABLE_TYPE = "format-table"
 ICEBERG_TABLE_TYPE = "iceberg-table"
+OBJECT_TABLE_TYPE = "object-table"
 
 
 class RESTCatalog(Catalog):
@@ -56,6 +64,13 @@ class RESTCatalog(Catalog):
         self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
+
+        # FUSE support (lazy import only when enabled)
+        self.fuse_enabled = self.context.options.get(FuseOptions.FUSE_ENABLED, False)
+        self._fuse_resolver = None
+        if self.fuse_enabled:
+            from pypaimon.catalog.rest.fuse_support import FusePathResolver
+            self._fuse_resolver = FusePathResolver(self.context.options, self.rest_api)
 
     def catalog_loader(self):
         """
@@ -253,7 +268,7 @@ class RESTCatalog(Catalog):
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
         table = self.get_table(identifier)
-        if isinstance(table, (FormatTable, IcebergTable)):
+        if isinstance(table, (FormatTable, IcebergTable, ObjectTable)):
             unsupported_type = type(table).__name__
             raise ValueError(
                 f"drop_partitions is not supported for table type '{unsupported_type}'. "
@@ -264,6 +279,27 @@ class RESTCatalog(Catalog):
             commit.truncate_partitions(partitions)
         finally:
             commit.close()
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.list_partitions_paged(
+                identifier,
+                max_results,
+                page_token,
+                partition_name_pattern
+            )
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def alter_table(
         self,
@@ -299,15 +335,138 @@ class RESTCatalog(Catalog):
         try:
             self.rest_api.rollback_to(identifier, instant, from_snapshot)
         except NoSuchResourceException as e:
-            if e.resource_type == "snapshot":
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(
                     "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
-            elif e.resource_type == "tag":
+            elif e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise ValueError(
                     "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional['TableSnapshot']:
+        """Load the latest snapshot for table.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.load_snapshot(identifier)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                return None
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def list_functions(self, database_name: str) -> List[str]:
+        try:
+            return self.rest_api.list_functions(database_name)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+
+    def get_function(self, identifier: Union[str, Identifier]) -> 'Function':
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            response = self.rest_api.get_function(identifier)
+            return response.to_function(identifier)
+        except NoSuchResourceException as e:
+            raise FunctionNotExistException(identifier) from e
+
+    def create_function(self, identifier: Union[str, Identifier],
+                        function: 'Function', ignore_if_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.create_function(identifier, function)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
+        except AlreadyExistsException as e:
+            if ignore_if_exists:
+                return
+            raise FunctionAlreadyExistException(identifier) from e
+
+    def drop_function(self, identifier: Union[str, Identifier],
+                      ignore_if_not_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.drop_function(identifier)
+        except NoSuchResourceException as e:
+            if ignore_if_not_exists:
+                return
+            raise FunctionNotExistException(identifier) from e
+
+    def alter_function(self, identifier: Union[str, Identifier],
+                       changes: List['FunctionChange'],
+                       ignore_if_not_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.alter_function(identifier, changes)
+        except AlreadyExistsException as e:
+            raise DefinitionAlreadyExistException(identifier, e.resource_name) from e
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DEFINITION:
+                raise DefinitionNotExistException(identifier, e.resource_name) from e
+            if not ignore_if_not_exists:
+                raise FunctionNotExistException(identifier) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
+
+    def list_functions_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            function_name_pattern: Optional[str] = None,
+    ) -> PagedList[str]:
+        try:
+            return self.rest_api.list_functions_paged(
+                database_name, max_results, page_token, function_name_pattern)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+
+    def list_functions_paged_globally(
+            self,
+            database_name_pattern: Optional[str] = None,
+            function_name_pattern: Optional[str] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[Identifier]:
+        result = self.rest_api.list_functions_paged_globally(
+            database_name_pattern, function_name_pattern, max_results, page_token)
+        functions = result.elements if result.elements else []
+        return PagedList(functions, result.next_page_token)
+
+    def list_function_details_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            function_name_pattern: Optional[str] = None,
+    ) -> PagedList['Function']:
+        try:
+            result = self.rest_api.list_function_details_paged(
+                database_name, max_results, page_token, function_name_pattern)
+            functions = [
+                resp.to_function(Identifier.create(database_name, resp.name))
+                for resp in result.elements
+            ]
+            return PagedList(functions, result.next_page_token)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         try:
@@ -338,6 +497,18 @@ class RESTCatalog(Catalog):
         return FileIO.get(table_path, self.context.options)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
+        """
+        Get FileIO for data access, supporting FUSE local path mapping.
+        """
+        if self._fuse_resolver is not None:
+            return self._fuse_resolver.get_file_io(
+                table_path, identifier, self.data_token_enabled,
+                rest_token_file_io_factory=lambda: RESTTokenFileIO(
+                    identifier, table_path, self.context.options),
+                default_file_io_factory=lambda: self.file_io_from_options(table_path),
+            )
+
+        # Fallback to original logic
         return RESTTokenFileIO(identifier, table_path, self.context.options) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
@@ -355,6 +526,8 @@ class RESTCatalog(Catalog):
         data_file_io = external_file_io if metadata.is_external else internal_file_io
         if table_type == ICEBERG_TABLE_TYPE:
             return self._create_iceberg_table(identifier, metadata, data_file_io)
+        if table_type == OBJECT_TABLE_TYPE:
+            return self._create_object_table(identifier, metadata, data_file_io)
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
@@ -409,6 +582,23 @@ class RESTCatalog(Catalog):
             options=dict(schema.options),
             comment=schema.comment,
             uuid=metadata.uuid,
+        )
+
+    def _create_object_table(self,
+                             identifier: Identifier,
+                             metadata: TableMetadata,
+                             file_io: Callable[[str], Any],
+                             ) -> ObjectTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return ObjectTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            options=dict(schema.options),
+            comment=schema.comment,
         )
 
     @staticmethod

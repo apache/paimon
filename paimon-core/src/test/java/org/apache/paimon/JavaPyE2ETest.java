@@ -155,6 +155,7 @@ public class JavaPyE2ETest {
                             .column("ts", DataTypes.TIMESTAMP())
                             .column("ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
                             .column("t", DataTypes.TIME())
+                            .column("bin_data", DataTypes.BINARY(20))
                             .column(
                                     "metadata",
                                     DataTypes.ROW(
@@ -186,8 +187,18 @@ public class JavaPyE2ETest {
 
                 write.write(
                         createRow7Cols(
-                                1, "Apple", "Fruit", 1.5, 1000000L, 2000000L, 1000, "store1", 1001L,
-                                "Beijing", "China"));
+                                1,
+                                "Apple",
+                                "Fruit",
+                                1.5,
+                                1000000L,
+                                2000000L,
+                                1000,
+                                "apple_bin_data".getBytes(),
+                                "store1",
+                                1001L,
+                                "Beijing",
+                                "China"));
                 write.write(
                         createRow7Cols(
                                 2,
@@ -197,6 +208,7 @@ public class JavaPyE2ETest {
                                 1000001L,
                                 2000001L,
                                 2000,
+                                "banana_bin".getBytes(),
                                 "store1",
                                 1002L,
                                 "Shanghai",
@@ -210,6 +222,7 @@ public class JavaPyE2ETest {
                                 1000002L,
                                 2000002L,
                                 3000,
+                                "carrot".getBytes(),
                                 "store2",
                                 1003L,
                                 "Tokyo",
@@ -223,18 +236,56 @@ public class JavaPyE2ETest {
                                 1000003L,
                                 2000003L,
                                 4000,
+                                "broccoli_binary_data".getBytes(),
                                 "store2",
                                 1004L,
                                 "Seoul",
                                 "Korea"));
                 write.write(
                         createRow7Cols(
-                                5, "Chicken", "Meat", 5.0, 1000004L, 2000004L, 5000, "store3",
-                                1005L, "NewYork", "USA"));
+                                5,
+                                "Chicken",
+                                "Meat",
+                                5.0,
+                                1000004L,
+                                2000004L,
+                                5000,
+                                "chicken".getBytes(),
+                                "store3",
+                                1005L,
+                                "NewYork",
+                                "USA"));
                 write.write(
                         createRow7Cols(
-                                6, "Beef", "Meat", 8.0, 1000005L, 2000005L, 6000, "store3", 1006L,
-                                "London", "UK"));
+                                6,
+                                "Beef",
+                                "Meat",
+                                8.0,
+                                1000005L,
+                                2000005L,
+                                6000,
+                                "beef_data".getBytes(),
+                                "store3",
+                                1006L,
+                                "London",
+                                "UK"));
+                // Row with null partition value -> __DEFAULT_PARTITION__
+                write.write(
+                        GenericRow.of(
+                                7,
+                                BinaryString.fromString("Tofu"),
+                                null,
+                                3.0,
+                                org.apache.paimon.data.Timestamp.fromEpochMillis(1000006L),
+                                org.apache.paimon.data.Timestamp.fromEpochMillis(2000006L),
+                                7000,
+                                "tofu".getBytes(),
+                                GenericRow.of(
+                                        BinaryString.fromString("store4"),
+                                        1007L,
+                                        GenericRow.of(
+                                                BinaryString.fromString("Paris"),
+                                                BinaryString.fromString("France")))));
 
                 commit.commit(0, write.prepareCommit(true, 0));
             }
@@ -246,12 +297,13 @@ public class JavaPyE2ETest {
                     getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, 1000, (store1, 1001, (Beijing, China))]",
-                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, 2000, (store1, 1002, (Shanghai, China))]",
-                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, (store2, 1003, (Tokyo, Japan))]",
-                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, (store2, 1004, (Seoul, Korea))]",
-                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, (store3, 1005, (NewYork, USA))]",
-                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, (store3, 1006, (London, UK))]");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, 1000, [97, 112, 112, 108, 101, 95, 98, 105, 110, 95, 100, 97, 116, 97], (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, 2000, [98, 97, 110, 97, 110, 97, 95, 98, 105, 110], (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, [99, 97, 114, 114, 111, 116], (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, [98, 114, 111, 99, 99, 111, 108, 105, 95, 98, 105, 110, 97, 114, 121, 95, 100, 97, 116, 97], (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, [99, 104, 105, 99, 107, 101, 110], (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, [98, 101, 101, 102, 95, 100, 97, 116, 97], (store3, 1006, (London, UK))]",
+                            "+I[7, Tofu, NULL, 3.0, 1970-01-01T00:16:40.006, 1970-01-01T00:33:20.006, 7000, [116, 111, 102, 117], (store4, 1007, (Paris, France))]");
         }
     }
 
@@ -512,10 +564,18 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+            commit.commit(
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -580,10 +640,18 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+            commit.commit(
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -650,10 +718,18 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+            commit.commit(
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -672,6 +748,47 @@ public class JavaPyE2ETest {
                 .createReader(readBuilder.newScan().plan())
                 .forEachRemaining(r -> result.add(r.getString(1).toString()));
         assertThat(result).containsExactlyInAnyOrder("v3", "v5");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteCompressedTextAppendTable() throws Exception {
+        for (String format : Arrays.asList("json", "csv")) {
+            String tableName = "mixed_test_append_tablej_" + format + "_gz";
+            Identifier identifier = identifier(tableName);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("value", DataTypes.DOUBLE())
+                            .option("file.format", format)
+                            .option("file.compression", "gzip")
+                            .option("bucket", "-1")
+                            .build();
+
+            catalog.createTable(identifier, schema, true);
+            Table table = catalog.getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+
+            BatchWriteBuilder writeBuilder = fileStoreTable.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(1, BinaryString.fromString("Apple"), 1.5));
+                write.write(GenericRow.of(2, BinaryString.fromString("Banana"), 0.8));
+                write.write(GenericRow.of(3, BinaryString.fromString("Carrot"), 0.6));
+                commit.commit(write.prepareCommit());
+            }
+
+            List<Split> splits =
+                    new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+            TableRead read = fileStoreTable.newRead();
+            List<String> res =
+                    getResult(
+                            read,
+                            splits,
+                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            assertThat(res).hasSize(3);
+        }
     }
 
     // Helper method from TableTestBase
@@ -710,6 +827,7 @@ public class JavaPyE2ETest {
             long ts,
             long tsLtz,
             int timeMillis,
+            byte[] binData,
             String metadataSource,
             long metadataCreatedAt,
             String city,
@@ -727,6 +845,7 @@ public class JavaPyE2ETest {
                 org.apache.paimon.data.Timestamp.fromEpochMillis(ts),
                 org.apache.paimon.data.Timestamp.fromEpochMillis(tsLtz),
                 timeMillis,
+                binData,
                 metadataRow);
     }
 

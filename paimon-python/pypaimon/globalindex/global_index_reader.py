@@ -19,11 +19,7 @@
 """Global index reader interface."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pypaimon.globalindex.global_index_result import GlobalIndexResult
-    from pypaimon.globalindex.vector_search import VectorSearch
+from typing import List, Optional
 
 
 class FieldRef:
@@ -45,6 +41,10 @@ class GlobalIndexReader(ABC):
     def visit_vector_search(self, vector_search: 'VectorSearch') -> Optional['GlobalIndexResult']:
         """Visit a vector search query."""
         raise NotImplementedError("Vector search not supported by this reader")
+
+    def visit_full_text_search(self, full_text_search: 'FullTextSearch') -> Optional['GlobalIndexResult']:
+        """Visit a full-text search query."""
+        raise NotImplementedError("Full-text search not supported by this reader")
 
     def visit_equal(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
         """Visit an equality predicate."""

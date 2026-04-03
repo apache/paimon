@@ -63,25 +63,52 @@ def cmd_table_read(args):
     # Build read pipeline
     read_builder = table.new_read_builder()
     
-    # Apply projection (select columns) if specified
+    available_fields = set(field.name for field in table.table_schema.fields)
+
+    # Parse select and where options
     select_columns = args.select
+    where_clause = args.where
+    user_columns = None
+    extra_where_columns = []
+
     if select_columns:
         # Parse column names (comma-separated)
-        columns = [col.strip() for col in select_columns.split(',')]
-        
+        user_columns = [col.strip() for col in select_columns.split(',')]
+
         # Validate that all columns exist in the table schema
-        available_fields = set(field.name for field in table.table_schema.fields)
-        invalid_columns = [col for col in columns if col not in available_fields]
-        
+        invalid_columns = [col for col in user_columns if col not in available_fields]
         if invalid_columns:
             print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.", file=sys.stderr)
             sys.exit(1)
-        
-        read_builder = read_builder.with_projection(columns)
 
-    # Apply limit if specified
+    # When both select and where are specified, ensure where-referenced fields
+    # are included in the projection so the filter can work correctly.
+    if user_columns and where_clause:
+        from pypaimon.cli.where_parser import extract_fields_from_where
+        where_fields = extract_fields_from_where(where_clause, available_fields)
+        user_column_set = set(user_columns)
+        extra_where_columns = [f for f in where_fields if f not in user_column_set]
+        projection_columns = user_columns + extra_where_columns
+        read_builder = read_builder.with_projection(projection_columns)
+    elif user_columns:
+        read_builder = read_builder.with_projection(user_columns)
+
+    # Apply where filter if specified
+    if where_clause:
+        from pypaimon.cli.where_parser import parse_where_clause
+        try:
+            predicate = parse_where_clause(where_clause, table.table_schema.fields)
+            if predicate:
+                read_builder = read_builder.with_filter(predicate)
+        except ValueError as e:
+            print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Apply limit: only push down when there is no where clause,
+    # because limit push-down may stop reading before enough rows
+    # pass the filter, leading to fewer results than expected.
     limit = args.limit
-    if limit:
+    if limit and not where_clause:
         read_builder = read_builder.with_limit(limit)
     
     # Scan and read
@@ -91,11 +118,110 @@ def cmd_table_read(args):
     
     read = read_builder.new_read()
 
-    # Use pandas to display as a nice table
+    # Read splits incrementally, stopping early when limit is reached
+    if limit:
+        import pandas as pd
+        collected_rows = 0
+        table_list = []
+        for split in splits:
+            if collected_rows >= limit:
+                break
+            partial_df = read.to_pandas([split])
+            collected_rows += len(partial_df)
+            table_list.append(partial_df)
+        df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
+        if len(df) > limit:
+            df = df.head(limit)
+    else:
+        df = read.to_pandas(splits)
+
+    # Drop extra columns that were added only for where-clause filtering
+    if extra_where_columns:
+        df = df.drop(columns=extra_where_columns, errors='ignore')
+
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+    else:
+        print(df.to_string(index=False))
+
+
+def cmd_table_full_text_search(args):
+    """
+    Execute the 'table full-text-search' command.
+
+    Performs full-text search on a Paimon table and displays matching rows.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config_path = args.config
+    config = load_catalog_config(config_path)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    database_name, table_name = parts
+
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build full-text search
+    text_column = args.column
+    query_text = args.query
+    limit = args.limit
+
+    try:
+        builder = table.new_full_text_search_builder()
+        builder.with_text_column(text_column)
+        builder.with_query_text(query_text)
+        builder.with_limit(limit)
+        result = builder.execute_local()
+    except Exception as e:
+        print(f"Error: Full-text search failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if result.is_empty():
+        print("No matching rows found.")
+        return
+
+    # Read matching rows using global index result
+    read_builder = table.new_read_builder()
+
+    select_columns = args.select
+    if select_columns:
+        projection = [col.strip() for col in select_columns.split(',')]
+        available_fields = set(field.name for field in table.table_schema.fields)
+        invalid_columns = [col for col in projection if col not in available_fields]
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.",
+                  file=sys.stderr)
+            sys.exit(1)
+        read_builder = read_builder.with_projection(projection)
+
+    scan = read_builder.new_scan().with_global_index_result(result)
+    plan = scan.plan()
+    splits = plan.splits()
+    read = read_builder.new_read()
     df = read.to_pandas(splits)
-    if limit and len(df) > limit:
-        df = df.head(limit)
-    print(df.to_string(index=False))
+
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+    else:
+        print(df.to_string(index=False))
 
 
 def cmd_table_get(args):
@@ -529,6 +655,75 @@ def cmd_table_alter(args):
         sys.exit(1)
 
 
+def cmd_table_list_partitions(args):
+    """
+    Execute the 'table list-partitions' command.
+
+    Lists partitions of a Paimon table with optional pattern filtering.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    # Load catalog configuration
+    config_path = args.config
+    config = load_catalog_config(config_path)
+
+    # Create catalog
+    catalog = create_catalog(config)
+
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    # List partitions with pagination
+    pattern = getattr(args, 'pattern', None)
+    try:
+        paged_list = catalog.list_partitions_paged(
+            table_identifier,
+            partition_name_pattern=pattern,
+        )
+        import pandas as pd
+
+        partitions = paged_list.elements
+        if not partitions:
+            print("No partitions found.")
+            return
+
+        data = []
+        for p in partitions:
+            spec_str = ",".join(f"{k}={v}" for k, v in p.spec.items())
+            data.append({
+                'Partition': spec_str,
+                'RecordCount': p.record_count,
+                'FileSizeInBytes': p.file_size_in_bytes,
+                'FileCount': p.file_count,
+                'LastFileCreationTime': p.last_file_creation_time,
+                'UpdatedAt': p.updated_at,
+                'UpdatedBy': p.updated_by or '',
+            })
+
+        output_format = getattr(args, 'format', 'table')
+        if output_format == 'json':
+            import json
+            print(json.dumps(data, ensure_ascii=False))
+        else:
+            df = pd.DataFrame(data)
+            print(df.to_string(index=False))
+
+    except NotImplementedError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: Failed to list partitions: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -551,10 +746,24 @@ def add_table_subcommands(table_parser):
         help='Select specific columns to read (comma-separated, e.g., "id,name,age")'
     )
     read_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help=('Filter condition in SQL-like syntax '
+              '(e.g., "age > 18", "name = \'Alice\' AND status IN (\'active\', \'pending\')")')
+    )
+    read_parser.add_argument(
         '--limit', '-l',
         type=int,
         default=100,
         help='Maximum number of results to display (default: 100)'
+    )
+    read_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
     )
     read_parser.set_defaults(func=cmd_table_read)
     
@@ -618,8 +827,66 @@ def add_table_subcommands(table_parser):
     )
     import_parser.set_defaults(func=cmd_table_import)
     
+    # table list-partitions command
+    list_partitions_parser = table_subparsers.add_parser('list-partitions', help='List partitions of a table')
+    list_partitions_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    list_partitions_parser.add_argument(
+        '--pattern', '-p',
+        type=str,
+        default=None,
+        help='Partition name pattern to filter partitions (e.g., "dt=2024*")'
+    )
+    list_partitions_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    list_partitions_parser.set_defaults(func=cmd_table_list_partitions)
+
     # table rename command
     rename_parser = table_subparsers.add_parser('rename', help='Rename a table')
+
+    # table full-text-search command
+    fts_parser = table_subparsers.add_parser('full-text-search', help='Full-text search on a table')
+    fts_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    fts_parser.add_argument(
+        '--column', '-c',
+        required=True,
+        help='Text column to search on'
+    )
+    fts_parser.add_argument(
+        '--query', '-q',
+        required=True,
+        help='Query text to search for'
+    )
+    fts_parser.add_argument(
+        '--limit', '-l',
+        type=int,
+        default=10,
+        help='Maximum number of results to return (default: 10)'
+    )
+    fts_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Select specific columns to display (comma-separated, e.g., "id,name,content")'
+    )
+    fts_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    fts_parser.set_defaults(func=cmd_table_full_text_search)
     rename_parser.add_argument(
         'table',
         help='Source table identifier in format: database.table'

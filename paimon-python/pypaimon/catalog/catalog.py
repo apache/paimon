@@ -139,6 +139,21 @@ class Catalog(ABC):
         return False
 
     @abstractmethod
+    def load_snapshot(self, identifier: Identifier):
+        """Load the snapshot of table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+
+        Returns:
+            TableSnapshot instance
+
+        Raises:
+            NotImplementedError: If the catalog does not support version management
+            TableNotExistException: If the table does not exist
+        """
+
+    @abstractmethod
     def commit_snapshot(
             self,
             identifier: Identifier,
@@ -178,10 +193,103 @@ class Catalog(ABC):
         )
 
     def drop_partitions(
-        self,
-        identifier: Union[str, Identifier],
-        partitions: List[Dict[str, str]],
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
     ) -> None:
         raise NotImplementedError(
             "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."
+        )
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        """List partitions of a table with pagination.
+
+        Args:
+            identifier: Path of the table.
+            max_results: Maximum number of results to return per page.
+            page_token: Token for pagination.
+            partition_name_pattern: Optional pattern to filter partition names.
+
+        Returns:
+            PagedList of Partition objects.
+
+        Raises:
+            NotImplementedError: If the catalog does not support listing partitions.
+        """
+        raise NotImplementedError(
+            "list_partitions_paged is not supported by this catalog."
+        )
+
+    def create_branch(
+            self,
+            identifier: Identifier,
+            branch_name: str,
+            tag_name: Optional[str] = None
+    ) -> None:
+        """
+        Create a branch for the table.
+
+        Args:
+            identifier: Table identifier
+            branch_name: Name of the branch to create
+            tag_name: Optional tag name to create branch from, None for current state
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "create_branch is not supported by this catalog."
+        )
+
+    def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
+        """
+        Drop a branch for the table.
+
+        Args:
+            identifier: Table identifier
+            branch_name: Name of the branch to drop
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "drop_branch is not supported by this catalog."
+        )
+
+    def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
+        """
+        Fast forward the current branch to the specified branch.
+
+        Args:
+            identifier: Table identifier
+            branch_name: The branch to fast forward to
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "fast_forward is not supported by this catalog."
+        )
+
+    def list_branches(self, identifier: Identifier) -> List[str]:
+        """
+        List all branches for the table.
+
+        Args:
+            identifier: Table identifier
+
+        Returns:
+            List of branch names
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "list_branches is not supported by this catalog."
         )

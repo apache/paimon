@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright the Vortex contributors
+
+syntax = "proto3";
+
+package vortex.scalar;
+
+option java_package = "dev.vortex.proto";
+option java_outer_classname = "ScalarProtos";
+
+import "dtype.proto";
+import "google/protobuf/struct.proto";
+
+message Scalar {
+  vortex.dtype.DType dtype = 1;
+  ScalarValue value = 2;
+}
+
+message ScalarValue {
+  oneof kind {
+    google.protobuf.NullValue null_value = 1;
+    bool bool_value = 2;
+    sint64 int64_value = 3;
+    uint64 uint64_value = 4;
+    float f32_value = 5;
+    double f64_value = 6;
+    string string_value = 7;
+    bytes bytes_value = 8;
+    ListValue list_value = 9;
+    uint64 f16_value = 10;
+    Scalar variant_value = 11;
+  }
+}
+
+message ListValue {
+  repeated ScalarValue values = 1;
+}

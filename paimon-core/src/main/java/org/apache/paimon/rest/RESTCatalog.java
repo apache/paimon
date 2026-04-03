@@ -442,6 +442,18 @@ public class RESTCatalog implements Catalog {
         }
     }
 
+    @Override
+    public void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        try {
+            api.rollbackSchema(identifier, schemaId);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         // if the table is system table, we need to load table metadata from the system table's data
         // table
@@ -716,6 +728,20 @@ public class RESTCatalog implements Catalog {
             api.dropBranch(identifier, branch);
         } catch (NoSuchResourceException e) {
             throw new BranchNotExistException(identifier, branch, e);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException {
+        try {
+            api.renameBranch(identifier, fromBranch, toBranch);
+        } catch (NoSuchResourceException e) {
+            throw new BranchNotExistException(identifier, fromBranch, e);
+        } catch (AlreadyExistsException e) {
+            throw new BranchAlreadyExistException(identifier, toBranch, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         }

@@ -93,8 +93,15 @@ class FormatTable(Table):
         return FormatReadBuilder(self)
 
     def new_batch_write_builder(self):
-        from pypaimon.table.format.format_batch_write_builder import FormatBatchWriteBuilder
+        from pypaimon.table.format.format_batch_write_builder import \
+            FormatBatchWriteBuilder
         return FormatBatchWriteBuilder(self)
+
+    def new_stream_read_builder(self):
+        raise NotImplementedError("Format table does not support stream read.")
 
     def new_stream_write_builder(self):
         raise NotImplementedError("Format table does not support stream write.")
+
+    def new_full_text_search_builder(self):
+        raise NotImplementedError("Format table does not support full text search.")
