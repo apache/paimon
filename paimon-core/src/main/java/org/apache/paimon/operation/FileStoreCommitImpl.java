@@ -46,6 +46,7 @@ import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.OverwriteChangesProvider;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
@@ -421,7 +422,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public int overwritePartition(
             Map<String, String> partition,
             ManifestCommittable committable,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId) {
         LOG.info(
                 "Ready to overwrite to table {}, number of commit messages: {}",
                 tableName,
@@ -509,7 +511,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 changes.appendIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.properties());
+                                committable.properties(),
+                                baseSnapshotId);
                 generatedSnapshot += 1;
             }
 
@@ -785,10 +788,61 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId) {
+        Snapshot overwriteSnapshot = null;
+        if (baseSnapshotId != null) {
+            overwriteSnapshot = snapshotManager.snapshot(baseSnapshotId);
+        }
+
+        if (baseSnapshotId != null && !options.sortCompactSkipOverwriteConflictDetection()) {
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot != null && latestSnapshot.id() > baseSnapshotId) {
+                List<BinaryRow> changedPartitions =
+                        changes.stream()
+                                .map(ManifestEntry::partition)
+                                .distinct()
+                                .collect(Collectors.toList());
+                List<SimpleFileEntry> incrementalChanges =
+                        scanner.readIncrementalChanges(
+                                snapshotManager.snapshot(baseSnapshotId),
+                                latestSnapshot,
+                                changedPartitions);
+                Collection<SimpleFileEntry> mergedIncremental =
+                        FileEntry.mergeEntries(incrementalChanges);
+                boolean hasNetNewAdds =
+                        mergedIncremental.stream()
+                                .anyMatch(
+                                        e ->
+                                                e.kind() == FileKind.ADD
+                                                        && (partitionFilter == null
+                                                                || partitionFilter.test(
+                                                                        e.partition())));
+                if (hasNetNewAdds) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Sort compact conflict detected for table %s: new data was written to "
+                                            + "the overwritten partitions between snapshot %d and %d. "
+                                            + "Please retry the sort compact or ensure no concurrent "
+                                            + "writes to these partitions.",
+                                    tableName, baseSnapshotId, latestSnapshot.id()));
+                }
+            }
+        }
+
+        OverwriteChangesProvider overwriteProvider =
+                (OverwriteChangesProvider)
+                        scanner.overwriteChangesProvider(
+                                options.bucket(), changes, indexFiles, partitionFilter);
+        Snapshot finalOverwriteSnapshot = overwriteSnapshot;
         return tryCommit(
-                scanner.overwriteChangesProvider(
-                        options.bucket(), changes, indexFiles, partitionFilter),
+                latestSnapshot -> {
+                    Snapshot scanSnapshot =
+                            finalOverwriteSnapshot != null
+                                    ? finalOverwriteSnapshot
+                                    : latestSnapshot;
+                    return overwriteProvider.provide(scanSnapshot);
+                },
                 identifier,
                 watermark,
                 properties,

@@ -39,6 +39,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.RetryCommitResult;
@@ -1222,6 +1223,219 @@ public class FileStoreCommitTest {
         return map.entrySet().stream()
                 .map(e -> new KeyValue().replace(e.getKey(), -1, RowKind.INSERT, e.getValue()))
                 .collect(Collectors.toList());
+    }
+
+    @Test
+    public void testOverwriteWithBaseSnapshotPinsDeleteList() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // Commit snapshot 1: files A, B
+        CommitMessageImpl msg1 =
+                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
+        store.commit(msg1);
+        long baseSnapshotId = store.snapshotManager().latestSnapshotId();
+
+        // Concurrent write: commit snapshot 2 with file C (simulates write after sort compact read)
+        CommitMessageImpl msg2 =
+                store.writeDataFiles(partition, 0, Collections.singletonList("C.parquet"));
+        store.commit(msg2);
+        long latestSnapshotId = store.snapshotManager().latestSnapshotId();
+        assertThat(latestSnapshotId).isEqualTo(baseSnapshotId + 1);
+
+        // Overwrite with baseSnapshotId should detect conflict (file C added after base)
+        FileStoreCommitImpl commit = store.newCommit();
+        ManifestCommittable committable = new ManifestCommittable(100L);
+        CommitMessageImpl sortedFiles =
+                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
+        committable.addFileCommittable(sortedFiles);
+
+        assertThatThrownBy(
+                        () ->
+                                commit.overwritePartition(
+                                        Collections.emptyMap(),
+                                        committable,
+                                        Collections.emptyMap(),
+                                        baseSnapshotId))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Sort compact conflict detected");
+        commit.close();
+    }
+
+    @Test
+    public void testOverwriteWithBaseSnapshotSucceedsWithoutConcurrentWrite() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // Commit snapshot 1: files A, B
+        CommitMessageImpl msg1 =
+                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
+        store.commit(msg1);
+        long baseSnapshotId = store.snapshotManager().latestSnapshotId();
+
+        // No concurrent write happens; overwrite with baseSnapshotId should succeed
+        FileStoreCommitImpl commit = store.newCommit();
+        ManifestCommittable committable = new ManifestCommittable(100L);
+        CommitMessageImpl sortedFiles =
+                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
+        committable.addFileCommittable(sortedFiles);
+
+        int snapshots =
+                commit.overwritePartition(
+                        Collections.emptyMap(),
+                        committable,
+                        Collections.emptyMap(),
+                        baseSnapshotId);
+        assertThat(snapshots).isGreaterThan(0);
+
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        commit.close();
+    }
+
+    @Test
+    public void testOverwriteWithNullBaseSnapshotFallsBackToCurrentBehavior() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // Commit snapshot 1: files A, B
+        CommitMessageImpl msg1 =
+                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
+        store.commit(msg1);
+
+        // Concurrent write: commit snapshot 2 with file C
+        CommitMessageImpl msg2 =
+                store.writeDataFiles(partition, 0, Collections.singletonList("C.parquet"));
+        store.commit(msg2);
+
+        // Overwrite with null baseSnapshotId should succeed (current behavior, no conflict
+        // detection)
+        FileStoreCommitImpl commit = store.newCommit();
+        ManifestCommittable committable = new ManifestCommittable(100L);
+        CommitMessageImpl sortedFiles =
+                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
+        committable.addFileCommittable(sortedFiles);
+
+        int snapshots =
+                commit.overwritePartition(
+                        Collections.emptyMap(), committable, Collections.emptyMap(), null);
+        assertThat(snapshots).isGreaterThan(0);
+
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        commit.close();
+    }
+
+    @Test
+    public void testOverwriteWithBaseSnapshotAllowsCompactionBetweenSnapshots() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // Commit snapshot 1: files A, B
+        CommitMessageImpl msg1 =
+                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
+        store.commit(msg1);
+        long baseSnapshotId = store.snapshotManager().latestSnapshotId();
+
+        // Simulate a compaction between base and latest: compaction replaces A+B with AB
+        // Compaction produces DELETE A, DELETE B, ADD AB — net change after merge is zero new files
+        // This should NOT be treated as a concurrent write conflict
+        ManifestCommittable compactCommittable = new ManifestCommittable(50L);
+        store.newCommit().commit(compactCommittable, false);
+
+        // Overwrite with baseSnapshotId; no actual new data files were added
+        FileStoreCommitImpl commit = store.newCommit();
+        ManifestCommittable committable = new ManifestCommittable(100L);
+        CommitMessageImpl sortedFiles =
+                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
+        committable.addFileCommittable(sortedFiles);
+
+        int snapshots =
+                commit.overwritePartition(
+                        Collections.emptyMap(),
+                        committable,
+                        Collections.emptyMap(),
+                        baseSnapshotId);
+        assertThat(snapshots).isGreaterThan(0);
+        commit.close();
+    }
+
+    @Test
+    public void testOverwriteSkipsConflictDetectionWhenConfigured() throws Exception {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.SORT_COMPACT_SKIP_OVERWRITE_CONFLICT_DETECTION.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, opts);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // Commit snapshot 1: files A, B
+        CommitMessageImpl msg1 =
+                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
+        store.commit(msg1);
+        long baseSnapshotId = store.snapshotManager().latestSnapshotId();
+
+        // Concurrent write: commit snapshot 2 with file C (simulates write after sort compact read)
+        CommitMessageImpl msg2 =
+                store.writeDataFiles(partition, 0, Collections.singletonList("C.parquet"));
+        store.commit(msg2);
+
+        // Overwrite with baseSnapshotId should succeed (conflict detection skipped)
+        FileStoreCommitImpl commit = store.newCommit();
+        ManifestCommittable committable = new ManifestCommittable(100L);
+        CommitMessageImpl sortedFiles =
+                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
+        committable.addFileCommittable(sortedFiles);
+
+        int snapshots =
+                commit.overwritePartition(
+                        Collections.emptyMap(),
+                        committable,
+                        Collections.emptyMap(),
+                        baseSnapshotId);
+        assertThat(snapshots).isGreaterThan(0);
+
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+
+        ManifestList manifestList = store.manifestListFactory().create();
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+
+        // Delta manifests: the overwrite commit itself.
+        // DELETE A, B (pinned to baseSnapshot 1) and ADD X, Y (sort compact output).
+        List<ManifestEntry> deltaEntries =
+                manifestList.readDeltaManifests(latest).stream()
+                        .flatMap(meta -> manifestFile.read(meta.fileName()).stream())
+                        .collect(Collectors.toList());
+        List<String> deltaDeletes =
+                deltaEntries.stream()
+                        .filter(e -> e.kind() == FileKind.DELETE)
+                        .map(e -> e.file().fileName())
+                        .collect(Collectors.toList());
+        List<String> deltaAdds =
+                deltaEntries.stream()
+                        .filter(e -> e.kind() == FileKind.ADD)
+                        .map(e -> e.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(deltaDeletes).containsExactlyInAnyOrder("A.parquet", "B.parquet");
+        assertThat(deltaAdds).containsExactlyInAnyOrder("X.parquet", "Y.parquet");
+
+        // Base manifests: carried forward from prior snapshots.
+        // A, B (snapshot 1) and C (concurrent write, snapshot 2) are all ADDs in base.
+        List<ManifestEntry> baseEntries =
+                manifestList.read(latest.baseManifestList(), latest.baseManifestListSize()).stream()
+                        .flatMap(meta -> manifestFile.read(meta.fileName()).stream())
+                        .collect(Collectors.toList());
+        List<String> baseFileNames =
+                baseEntries.stream().map(e -> e.file().fileName()).collect(Collectors.toList());
+        assertThat(baseFileNames).containsExactlyInAnyOrder("A.parquet", "B.parquet", "C.parquet");
+        assertThat(baseEntries).allMatch(e -> e.kind() == FileKind.ADD);
+
+        // Net visible files: base ADDs minus delta DELETEs plus delta ADDs = C, X, Y
+        List<String> visibleFiles =
+                store.newScan().plan().files().stream()
+                        .map(e -> e.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(visibleFiles).containsExactlyInAnyOrder("C.parquet", "X.parquet", "Y.parquet");
+        commit.close();
     }
 
     private void logData(Supplier<List<KeyValue>> supplier, String name) {
