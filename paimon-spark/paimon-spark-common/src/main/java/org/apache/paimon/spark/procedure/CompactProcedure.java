@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
@@ -636,9 +637,12 @@ public class CompactProcedure extends BaseProcedure {
                         .reduce(Dataset::union)
                         .orElse(null);
         if (datasetForWrite != null) {
+            Snapshot readSnapshot = table.snapshotManager().latestSnapshot();
+            Long readSnapshotId = readSnapshot == null ? null : readSnapshot.id();
+
             PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
-            // Use dynamic partition overwrite
             writer.writeBuilder().withOverwrite();
+            writer.withOverwriteBaseSnapshot(readSnapshotId);
             writer.commit(writer.write(datasetForWrite));
         }
     }

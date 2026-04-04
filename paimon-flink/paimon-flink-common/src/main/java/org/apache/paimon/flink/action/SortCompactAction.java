@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
 import org.apache.paimon.flink.sorter.TableSortInfo;
@@ -135,10 +136,14 @@ public class SortCompactAction extends CompactAction {
                         fileStoreTable.rowType(),
                         sortInfo);
 
+        Snapshot readSnapshot = fileStoreTable.snapshotManager().latestSnapshot();
+        Long readSnapshotId = readSnapshot == null ? null : readSnapshot.id();
+
         new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)
                 .forRowData(sorter.sort())
                 .overwrite()
+                .withOverwriteBaseSnapshot(readSnapshotId)
                 .build();
     }
 

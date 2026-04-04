@@ -412,7 +412,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public int overwritePartition(
             Map<String, String> partition,
             ManifestCommittable committable,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId) {
         LOG.info(
                 "Ready to overwrite to table {}, number of commit messages: {}",
                 tableName,
@@ -500,7 +501,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 changes.appendIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.properties());
+                                committable.properties(),
+                                baseSnapshotId);
                 generatedSnapshot += 1;
             }
 
@@ -743,15 +745,53 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<String, String> properties) {
-        return tryCommit(
-                latestSnapshot ->
-                        scanner.readOverwriteChanges(
-                                options.bucket(),
-                                changes,
-                                indexFiles,
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId) {
+        // When baseSnapshotId is provided, detect concurrent writes between the base and latest
+        if (baseSnapshotId != null && !options.sortCompactSkipOverwriteConflictDetection()) {
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot != null && latestSnapshot.id() > baseSnapshotId) {
+                List<BinaryRow> changedPartitions =
+                        changes.stream()
+                                .map(ManifestEntry::partition)
+                                .distinct()
+                                .collect(Collectors.toList());
+                List<SimpleFileEntry> incrementalChanges =
+                        readIncrementalChanges(
+                                snapshotManager.snapshot(baseSnapshotId),
                                 latestSnapshot,
-                                partitionFilter),
+                                changedPartitions);
+                Collection<SimpleFileEntry> mergedIncremental =
+                        FileEntry.mergeEntries(incrementalChanges);
+                boolean hasNetNewAdds =
+                        mergedIncremental.stream()
+                                .anyMatch(
+                                        e ->
+                                                e.kind() == FileKind.ADD
+                                                        && (partitionFilter == null
+                                                                || partitionFilter.test(
+                                                                        e.partition())));
+                if (hasNetNewAdds) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Sort compact conflict detected for table %s: new data was written to "
+                                            + "the overwritten partitions between snapshot %d and %d. "
+                                            + "Please retry the sort compact or ensure no concurrent "
+                                            + "writes to these partitions.",
+                                    tableName, baseSnapshotId, latestSnapshot.id()));
+                }
+            }
+        }
+
+        return tryCommit(
+                latestSnapshot -> {
+                    Snapshot baseSnapshot =
+                            baseSnapshotId != null
+                                    ? snapshotManager.snapshot(baseSnapshotId)
+                                    : latestSnapshot;
+                    return scanner.readOverwriteChanges(
+                            options.bucket(), changes, indexFiles, baseSnapshot, partitionFilter);
+                },
                 identifier,
                 watermark,
                 properties,

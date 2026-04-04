@@ -93,6 +93,13 @@ case class PaimonSparkWriter(
     tableForWrite.newBatchWriteBuilder()
   }
 
+  var overwriteBaseSnapshotId: java.lang.Long = _
+
+  def withOverwriteBaseSnapshot(snapshotId: java.lang.Long): PaimonSparkWriter = {
+    this.overwriteBaseSnapshotId = snapshotId
+    this
+  }
+
   def writeOnly(): PaimonSparkWriter = {
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
@@ -422,6 +429,11 @@ case class PaimonSparkWriter(
       writeBuilder
     }
     val tableCommit = finalWriteBuilder.newCommit()
+    tableCommit match {
+      case innerTableCommit: InnerTableCommit =>
+        innerTableCommit.withOverwriteBaseSnapshot(overwriteBaseSnapshotId)
+      case _ =>
+    }
     try {
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
