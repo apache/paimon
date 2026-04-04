@@ -89,6 +89,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final ThreadPoolExecutor fileCheckExecutor;
 
     @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private Long overwriteBaseSnapshotId = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -143,6 +144,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
         this.overwritePartition = overwritePartitions;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withOverwriteBaseSnapshot(@Nullable Long snapshotId) {
+        this.overwriteBaseSnapshotId = snapshotId;
         return this;
     }
 
@@ -262,7 +269,10 @@ public class TableCommitImpl implements InnerTableCommit {
             }
             int newSnapshots =
                     commit.overwritePartition(
-                            overwritePartition, committable, Collections.emptyMap());
+                            overwritePartition,
+                            committable,
+                            Collections.emptyMap(),
+                            overwriteBaseSnapshotId);
             maintain(
                     committable.identifier(),
                     maintainExecutor,
