@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.data.GenericRow
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.utils.SparkProcedureUtils
@@ -1336,6 +1337,71 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
       val hilbertResult = spark.sql("SELECT * FROM T").collect()
       Assertions.assertThat(hilbertResult.length).isEqualTo(8)
+    }
+  }
+
+  test("Paimon Procedure: sort compact detects concurrent write conflict") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a INT, b INT)
+                   |TBLPROPERTIES ('bucket'='-1')
+                   |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (1, 1)")
+      spark.sql("INSERT INTO T VALUES (2, 2)")
+
+      val table = loadTable("T")
+      val baseSnapshotId = table.snapshotManager().latestSnapshotId()
+
+      // Simulate concurrent write after base snapshot
+      spark.sql("INSERT INTO T VALUES (3, 3)")
+
+      val latestSnapshotId = table.snapshotManager().latestSnapshotId()
+      Assertions.assertThat(latestSnapshotId).isGreaterThan(baseSnapshotId)
+
+      val overwritePartition = new java.util.HashMap[String, String]()
+
+      // Generate commit messages via BatchWriteBuilder
+      val builder = table.newBatchWriteBuilder().withOverwrite(overwritePartition)
+      val batchWrite = builder.newWrite()
+      batchWrite.write(GenericRow.of(Integer.valueOf(99), Integer.valueOf(99)))
+      val messages = batchWrite.prepareCommit()
+      batchWrite.close()
+
+      // Attempt overwrite with baseSnapshotId: should detect conflict
+      val user = UUID.randomUUID().toString
+      val tableCommit = table
+        .newCommit(user)
+        .withOverwrite(overwritePartition)
+        .withOverwriteBaseSnapshot(java.lang.Long.valueOf(baseSnapshotId))
+
+      Assertions
+        .assertThatThrownBy(() => tableCommit.commit(messages))
+        .isInstanceOf(classOf[RuntimeException])
+        .hasMessageContaining("Sort compact conflict detected")
+      tableCommit.close()
+    }
+  }
+
+  test("Paimon Procedure: sort compact succeeds with overwrite base snapshot") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a INT, b INT)
+                   |TBLPROPERTIES ('bucket'='-1')
+                   |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (2, 2)")
+      spark.sql("INSERT INTO T VALUES (1, 1)")
+
+      checkAnswer(
+        spark.sql("CALL sys.compact(table => 'T', order_strategy => 'order', order_by => 'a')"),
+        Row(true) :: Nil)
+
+      val table = loadTable("T")
+      Assertions
+        .assertThat(table.latestSnapshot().get().commitKind())
+        .isEqualTo(CommitKind.OVERWRITE)
+      checkAnswer(spark.sql("SELECT * FROM T ORDER BY a"), Seq(Row(1, 1), Row(2, 2)))
     }
   }
 
