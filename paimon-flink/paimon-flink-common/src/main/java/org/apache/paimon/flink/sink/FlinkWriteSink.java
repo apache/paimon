@@ -40,10 +40,15 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
     private static final long serialVersionUID = 1L;
 
     @Nullable protected final Map<String, String> overwritePartition;
+    @Nullable protected Long overwriteBaseSnapshotId;
 
     public FlinkWriteSink(FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
         super(table, overwritePartition != null);
         this.overwritePartition = overwritePartition;
+    }
+
+    public void setOverwriteBaseSnapshotId(@Nullable Long overwriteBaseSnapshotId) {
+        this.overwriteBaseSnapshotId = overwriteBaseSnapshotId;
     }
 
     @Override
@@ -57,6 +62,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                         table,
                         table.newCommit(context.commitUser())
                                 .withOverwrite(overwritePartition)
+                                .withOverwriteBaseSnapshot(overwriteBaseSnapshotId)
                                 .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
                         context);
     }
