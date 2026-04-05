@@ -36,6 +36,48 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
+    """Cast binary columns to match the target table schema.
+
+    Ray map_batches may downgrade large_binary (BLOB) to binary when user code
+    returns Python dicts, because PyArrow infers bytes as binary by default.
+    This function casts such columns back to large_binary to match the Paimon
+    table schema before writing.
+    """
+    needs_cast = False
+    for field in table.schema:
+        try:
+            target_type = target_schema.field(field.name).type
+        except KeyError:
+            continue
+        if (pa.types.is_binary(field.type) and pa.types.is_large_binary(target_type)):
+            needs_cast = True
+            break
+
+    if not needs_cast:
+        return table
+
+    new_columns = []
+    new_fields = []
+    for i, field in enumerate(table.schema):
+        col = table.column(i)
+        try:
+            target_type = target_schema.field(field.name).type
+        except KeyError:
+            new_columns.append(col)
+            new_fields.append(field)
+            continue
+
+        if pa.types.is_binary(field.type) and pa.types.is_large_binary(target_type):
+            col = col.cast(target_type)
+            new_fields.append(pa.field(field.name, target_type, nullable=field.nullable))
+        else:
+            new_fields.append(field)
+        new_columns.append(col)
+
+    return pa.table(new_columns, schema=pa.schema(new_fields))
+
 # Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
 try:
     _DatasinkBase = Datasink[List["CommitMessage"]]
@@ -90,11 +132,19 @@ class PaimonDatasink(_DatasinkBase):
             
             table_write = writer_builder.new_write()
 
+            table_schema = self.table.table_schema
+            from pypaimon.schema.data_types import PyarrowFieldParser
+            target_pa_schema = PyarrowFieldParser.from_paimon_schema(table_schema.fields)
+
             for block in blocks:
                 block_arrow: pa.Table = BlockAccessor.for_block(block).to_arrow()
 
                 if block_arrow.num_rows == 0:
                     continue
+
+                # Ray map_batches may downgrade large_binary to binary when
+                # returning Python dicts. Cast back to match the table schema.
+                block_arrow = _cast_binary_to_table_schema(block_arrow, target_pa_schema)
 
                 table_write.write_arrow(block_arrow)
 

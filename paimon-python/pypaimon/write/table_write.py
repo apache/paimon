@@ -59,7 +59,7 @@ class TableWrite:
 
     def write_pandas(self, dataframe):
         pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
-        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
+        record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema, preserve_index=False)
         return self.write_arrow_batch(record_batch)
 
     def with_write_type(self, write_cols: List[str]):
@@ -80,7 +80,7 @@ class TableWrite:
     ) -> None:
         """
         Write a Ray Dataset to Paimon table.
-        
+
         Args:
             dataset: Ray Dataset to write. This is a distributed data collection
                 from Ray Data (ray.data.Dataset).
@@ -102,31 +102,24 @@ class TableWrite:
         self.file_store_write.close()
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
-        if data_schema == self.table_pyarrow_schema:
-            return
-        if data_schema.names == self.file_store_write.write_cols:
-            return
-        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
-        if data_schema.names == self.table_pyarrow_schema.names:
-            compatible = True
-            for i in range(len(data_schema)):
-                input_type = data_schema.field(i).type
-                table_type = self.table_pyarrow_schema.field(i).type
-                if input_type != table_type:
-                    if self._is_binary_family(input_type) and self._is_binary_family(table_type):
-                        continue
-                    compatible = False
-                    break
-            if compatible:
-                return
-        raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
-                         f"Input schema is: {data_schema} "
-                         f"Table schema is: {self.table_pyarrow_schema} "
-                         f"Write cols is: {self.file_store_write.write_cols}")
+        write_cols = self.file_store_write.write_cols
 
-    @staticmethod
-    def _is_binary_family(arrow_type) -> bool:
-        return pa.types.is_binary(arrow_type) or pa.types.is_fixed_size_binary(arrow_type)
+        if write_cols is None:
+            if data_schema != self.table_pyarrow_schema:
+                raise ValueError(
+                    f"Input schema isn't consistent with table schema and write cols. "
+                    f"Input schema is: {data_schema} "
+                    f"Table schema is: {self.table_pyarrow_schema} "
+                    f"Write cols is: {self.file_store_write.write_cols}"
+                )
+        else:
+            if list(data_schema.names) != write_cols:
+                raise ValueError(
+                    f"Input schema field names don't match write_cols. "
+                    f"Field names and order must match write_cols.\n"
+                    f"Input schema names: {list(data_schema.names)}\n"
+                    f"Write cols: {write_cols}"
+                )
 
 
 class BatchTableWrite(TableWrite):
