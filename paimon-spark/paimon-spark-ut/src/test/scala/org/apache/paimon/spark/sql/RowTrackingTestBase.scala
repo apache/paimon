@@ -971,10 +971,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
       checkAnswer(
         sql("SELECT a, b, c, status FROM target ORDER BY a"),
-        Seq(
-          Row(1, 10, "c1", "active"),
-          Row(2, 20, "c2", "active"),
-          Row(3, 30, "c3", "active"))
+        Seq(Row(1, 10, "c1", "active"), Row(2, 20, "c2", "active"), Row(3, 30, "c3", "active"))
       )
     }
   }
