@@ -71,8 +71,8 @@ setup(
             'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
         ],
         'sql': [
-            'pypaimon-rust',
-            'datafusion>=52',
+            'pypaimon-rust; python_version>="3.10"',
+            'datafusion>=52; python_version>="3.10"',
         ],
     },
     description="Apache Paimon Python API",
