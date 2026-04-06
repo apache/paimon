@@ -76,4 +76,6 @@ class SQLContext:
         """Execute a SQL query and return the result as a PyArrow Table."""
         df = self._ctx.sql(query)
         batches = df.collect()
+        if not batches:
+            return pa.Table.from_batches([], schema=df.schema())
         return pa.Table.from_batches(batches)

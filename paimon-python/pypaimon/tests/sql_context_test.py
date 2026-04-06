@@ -112,6 +112,13 @@ class SQLContextTest(unittest.TestCase):
         self.assertEqual(table.num_rows, 2)
         self.assertEqual(table.column("id").to_pylist(), [2, 3])
 
+    def test_sql_with_empty_result(self):
+        ctx = self._create_sql_context()
+        table = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 4 ORDER BY id")
+        self.assertIsInstance(table, pa.Table)
+        self.assertEqual(table.num_rows, 0)
+        self.assertEqual(table.schema.names, ["id", "name"])
+
     def test_sql_with_aggregation(self):
         ctx = self._create_sql_context()
         table = ctx.sql("SELECT count(*) AS cnt FROM sql_test_table")
