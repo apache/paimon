@@ -117,125 +117,20 @@ class RayDataTest(unittest.TestCase):
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
-    def test_ray_data_read_and_write_with_blob(self):
-        import time
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('name', pa.string()),
-            ('data', pa.large_binary()),  # Table uses large_binary for blob
-        ])
+        # Test basic operations
+        sample_data = ray_dataset.take(3)
+        self.assertEqual(len(sample_data), 3, "Should have 3 sample rows")
 
-        schema = Schema.from_pyarrow_schema(
-            pa_schema,
-            options={
-                'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true',
-                'blob-field': 'data',
-            }
-        )
-
-        table_name = f'default.test_ray_read_write_blob_{int(time.time() * 1000000)}'
-        self.catalog.create_table(table_name, schema, False)
-        table = self.catalog.get_table(table_name)
-
-        # Step 1: Write data to Paimon table using write_arrow (large_binary type)
-        initial_data = pa.Table.from_pydict({
-            'id': [1, 2, 3],
-            'name': ['Alice', 'Bob', 'Charlie'],
-            'data': [b'blob_data_1', b'blob_data_2', b'blob_data_3'],
-        }, schema=pa_schema)
-
-        write_builder = table.new_batch_write_builder()
-        writer = write_builder.new_write()
-        writer.write_arrow(initial_data)
-        commit_messages = writer.prepare_commit()
-        commit = write_builder.new_commit()
-        commit.commit(commit_messages)
-        writer.close()
-
-        # Step 2: Read from Paimon table using to_ray()
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        table_scan = read_builder.new_scan()
-        splits = table_scan.plan().splits()
-
-        ray_dataset = table_read.to_ray(splits)
-
-        # Verify Ray blocks preserve large_binary type from Paimon
-        for batch in ray_dataset.iter_batches(batch_size=10, batch_format="pyarrow"):
-            ray_data_field = batch.schema.field('data')
-            self.assertTrue(
-                pa_types.is_large_binary(ray_data_field.type),
-                f"Ray block should preserve large_binary() from Paimon, but got {ray_data_field.type}"
-            )
-            break
-
-        # Verify Paimon table schema is large_binary (BLOB)
-        table_pa_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-        self.assertTrue(
-            pa_types.is_large_binary(table_pa_schema.field('data').type),
-            f"Paimon table should have large_binary() for BLOB field"
-        )
-
-        # Step 3: Simulate user pipeline: map_batches returns Python dict,
-        # causing PyArrow to re-infer types (large_binary -> binary for bytes).
-        # This reproduces the real-world scenario where user code (e.g. DLFBlobParser)
-        # returns processed Python bytes and Ray/PyArrow downgrades the Arrow type.
-        def process_blob(batch):
-            return {
-                'id': batch['id'].to_pylist(),
-                'name': batch['name'].to_pylist(),
-                'data': batch['data'].to_pylist(),  # Python bytes -> binary
-            }
-
-        mapped_dataset = ray_dataset.map_batches(process_blob, batch_format="pyarrow")
-
-        # Verify map_batches caused type downgrade: large_binary -> binary
-        for batch in mapped_dataset.iter_batches(batch_size=10, batch_format="pyarrow"):
-            mapped_data_field = batch.schema.field('data')
-            self.assertTrue(
-                pa_types.is_binary(mapped_data_field.type),
-                f"After map_batches returning dict, data should be binary(), but got {mapped_data_field.type}"
-            )
-            break
-
-        # Step 4: Write mapped dataset back via write_ray().
-        # Without the fix in ray_datasink, this raises:
-        #   ValueError: Input schema isn't consistent with table schema
-        #   Input: binary, Table: large_binary
-        # With the fix, ray_datasink casts binary back to large_binary before writing.
-        write_builder2 = table.new_batch_write_builder()
-        writer2 = write_builder2.new_write()
-
-        writer2.write_ray(
-            mapped_dataset,
-            overwrite=False,
-            concurrency=1
-        )
-        writer2.close()
-
-        # Step 5: Verify the data was written correctly
-        read_builder2 = table.new_read_builder()
-        table_read2 = read_builder2.new_read()
-        result = table_read2.to_arrow(read_builder2.new_scan().plan().splits())
-
-        self.assertEqual(result.num_rows, 6, "Table should have 6 rows after roundtrip")
-
-        result_df = result.to_pandas()
-        result_df_sorted = result_df.sort_values(by='id').reset_index(drop=True)
-
-        self.assertEqual(list(result_df_sorted['id']), [1, 1, 2, 2, 3, 3], "ID column should match")
+        # Convert to pandas for verification
+        df = ray_dataset.to_pandas()
+        self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
+        # Sort by id to ensure order-independent comparison
+        df_sorted = df.sort_values(by='id').reset_index(drop=True)
+        self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4, 5], "ID column should match")
         self.assertEqual(
-            list(result_df_sorted['name']),
-            ['Alice', 'Alice', 'Bob', 'Bob', 'Charlie', 'Charlie'],
+            list(df_sorted['name']),
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             "Name column should match"
-        )
-
-        written_data_values = [bytes(d) if d is not None else None for d in result_df_sorted['data']]
-        self.assertEqual(
-            written_data_values,
-            [b'blob_data_1', b'blob_data_1', b'blob_data_2', b'blob_data_2', b'blob_data_3', b'blob_data_3'],
-            "Blob data column should match"
         )
 
     def test_basic_ray_data_write(self):
@@ -805,13 +700,6 @@ class RayDataTest(unittest.TestCase):
         self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
     def test_dict_return_loses_large_binary_type(self):
-        """Demonstrate that returning a dict from map_batches loses large_binary type.
-
-        This is the root cause of the binary/large_binary mismatch issue:
-        1. PyArrow table has large_binary column
-        2. Convert to dict (Python list[bytes]) — type info lost
-        3. Rebuild PyArrow table from dict — PyArrow infers bytes as binary
-        """
         # Original data with large_binary
         original = pa.table({
             'data': pa.array([b'hello', b'world'], type=pa.large_binary())
@@ -831,6 +719,120 @@ class RayDataTest(unittest.TestCase):
         self.assertFalse(
             pa_types.is_large_binary(rebuilt.schema.field('data').type),
             "large_binary type should be lost after dict roundtrip"
+        )
+
+    def test_ray_data_read_and_write_with_blob(self):
+        import time
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('data', pa.large_binary()),  # Table uses large_binary for blob
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-field': 'data',
+            }
+        )
+
+        table_name = f'default.test_ray_read_write_blob_{int(time.time() * 1000000)}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        # Step 1: Write data to Paimon table using write_arrow (large_binary type)
+        initial_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'data': [b'blob_data_1', b'blob_data_2', b'blob_data_3'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Step 2: Read from Paimon table using to_ray()
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        ray_dataset = table_read.to_ray(splits)
+
+        # Verify Ray blocks preserve large_binary type from Paimon
+        for batch in ray_dataset.iter_batches(batch_size=10, batch_format="pyarrow"):
+            ray_data_field = batch.schema.field('data')
+            self.assertTrue(
+                pa_types.is_large_binary(ray_data_field.type),
+                f"Ray block should preserve large_binary() from Paimon, but got {ray_data_field.type}"
+            )
+            break
+
+        # Verify Paimon table schema is large_binary (BLOB)
+        table_pa_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self.assertTrue(
+            pa_types.is_large_binary(table_pa_schema.field('data').type),
+            "Paimon table should have large_binary() for BLOB field"
+        )
+
+        # Step 3: Simulate user pipeline: map_batches returns Python dict,
+        def process_blob(batch):
+            return {
+                'id': batch['id'].to_pylist(),
+                'name': batch['name'].to_pylist(),
+                'data': batch['data'].to_pylist(),  # Python bytes -> binary
+            }
+
+        mapped_dataset = ray_dataset.map_batches(process_blob, batch_format="pyarrow")
+
+        # Verify map_batches caused type downgrade: large_binary -> binary
+        for batch in mapped_dataset.iter_batches(batch_size=10, batch_format="pyarrow"):
+            mapped_data_field = batch.schema.field('data')
+            self.assertTrue(
+                pa_types.is_binary(mapped_data_field.type),
+                f"After map_batches returning dict, data should be binary(), but got {mapped_data_field.type}"
+            )
+            break
+
+        # Step 4: Write mapped dataset back via write_ray().
+        write_builder2 = table.new_batch_write_builder()
+        writer2 = write_builder2.new_write()
+
+        writer2.write_ray(
+            mapped_dataset,
+            overwrite=False,
+            concurrency=1
+        )
+        writer2.close()
+
+        # Step 5: Verify the data was written correctly
+        read_builder2 = table.new_read_builder()
+        table_read2 = read_builder2.new_read()
+        result = table_read2.to_arrow(read_builder2.new_scan().plan().splits())
+
+        self.assertEqual(result.num_rows, 6, "Table should have 6 rows after roundtrip")
+
+        result_df = result.to_pandas()
+        result_df_sorted = result_df.sort_values(by='id').reset_index(drop=True)
+
+        self.assertEqual(list(result_df_sorted['id']), [1, 1, 2, 2, 3, 3], "ID column should match")
+        self.assertEqual(
+            list(result_df_sorted['name']),
+            ['Alice', 'Alice', 'Bob', 'Bob', 'Charlie', 'Charlie'],
+            "Name column should match"
+        )
+
+        written_data_values = [bytes(d) if d is not None else None for d in result_df_sorted['data']]
+        self.assertEqual(
+            written_data_values,
+            [b'blob_data_1', b'blob_data_1', b'blob_data_2', b'blob_data_2', b'blob_data_3', b'blob_data_3'],
+            "Blob data column should match"
         )
 
 

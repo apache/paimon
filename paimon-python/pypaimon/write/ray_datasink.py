@@ -38,45 +38,26 @@ logger = logging.getLogger(__name__)
 
 
 def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
-    """Cast binary columns to match the target table schema.
+    """Cast binary to large_binary for BLOB fields.
 
-    Ray map_batches may downgrade large_binary (BLOB) to binary when user code
-    returns Python dicts, because PyArrow infers bytes as binary by default.
-    This function casts such columns back to large_binary to match the Paimon
-    table schema before writing.
+    When map_batches returns Python dicts, PyArrow infers bytes as binary,
+    losing the original large_binary (BLOB) type. Cast back before writing.
     """
-    needs_cast = False
-    for field in table.schema:
-        try:
-            target_type = target_schema.field(field.name).type
-        except KeyError:
-            continue
-        if (pa.types.is_binary(field.type) and pa.types.is_large_binary(target_type)):
-            needs_cast = True
-            break
+    cast_indices = []
+    for i, field in enumerate(table.schema):
+        target_field = target_schema.field(field.name) if field.name in target_schema.names else None
+        if target_field and pa.types.is_binary(field.type) and pa.types.is_large_binary(target_field.type):
+            cast_indices.append(i)
 
-    if not needs_cast:
+    if not cast_indices:
         return table
 
-    new_columns = []
-    new_fields = []
-    for i, field in enumerate(table.schema):
-        col = table.column(i)
-        try:
-            target_type = target_schema.field(field.name).type
-        except KeyError:
-            new_columns.append(col)
-            new_fields.append(field)
-            continue
-
-        if pa.types.is_binary(field.type) and pa.types.is_large_binary(target_type):
-            col = col.cast(target_type)
-            new_fields.append(pa.field(field.name, target_type, nullable=field.nullable))
-        else:
-            new_fields.append(field)
-        new_columns.append(col)
-
-    return pa.table(new_columns, schema=pa.schema(new_fields))
+    columns = table.columns
+    for i in cast_indices:
+        columns[i] = columns[i].cast(pa.large_binary())
+    fields = [target_schema.field(f.name) if i in cast_indices else f
+              for i, f in enumerate(table.schema)]
+    return pa.table(columns, schema=pa.schema(fields))
 
 # Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
 try:
@@ -142,8 +123,6 @@ class PaimonDatasink(_DatasinkBase):
                 if block_arrow.num_rows == 0:
                     continue
 
-                # Ray map_batches may downgrade large_binary to binary when
-                # returning Python dicts. Cast back to match the table schema.
                 block_arrow = _cast_binary_to_table_schema(block_arrow, target_pa_schema)
 
                 table_write.write_arrow(block_arrow)
