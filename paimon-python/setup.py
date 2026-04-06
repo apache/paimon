@@ -70,6 +70,10 @@ setup(
             'pylance>=0.20,<1; python_version>="3.9"',
             'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
         ],
+        'sql': [
+            'pypaimon-rust; python_version>="3.10"',
+            'datafusion>=52; python_version>="3.10"',
+        ],
     },
     description="Apache Paimon Python API",
     long_description=long_description,

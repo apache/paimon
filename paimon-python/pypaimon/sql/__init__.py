@@ -15,26 +15,11 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-import sys
+__all__ = ['SQLContext']
 
-if sys.version_info[:2] == (3, 6):
-    try:
-        from pypaimon.manifest import fastavro_py36_compat  # noqa: F401
-    except ImportError:
-        pass
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
-from pypaimon.schema.schema import Schema
-from pypaimon.tag.tag import Tag
-from pypaimon.tag.tag_manager import TagManager
-from pypaimon.sql.sql_context import SQLContext
-
-__all__ = [
-    "PaimonVirtualFileSystem",
-    "CatalogFactory",
-    "Schema",
-    "Tag",
-    "TagManager",
-    "SQLContext",
-]
+def __getattr__(name):
+    if name == "SQLContext":
+        from pypaimon.sql.sql_context import SQLContext
+        return SQLContext
+    raise AttributeError("module 'pypaimon.sql' has no attribute {}".format(name))

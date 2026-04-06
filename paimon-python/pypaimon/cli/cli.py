@@ -121,6 +121,10 @@ def main():
     from pypaimon.cli.cli_catalog import add_catalog_subcommands
     add_catalog_subcommands(catalog_parser)
 
+    # SQL command
+    from pypaimon.cli.cli_sql import add_sql_subcommand
+    add_sql_subcommand(subparsers)
+
     args = parser.parse_args()
     
     if args.command is None:
