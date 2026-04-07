@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -70,7 +71,7 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
         affectedPartitions = new HashSet<>();
 
         Preconditions.checkState(
-                getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks() == 1,
+                RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()) == 1,
                 "Parallelism of MergeIntoUpdateChecker must be 1.");
     }
 
