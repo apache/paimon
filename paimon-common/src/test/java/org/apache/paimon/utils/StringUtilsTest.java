@@ -260,6 +260,56 @@ class StringUtilsTest {
     }
 
     @Nested
+    class CommonsCompatibilityTests {
+
+        @Test
+        void testIsBlank() {
+            assertThat(StringUtils.isBlank(null)).isTrue();
+            assertThat(StringUtils.isBlank("")).isTrue();
+            assertThat(StringUtils.isBlank(" \t")).isTrue();
+            assertThat(StringUtils.isBlank("paimon")).isFalse();
+        }
+
+        @Test
+        void testEquals() {
+            assertThat(StringUtils.equals(null, null)).isTrue();
+            assertThat(StringUtils.equals(null, "paimon")).isFalse();
+            assertThat(StringUtils.equals("paimon", "paimon")).isTrue();
+            assertThat(StringUtils.equals("paimon", "Paimon")).isFalse();
+        }
+
+        @Test
+        void testStartsWithAndEndsWith() {
+            assertThat(StringUtils.startsWith("manifest-1", "manifest")).isTrue();
+            assertThat(StringUtils.startsWith(null, "manifest")).isFalse();
+            assertThat(StringUtils.endsWith("part-0.parquet", ".parquet")).isTrue();
+            assertThat(StringUtils.endsWith("part-0.orc", ".parquet")).isFalse();
+        }
+
+        @Test
+        void testSubstringBeforeAndAfterLast() {
+            assertThat(StringUtils.substringBeforeLast("a/b/c", "/")).isEqualTo("a/b");
+            assertThat(StringUtils.substringBeforeLast("abc", "/")).isEqualTo("abc");
+            assertThat(StringUtils.substringAfterLast("a/b/c", "/")).isEqualTo("c");
+            assertThat(StringUtils.substringAfterLast("abc/", "/")).isEmpty();
+        }
+
+        @Test
+        void testStripEnd() {
+            assertThat(StringUtils.stripEnd("cpu\n", null)).isEqualTo("cpu");
+            assertThat(StringUtils.stripEnd("abccc", "c")).isEqualTo("ab");
+            assertThat(StringUtils.stripEnd("abc", "")).isEqualTo("abc");
+        }
+
+        @Test
+        void testTrimToNull() {
+            assertThat(StringUtils.trimToNull(null)).isNull();
+            assertThat(StringUtils.trimToNull("   ")).isNull();
+            assertThat(StringUtils.trimToNull("  paimon  ")).isEqualTo("paimon");
+        }
+    }
+
+    @Nested
     class RandomNumericStringTests {
 
         @Test

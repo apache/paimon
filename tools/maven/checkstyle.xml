@@ -189,12 +189,6 @@ This file is based on the checkstyle file of Apache Beam.
 			<property name="message"
 					  value="Use Paimon's Preconditions instead of Guava's Preconditions"/>
 		</module>
-		<module name="Regexp">
-			<property name="format" value="import org\.apache\.commons\.lang3\.StringUtils"/>
-			<property name="illegalPattern" value="true"/>
-			<property name="message" value="{0}; Use paimon StringUtils or paimon shaded StringUtils instead."/>
-		</module>
-
 		<!-- Enforce Java-style array declarations -->
 		<module name="ArrayTypeStyle"/>
 
@@ -275,6 +269,13 @@ This file is based on the checkstyle file of Apache Beam.
 		<!--<module name="RegexpSinglelineJava">-->
 		<!--<property name="format" value="com\.google\.api\.client\.util\.(ByteStreams|Charsets|Collections2|Joiner|Lists|Maps|Objects|Preconditions|Sets|Strings|Throwables)"/>-->
 		<!--</module>-->
+
+		<module name="RegexpSinglelineJava">
+			<property name="format"
+					  value="^import (static )?(org\.apache\.paimon\.shade\.)?org\.apache\.commons\.lang3\.StringUtils.*;$"/>
+			<property name="message"
+					  value="Use org.apache.paimon.utils.StringUtils instead of commons StringUtils"/>
+		</module>
 
 		<!--
 			 Require static importing from Preconditions.
@@ -588,4 +589,3 @@ This file is based on the checkstyle file of Apache Beam.
 
 	</module>
 </module>
-

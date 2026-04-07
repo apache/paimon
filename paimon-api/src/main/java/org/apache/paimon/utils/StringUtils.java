@@ -307,6 +307,112 @@ public class StringUtils {
         return !isEmpty(cs);
     }
 
+    public static boolean isBlank(final CharSequence cs) {
+        if (isEmpty(cs)) {
+            return true;
+        }
+
+        for (int i = 0; i < cs.length(); i++) {
+            if (!Character.isWhitespace(cs.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean equals(final CharSequence cs1, final CharSequence cs2) {
+        if (cs1 == cs2) {
+            return true;
+        }
+        if (cs1 == null || cs2 == null || cs1.length() != cs2.length()) {
+            return false;
+        }
+
+        for (int i = 0; i < cs1.length(); i++) {
+            if (cs1.charAt(i) != cs2.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean startsWith(final CharSequence str, final CharSequence prefix) {
+        if (str == prefix) {
+            return true;
+        }
+        if (str == null || prefix == null) {
+            return false;
+        }
+
+        return str.toString().startsWith(prefix.toString());
+    }
+
+    public static boolean endsWith(final CharSequence str, final CharSequence suffix) {
+        if (str == suffix) {
+            return true;
+        }
+        if (str == null || suffix == null) {
+            return false;
+        }
+
+        return str.toString().endsWith(suffix.toString());
+    }
+
+    public static String substringBeforeLast(final String str, final String separator) {
+        if (isEmpty(str) || isEmpty(separator)) {
+            return str;
+        }
+
+        int pos = str.lastIndexOf(separator);
+        if (pos == INDEX_NOT_FOUND) {
+            return str;
+        }
+
+        return str.substring(0, pos);
+    }
+
+    public static String substringAfterLast(final String str, final String separator) {
+        if (isEmpty(str)) {
+            return str;
+        }
+        if (isEmpty(separator)) {
+            return EMPTY;
+        }
+
+        int pos = str.lastIndexOf(separator);
+        if (pos == INDEX_NOT_FOUND || pos == str.length() - separator.length()) {
+            return EMPTY;
+        }
+
+        return str.substring(pos + separator.length());
+    }
+
+    public static String stripEnd(final String str, final String stripChars) {
+        if (isEmpty(str)) {
+            return str;
+        }
+
+        int end = str.length();
+        if (stripChars == null) {
+            while (end != 0 && Character.isWhitespace(str.charAt(end - 1))) {
+                end--;
+            }
+        } else if (stripChars.isEmpty()) {
+            return str;
+        } else {
+            while (end != 0 && stripChars.indexOf(str.charAt(end - 1)) != INDEX_NOT_FOUND) {
+                end--;
+            }
+        }
+
+        return str.substring(0, end);
+    }
+
+    public static String trimToNull(final String str) {
+        String trimmed = trim(str);
+        return isEmpty(trimmed) ? null : trimmed;
+    }
+
     public static String randomNumericString(int len) {
         StringBuilder builder = new StringBuilder();
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
