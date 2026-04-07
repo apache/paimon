@@ -397,8 +397,8 @@ t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
 if snapshot_manager.snapshot_exists(1):
     print("Snapshot 1 exists")
 
-# Or delete a specific snapshot (use with caution)
-# snapshot_manager.delete_snapshot(3)  # Deletes snapshot 3
+# Delete a specific snapshot
+snapshot_manager.delete_snapshot(3)
 
 # Read records committed between [t1, t2]
 table_inc = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: f"{t1},{t2}"})
