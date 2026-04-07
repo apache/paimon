@@ -134,6 +134,35 @@ class SnapshotManager:
         """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
+    def snapshot_exists(self, snapshot_id: int) -> bool:
+        """
+        Check if a snapshot with the given ID exists.
+
+        Args:
+            snapshot_id: The snapshot ID to check
+
+        Returns:
+            True if the snapshot exists, False otherwise
+        """
+        snapshot_file = self.get_snapshot_path(snapshot_id)
+        return self.file_io.exists(snapshot_file)
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        """
+        Delete the snapshot file for the given ID.
+
+        Args:
+            snapshot_id: The snapshot ID to delete
+
+        Raises:
+            FileNotFoundError: If the snapshot file does not exist
+            IOError: If an error occurs during deletion
+        """
+        snapshot_file = self.get_snapshot_path(snapshot_id)
+        if not self.file_io.exists(snapshot_file):
+            raise FileNotFoundError(f"Snapshot file not found: {snapshot_file}")
+        self.file_io.delete(snapshot_file)
+
     def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
         earliest_file = f"{self.snapshot_dir}/EARLIEST"
         if self.file_io.exists(earliest_file):

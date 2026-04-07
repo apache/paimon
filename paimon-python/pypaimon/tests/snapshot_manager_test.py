@@ -138,6 +138,85 @@ class SnapshotManagerTest(unittest.TestCase):
         self.assertEqual(next_id, 8)  # 5 + 3 = 8, continue from here
         self.assertEqual(skipped_count, 3)  # All 3 were skipped
 
+    def test_snapshot_exists_returns_true_when_snapshot_exists(self):
+        """snapshot_exists should return True when snapshot file exists."""
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        table = Mock()
+        table.table_path = "/tmp/test_table"
+        table.file_io = Mock()
+        table.file_io.exists.return_value = True
+        table.catalog_environment = Mock()
+        table.catalog_environment.snapshot_loader.return_value = None
+
+        manager = SnapshotManager(table)
+
+        # Test existing snapshot
+        exists = manager.snapshot_exists(123)
+
+        self.assertTrue(exists)
+        # Verify the correct path was checked
+        table.file_io.exists.assert_called_once_with("/tmp/test_table/snapshot/snapshot-123")
+
+    def test_snapshot_exists_returns_false_when_snapshot_not_exists(self):
+        """snapshot_exists should return False when snapshot file does not exist."""
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        table = Mock()
+        table.table_path = "/tmp/test_table"
+        table.file_io = Mock()
+        table.file_io.exists.return_value = False
+        table.catalog_environment = Mock()
+        table.catalog_environment.snapshot_loader.return_value = None
+
+        manager = SnapshotManager(table)
+
+        # Test non-existing snapshot
+        exists = manager.snapshot_exists(999)
+
+        self.assertFalse(exists)
+        table.file_io.exists.assert_called_once_with("/tmp/test_table/snapshot/snapshot-999")
+
+    def test_delete_snapshot_removes_snapshot_file(self):
+        """delete_snapshot should successfully delete existing snapshot file."""
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        table = Mock()
+        table.table_path = "/tmp/test_table"
+        table.file_io = Mock()
+        table.file_io.exists.return_value = True
+        table.catalog_environment = Mock()
+        table.catalog_environment.snapshot_loader.return_value = None
+
+        manager = SnapshotManager(table)
+
+        # Test deleting existing snapshot
+        manager.delete_snapshot(456)
+
+        # Verify delete was called with correct path
+        table.file_io.delete.assert_called_once_with("/tmp/test_table/snapshot/snapshot-456")
+
+    def test_delete_snapshot_raises_error_when_snapshot_not_exists(self):
+        """delete_snapshot should raise FileNotFoundError when snapshot does not exist."""
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        table = Mock()
+        table.table_path = "/tmp/test_table"
+        table.file_io = Mock()
+        table.file_io.exists.return_value = False
+        table.catalog_environment = Mock()
+        table.catalog_environment.snapshot_loader.return_value = None
+
+        manager = SnapshotManager(table)
+
+        # Test deleting non-existing snapshot should raise error
+        with self.assertRaises(FileNotFoundError) as context:
+            manager.delete_snapshot(789)
+
+        self.assertIn("Snapshot file not found", str(context.exception))
+        # Verify delete was not called
+        table.file_io.delete.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
