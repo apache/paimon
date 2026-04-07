@@ -35,13 +35,11 @@ class GlobalIndexScanner:
 
     def __init__(
         self,
-        options: dict,
         fields: list,
         file_io,
         index_path: str,
         index_files: Collection['IndexFileMeta']
     ):
-        self._options = options
         self._evaluator = self._create_evaluator(fields, file_io, index_path, index_files)
 
     def _create_evaluator(self, fields, file_io, index_path, index_files):
@@ -70,10 +68,8 @@ class GlobalIndexScanner:
             )
             index_metas[field_id][index_type][range_key].append(io_meta)
 
-        options = self._options
-
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
-            return _create_readers(file_io, index_path, index_metas.get(field.id), field, options)
+            return _create_readers(file_io, index_path, index_metas.get(field.id), field)
 
         return GlobalIndexEvaluator(fields, readers_function)
 
@@ -91,7 +87,6 @@ class GlobalIndexScanner:
             if len(index_files) == 0:
                 return None
             return GlobalIndexScanner(
-                options=table.table_schema.options,
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path=table.path_factory().global_index_path_factory().index_path(),
@@ -124,7 +119,6 @@ class GlobalIndexScanner:
         if len(scanned_index_files) == 0:
             return None
         return GlobalIndexScanner(
-            options=table.table_schema.options,
             fields=table.fields,
             file_io=table.file_io,
             index_path=table.path_factory().global_index_path_factory().index_path(),
@@ -146,7 +140,7 @@ class GlobalIndexScanner:
         self.close()
 
 
-def _create_readers(file_io, index_path, index_type_metas, field, options=None):
+def _create_readers(file_io, index_path, index_type_metas, field):
     """Create readers for a specific field from the index metadata."""
     if index_type_metas is None:
         return []
@@ -165,14 +159,4 @@ def _create_readers(file_io, index_path, index_type_metas, field, options=None):
                         io_meta=metadata
                     )
                     readers.append(reader)
-        elif index_type == 'lumina-vector-ann':
-            from pypaimon.globalindex.lumina import LuminaVectorGlobalIndexReader
-            for range_key, io_metas in range_metas.items():
-                reader = LuminaVectorGlobalIndexReader(
-                    file_io=file_io,
-                    index_path=index_path,
-                    io_metas=io_metas,
-                    options=options,
-                )
-                readers.append(reader)
     return readers

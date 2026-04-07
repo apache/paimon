@@ -130,6 +130,14 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             stream.close()
             raise
 
+    def close(self):
+        if self._searcher is not None:
+            self._searcher.close()
+            self._searcher = None
+        if self._stream is not None:
+            self._stream.close()
+            self._stream = None
+
     # =================== unsupported =====================
 
     def visit_equal(self, field_ref, literal):
@@ -176,11 +184,3 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
 
     def visit_between(self, field_ref, min_v, max_v):
         return None
-
-    def close(self):
-        if self._searcher is not None:
-            self._searcher.close()
-            self._searcher = None
-        if self._stream is not None:
-            self._stream.close()
-            self._stream = None

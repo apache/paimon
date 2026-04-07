@@ -47,11 +47,3 @@ __all__ = [
     'OffsetGlobalIndexReader',
     'Range',
 ]
-
-
-# Lazy import for lumina reader (requires lumina-data optional dependency)
-def __getattr__(name):
-    if name == 'LuminaVectorGlobalIndexReader':
-        from pypaimon.globalindex.lumina import LuminaVectorGlobalIndexReader
-        return LuminaVectorGlobalIndexReader
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
