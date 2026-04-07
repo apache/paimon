@@ -31,7 +31,7 @@ from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
     LuminaVectorGlobalIndexReader,
 )
 from pypaimon.globalindex.lumina.lumina_vector_index_options import (
-    LuminaVectorIndexOptions,
+    strip_lumina_options,
 )
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -67,13 +67,7 @@ class LuminaVectorIndexTest(unittest.TestCase):
             "lumina.diskann.build.thread_count": "2",
         }
 
-        # Use LuminaVectorIndexOptions to get native Lumina options for builder
-        opts = LuminaVectorIndexOptions(paimon_options)
-        self.assertEqual(opts.dimension, dim)
-        self.assertEqual(opts.index_type, "diskann")
-        self.assertEqual(opts.encoding_type, "rawf32")
-
-        build_options = opts.to_lumina_options()
+        build_options = strip_lumina_options(paimon_options)
         vectors, ids, raw = _make_vectors(n, dim, seed=777)
 
         tmp_dir = tempfile.mkdtemp(prefix="paimon_lumina_test_")
@@ -126,8 +120,7 @@ class LuminaVectorIndexTest(unittest.TestCase):
             "lumina.diskann.build.thread_count": "2",
         }
 
-        opts = LuminaVectorIndexOptions(paimon_options)
-        build_options = opts.to_lumina_options()
+        build_options = strip_lumina_options(paimon_options)
         vectors, ids, raw = _make_vectors(n, dim, seed=99)
 
         tmp_dir = tempfile.mkdtemp(prefix="paimon_lumina_test_")

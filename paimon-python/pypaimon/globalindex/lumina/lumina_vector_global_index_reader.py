@@ -50,7 +50,7 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._options = options or {}
         self._searcher = None
         self._index_meta = None
-        self._paimon_opts = None
+        self._search_options = None
         self._stream = None
 
     def visit_vector_search(self, vector_search):
@@ -87,15 +87,13 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             if len(filter_id_list) == 0:
                 return None
             effective_k = min(effective_k, len(filter_id_list))
-            search_opts = self._paimon_opts.to_lumina_options()
-            search_opts.update(self._index_meta.options)
+            search_opts = dict(self._search_options)
             search_opts["search.thread_safe_filter"] = "true"
             _ensure_search_list_size(search_opts, effective_k)
             distances, labels = self._searcher.search_with_filter_list(
                 query_flat, 1, effective_k, filter_id_list, search_opts)
         else:
-            search_opts = self._paimon_opts.to_lumina_options()
-            search_opts.update(self._index_meta.options)
+            search_opts = dict(self._search_options)
             _ensure_search_list_size(search_opts, effective_k)
             distances, labels = self._searcher.search_list(
                 query_flat, 1, effective_k, search_opts)
@@ -120,13 +118,15 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         from lumina_data import LuminaSearcher
         from pypaimon.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
         from pypaimon.globalindex.lumina.lumina_vector_index_options import (
-            LuminaVectorIndexOptions,
+            strip_lumina_options,
         )
 
         self._index_meta = LuminaIndexMeta.deserialize(self._io_meta.metadata)
-        self._paimon_opts = LuminaVectorIndexOptions(self._options)
-        searcher_options = self._paimon_opts.to_lumina_options()
+        # Merge paimon table options (prefix-stripped) with index metadata options;
+        # index metadata takes precedence as it reflects the actual built index.
+        searcher_options = strip_lumina_options(self._options)
         searcher_options.update(self._index_meta.options)
+        self._search_options = searcher_options
 
         file_path = os.path.join(self._index_path, self._io_meta.file_name)
         stream = self._file_io.new_input_stream(file_path)
