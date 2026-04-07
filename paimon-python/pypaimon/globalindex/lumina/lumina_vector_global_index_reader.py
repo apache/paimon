@@ -55,22 +55,14 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
     def visit_vector_search(self, vector_search):
         self._ensure_loaded()
 
-        import ctypes
+        import numpy as np
         from lumina_data import MetricType
 
         query = vector_search.vector
-        # Convert to ctypes array once
-        if hasattr(query, 'ctypes'):
-            query_arr = ctypes.cast(query.ctypes.data,
-                                    ctypes.POINTER(ctypes.c_float))
-        elif isinstance(query, ctypes.Array):
-            query_arr = query
-        else:
-            if hasattr(query, 'tolist'):
-                query = query.tolist()
-            if not isinstance(query, list):
-                query = list(query)
-            query_arr = (ctypes.c_float * len(query))(*query)
+        # Ensure (1, dim) shaped float32 array for searcher
+        if not isinstance(query, np.ndarray):
+            query = np.asarray(query, dtype=np.float32)
+        query = np.ascontiguousarray(query, dtype=np.float32).reshape(1, -1)
 
         limit = vector_search.limit
         index_metric = self._index_meta.metric
@@ -83,39 +75,32 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         include_row_ids = vector_search.include_row_ids
 
         if include_row_ids is not None:
-            filter_ids_list = list(include_row_ids)
-            if len(filter_ids_list) == 0:
+            filter_ids = np.array(list(include_row_ids), dtype=np.uint64)
+            if len(filter_ids) == 0:
                 return None
-            effective_k = min(effective_k, len(filter_ids_list))
-            dist_buf = (ctypes.c_float * effective_k)()
-            label_buf = (ctypes.c_uint64 * effective_k)()
+            effective_k = min(effective_k, len(filter_ids))
             search_opts = self._paimon_opts.to_lumina_options()
             search_opts.update(self._index_meta.options)
             search_opts["search.thread_safe_filter"] = "true"
             _ensure_search_list_size(search_opts, effective_k)
-            fid_arr = (ctypes.c_uint64 * len(filter_ids_list))(*filter_ids_list)
-            self._searcher.search_with_filter(
-                query_arr, 1, effective_k,
-                fid_arr, len(filter_ids_list),
-                dist_buf, label_buf, search_opts)
+            distances, labels = self._searcher.search_with_filter_numpy(
+                query, effective_k, filter_ids, search_opts)
         else:
-            dist_buf = (ctypes.c_float * effective_k)()
-            label_buf = (ctypes.c_uint64 * effective_k)()
-            # Java: searchOptions = options.toLuminaOptions(); searchOptions.putAll(indexMeta.options())
             search_opts = self._paimon_opts.to_lumina_options()
             search_opts.update(self._index_meta.options)
             _ensure_search_list_size(search_opts, effective_k)
-            self._searcher.search(
-                query_arr, 1, effective_k,
-                dist_buf, label_buf, search_opts)
+            distances, labels = self._searcher.search_numpy(
+                query, effective_k, search_opts)
 
         # Collect results with score conversion (same as Java collectResults)
+        SENTINEL = np.uint64(0xFFFFFFFFFFFFFFFF)
         id_to_scores = {}
         for i in range(effective_k):
-            row_id = label_buf[i]
-            if row_id == 0xFFFFFFFFFFFFFFFF:
+            row_id = labels[0, i]
+            if row_id == SENTINEL:
                 continue
-            score = MetricType.convert_distance_to_score(dist_buf[i], index_metric)
+            score = MetricType.convert_distance_to_score(
+                float(distances[0, i]), index_metric)
             id_to_scores[int(row_id)] = score
 
         return DictBasedScoredIndexResult(id_to_scores)
