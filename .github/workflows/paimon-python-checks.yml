@@ -71,6 +71,8 @@ jobs:
             build-essential \
             git \
             curl \
+            pkg-config \
+            libssl-dev \
             && apt-get clean \
             && rm -rf /var/lib/apt/lists/*
 
@@ -141,11 +143,21 @@ jobs:
         if: matrix.python-version != '3.6.15'
         shell: bash
         run: |
-          pip install maturin
+          pip install maturin[patchelf]
           git clone -b support_directory https://github.com/JingsongLi/tantivy-py.git /tmp/tantivy-py
           cd /tmp/tantivy-py
           maturin build --release
           pip install target/wheels/tantivy-*.whl
+
+      - name: Build and install pypaimon-rust from source
+        if: matrix.python-version != '3.6.15'
+        shell: bash
+        run: |
+          git clone https://github.com/apache/paimon-rust.git /tmp/paimon-rust
+          cd /tmp/paimon-rust/bindings/python
+          maturin build --release -o dist
+          pip install dist/pypaimon_rust-*.whl
+          pip install 'datafusion>=52'
 
       - name: Run lint-python.sh
         shell: bash

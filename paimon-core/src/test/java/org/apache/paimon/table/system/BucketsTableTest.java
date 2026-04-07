@@ -20,9 +20,14 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -31,10 +36,16 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Projection;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.table.system.BucketsTable.BUCKETS;
@@ -76,5 +87,82 @@ public class BucketsTableTest extends TableTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L),
                         GenericRow.of(BinaryString.fromString("{2}"), 0, 2L, 2L));
+    }
+
+    @Test
+    public void testBucketsTableWithPartitionFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+
+        Predicate filter = builder.equal(0, BinaryString.fromString("{1}"));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L));
+
+        filter = builder.equal(0, BinaryString.fromString("{2}"));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{2}"), 0, 2L, 2L));
+
+        filter =
+                builder.in(
+                        0,
+                        Arrays.asList(
+                                BinaryString.fromString("{1}"), BinaryString.fromString("{2}")));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L),
+                        GenericRow.of(BinaryString.fromString("{2}"), 0, 2L, 2L));
+
+        filter = builder.equal(0, BinaryString.fromString("{999}"));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4})).isEmpty();
+    }
+
+    @Test
+    public void testBucketsTableWithBucketFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+
+        Predicate filter = builder.equal(1, 0);
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L),
+                        GenericRow.of(BinaryString.fromString("{2}"), 0, 2L, 2L));
+
+        filter = builder.equal(1, 1);
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4})).isEmpty();
+    }
+
+    @Test
+    public void testBucketsTableWithCombinedFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+
+        Predicate filter =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("{1}")), builder.equal(1, 0));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("{1}"), 0, 2L, 2L));
+
+        filter =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("{1}")), builder.equal(1, 1));
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4})).isEmpty();
+    }
+
+    private List<InternalRow> readWithFilter(Table table, Predicate filter, int[] projection)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(filter);
+        if (projection != null) {
+            readBuilder.withProjection(projection);
+        }
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
+                        projection == null
+                                ? table.rowType()
+                                : Projection.of(projection).project(table.rowType()));
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        return rows;
     }
 }

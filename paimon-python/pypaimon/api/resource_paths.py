@@ -28,6 +28,8 @@ class ResourcePaths:
     TABLES = "tables"
     TABLE_DETAILS = "table-details"
     PARTITIONS = "partitions"
+    FUNCTIONS = "functions"
+    FUNCTION_DETAILS = "function-details"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -83,3 +85,17 @@ class ResourcePaths:
     def partitions(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                            self.TABLES, RESTUtil.encode_string(table_name), self.PARTITIONS))
+
+    def functions(self, database_name: Optional[str] = None) -> str:
+        if database_name:
+            return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                        RESTUtil.encode_string(database_name), self.FUNCTIONS)
+        return "{}/{}".format(self.base_path, self.FUNCTIONS)
+
+    def function_details(self, database_name: str) -> str:
+        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                    RESTUtil.encode_string(database_name), self.FUNCTION_DETAILS)
+
+    def function(self, database_name: str, function_name: str) -> str:
+        return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                       self.FUNCTIONS, RESTUtil.encode_string(function_name))

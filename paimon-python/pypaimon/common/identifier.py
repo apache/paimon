@@ -103,5 +103,8 @@ class Identifier:
         """Get branch name or return default 'main' if branch is None."""
         return self.branch if self.branch else "main"
 
+    def __hash__(self):
+        return hash((self.database, self.object, self.branch))
+
     def is_system_table(self) -> bool:
         return self.object.startswith('$')

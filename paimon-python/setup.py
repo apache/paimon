@@ -71,7 +71,11 @@ setup(
             'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
         ],
         'lumina': [
-            'lumina-data>=0.1.0.dev4',
+            'lumina-data>=0.1.0.dev4'
+        ],
+        'sql': [
+            'pypaimon-rust; python_version>="3.10"',
+            'datafusion>=52; python_version>="3.10"'
         ],
     },
     description="Apache Paimon Python API",
