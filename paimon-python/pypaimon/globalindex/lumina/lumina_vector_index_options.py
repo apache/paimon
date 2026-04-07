@@ -20,8 +20,6 @@
 Accepts Paimon table properties (with ``lumina.`` prefix), strips the prefix and provides typed accessors.
 """
 
-from lumina_data import MetricType
-
 LUMINA_PREFIX = "lumina."
 
 # ConfigOption definitions: (paimon_key, default_value)
@@ -59,10 +57,12 @@ class LuminaVectorIndexOptions:
         self._lumina_options = _build_lumina_options(paimon_options)
         self._dimension = _validate_positive(
             int(self._lumina_options["index.dimension"]), "lumina.index.dimension")
-        self._metric = _parse_metric(self._lumina_options["distance.metric"])
+        from lumina_data import MetricType
+        self._metric_type_class = MetricType
+        self._metric = _parse_metric(MetricType, self._lumina_options["distance.metric"])
         self._index_type = self._lumina_options.get("index.type", "diskann")
         _validate_encoding_metric(
-            self._lumina_options.get("encoding.type", "pq"), self._metric)
+            MetricType, self._lumina_options.get("encoding.type", "pq"), self._metric)
 
     def to_lumina_options(self):
         """Return all lumina options as native keys (prefix stripped).
@@ -126,7 +126,7 @@ def _cap_pq_m(opts):
             opts["encoding.pq.m"] = str(dim)
 
 
-def _parse_metric(value):
+def _parse_metric(MetricType, value):
     """Parse distance metric, accepting both native names and enum names."""
     try:
         return MetricType.from_lumina_name(value)
@@ -134,7 +134,7 @@ def _parse_metric(value):
         return MetricType.from_string(value)
 
 
-def _validate_encoding_metric(encoding, metric):
+def _validate_encoding_metric(MetricType, encoding, metric):
     if encoding == "pq" and metric == MetricType.COSINE:
         raise ValueError(
             "Lumina does not support PQ encoding with cosine metric. "

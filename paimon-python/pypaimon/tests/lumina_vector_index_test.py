@@ -95,22 +95,20 @@ class LuminaVectorIndexTest(unittest.TestCase):
             )
 
             # Reader receives paimon_options (with lumina. prefix)
-            reader = LuminaVectorGlobalIndexReader(
+            with LuminaVectorGlobalIndexReader(
                 file_io=_SimpleFileIO(),
                 index_path=tmp_dir,
                 io_metas=[io_meta],
                 options=paimon_options,
-            )
+            ) as reader:
+                vs = VectorSearch(vector=raw[:dim], limit=5, field_name="embedding")
+                result = reader.visit_vector_search(vs)
 
-            vs = VectorSearch(vector=raw[:dim], limit=5, field_name="embedding")
-            result = reader.visit_vector_search(vs)
-
-            self.assertIsNotNone(result)
-            row_ids = result.results()
-            self.assertGreater(row_ids.cardinality(), 0)
-            self.assertIn(0, row_ids)
-            self.assertIsNotNone(result.score_getter()(0))
-            reader.close()
+                self.assertIsNotNone(result)
+                row_ids = result.results()
+                self.assertGreater(row_ids.cardinality(), 0)
+                self.assertIn(0, row_ids)
+                self.assertIsNotNone(result.score_getter()(0))
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

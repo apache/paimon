@@ -59,16 +59,15 @@ class VectorSearchScanImpl(VectorSearchScan):
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
         vector_column = self._vector_column
-        snapshot = SnapshotManager(self._table).get_latest_snapshot()
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         from pypaimon.common.options.options import Options
-        travel_snapshot = TimeTravelUtil.try_travel_to_snapshot(
+        snapshot = TimeTravelUtil.try_travel_to_snapshot(
             Options(self._table.table_schema.options),
             self._table.tag_manager()
         )
-        if travel_snapshot is not None:
-            snapshot = travel_snapshot
+        if snapshot is None:
+            snapshot = SnapshotManager(self._table).get_latest_snapshot()
 
         index_file_handler = IndexFileHandler(table=self._table)
 

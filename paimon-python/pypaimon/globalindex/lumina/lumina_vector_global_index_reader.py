@@ -50,6 +50,7 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._options = options or {}
         self._searcher = None
         self._index_meta = None
+        self._paimon_opts = None
         self._stream = None
 
     def visit_vector_search(self, vector_search):

@@ -67,6 +67,8 @@ class VectorSearchReadImpl(VectorSearchRead):
 
     def _eval(self, row_range_start, row_range_end, vector_index_files):
         # type: (int, int, list) -> Optional[ScoredGlobalIndexResult]
+        if not vector_index_files:
+            return None
         index_io_meta_list = []
         for index_file in vector_index_files:
             meta = index_file.global_index_meta

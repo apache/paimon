@@ -26,8 +26,6 @@ implementation can be read by all of them.
 
 import json
 
-from lumina_data import MetricType
-
 
 class LuminaIndexMeta:
     """Metadata for a Lumina vector index file."""
@@ -53,6 +51,7 @@ class LuminaIndexMeta:
 
     @property
     def metric(self):
+        from lumina_data import MetricType
         return MetricType.from_lumina_name(self.distance_metric)
 
     @property
