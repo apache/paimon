@@ -452,6 +452,13 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         self.assertEqual(expected, actual)
 
+        # read is_not_null index (full scan across all data blocks)
+        read_builder.with_filter(predicate_builder.is_not_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        self.assertEqual(len(actual), 2000)
+
     def _test_read_btree_index_null(self):
         table = self.catalog.get_table('default.test_btree_index_null')
 
