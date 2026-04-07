@@ -20,6 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
@@ -60,6 +61,7 @@ public class TagAutoCreation {
     private final List<TagCallback> callbacks;
     private final Duration idlenessTimeout;
     private final boolean automaticCompletion;
+    private final ZoneId sinkProcessTimeZone;
 
     private LocalDateTime nextTag;
     private long nextSnapshot;
@@ -75,7 +77,8 @@ public class TagAutoCreation {
             @Nullable Duration defaultTimeRetained,
             Duration idlenessTimeout,
             boolean automaticCompletion,
-            List<TagCallback> callbacks) {
+            List<TagCallback> callbacks,
+            ZoneId sinkProcessTimeZone) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.tagDeletion = tagDeletion;
@@ -87,6 +90,7 @@ public class TagAutoCreation {
         this.callbacks = callbacks;
         this.idlenessTimeout = idlenessTimeout;
         this.automaticCompletion = automaticCompletion;
+        this.sinkProcessTimeZone = sinkProcessTimeZone;
 
         this.periodHandler.validateDelay(delay);
 
@@ -123,11 +127,15 @@ public class TagAutoCreation {
 
             return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
         } else if (timeExtractor instanceof ProcessTimeExtractor) {
-            return nextTag == null
-                    || isAfterOrEqual(
-                            LocalDateTime.now().minus(delay), periodHandler.nextTagTime(nextTag));
+            return forceCreatingSnapshotProcessTime(LocalDateTime.now(sinkProcessTimeZone));
         }
         return false;
+    }
+
+    @VisibleForTesting
+    boolean forceCreatingSnapshotProcessTime(LocalDateTime now) {
+        return nextTag == null
+                || isAfterOrEqual(now.minus(delay), periodHandler.nextTagTime(nextTag));
     }
 
     public void run() {
@@ -230,6 +238,7 @@ public class TagAutoCreation {
                 options.tagDefaultTimeRetained(),
                 options.snapshotWatermarkIdleTimeout(),
                 options.tagAutomaticCompletion(),
-                callbacks);
+                callbacks,
+                options.sinkProcessTimeZone());
     }
 }
