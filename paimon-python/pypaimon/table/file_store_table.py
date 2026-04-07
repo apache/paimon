@@ -373,6 +373,10 @@ class FileStoreTable(Table):
         from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
         return FullTextSearchBuilderImpl(self)
 
+    def new_vector_search_builder(self) -> 'VectorSearchBuilder':
+        from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
+        return VectorSearchBuilderImpl(self)
+
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:

@@ -15,15 +15,13 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-# Core dependencies for pypaimon are in requirements.txt
 
-# Test dependencies for pypaimon are as follows
-duckdb==1.3.2
-flake8==4.0.1
-pytest~=7.0
-# Ray: 2.48+ has no wheel for Python 3.8; use 2.10.0 on 3.8, 2.48.0 on 3.9+
-ray>=2.10.0
-requests
-parameterized
-# Lumina vector search (optional, for lumina index tests)
-lumina-data>=0.1.0
+from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
+    LuminaVectorGlobalIndexReader,
+    LUMINA_VECTOR_ANN_IDENTIFIER,
+)
+
+__all__ = [
+    'LuminaVectorGlobalIndexReader',
+    'LUMINA_VECTOR_ANN_IDENTIFIER',
+]
