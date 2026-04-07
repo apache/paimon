@@ -105,8 +105,7 @@ def _build_lumina_options(paimon_options):
     for key, value in paimon_options.items():
         if key.startswith(LUMINA_PREFIX) and key not in known_keys:
             native_key = _strip_prefix(key)
-            if native_key not in result:
-                result[native_key] = str(value)
+            result[native_key] = str(value)
 
     # 3. Cap pq.m to dimension
     _cap_pq_m(result)

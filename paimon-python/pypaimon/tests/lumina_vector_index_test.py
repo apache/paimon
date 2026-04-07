@@ -106,9 +106,10 @@ class LuminaVectorIndexTest(unittest.TestCase):
             result = reader.visit_vector_search(vs)
 
             self.assertIsNotNone(result)
-            id_to_scores = result._id_to_scores
-            self.assertGreater(len(id_to_scores), 0)
-            self.assertIn(0, id_to_scores)
+            row_ids = result.results()
+            self.assertGreater(row_ids.cardinality(), 0)
+            self.assertIn(0, row_ids)
+            self.assertIsNotNone(result.score_getter()(0))
             reader.close()
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

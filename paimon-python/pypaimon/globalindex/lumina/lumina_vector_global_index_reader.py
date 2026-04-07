@@ -55,14 +55,15 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
     def visit_vector_search(self, vector_search):
         self._ensure_loaded()
 
-        import numpy as np
         from lumina_data import MetricType
 
         query = vector_search.vector
-        # Ensure (1, dim) shaped float32 array for searcher
-        if not isinstance(query, np.ndarray):
-            query = np.asarray(query, dtype=np.float32)
-        query = np.ascontiguousarray(query, dtype=np.float32).reshape(1, -1)
+        # Flatten to a plain list of floats for search_list API
+        if hasattr(query, 'tolist'):
+            query_flat = list(query.flatten()) if hasattr(query, 'flatten') else list(query)
+        else:
+            query_flat = list(query)
+        query_flat = [float(v) for v in query_flat]
 
         limit = vector_search.limit
         index_metric = self._index_meta.metric
@@ -75,32 +76,32 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         include_row_ids = vector_search.include_row_ids
 
         if include_row_ids is not None:
-            filter_ids = np.array(list(include_row_ids), dtype=np.uint64)
-            if len(filter_ids) == 0:
+            filter_id_list = list(include_row_ids)
+            if len(filter_id_list) == 0:
                 return None
-            effective_k = min(effective_k, len(filter_ids))
+            effective_k = min(effective_k, len(filter_id_list))
             search_opts = self._paimon_opts.to_lumina_options()
             search_opts.update(self._index_meta.options)
             search_opts["search.thread_safe_filter"] = "true"
             _ensure_search_list_size(search_opts, effective_k)
-            distances, labels = self._searcher.search_with_filter_numpy(
-                query, effective_k, filter_ids, search_opts)
+            distances, labels = self._searcher.search_with_filter_list(
+                query_flat, 1, effective_k, filter_id_list, search_opts)
         else:
             search_opts = self._paimon_opts.to_lumina_options()
             search_opts.update(self._index_meta.options)
             _ensure_search_list_size(search_opts, effective_k)
-            distances, labels = self._searcher.search_numpy(
-                query, effective_k, search_opts)
+            distances, labels = self._searcher.search_list(
+                query_flat, 1, effective_k, search_opts)
 
         # Collect results with score conversion (same as Java collectResults)
-        SENTINEL = np.uint64(0xFFFFFFFFFFFFFFFF)
+        SENTINEL = 0xFFFFFFFFFFFFFFFF
         id_to_scores = {}
         for i in range(effective_k):
-            row_id = labels[0, i]
+            row_id = labels[i]
             if row_id == SENTINEL:
                 continue
             score = MetricType.convert_distance_to_score(
-                float(distances[0, i]), index_metric)
+                float(distances[i]), index_metric)
             id_to_scores[int(row_id)] = score
 
         return DictBasedScoredIndexResult(id_to_scores)
@@ -129,6 +130,13 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         except Exception:
             stream.close()
             raise
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
     def close(self):
         if self._searcher is not None:

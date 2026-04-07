@@ -75,7 +75,7 @@ setup(
         ],
         'sql': [
             'pypaimon-rust; python_version>="3.10"',
-            'datafusion>=52; python_version>="3.10"'
+            'datafusion>=52; python_version>="3.10"',
         ],
     },
     description="Apache Paimon Python API",
