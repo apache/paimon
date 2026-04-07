@@ -29,6 +29,38 @@ from pypaimon.table.row.internal_row import InternalRow, RowKind
 from pypaimon.table.row.blob import BlobData
 
 
+def _decimal_to_unscaled(d: Decimal, scale: int) -> int:
+    """Convert a Decimal to its unscaled integer value without precision loss.
+    Raises ArithmeticError if the value has more fractional digits than scale."""
+    sign, digits, exponent = d.as_tuple()
+    int_digits = int(''.join(str(x) for x in digits)) if digits != (0,) else 0
+    shift = exponent + scale
+    if shift >= 0:
+        unscaled = int_digits * (10 ** shift)
+    else:
+        divisor = 10 ** (-shift)
+        if int_digits % divisor != 0:
+            raise ArithmeticError(
+                f"Decimal {d} has more fractional digits than scale {scale}")
+        unscaled = int_digits // divisor
+    return -unscaled if sign else unscaled
+
+
+def _parse_type_precision_scale(data_type):
+    """Parse precision and scale from type string like DECIMAL(38, 10) or TIMESTAMP(6)."""
+    type_str = str(data_type)
+    if '(' in type_str and ')' in type_str:
+        try:
+            params_str = type_str.split('(')[1].split(')')[0]
+            parts = [p.strip() for p in params_str.split(',')]
+            precision = int(parts[0])
+            scale = int(parts[1]) if len(parts) > 1 else 0
+            return precision, scale
+        except (ValueError, IndexError):
+            return 0, 0
+    return 0, 0
+
+
 @dataclass
 class GenericRow(InternalRow):
 
@@ -233,21 +265,27 @@ class GenericRowDeserializer:
         return BlobData.from_bytes(binary_data)
 
     @classmethod
+    def _unscaled_to_decimal(cls, unscaled_value: int, scale: int) -> Decimal:
+        sign = 0 if unscaled_value >= 0 else 1
+        digits = tuple(int(d) for d in str(abs(unscaled_value))) if unscaled_value != 0 else (0,)
+        return Decimal((sign, digits, -scale))
+
+    @classmethod
     def _parse_decimal(cls, bytes_data: bytes, base_offset: int, field_offset: int, data_type: DataType) -> Decimal:
-        unscaled_long = struct.unpack('<q', bytes_data[field_offset:field_offset + 8])[0]
-        type_str = str(data_type)
-        if '(' in type_str and ')' in type_str:
-            try:
-                precision_scale = type_str.split('(')[1].split(')')[0]
-                if ',' in precision_scale:
-                    scale = int(precision_scale.split(',')[1])
-                else:
-                    scale = 0
-            except:
-                scale = 0
+        precision, scale = _parse_type_precision_scale(data_type)
+        if precision <= 18:
+            # Compact format: unscaled long stored directly in fixed part
+            unscaled_long = struct.unpack('<q', bytes_data[field_offset:field_offset + 8])[0]
+            return cls._unscaled_to_decimal(unscaled_long, scale)
         else:
-            scale = 0
-        return Decimal(unscaled_long) / (10 ** scale)
+            # Non-compact format: fixed part has (cursor << 32) | byte_length
+            offset_and_len = struct.unpack('<q', bytes_data[field_offset:field_offset + 8])[0]
+            cursor = (offset_and_len >> 32) & 0xFFFFFFFF
+            byte_length = offset_and_len & 0xFFFFFFFF
+            var_offset = base_offset + cursor
+            unscaled_bytes = bytes_data[var_offset:var_offset + byte_length]
+            unscaled_value = int.from_bytes(unscaled_bytes, byteorder='big', signed=True)
+            return cls._unscaled_to_decimal(unscaled_value, scale)
 
     @classmethod
     def _parse_timestamp(cls, bytes_data: bytes, base_offset: int, field_offset: int, data_type: DataType) -> datetime:
@@ -301,9 +339,23 @@ class GenericRowSerializer:
                 raise ValueError(f"BinaryRow only support AtomicType yet, meet {field.type.__class__}")
 
             type_name = field.type.type.upper()
-            if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING',
-                                                     'BINARY', 'VARBINARY', 'BYTES', 'BLOB']):
-                if any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
+            is_var_len_type = any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING',
+                                                                     'BINARY', 'VARBINARY', 'BYTES', 'BLOB'])
+            is_decimal_type = type_name.startswith('DECIMAL') or type_name.startswith('NUMERIC')
+            decimal_precision, decimal_scale = _parse_type_precision_scale(field.type) if is_decimal_type else (0, 0)
+            is_high_precision_decimal = is_decimal_type and decimal_precision > 18
+
+            if is_var_len_type or is_high_precision_decimal:
+                if is_high_precision_decimal:
+                    d = value if isinstance(value, Decimal) else Decimal(str(value))
+                    unscaled_value = _decimal_to_unscaled(d, decimal_scale)
+                    # Convert to big-endian signed bytes (minimal representation)
+                    if unscaled_value == 0:
+                        value_bytes = b'\x00'
+                    else:
+                        byte_length = (unscaled_value.bit_length() + 8) // 8  # +8 for sign bit
+                        value_bytes = unscaled_value.to_bytes(byte_length, byteorder='big', signed=True)
+                elif any(type_name.startswith(p) for p in ['CHAR', 'VARCHAR', 'STRING']):
                     value_bytes = str(value).encode('utf-8')
                 elif type_name == 'BLOB':
                     value_bytes = value.to_data()
@@ -311,14 +363,18 @@ class GenericRowSerializer:
                     value_bytes = bytes(value)
 
                 length = len(value_bytes)
-                if length <= cls.MAX_FIX_PART_DATA_SIZE:
+                if length <= cls.MAX_FIX_PART_DATA_SIZE and not is_high_precision_decimal:
                     fixed_part[field_fixed_offset: field_fixed_offset + length] = value_bytes
                     for j in range(length, 7):
                         fixed_part[field_fixed_offset + j] = 0
                     header_byte = 0x80 | length
                     fixed_part[field_fixed_offset + 7] = header_byte
                 else:
-                    var_length = cls._round_number_of_bytes_to_nearest_word(len(value_bytes))
+                    # Non-compact decimal uses fixed 16 bytes, others use 8-byte alignment
+                    if is_high_precision_decimal:
+                        var_length = 16
+                    else:
+                        var_length = cls._round_number_of_bytes_to_nearest_word(len(value_bytes))
                     var_value_bytes = value_bytes + b'\x00' * (var_length - length)
                     offset_in_variable_part = current_variable_offset
                     variable_part_data.append(var_value_bytes)
@@ -365,6 +421,11 @@ class GenericRowSerializer:
         elif type_name in ['DOUBLE']:
             return cls._serialize_double(value)
         elif type_name.startswith('DECIMAL') or type_name.startswith('NUMERIC'):
+            precision, _ = _parse_type_precision_scale(data_type)
+            if precision > 18:
+                raise ValueError(
+                    f"Non-compact decimal (precision={precision}) must be serialized "
+                    f"via the variable-length path in to_bytes(), not _serialize_field_value()")
             return cls._serialize_decimal(value, data_type)
         elif type_name.startswith('TIMESTAMP'):
             return cls._serialize_timestamp(value)
@@ -405,20 +466,10 @@ class GenericRowSerializer:
 
     @classmethod
     def _serialize_decimal(cls, value: Decimal, data_type: DataType) -> bytes:
-        type_str = str(data_type)
-        if '(' in type_str and ')' in type_str:
-            try:
-                precision_scale = type_str.split('(')[1].split(')')[0]
-                if ',' in precision_scale:
-                    scale = int(precision_scale.split(',')[1])
-                else:
-                    scale = 0
-            except:
-                scale = 0
-        else:
-            scale = 0
-
-        unscaled_value = int(value * (10 ** scale))
+        """Serialize compact decimal (precision <= 18) as unscaled long in fixed part."""
+        _, scale = _parse_type_precision_scale(data_type)
+        d = value if isinstance(value, Decimal) else Decimal(str(value))
+        unscaled_value = _decimal_to_unscaled(d, scale)
         return struct.pack('<q', unscaled_value)
 
     @classmethod
