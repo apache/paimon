@@ -65,6 +65,12 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             query_flat = list(query)
         query_flat = [float(v) for v in query_flat]
 
+        expected_dim = self._index_meta.dim
+        if len(query_flat) != expected_dim:
+            raise ValueError(
+                "Query vector dimension mismatch: expected %d, got %d"
+                % (expected_dim, len(query_flat)))
+
         limit = vector_search.limit
         index_metric = self._index_meta.metric
 
