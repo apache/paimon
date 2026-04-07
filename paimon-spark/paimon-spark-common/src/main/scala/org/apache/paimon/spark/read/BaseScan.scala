@@ -68,7 +68,10 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val tableRowType: RowType = {
-    if (coreOptions.rowTrackingEnabled()) {
+    if (
+      coreOptions
+        .rowTrackingEnabled() && !table.rowType().containsField(SpecialFields.ROW_ID.name())
+    ) {
       SpecialFields.rowTypeWithRowTracking(table.rowType())
     } else {
       table.rowType()

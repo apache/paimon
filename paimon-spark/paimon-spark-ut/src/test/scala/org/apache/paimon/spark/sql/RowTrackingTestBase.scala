@@ -952,4 +952,27 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       assert(!indexEntries.exists(entry => entry.partition().getString(0).toString.equals("p1")))
     }
   }
+
+  test("Data Evolution: self merge via row_tracking system table") {
+    withTable("target") {
+      sql(
+        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO target VALUES (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3')")
+
+      // Add a new column and backfill via $row_tracking system table
+      sql("ALTER TABLE target ADD COLUMNS (status STRING)")
+
+      sql(s"""
+             |MERGE INTO target AS t
+             |USING `target$$row_tracking` AS s
+             |ON t._ROW_ID = s._ROW_ID
+             |WHEN MATCHED THEN UPDATE SET t.status = 'active'
+             |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT a, b, c, status FROM target ORDER BY a"),
+        Seq(Row(1, 10, "c1", "active"), Row(2, 20, "c2", "active"), Row(3, 30, "c3", "active"))
+      )
+    }
+  }
 }
