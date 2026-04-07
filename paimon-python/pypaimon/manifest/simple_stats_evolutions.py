@@ -55,13 +55,15 @@ class SimpleStatsEvolutions:
         Create index and cast mapping between table fields and data fields.
         This is a simplified implementation.
         """
-        # Create a mapping from field names to indices in data_fields
-        data_field_map = {field.name: i for i, field in enumerate(data_fields)}
+        # Create a mapping from field IDs to indices in data_fields.
+        # Field IDs are stable across schema evolution (including column renames),
+        # while field names may change.
+        data_field_map = {field.id: i for i, field in enumerate(data_fields)}
 
         index_mapping = []
         for table_field in table_fields:
-            if table_field.name in data_field_map:
-                index_mapping.append(data_field_map[table_field.name])
+            if table_field.id in data_field_map:
+                index_mapping.append(data_field_map[table_field.id])
             else:
                 index_mapping.append(-1)  # Field not found in data schema
 
