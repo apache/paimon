@@ -736,7 +736,10 @@ public abstract class SimpleTableTestBase {
                         })
                 .satisfies(
                         anyCauseMatches(
-                                OutOfRangeException.class, "The snapshot with id 5 has expired."));
+                                OutOfRangeException.class,
+                                "The wanted read snapshot with id 5 has expired."))
+                .hasMessageContaining("Earliest Snapshot ID:")
+                .hasMessageContaining("Latest Snapshot ID:");
 
         write.close();
         commit.close();
