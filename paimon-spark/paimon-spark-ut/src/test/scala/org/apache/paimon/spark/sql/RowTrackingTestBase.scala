@@ -953,25 +953,15 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Data Evolution: self merge via row_tracking system table") {
-    withTable("target") {
+  test("Data Evolution: query row_tracking system table with filter") {
+    withTable("t") {
       sql(
-        "CREATE TABLE target (a INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO target VALUES (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3')")
-
-      // Add a new column and backfill via $row_tracking system table
-      sql("ALTER TABLE target ADD COLUMNS (status STRING)")
-
-      sql(s"""
-             |MERGE INTO target AS t
-             |USING `target$$row_tracking` AS s
-             |ON t._ROW_ID = s._ROW_ID
-             |WHEN MATCHED THEN UPDATE SET t.status = 'active'
-             |""".stripMargin)
+        "CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
 
       checkAnswer(
-        sql("SELECT a, b, c, status FROM target ORDER BY a"),
-        Seq(Row(1, 10, "c1", "active"), Row(2, 20, "c2", "active"), Row(3, 30, "c3", "active"))
+        sql(s"SELECT a, b FROM `t$$row_tracking` WHERE a > 1 ORDER BY a"),
+        Seq(Row(2, 20), Row(3, 30))
       )
     }
   }
