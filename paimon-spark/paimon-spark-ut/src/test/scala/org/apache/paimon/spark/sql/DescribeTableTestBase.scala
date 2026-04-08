@@ -98,6 +98,44 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
           )
           Assertions.assertTrue(
             res2.select("information").collect().head.getString(0).contains("Partition Values"))
+
+          val info2 = res2.select("information").collect().head.getString(0)
+          Assertions.assertTrue(
+            info2.contains("Partition Parameters"),
+            s"SHOW TABLE EXTENDED should contain Partition Parameters, but got: $info2")
+          Assertions.assertTrue(
+            info2.contains(PartitionStatistics.FIELD_RECORD_COUNT),
+            s"SHOW TABLE EXTENDED should contain recordCount, but got: $info2")
+          Assertions.assertTrue(
+            info2.contains(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES),
+            s"SHOW TABLE EXTENDED should contain fileSizeInBytes, but got: $info2")
+          Assertions.assertTrue(
+            info2.contains(PartitionStatistics.FIELD_FILE_COUNT),
+            s"SHOW TABLE EXTENDED should contain fileCount, but got: $info2")
+          Assertions.assertTrue(
+            info2.contains(PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME),
+            s"SHOW TABLE EXTENDED should contain lastFileCreationTime, but got: $info2")
+          // Verify recordCount value: partition (pt1='2024', pt2='11') has 1 row
+          // Spark 3 uses "key=value" format, Spark 4 uses "key: value" format
+          Assertions.assertTrue(
+            info2.contains("Partition Statistics"),
+            s"SHOW TABLE EXTENDED should contain Partition Statistics, but got: $info2")
+          Assertions.assertTrue(
+            info2.contains("recordCount=1") || info2.contains("recordCount: 1"),
+            s"Partition (pt1='2024', pt2='11') should have recordCount=1, but got: $info2")
+          Assertions.assertTrue(
+            info2.contains("1 rows"),
+            s"Partition Statistics should contain '1 rows', but got: $info2")
+
+          val res3 =
+            spark.sql(s"SHOW TABLE EXTENDED IN $testDB LIKE 's2' PARTITION(pt = '2024')")
+          val info3 = res3.select("information").collect().head.getString(0)
+          Assertions.assertTrue(
+            info3.contains("recordCount=2") || info3.contains("recordCount: 2"),
+            s"Partition pt='2024' should have recordCount=2, but got: $info3")
+          Assertions.assertTrue(
+            info3.contains("2 rows"),
+            s"Partition Statistics should contain '2 rows', but got: $info3")
         }
       }
     }
