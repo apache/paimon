@@ -697,6 +697,9 @@ class FileStoreCommit:
         blob_start_by_field = {}
 
         for entry in commit_entries:
+            assert entry.file.file_source is not None, \
+                f"file_source must be present for row-tracking table, file={entry.file.file_name}"
+
             # Check if this is an append file that needs row ID assignment
             if (entry.kind == 0 and  # ADD kind
                     entry.file.file_source == 0 and  # APPEND file source
