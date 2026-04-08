@@ -795,6 +795,22 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Tracking: query row_tracking system table with filter pushdown") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
+
+      val query = s"SELECT a, b FROM `t$$row_tracking` WHERE a > 1 ORDER BY a"
+      checkAnswer(sql(query), Seq(Row(2, 20), Row(3, 30)))
+
+      val scan = getScan(query)
+      assert(
+        scan.description().contains("DataFilters"),
+        s"Expected predicate pushdown (DataFilters) in scan description, but got: ${scan.description()}"
+      )
+    }
+  }
+
   test("Data Evolution: compact fields action") {
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, b INT)")
@@ -953,16 +969,4 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Data Evolution: query row_tracking system table with filter") {
-    withTable("t") {
-      sql(
-        "CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
-
-      checkAnswer(
-        sql(s"SELECT a, b FROM `t$$row_tracking` WHERE a > 1 ORDER BY a"),
-        Seq(Row(2, 20), Row(3, 30))
-      )
-    }
-  }
 }
