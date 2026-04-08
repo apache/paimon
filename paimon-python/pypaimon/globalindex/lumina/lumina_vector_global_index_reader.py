@@ -23,6 +23,7 @@ index and performs vector similarity search using the lumina-data SDK.
 """
 
 import os
+import numpy as np
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
@@ -57,15 +58,7 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._ensure_loaded()
 
         from lumina_data import MetricType
-
-        query = vector_search.vector
-        # Flatten to a plain list of floats for search_list API
-        if hasattr(query, 'tolist'):
-            query_flat = list(query.flatten()) if hasattr(query, 'flatten') else list(query)
-        else:
-            query_flat = list(query)
-        query_flat = [float(v) for v in query_flat]
-
+        query_flat = [float(v) for v in np.asarray(vector_search.vector).tolist()]
         expected_dim = self._index_meta.dim
         if len(query_flat) != expected_dim:
             raise ValueError(
@@ -152,50 +145,3 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         if self._stream is not None:
             self._stream.close()
             self._stream = None
-
-    # =================== unsupported =====================
-
-    def visit_equal(self, field_ref, literal):
-        return None
-
-    def visit_not_equal(self, field_ref, literal):
-        return None
-
-    def visit_less_than(self, field_ref, literal):
-        return None
-
-    def visit_less_or_equal(self, field_ref, literal):
-        return None
-
-    def visit_greater_than(self, field_ref, literal):
-        return None
-
-    def visit_greater_or_equal(self, field_ref, literal):
-        return None
-
-    def visit_is_null(self, field_ref):
-        return None
-
-    def visit_is_not_null(self, field_ref):
-        return None
-
-    def visit_in(self, field_ref, literals):
-        return None
-
-    def visit_not_in(self, field_ref, literals):
-        return None
-
-    def visit_starts_with(self, field_ref, literal):
-        return None
-
-    def visit_ends_with(self, field_ref, literal):
-        return None
-
-    def visit_contains(self, field_ref, literal):
-        return None
-
-    def visit_like(self, field_ref, literal):
-        return None
-
-    def visit_between(self, field_ref, min_v, max_v):
-        return None

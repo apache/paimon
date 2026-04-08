@@ -86,22 +86,17 @@ class VectorSearchReadImpl(VectorSearchRead):
         file_io = self._table.file_io
         options = self._table.table_schema.options
 
-        reader = _create_vector_reader(
-            index_type, file_io, index_path,
-            index_io_meta_list, options
-        )
-
         vector_search = VectorSearch(
             vector=self._query_vector,
             limit=self._limit,
             field_name=self._vector_column.name
         )
-
-        try:
+        with _create_vector_reader(
+            index_type, file_io, index_path,
+            index_io_meta_list, options
+        ) as reader:
             offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
             return offset_reader.visit_vector_search(vector_search)
-        finally:
-            reader.close()
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):
