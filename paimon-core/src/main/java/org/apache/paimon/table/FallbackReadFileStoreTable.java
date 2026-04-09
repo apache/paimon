@@ -209,48 +209,21 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     }
 
     protected void validateSchema() {
-        FileStoreTable first = wrappedFirst ? wrapped : other;
-        FileStoreTable second = wrappedFirst ? other : wrapped;
-
-        String firstBranch = first.coreOptions().branch();
-        String secondBranch = second.coreOptions().branch();
-        RowType firstRowType = first.schema().logicalRowType();
-        RowType secondRowType = second.schema().logicalRowType();
+        String mainBranch = wrapped.coreOptions().branch();
+        String otherBranch = other.coreOptions().branch();
+        RowType mainRowType = wrapped.schema().logicalRowType();
+        RowType otherRowType = other.schema().logicalRowType();
         Preconditions.checkArgument(
-                sameRowTypeIgnoreNullable(firstRowType, secondRowType),
+                sameRowTypeIgnoreNullable(mainRowType, otherRowType),
                 "Branch %s and %s does not have the same row type.\n"
                         + "Row type of branch %s is %s.\n"
                         + "Row type of branch %s is %s.",
-                firstBranch,
-                secondBranch,
-                firstBranch,
-                firstRowType,
-                secondBranch,
-                secondRowType);
-
-        List<String> firstPrimaryKeys = first.schema().primaryKeys();
-        List<String> secondPrimaryKeys = second.schema().primaryKeys();
-        if (!firstPrimaryKeys.isEmpty()) {
-            if (secondPrimaryKeys.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Branch "
-                                + firstBranch
-                                + " has primary keys while branch "
-                                + secondBranch
-                                + " does not. This is not allowed.");
-            }
-            Preconditions.checkArgument(
-                    firstPrimaryKeys.equals(secondPrimaryKeys),
-                    "Branch %s and %s both have primary keys but are not the same.\n"
-                            + "Primary keys of %s are %s.\n"
-                            + "Primary keys of %s are %s.",
-                    firstBranch,
-                    secondBranch,
-                    firstBranch,
-                    firstPrimaryKeys,
-                    secondBranch,
-                    secondPrimaryKeys);
-        }
+                mainBranch,
+                otherBranch,
+                mainBranch,
+                mainRowType,
+                otherBranch,
+                otherRowType);
     }
 
     private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType otherRowType) {
