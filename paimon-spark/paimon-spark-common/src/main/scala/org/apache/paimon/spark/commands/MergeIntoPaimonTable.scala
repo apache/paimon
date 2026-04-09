@@ -31,9 +31,10 @@ import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, Expression, Literal, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicate, Expression, IsNull, Literal, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
+import org.apache.spark.sql.catalyst.plans.FullOuter
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
@@ -222,29 +223,26 @@ case class MergeIntoPaimonTable(
       deletionVectorEnabled: Boolean = false,
       extraMetadataCols: Seq[PaimonMetadataColumn] = Seq.empty,
       writeRowTracking: Boolean = false): Dataset[Row] = {
-    val targetDS = targetDataset
-      .withColumn(TARGET_ROW_COL, lit(true))
-
-    val sourceDS = createDataset(sparkSession, sourceTable)
-      .withColumn(SOURCE_ROW_COL, lit(true))
-
-    val joinedDS = sourceDS.join(targetDS, toColumn(mergeCondition), "fullOuter")
+    val targetPlan = targetDataset.queryExecution.analyzed
+    val targetProject =
+      Project(targetPlan.output :+ Alias(Literal(true), TARGET_ROW_COL)(), targetPlan)
+    val sourceProject =
+      Project(sourceTable.output :+ Alias(Literal(true), SOURCE_ROW_COL)(), sourceTable)
+    val joinNode =
+      Join(sourceProject, targetProject, FullOuter, Some(mergeCondition), JoinHint.NONE)
+    val joinedDS = createDataset(sparkSession, joinNode)
     val joinedPlan = joinedDS.queryExecution.analyzed
-
-    def resolveOnJoinedPlan(exprs: Seq[Expression]): Seq[Expression] = {
-      resolveExpressions(sparkSession)(exprs, joinedPlan)
-    }
-
-    val targetRowNotMatched = resolveOnJoinedPlan(
-      Seq(toExpression(sparkSession, col(SOURCE_ROW_COL).isNull))).head
-    val sourceRowNotMatched = resolveOnJoinedPlan(
-      Seq(toExpression(sparkSession, col(TARGET_ROW_COL).isNull))).head
-    val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
-    val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
-    val notMatchedBySourceExprs = notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))
 
     val resolver = sparkSession.sessionState.conf.resolver
     def attribute(name: String) = joinedPlan.output.find(attr => resolver(name, attr.name))
+
+    val targetRowNotMatched = IsNull(attribute(SOURCE_ROW_COL).get)
+    val sourceRowNotMatched = IsNull(attribute(TARGET_ROW_COL).get)
+    val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
+    val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
+    val notMatchedBySourceExprs =
+      notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))
+
     val extraMetadataAttributes =
       extraMetadataCols.flatMap(metadataCol => attribute(metadataCol.name))
     val (rowIdAttr, sequenceNumberAttr) = if (writeRowTracking) {
@@ -266,7 +264,7 @@ case class MergeIntoPaimonTable(
     def processMergeActions(actions: Seq[MergeAction]): Seq[Seq[Expression]] = {
       val columnExprs = actions.map {
         case UpdateAction(_, assignments) =>
-          var exprs = assignments.map(_.value)
+          var exprs: Seq[Expression] = assignments.map(_.value)
           if (writeRowTracking) {
             exprs ++= Seq(rowIdAttr, Literal(null))
           }
@@ -280,7 +278,7 @@ case class MergeIntoPaimonTable(
             noopOutput
           }
         case InsertAction(_, assignments) =>
-          var exprs = assignments.map(_.value)
+          var exprs: Seq[Expression] = assignments.map(_.value)
           if (writeRowTracking) {
             exprs ++= Seq(rowIdAttr, sequenceNumberAttr)
           }
