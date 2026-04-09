@@ -796,4 +796,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         AbstractFileStoreTable that = (AbstractFileStoreTable) o;
         return Objects.equals(path, that.path) && Objects.equals(tableSchema, that.tableSchema);
     }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(path, tableSchema);
+    }
 }
