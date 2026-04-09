@@ -69,7 +69,10 @@ abstract class PaimonBaseScanBuilder
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
 
     var newRowType = rowType
-    if (coreOptions.rowTrackingEnabled() && coreOptions.dataEvolutionEnabled()) {
+    if (
+      coreOptions.rowTrackingEnabled() && coreOptions
+        .dataEvolutionEnabled() && !rowType.containsField(SpecialFields.ROW_ID.name())
+    ) {
       newRowType = SpecialFields.rowTypeWithRowTracking(newRowType);
     }
     val converter = SparkV2FilterConverter(newRowType)
