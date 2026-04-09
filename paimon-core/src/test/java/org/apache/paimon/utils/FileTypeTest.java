@@ -44,19 +44,13 @@ public class FileTypeTest {
         assertThat(FileType.classify(new Path(TABLE_ROOT + "/schema/schema-5")))
                 .isEqualTo(FileType.META);
         // manifest
-        assertThat(
-                        FileType.classify(
-                                new Path(TABLE_ROOT + "/manifest/manifest-a1b2c3d4-0")))
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/manifest/manifest-a1b2c3d4-0")))
                 .isEqualTo(FileType.META);
         // manifest-list
-        assertThat(
-                        FileType.classify(
-                                new Path(TABLE_ROOT + "/manifest/manifest-list-a1b2c3d4-0")))
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/manifest/manifest-list-a1b2c3d4-0")))
                 .isEqualTo(FileType.META);
         // index-manifest
-        assertThat(
-                        FileType.classify(
-                                new Path(TABLE_ROOT + "/manifest/index-manifest-a1b2c3d4-0")))
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/manifest/index-manifest-a1b2c3d4-0")))
                 .isEqualTo(FileType.META);
         // statistics
         assertThat(FileType.classify(new Path(TABLE_ROOT + "/statistics/stat-a1b2c3d4-0")))
@@ -79,17 +73,13 @@ public class FileTypeTest {
         // success files
         assertThat(FileType.classify(new Path(TABLE_ROOT + "/dt=2024-01-01/bucket-0/_SUCCESS")))
                 .isEqualTo(FileType.META);
-        assertThat(
-                        FileType.classify(
-                                new Path(TABLE_ROOT + "/tag/tag-success-file/myTag_SUCCESS")))
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/tag/tag-success-file/myTag_SUCCESS")))
                 .isEqualTo(FileType.META);
         // consumer
         assertThat(FileType.classify(new Path(TABLE_ROOT + "/consumer/consumer-myGroup")))
                 .isEqualTo(FileType.META);
         // service
-        assertThat(
-                        FileType.classify(
-                                new Path(TABLE_ROOT + "/service/service-primary-key-lookup")))
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/service/service-primary-key-lookup")))
                 .isEqualTo(FileType.META);
     }
 
@@ -103,9 +93,7 @@ public class FileTypeTest {
         // under bucket dir
         assertThat(
                         FileType.classify(
-                                new Path(
-                                        TABLE_ROOT
-                                                + "/dt=2024-01-01/bucket-0/index-a1b2c3d4-0")))
+                                new Path(TABLE_ROOT + "/dt=2024-01-01/bucket-0/index-a1b2c3d4-0")))
                 .isEqualTo(FileType.BUCKET_INDEX);
     }
 
@@ -249,9 +237,7 @@ public class FileTypeTest {
                 .isEqualTo(FileType.BUCKET_INDEX);
         assertThat(
                         FileType.classify(
-                                new Path(
-                                        branchRoot
-                                                + "/index/btree-global-index-a1b2c3d4.index")))
+                                new Path(branchRoot + "/index/btree-global-index-a1b2c3d4.index")))
                 .isEqualTo(FileType.GLOBAL_INDEX);
     }
 }
