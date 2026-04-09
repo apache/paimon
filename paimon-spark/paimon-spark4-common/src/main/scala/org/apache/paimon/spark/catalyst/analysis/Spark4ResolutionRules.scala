@@ -21,10 +21,9 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.commands.PaimonShowTablePartitionCommand
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{ResolvedTable, UnresolvedPartitionSpec}
+import org.apache.spark.sql.catalyst.analysis.ResolvedTable
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ShowTablePartition}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
 
 case class Spark4ResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
