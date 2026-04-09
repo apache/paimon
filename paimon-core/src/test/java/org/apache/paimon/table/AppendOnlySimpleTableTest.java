@@ -1565,6 +1565,33 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
     }
 
+    @Test
+    public void testEqualsAndHashCode() throws Exception {
+        // Test same table equals and hashCode consistency
+        FileStoreTable table1 = createFileStoreTable();
+        FileStoreTable table2 = table1.copy(table1.schema());
+        assertThat(table1.equals(table2)).isTrue();
+        assertThat(table1.hashCode()).isEqualTo(table2.hashCode());
+
+        // Test with different options
+        Map<String, String> optionsWithMock = new HashMap<>(table1.schema().options());
+        optionsWithMock.put("mockKey", "mockValue");
+        TableSchema schemaWithMock = table1.schema().copy(optionsWithMock);
+        FileStoreTable tableWithMock = table1.copy(schemaWithMock);
+
+        assertThat(table1.equals(tableWithMock)).isFalse();
+        assertThat(table1.hashCode()).isNotEqualTo(tableWithMock.hashCode());
+
+        // Test same options should be equal
+        Map<String, String> sameOptionsWithMock = new HashMap<>(table1.schema().options());
+        sameOptionsWithMock.put("mockKey", "mockValue");
+        TableSchema sameSchemaWithMock = table1.schema().copy(sameOptionsWithMock);
+        FileStoreTable sameTableWithMock = table1.copy(sameSchemaWithMock);
+
+        assertThat(tableWithMock.equals(sameTableWithMock)).isTrue();
+        assertThat(tableWithMock.hashCode()).isEqualTo(sameTableWithMock.hashCode());
+    }
+
     private void writeData() throws Exception {
         writeData(options -> {});
     }
