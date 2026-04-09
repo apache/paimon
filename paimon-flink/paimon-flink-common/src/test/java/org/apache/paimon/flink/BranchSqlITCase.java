@@ -962,8 +962,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         // Unset scan.primary-branch, main table should show its own data
         sql("ALTER TABLE t RESET ( 'scan.primary-branch' )");
         assertThat(collectResult("SELECT v, k FROM t"))
-                .containsExactlyInAnyOrder(
-                        "+I[apple, 10]", "+I[banana, 20]", "+I[horse, 10]");
+                .containsExactlyInAnyOrder("+I[apple, 10]", "+I[banana, 20]", "+I[horse, 10]");
     }
 
     private List<String> collectResult(String sql) throws Exception {
