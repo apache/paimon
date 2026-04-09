@@ -34,6 +34,7 @@ import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
@@ -211,7 +212,10 @@ public class BTreeIndexTopoBuilder {
         parallelism = Math.min(parallelism, maxParallelism);
 
         DataStream<Split> sourceStream =
-                env.fromData(new JavaTypeInfo<>(Split.class), rangeSplits.toArray(new Split[0]))
+                StreamExecutionEnvironmentUtils.fromData(
+                                env,
+                                new JavaTypeInfo<>(Split.class),
+                                rangeSplits.toArray(new Split[0]))
                         .name("Global Index Source " + " range=" + range)
                         .setParallelism(1);
 
