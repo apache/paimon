@@ -209,44 +209,47 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     }
 
     protected void validateSchema() {
-        String mainBranch = wrapped.coreOptions().branch();
-        String otherBranch = other.coreOptions().branch();
-        RowType mainRowType = wrapped.schema().logicalRowType();
-        RowType otherRowType = other.schema().logicalRowType();
+        FileStoreTable first = wrappedFirst ? wrapped : other;
+        FileStoreTable second = wrappedFirst ? other : wrapped;
+
+        String firstBranch = first.coreOptions().branch();
+        String secondBranch = second.coreOptions().branch();
+        RowType firstRowType = first.schema().logicalRowType();
+        RowType secondRowType = second.schema().logicalRowType();
         Preconditions.checkArgument(
-                sameRowTypeIgnoreNullable(mainRowType, otherRowType),
+                sameRowTypeIgnoreNullable(firstRowType, secondRowType),
                 "Branch %s and %s does not have the same row type.\n"
                         + "Row type of branch %s is %s.\n"
                         + "Row type of branch %s is %s.",
-                mainBranch,
-                otherBranch,
-                mainBranch,
-                mainRowType,
-                otherBranch,
-                otherRowType);
+                firstBranch,
+                secondBranch,
+                firstBranch,
+                firstRowType,
+                secondBranch,
+                secondRowType);
 
-        List<String> mainPrimaryKeys = wrapped.schema().primaryKeys();
-        List<String> otherPrimaryKeys = other.schema().primaryKeys();
-        if (!mainPrimaryKeys.isEmpty()) {
-            if (otherPrimaryKeys.isEmpty()) {
+        List<String> firstPrimaryKeys = first.schema().primaryKeys();
+        List<String> secondPrimaryKeys = second.schema().primaryKeys();
+        if (!firstPrimaryKeys.isEmpty()) {
+            if (secondPrimaryKeys.isEmpty()) {
                 throw new IllegalArgumentException(
                         "Branch "
-                                + mainBranch
+                                + firstBranch
                                 + " has primary keys while branch "
-                                + otherBranch
+                                + secondBranch
                                 + " does not. This is not allowed.");
             }
             Preconditions.checkArgument(
-                    mainPrimaryKeys.equals(otherPrimaryKeys),
+                    firstPrimaryKeys.equals(secondPrimaryKeys),
                     "Branch %s and %s both have primary keys but are not the same.\n"
                             + "Primary keys of %s are %s.\n"
                             + "Primary keys of %s are %s.",
-                    mainBranch,
-                    otherBranch,
-                    mainBranch,
-                    mainPrimaryKeys,
-                    otherBranch,
-                    otherPrimaryKeys);
+                    firstBranch,
+                    secondBranch,
+                    firstBranch,
+                    firstPrimaryKeys,
+                    secondBranch,
+                    secondPrimaryKeys);
         }
     }
 
