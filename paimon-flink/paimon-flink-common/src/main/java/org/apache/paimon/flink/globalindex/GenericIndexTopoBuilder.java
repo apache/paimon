@@ -28,6 +28,7 @@ import org.apache.paimon.flink.sink.NoopCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
@@ -179,7 +180,8 @@ public class GenericIndexTopoBuilder {
         ReadBuilder readBuilder = table.newReadBuilder().withReadType(projectedRowType);
 
         DataStream<ShardTask> source =
-                env.fromData(
+                StreamExecutionEnvironmentUtils.fromData(
+                                env,
                                 new JavaTypeInfo<>(ShardTask.class),
                                 shardTasks.toArray(new ShardTask[0]))
                         .name("Generic Index Source")
@@ -201,7 +203,8 @@ public class GenericIndexTopoBuilder {
         if (!deletedIndexEntries.isEmpty()) {
             List<Committable> deleteCommittables = createDeleteCommittables(deletedIndexEntries);
             DataStream<Committable> deletes =
-                    env.fromData(
+                    StreamExecutionEnvironmentUtils.fromData(
+                                    env,
                                     new CommittableTypeInfo(),
                                     deleteCommittables.toArray(new Committable[0]))
                             .name("Index Delete Source")

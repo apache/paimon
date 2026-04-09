@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -108,7 +109,8 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
         List<BinaryRow> binaryPartitions = fileStoreTable.newScan().listPartitions();
 
         SingleOutputStreamOperator<byte[]> source =
-                env.fromData(
+                StreamExecutionEnvironmentUtils.fromData(
+                                env,
                                 binaryPartitions.stream()
                                         .map(BinaryRow::toBytes)
                                         .collect(Collectors.toList()),
