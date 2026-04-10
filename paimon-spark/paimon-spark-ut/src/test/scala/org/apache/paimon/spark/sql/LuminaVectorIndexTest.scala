@@ -95,7 +95,7 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
         .sql("""
                |SELECT index_type, row_count, row_range_start, row_range_end,
                |       index_field_id, index_field_name
-               |FROM T$table_indexes
+               |FROM `T$table_indexes`
                |WHERE index_type = 'lumina-vector-ann'
                |""".stripMargin)
         .collect()
@@ -110,7 +110,7 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
 
       // Verify max row id matches snapshot next_row_id - 1
       val nextRowId = spark
-        .sql("SELECT next_row_id FROM T$snapshots ORDER BY snapshot_id DESC LIMIT 1")
+        .sql("SELECT next_row_id FROM `T$snapshots` ORDER BY snapshot_id DESC LIMIT 1")
         .collect()
         .head
         .getAs[Long]("next_row_id")
