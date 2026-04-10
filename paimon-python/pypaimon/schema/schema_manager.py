@@ -136,6 +136,18 @@ def _assert_not_updating_primary_keys(
         raise ValueError(f"Cannot {operation} primary key")
 
 
+def _assert_not_renaming_blob_column(
+        new_fields: List[DataField], field_names: List[str]):
+    if len(field_names) > 1:
+        return
+    field_name = field_names[0]
+    for field in new_fields:
+        if field.name == field_name and str(field.type) == 'BLOB':
+            raise ValueError(
+                f"Cannot rename BLOB column: [{field_name}]"
+            )
+
+
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
     field_name = change.field_names[-1]
     new_name = change.new_name
@@ -355,6 +367,7 @@ class SchemaManager:
                 _assert_not_updating_partition_keys(
                     old_table_schema, change.field_names, "rename"
                 )
+                _assert_not_renaming_blob_column(new_fields, change.field_names)
                 _handle_rename_column(change, new_fields)
             elif isinstance(change, DropColumn):
                 _drop_column_validation(old_table_schema, change)
