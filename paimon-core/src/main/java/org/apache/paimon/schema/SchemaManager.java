@@ -60,6 +60,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Streams;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -110,7 +113,8 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 @ThreadSafe
 public class SchemaManager implements Serializable {
 
-    public static final String SCHEMA_PREFIX = "schema-";
+    private static final Logger LOG = LoggerFactory.getLogger(SchemaManager.class);
+    private static final String SCHEMA_PREFIX = "schema-";
 
     private final FileIO fileIO;
     private final Path tableRoot;
@@ -268,6 +272,12 @@ public class SchemaManager implements Serializable {
                     new LazyField<>(() -> identifierFromPath(tableRoot.toString(), true, branch));
             TableSchema newTableSchema =
                     generateTableSchema(oldTableSchema, changes, hasSnapshots, lazyIdentifier);
+            if (oldTableSchema.sameContent(newTableSchema)) {
+                LOG.info(
+                        "No schema change detected for table {}. Skipping schema update.",
+                        lazyIdentifier.get());
+                return oldTableSchema;
+            }
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
