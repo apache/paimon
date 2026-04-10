@@ -386,6 +386,23 @@ class StringUtilsTest {
         }
 
         @Test
+        void testJoinArrayStartAndEndIndex() {
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, "--", 1, 3))
+                    .isEqualTo("b--c");
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, "--", 2, 2)).isEmpty();
+        }
+
+        @Test
+        void testJoinArrayInvalidIndex() {
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 0, -1))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 3, 3))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 0, 4))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+        }
+
+        @Test
         void testJoinIterableEdgeCases() {
             assertThat(StringUtils.join((Iterable<?>) null, ",")).isNull();
             assertThat(StringUtils.join(Arrays.asList(), ",")).isEmpty();

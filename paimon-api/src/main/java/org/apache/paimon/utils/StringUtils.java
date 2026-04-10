@@ -590,6 +590,12 @@ public class StringUtils {
         if (array == null) {
             return null;
         }
+        if (startIndex < 0 || startIndex >= array.length) {
+            throw new ArrayIndexOutOfBoundsException(startIndex);
+        }
+        if (endIndex < 0 || endIndex > array.length) {
+            throw new ArrayIndexOutOfBoundsException(endIndex);
+        }
         final int noOfItems = endIndex - startIndex;
         if (noOfItems <= 0) {
             return EMPTY;
