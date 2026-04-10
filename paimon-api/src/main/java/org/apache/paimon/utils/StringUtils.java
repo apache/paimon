@@ -594,10 +594,11 @@ public class StringUtils {
         if (noOfItems <= 0) {
             return EMPTY;
         }
+        final String actualSeparator = separator == null ? EMPTY : separator;
         final StringBuilder buf = new StringBuilder(noOfItems * 16);
         for (int i = startIndex; i < endIndex; i++) {
             if (i > startIndex) {
-                buf.append(separator);
+                buf.append(actualSeparator);
             }
             if (array[i] != null) {
                 buf.append(array[i]);

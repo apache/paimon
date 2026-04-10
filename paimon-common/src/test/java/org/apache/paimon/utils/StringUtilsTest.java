@@ -381,6 +381,11 @@ class StringUtilsTest {
         }
 
         @Test
+        void testJoinArrayNullSeparator() {
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, null)).isEqualTo("abc");
+        }
+
+        @Test
         void testJoinIterableEdgeCases() {
             assertThat(StringUtils.join((Iterable<?>) null, ",")).isNull();
             assertThat(StringUtils.join(Arrays.asList(), ",")).isEmpty();
