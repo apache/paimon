@@ -49,6 +49,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -552,6 +553,61 @@ public class BlobTableTest extends TableTestBase {
 
         // Step 5: read after compaction
         readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
+    }
+
+    @Disabled("Reproduce: rename blob column causes read failure after compaction")
+    @Test
+    void testRenameBlobColumnReadFailure() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        // Step 1: write blob data — blob files record writeCols=["f2"]
+        commitDefault(writeDataDefault(100, 1));
+
+        // Step 2: rename blob column f2 -> f2_renamed
+        catalog.alterTable(identifier(), SchemaChange.renameColumn("f2", "f2_renamed"), false);
+
+        // Step 3: write more data — new blob files have writeCols=["f2_renamed"]
+        commitDefault(writeDataDefault(100, 1));
+
+        // Step 4: compact merges files into the same split
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        // Step 5: read fails —
+        assertThatThrownBy(() -> readDefault(row -> {}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("All files in this bunch should have the same write columns");
+    }
+
+    @Test
+    void testRenameBlobColumnShouldFail() throws Exception {
+        createTableDefault();
+        commitDefault(writeDataDefault(10, 1));
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.renameColumn("f2", "f2_renamed"),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot rename BLOB column");
     }
 
     private void createExternalStorageTable() throws Exception {
