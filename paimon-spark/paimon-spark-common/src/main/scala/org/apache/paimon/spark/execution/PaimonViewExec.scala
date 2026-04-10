@@ -22,6 +22,7 @@ import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.view.View
 
+import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
 import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, StringUtils}
@@ -49,6 +50,16 @@ case class CreatePaimonViewExec(
   override def output: Seq[Attribute] = Nil
 
   override protected def run(): Seq[InternalRow] = {
+    if (queryColumnNames.nonEmpty) {
+      throw new UnsupportedOperationException("queryColumnNames is not supported now")
+    }
+
+    if (columnAliases.nonEmpty && columnAliases.length != viewSchema.fields.length) {
+      throw new AnalysisException(
+        s"The number of column aliases (${columnAliases.length}) " +
+          s"must match the number of columns (${viewSchema.fields.length})")
+    }
+
     // Apply column aliases and comments to the view schema
     val finalSchema = applyColumnAliasesAndComments(viewSchema, columnAliases, columnComments)
 
@@ -71,7 +82,7 @@ case class CreatePaimonViewExec(
   /**
    * Apply column aliases and comments to the view schema. If columnAliases is empty, the original
    * column names are used. If columnComments is empty or a specific comment is None, no comment is
-   * added.
+   * added. The length of aliases (if non-empty) is validated before calling this method.
    */
   private def applyColumnAliasesAndComments(
       schema: StructType,
@@ -83,19 +94,15 @@ case class CreatePaimonViewExec(
 
     val fields = schema.fields.zipWithIndex.map {
       case (field, index) =>
-        val newName = if (index < aliases.length) aliases(index) else field.name
+        val newName = if (aliases.nonEmpty) aliases(index) else field.name
         val newComment = if (index < comments.length) comments(index) else None
 
-        // Create a new field with the new name
-        var newField = StructField(newName, field.dataType, field.nullable, field.metadata)
+        val newField = StructField(newName, field.dataType, field.nullable, field.metadata)
 
-        // Apply comment if present
         newComment match {
-          case Some(comment) => newField = newField.withComment(comment)
-          case None => // Keep existing comment if any
+          case Some(c) => newField.withComment(c)
+          case None => newField
         }
-
-        newField
     }
 
     StructType(fields)

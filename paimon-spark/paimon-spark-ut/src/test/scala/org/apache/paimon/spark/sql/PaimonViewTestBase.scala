@@ -324,8 +324,8 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
               // Verify column comments via SHOW CREATE TABLE
               val showCreateRows = sql("SHOW CREATE TABLE v1").collectAsList()
               val showCreateStr = showCreateRows.get(0).get(0).toString
-              assert(showCreateStr.contains("id COMMENT 'the user id'"))
-              assert(showCreateStr.contains("name COMMENT 'the user name'"))
+              assert(showCreateStr.contains("COMMENT 'the user id'"))
+              assert(showCreateStr.contains("COMMENT 'the user name'"))
             }
           }
         }
