@@ -569,26 +569,36 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
 
-        commitDefault(writeDataDefault(100, 1));
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    1, BinaryString.fromString("batch1"), new BlobData(blobBytes)));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
+            }
+        }
 
         catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
 
-        List<CommitMessage> messages = new ArrayList<>();
-        FileStoreTable newTable = getTableDefault();
-        StreamWriteBuilder builder = newTable.newStreamWriteBuilder();
-        builder.withCommitUser(commitUser);
-        try (StreamTableWrite write = builder.newWrite()) {
-            for (int j = 0; j < 100; j++) {
-                write.write(
-                        GenericRow.of(
-                                RANDOM.nextInt(),
-                                BinaryString.fromBytes(randomBytes()),
-                                new BlobData(blobBytes),
-                                null));
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    2,
+                                    BinaryString.fromString("batch2"),
+                                    new BlobData(blobBytes),
+                                    BinaryString.fromString("after-add")));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
             }
-            messages.addAll(write.prepareCommit(false, Long.MAX_VALUE));
         }
-        commitDefault(messages);
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
@@ -601,7 +611,19 @@ public class BlobTableTest extends TableTestBase {
         }
         commitDefault(compactMessages);
 
-        readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
+        AtomicInteger batch1Count = new AtomicInteger(0);
+        AtomicInteger batch2Count = new AtomicInteger(0);
+        readDefault(
+                row -> {
+                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                    if (row.getInt(0) == 1) {
+                        batch1Count.incrementAndGet();
+                    } else if (row.getInt(0) == 2) {
+                        batch2Count.incrementAndGet();
+                    }
+                });
+        assertThat(batch1Count.get()).isEqualTo(100);
+        assertThat(batch2Count.get()).isEqualTo(100);
     }
 
     @Test
@@ -617,26 +639,36 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
 
-        FileStoreTable tableV0 = getTableDefault();
-        List<CommitMessage> messages = new ArrayList<>();
-        StreamWriteBuilder builderV0 = tableV0.newStreamWriteBuilder();
-        builderV0.withCommitUser(commitUser);
-        try (StreamTableWrite write = builderV0.newWrite()) {
-            for (int j = 0; j < 100; j++) {
-                write.write(
-                        GenericRow.of(
-                                RANDOM.nextInt(),
-                                BinaryString.fromBytes(randomBytes()),
-                                new BlobData(blobBytes),
-                                BinaryString.fromString("extra")));
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    1,
+                                    BinaryString.fromString("batch1"),
+                                    new BlobData(blobBytes),
+                                    BinaryString.fromString("before-drop")));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
             }
-            messages.addAll(write.prepareCommit(false, Long.MAX_VALUE));
         }
-        commitDefault(messages);
 
         catalog.alterTable(identifier(), SchemaChange.dropColumn("f3"), false);
 
-        commitDefault(writeDataDefault(100, 1));
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    2, BinaryString.fromString("batch2"), new BlobData(blobBytes)));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
+            }
+        }
 
         FileStoreTable table = getTableDefault();
         DataEvolutionCompactCoordinator coordinator =
@@ -649,7 +681,19 @@ public class BlobTableTest extends TableTestBase {
         }
         commitDefault(compactMessages);
 
-        readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
+        AtomicInteger batch1Count = new AtomicInteger(0);
+        AtomicInteger batch2Count = new AtomicInteger(0);
+        readDefault(
+                row -> {
+                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                    if (row.getInt(0) == 1) {
+                        batch1Count.incrementAndGet();
+                    } else if (row.getInt(0) == 2) {
+                        batch2Count.incrementAndGet();
+                    }
+                });
+        assertThat(batch1Count.get()).isEqualTo(100);
+        assertThat(batch2Count.get()).isEqualTo(100);
     }
 
     @Disabled("Reproduce: rename blob column causes read failure after compaction")
