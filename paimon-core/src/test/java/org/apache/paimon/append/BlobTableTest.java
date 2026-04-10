@@ -71,9 +71,7 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
-/**
- * Tests for table with blob.
- */
+/** Tests for table with blob. */
 public class BlobTableTest extends TableTestBase {
 
     private final byte[] blobBytes = randomBytes();
@@ -210,10 +208,10 @@ public class BlobTableTest extends TableTestBase {
                                 i++;
                                 return (i - 1) == 100
                                         ? GenericRow.of(
-                                        i,
-                                        BinaryString.fromString("nice"),
-                                        new BlobData(
-                                                "This is the specified message".getBytes()))
+                                                i,
+                                                BinaryString.fromString("nice"),
+                                                new BlobData(
+                                                        "This is the specified message".getBytes()))
                                         : dataDefault(0, 0);
                             }
                         };
@@ -284,13 +282,13 @@ public class BlobTableTest extends TableTestBase {
         createDescriptorTable();
 
         assertThatThrownBy(
-                () ->
-                        writeDataDefault(
-                                Collections.singletonList(
-                                        GenericRow.of(
-                                                1,
-                                                BinaryString.fromString("bad"),
-                                                new BlobData(blobBytes)))))
+                        () ->
+                                writeDataDefault(
+                                        Collections.singletonList(
+                                                GenericRow.of(
+                                                        1,
+                                                        BinaryString.fromString("bad"),
+                                                        new BlobData(blobBytes)))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob-descriptor-field");
     }
@@ -335,14 +333,14 @@ public class BlobTableTest extends TableTestBase {
         createMixedModeTable();
 
         assertThatThrownBy(
-                () ->
-                        writeDataDefault(
-                                Collections.singletonList(
-                                        GenericRow.of(
-                                                1,
-                                                BinaryString.fromString("bad"),
-                                                new BlobData(blobBytes),
-                                                new BlobData(randomBytes())))))
+                        () ->
+                                writeDataDefault(
+                                        Collections.singletonList(
+                                                GenericRow.of(
+                                                        1,
+                                                        BinaryString.fromString("bad"),
+                                                        new BlobData(blobBytes),
+                                                        new BlobData(randomBytes())))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob-descriptor-field");
     }
@@ -435,20 +433,20 @@ public class BlobTableTest extends TableTestBase {
     @Test
     public void testExternalStorageFieldValidationRequiresPath() {
         assertThatThrownBy(
-                () -> {
-                    Schema.Builder schemaBuilder = Schema.newBuilder();
-                    schemaBuilder.column("f0", DataTypes.INT());
-                    schemaBuilder.column("f1", DataTypes.STRING());
-                    schemaBuilder.column("f2", DataTypes.BLOB());
-                    schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                    schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                    schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                    schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
-                    schemaBuilder.option(
-                            CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-                    // No external storage path set
-                    catalog.createTable(identifier(), schemaBuilder.build(), true);
-                })
+                        () -> {
+                            Schema.Builder schemaBuilder = Schema.newBuilder();
+                            schemaBuilder.column("f0", DataTypes.INT());
+                            schemaBuilder.column("f1", DataTypes.STRING());
+                            schemaBuilder.column("f2", DataTypes.BLOB());
+                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
+                            schemaBuilder.option(
+                                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
+                            // No external storage path set
+                            catalog.createTable(identifier(), schemaBuilder.build(), true);
+                        })
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "'"
@@ -461,22 +459,22 @@ public class BlobTableTest extends TableTestBase {
     @Test
     public void testExternalStorageFieldMustBeSubsetOfDescriptorField() {
         assertThatThrownBy(
-                () -> {
-                    Schema.Builder schemaBuilder = Schema.newBuilder();
-                    schemaBuilder.column("f0", DataTypes.INT());
-                    schemaBuilder.column("f1", DataTypes.STRING());
-                    schemaBuilder.column("f2", DataTypes.BLOB());
-                    schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                    schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                    schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                    // f2 is configured for external storage but not in
-                    // blob-descriptor-field
-                    schemaBuilder.option(
-                            CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-                    schemaBuilder.option(
-                            CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/target");
-                    catalog.createTable(identifier(), schemaBuilder.build(), true);
-                })
+                        () -> {
+                            Schema.Builder schemaBuilder = Schema.newBuilder();
+                            schemaBuilder.column("f0", DataTypes.INT());
+                            schemaBuilder.column("f1", DataTypes.STRING());
+                            schemaBuilder.column("f2", DataTypes.BLOB());
+                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                            // f2 is configured for external storage but not in
+                            // blob-descriptor-field
+                            schemaBuilder.option(
+                                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
+                            schemaBuilder.option(
+                                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/target");
+                            catalog.createTable(identifier(), schemaBuilder.build(), true);
+                        })
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "Field 'f2' in '"
@@ -503,7 +501,7 @@ public class BlobTableTest extends TableTestBase {
         // read with projection: only _ROW_ID and f2 (blob)
         // row tracking schema indices: 0=f0, 1=f1, 2=f2, 3=_ROW_ID, 4=_SEQUENCE_NUMBER
         ReadBuilder projectedBuilder =
-                rowTrackingTable.newReadBuilder().withProjection(new int[]{3, 2});
+                rowTrackingTable.newReadBuilder().withProjection(new int[] {3, 2});
         RecordReader<InternalRow> projectedReader =
                 projectedBuilder.newRead().createReader(projectedBuilder.newScan().plan());
         AtomicInteger projectedCount = new AtomicInteger(0);
@@ -519,7 +517,7 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
-    void testReadBlobAfterAlterTableSet() throws Exception {
+    void testReadBlobAfterAlterTableAndCompaction() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());

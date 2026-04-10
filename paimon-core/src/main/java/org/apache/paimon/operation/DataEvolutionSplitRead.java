@@ -548,9 +548,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     }
                 }
                 if (!files.isEmpty()) {
-                    checkArgument(
-                            file.schemaId() == files.get(0).schemaId(),
-                            "All files in this bunch should have the same schema id.");
+                    if (!isBlobFile(file.fileName())) {
+                        checkArgument(
+                                file.schemaId() == files.get(0).schemaId(),
+                                "All files in this bunch should have the same schema id.");
+                    }
                     checkArgument(
                             file.writeCols().equals(files.get(0).writeCols()),
                             "All files in this bunch should have the same write columns.");
