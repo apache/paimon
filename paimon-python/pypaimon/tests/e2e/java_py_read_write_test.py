@@ -503,3 +503,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
             table_read.to_arrow(splits)
         self.assertIn(file_format, str(ctx.exception))
         self.assertIn("not yet supported", str(ctx.exception))
+
+    def test_read_blob_after_alter_and_compact(self):
+        table = self.catalog.get_table('default.blob_alter_compact_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+        self.assertEqual(result.num_rows, 200)

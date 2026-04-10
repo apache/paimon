@@ -42,6 +42,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
@@ -404,6 +405,7 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
+                assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -905,6 +907,19 @@ public class SchemaManager implements Serializable {
         if (schema.primaryKeys().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format("Cannot %s primary key", operation));
+        }
+    }
+
+    private static void assertNotRenamingBlobColumn(List<DataField> fields, String[] fieldNames) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        for (DataField field : fields) {
+            if (field.name().equals(fieldName) && field.type().is(DataTypeRoot.BLOB)) {
+                throw new UnsupportedOperationException(
+                        String.format("Cannot rename BLOB column: [%s]", fieldName));
+            }
         }
     }
 

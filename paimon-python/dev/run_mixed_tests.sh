@@ -244,6 +244,29 @@ run_compressed_text_test() {
     fi
 }
 
+run_blob_alter_compact_test() {
+    echo -e "${YELLOW}=== Running Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testBlobWriteAlterCompact..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testBlobWriteAlterCompact -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java blob write+alter+compact test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java blob write+alter+compact test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_blob_after_alter_and_compact..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_blob_after_alter_and_compact -v; then
+        echo -e "${GREEN}✓ Python blob read test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python blob read test failed${NC}"
+        return 1
+    fi
+}
+
 # Main execution
 main() {
     local java_write_result=0
@@ -253,6 +276,7 @@ main() {
     local pk_dv_result=0
     local btree_index_result=0
     local compressed_text_result=0
+    local blob_alter_compact_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -311,6 +335,13 @@ main() {
 
     echo ""
 
+    # Run blob alter+compact test (Java write+alter+compact, Python read)
+    if ! run_blob_alter_compact_test; then
+        blob_alter_compact_result=1
+    fi
+
+    echo ""
+
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
@@ -355,12 +386,18 @@ main() {
         echo -e "${RED}✗ Compressed Text Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $blob_alter_compact_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read): FAILED${NC}"
+    fi
+
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $blob_alter_compact_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else
