@@ -1593,3 +1593,43 @@ class DataEvolutionTest(unittest.TestCase):
         sliced = rb.new_read().to_arrow(scan.plan().splits())
         self.assertEqual(sliced.num_rows, 3)
         self.assertEqual(sorted(sliced.column('id').to_pylist()), [2, 3, 4])
+
+    def test_large_file_read(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table('default.test_large_file_row_id', schema, False)
+        table = self.catalog.get_table('default.test_large_file_row_id')
+
+        # Write >1024 rows in a single file
+        num_rows = 2000
+        data = pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'name': [f'name_{i}' for i in range(num_rows)],
+        }, schema=pa_schema)
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        update_ids = list(range(0, 1500))
+        upsert_data = pa.Table.from_pydict({
+            'id': update_ids,
+            'name': [f'upsert_{i}' for i in update_ids],
+        }, schema=pa_schema)
+
+        wb = table.new_batch_write_builder()
+        tu = wb.new_update()
+        msgs = tu.upsert_by_arrow_with_key(upsert_data, ['id'])
+        tc = wb.new_commit()
+        tc.commit(msgs)
+        tc.close()
