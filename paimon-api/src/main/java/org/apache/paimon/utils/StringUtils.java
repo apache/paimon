@@ -308,11 +308,8 @@ public class StringUtils {
     }
 
     public static boolean isBlank(final CharSequence cs) {
-        if (isEmpty(cs)) {
-            return true;
-        }
-
-        for (int i = 0; i < cs.length(); i++) {
+        final int strLen = cs == null ? 0 : cs.length();
+        for (int i = 0; i < strLen; i++) {
             if (!Character.isWhitespace(cs.charAt(i))) {
                 return false;
             }
@@ -337,24 +334,16 @@ public class StringUtils {
     }
 
     public static boolean startsWith(final CharSequence str, final CharSequence prefix) {
-        if (str == prefix) {
-            return true;
-        }
         if (str == null || prefix == null) {
-            return false;
+            return str == null && prefix == null;
         }
-
         return str.toString().startsWith(prefix.toString());
     }
 
     public static boolean endsWith(final CharSequence str, final CharSequence suffix) {
-        if (str == suffix) {
-            return true;
-        }
         if (str == null || suffix == null) {
-            return false;
+            return str == null && suffix == null;
         }
-
         return str.toString().endsWith(suffix.toString());
     }
 
@@ -562,11 +551,11 @@ public class StringUtils {
      * @param separator the separator character to use, null treated as ""
      * @return the joined String, {@code null} if null array input
      */
-    public static String join(final Object[] array, final String separator) {
+    public static String join(final Object[] array, final String delimiter) {
         if (array == null) {
             return null;
         }
-        return join(array, separator, 0, array.length);
+        return join(array, delimiter, 0, array.length);
     }
 
     /**
@@ -584,7 +573,7 @@ public class StringUtils {
      */
     public static String join(
             final Object[] array,
-            final String separator,
+            final String delimiter,
             final int startIndex,
             final int endIndex) {
         if (array == null) {
@@ -600,11 +589,11 @@ public class StringUtils {
         if (noOfItems <= 0) {
             return EMPTY;
         }
-        final String actualSeparator = separator == null ? EMPTY : separator;
+        Objects.requireNonNull(delimiter, "The delimiter must not be null");
         final StringBuilder buf = new StringBuilder(noOfItems * 16);
         for (int i = startIndex; i < endIndex; i++) {
             if (i > startIndex) {
-                buf.append(actualSeparator);
+                buf.append(delimiter);
             }
             if (array[i] != null) {
                 buf.append(array[i]);

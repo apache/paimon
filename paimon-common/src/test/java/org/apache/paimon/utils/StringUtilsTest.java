@@ -282,8 +282,10 @@ class StringUtilsTest {
         void testStartsWithAndEndsWith() {
             assertThat(StringUtils.startsWith("manifest-1", "manifest")).isTrue();
             assertThat(StringUtils.startsWith(null, "manifest")).isFalse();
+            assertThat(StringUtils.startsWith(null, null)).isTrue();
             assertThat(StringUtils.endsWith("part-0.parquet", ".parquet")).isTrue();
             assertThat(StringUtils.endsWith("part-0.orc", ".parquet")).isFalse();
+            assertThat(StringUtils.endsWith(null, null)).isTrue();
         }
 
         @Test
@@ -381,8 +383,10 @@ class StringUtilsTest {
         }
 
         @Test
-        void testJoinArrayNullSeparator() {
-            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, null)).isEqualTo("abc");
+        void testJoinArrayNullDelimiter() {
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, null))
+                    .isInstanceOf(NullPointerException.class)
+                    .hasMessage("The delimiter must not be null");
         }
 
         @Test
