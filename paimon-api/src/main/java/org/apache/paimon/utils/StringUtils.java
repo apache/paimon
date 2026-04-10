@@ -583,7 +583,10 @@ public class StringUtils {
      * @return the joined String, {@code null} if null array input
      */
     public static String join(
-            final Object[] array, final String separator, final int startIndex, final int endIndex) {
+            final Object[] array,
+            final String separator,
+            final int startIndex,
+            final int endIndex) {
         if (array == null) {
             return null;
         }
