@@ -22,7 +22,6 @@ import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.view.View
 
-import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
 import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, StringUtils}
@@ -55,7 +54,7 @@ case class CreatePaimonViewExec(
     }
 
     if (columnAliases.nonEmpty && columnAliases.length != viewSchema.fields.length) {
-      throw new AnalysisException(
+      throw new UnsupportedOperationException(
         s"The number of column aliases (${columnAliases.length}) " +
           s"must match the number of columns (${viewSchema.fields.length})")
     }
