@@ -519,6 +519,22 @@ class ClusteringTableTest {
                 .containsExactlyInAnyOrder(GenericRow.of(1, 100), GenericRow.of(2, 200));
     }
 
+    /** Test first-row mode without explicit deletion-vectors enabled. */
+    @Test
+    public void testFirstRowWithoutDeletionVectors() throws Exception {
+        Table firstRowTable = createFirstRowTableWithoutDv();
+
+        // Write initial data
+        writeRows(firstRowTable, Arrays.asList(GenericRow.of(1, 100), GenericRow.of(2, 200)));
+
+        // Write same keys with different values - should be ignored (first-row keeps first)
+        writeRows(firstRowTable, Arrays.asList(GenericRow.of(1, 999), GenericRow.of(2, 888)));
+
+        // Should still see the first values
+        assertThat(readRows(firstRowTable))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 100), GenericRow.of(2, 200));
+    }
+
     /** Test first-row mode with multiple commits. */
     @Test
     public void testFirstRowMultipleCommits() throws Exception {
@@ -906,6 +922,22 @@ class ClusteringTableTest {
                         .column("b", DataTypes.INT())
                         .primaryKey("a")
                         .option(DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "1")
+                        .option(CLUSTERING_COLUMNS.key(), "b")
+                        .option(PK_CLUSTERING_OVERRIDE.key(), "true")
+                        .option(MERGE_ENGINE.key(), "first-row")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        return catalog.getTable(identifier);
+    }
+
+    private Table createFirstRowTableWithoutDv() throws Exception {
+        Identifier identifier = Identifier.create("default", "first_row_no_dv_table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .primaryKey("a")
                         .option(BUCKET.key(), "1")
                         .option(CLUSTERING_COLUMNS.key(), "b")
                         .option(PK_CLUSTERING_OVERRIDE.key(), "true")
