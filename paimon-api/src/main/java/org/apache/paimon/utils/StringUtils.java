@@ -548,7 +548,7 @@ public class StringUtils {
      * empty String ("").
      *
      * @param array the array of values to join together, may be null
-     * @param separator the separator character to use, null treated as ""
+     * @param delimiter the separator character to use, null treated as ""
      * @return the joined String, {@code null} if null array input
      */
     public static String join(final Object[] array, final String delimiter) {
@@ -566,7 +566,7 @@ public class StringUtils {
      * empty String ("").
      *
      * @param array the array of values to join together, may be null
-     * @param separator the separator character to use, null treated as ""
+     * @param delimiter the separator character to use, null treated as ""
      * @param startIndex the first index to start joining from
      * @param endIndex the index to stop joining from (exclusive)
      * @return the joined String, {@code null} if null array input
