@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -84,9 +85,10 @@ public class TableIndexesTable implements ReadonlyTable {
                             new DataField(4, "file_size", new BigIntType(false)),
                             new DataField(5, "row_count", new BigIntType(false)),
                             new DataField(
-                                    6,
-                                    "dv_ranges",
-                                    new ArrayType(true, DeletionVectorMeta.SCHEMA))));
+                                    6, "dv_ranges", new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            new DataField(7, "row_range_start", new BigIntType(true)),
+                            new DataField(8, "row_range_end", new BigIntType(true)),
+                            new DataField(9, "index_field_id", new IntType(true))));
 
     private final FileStoreTable dataTable;
 
@@ -221,6 +223,7 @@ public class TableIndexesTable implements ReadonlyTable {
                 CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
             LinkedHashMap<String, DeletionVectorMeta> dvMetas =
                     indexManifestEntry.indexFile().dvRanges();
+            GlobalIndexMeta globalMeta = indexManifestEntry.indexFile().globalIndexMeta();
             return GenericRow.of(
                     partitionCastExecutor.cast(indexManifestEntry.partition()),
                     indexManifestEntry.bucket(),
@@ -230,7 +233,10 @@ public class TableIndexesTable implements ReadonlyTable {
                     indexManifestEntry.indexFile().rowCount(),
                     dvMetas == null
                             ? null
-                            : IndexFileMetaSerializer.dvMetasToRowArrayData(dvMetas.values()));
+                            : IndexFileMetaSerializer.dvMetasToRowArrayData(dvMetas.values()),
+                    globalMeta != null ? globalMeta.rowRangeStart() : null,
+                    globalMeta != null ? globalMeta.rowRangeEnd() : null,
+                    globalMeta != null ? globalMeta.indexFieldId() : null);
         }
     }
 
