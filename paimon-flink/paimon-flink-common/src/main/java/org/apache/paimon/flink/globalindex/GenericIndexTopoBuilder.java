@@ -88,6 +88,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class GenericIndexTopoBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(GenericIndexTopoBuilder.class);
+    public static final long NO_MAX_INDEXED_ROW_ID = -1L;
 
     public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
@@ -97,6 +98,25 @@ public class GenericIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
+        buildIndexAndExecute(
+                env,
+                table,
+                indexColumn,
+                indexType,
+                partitionPredicate,
+                userOptions,
+                NO_MAX_INDEXED_ROW_ID);
+    }
+
+    public static void buildIndexAndExecute(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            String indexColumn,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions,
+            long maxIndexedRowId)
+            throws Exception {
         boolean hasIndexToBuild =
                 buildIndex(
                         env,
@@ -105,12 +125,33 @@ public class GenericIndexTopoBuilder {
                         indexColumn,
                         indexType,
                         partitionPredicate,
-                        userOptions);
+                        userOptions,
+                        maxIndexedRowId);
         if (hasIndexToBuild) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         } else {
             LOG.info("No index to build, nothing to do.");
         }
+    }
+
+    public static boolean buildIndex(
+            StreamExecutionEnvironment env,
+            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
+            FileStoreTable table,
+            String indexColumn,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        return buildIndex(
+                env,
+                indexBuilderSupplier,
+                table,
+                indexColumn,
+                indexType,
+                partitionPredicate,
+                userOptions,
+                NO_MAX_INDEXED_ROW_ID);
     }
 
     /**
@@ -126,7 +167,8 @@ public class GenericIndexTopoBuilder {
             String indexColumn,
             String indexType,
             PartitionPredicate partitionPredicate,
-            Options userOptions)
+            Options userOptions,
+            long maxIndexedRowId)
             throws Exception {
         GenericGlobalIndexBuilder indexBuilder = indexBuilderSupplier.get();
         if (partitionPredicate != null) {
@@ -135,14 +177,47 @@ public class GenericIndexTopoBuilder {
 
         List<ManifestEntry> entries = indexBuilder.scan();
         List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
+
+        return buildTopology(
+                env,
+                table,
+                indexColumn,
+                indexType,
+                userOptions,
+                entries,
+                deletedIndexEntries,
+                maxIndexedRowId);
+    }
+
+    /**
+     * Builds the Flink topology for global index creation from pre-scanned entries. Supports both
+     * full builds ({@code maxIndexedRowId = NO_MAX_INDEXED_ROW_ID}) and incremental builds where
+     * rows up to {@code maxIndexedRowId} are skipped.
+     *
+     * @param maxIndexedRowId the maximum row ID already indexed; use {@link #NO_MAX_INDEXED_ROW_ID}
+     *     for a full build
+     * @return {@code true} if a Flink topology was built, {@code false} if nothing to index
+     */
+    private static boolean buildTopology(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            String indexColumn,
+            String indexType,
+            Options userOptions,
+            List<ManifestEntry> entries,
+            List<IndexManifestEntry> deletedIndexEntries,
+            long maxIndexedRowId)
+            throws Exception {
         long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
         LOG.info(
-                "Scanned {} files ({} rows) across {} partitions for {} index on column '{}'.",
+                "Scanned {} files ({} rows) across {} partitions for {} index on column '{}'"
+                        + (maxIndexedRowId >= 0 ? ", maxIndexedRowId={}." : "."),
                 entries.size(),
                 totalRowCount,
                 entries.stream().map(ManifestEntry::partition).distinct().count(),
                 indexType,
-                indexColumn);
+                indexColumn,
+                maxIndexedRowId);
 
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
@@ -160,7 +235,8 @@ public class GenericIndexTopoBuilder {
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
         // Compute shard tasks at file level from the provided entries
-        List<ShardTask> shardTasks = computeShardTasks(table, entries, rowsPerShard);
+        List<ShardTask> shardTasks =
+                computeShardTasks(table, entries, rowsPerShard, maxIndexedRowId);
         if (shardTasks.isEmpty()) {
             LOG.info("No shard tasks generated, nothing to index.");
             return false;
@@ -217,12 +293,32 @@ public class GenericIndexTopoBuilder {
     }
 
     /**
-     * Compute shard tasks at file level from the given manifest entries. Each shard only contains
-     * the files whose row ID ranges overlap with its shard range. A file spanning multiple shard
-     * boundaries is included in each overlapping shard.
+     * Compute shard tasks for a full build (no rows to skip).
+     *
+     * @see #computeShardTasks(FileStoreTable, List, long, long)
      */
     static List<ShardTask> computeShardTasks(
             FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
+        return computeShardTasks(table, entries, rowsPerShard, NO_MAX_INDEXED_ROW_ID);
+    }
+
+    /**
+     * Compute shard tasks at file level from the given manifest entries. Each shard only contains
+     * the files whose row ID ranges overlap with its shard range. A file spanning multiple shard
+     * boundaries is included in each overlapping shard.
+     *
+     * <p>When {@code maxIndexedRowId >= 0}, each shard's effective start is advanced past {@code
+     * maxIndexedRowId}, skipping fully-indexed shards entirely. This enables incremental index
+     * building where only new (un-indexed) rows are processed.
+     *
+     * @param maxIndexedRowId the maximum row ID already indexed; use {@link #NO_MAX_INDEXED_ROW_ID}
+     *     for a full build
+     */
+    static List<ShardTask> computeShardTasks(
+            FileStoreTable table,
+            List<ManifestEntry> entries,
+            long rowsPerShard,
+            long maxIndexedRowId) {
         // Group by partition (bucket is always 0 for unaware-bucket tables)
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                 entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
@@ -266,6 +362,15 @@ public class GenericIndexTopoBuilder {
                     continue;
                 }
 
+                // For incremental builds, advance past already-indexed rows
+                long effectiveStart =
+                        maxIndexedRowId >= 0
+                                ? Math.max(shardStart, maxIndexedRowId + 1)
+                                : shardStart;
+                if (effectiveStart > shardEnd) {
+                    continue; // entire shard already indexed
+                }
+
                 shardFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
 
                 // Group contiguous files; gaps produce separate tasks
@@ -286,7 +391,7 @@ public class GenericIndexTopoBuilder {
                         tasks.add(
                                 createShardTask(
                                         currentGroup,
-                                        shardStart,
+                                        effectiveStart,
                                         shardEnd,
                                         partition,
                                         partBucketPath));
@@ -298,7 +403,11 @@ public class GenericIndexTopoBuilder {
                 if (!currentGroup.isEmpty()) {
                     tasks.add(
                             createShardTask(
-                                    currentGroup, shardStart, shardEnd, partition, partBucketPath));
+                                    currentGroup,
+                                    effectiveStart,
+                                    shardEnd,
+                                    partition,
+                                    partBucketPath));
                 }
             }
         }
@@ -307,7 +416,7 @@ public class GenericIndexTopoBuilder {
 
     private static ShardTask createShardTask(
             List<DataFileMeta> files,
-            long shardStart,
+            long effectiveStart,
             long shardEnd,
             BinaryRow partition,
             String bucketPath) {
@@ -315,8 +424,8 @@ public class GenericIndexTopoBuilder {
         long groupMaxRowId =
                 files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().getAsLong();
 
-        // Clamp to shard boundaries
-        long rangeFrom = Math.max(groupMinRowId, shardStart);
+        // Clamp to effective boundaries
+        long rangeFrom = Math.max(groupMinRowId, effectiveStart);
         long rangeTo = Math.min(groupMaxRowId, shardEnd);
 
         DataSplit dataSplit =
