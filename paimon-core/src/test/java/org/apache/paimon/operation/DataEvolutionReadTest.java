@@ -297,6 +297,36 @@ public class DataEvolutionReadTest {
                 fileName, firstRowId, rowCount, maxSequenceNumber, Arrays.asList("blob_col"));
     }
 
+    /** Creates a blob file with a specified schemaId. */
+    private DataFileMeta createBlobFileWithSchema(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSequenceNumber,
+            long schemaId) {
+        return DataFileMeta.create(
+                fileName + ".blob",
+                rowCount,
+                rowCount,
+                DataFileMeta.EMPTY_MIN_KEY,
+                DataFileMeta.EMPTY_MAX_KEY,
+                SimpleStats.EMPTY_STATS,
+                SimpleStats.EMPTY_STATS,
+                0,
+                maxSequenceNumber,
+                schemaId,
+                DataFileMeta.DUMMY_LEVEL,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(System.currentTimeMillis()),
+                rowCount,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                firstRowId,
+                Arrays.asList("blob_col"));
+    }
+
     /** Creates a blob file with custom write columns. */
     private DataFileMeta createBlobFileWithCols(
             String fileName,
@@ -325,6 +355,20 @@ public class DataEvolutionReadTest {
                 null,
                 firstRowId,
                 writeCols);
+    }
+
+    @Test
+    void testAddBlobFilesWithDifferentSchemaId() {
+        DataFileMeta blobEntry1 = createBlobFileWithSchema("blob1", 0, 100, 1, 0L);
+        DataFileMeta blobEntry2 = createBlobFileWithSchema("blob2", 100, 200, 1, 1L);
+
+        blobBunch.add(blobEntry1);
+        assertThatCode(() -> blobBunch.add(blobEntry2)).doesNotThrowAnyException();
+
+        assertThat(blobBunch.files).hasSize(2);
+        assertThat(blobBunch.files.get(0).schemaId()).isEqualTo(0L);
+        assertThat(blobBunch.files.get(1).schemaId()).isEqualTo(1L);
+        assertThat(blobBunch.rowCount()).isEqualTo(300);
     }
 
     @Test
