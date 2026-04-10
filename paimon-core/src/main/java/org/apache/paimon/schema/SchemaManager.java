@@ -270,14 +270,15 @@ public class SchemaManager implements Serializable {
                                                             tableRoot.toString(), true, branch)));
             LazyField<Identifier> lazyIdentifier =
                     new LazyField<>(() -> identifierFromPath(tableRoot.toString(), true, branch));
-            TableSchema newTableSchema =
+            Optional<TableSchema> newTableSchemaOpt =
                     generateTableSchema(oldTableSchema, changes, hasSnapshots, lazyIdentifier);
-            if (oldTableSchema.sameContent(newTableSchema)) {
+            if (!newTableSchemaOpt.isPresent()) {
                 LOG.info(
                         "No schema change detected for table {}. Skipping schema update.",
                         lazyIdentifier.get());
                 return oldTableSchema;
             }
+            TableSchema newTableSchema = newTableSchemaOpt.get();
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
@@ -289,7 +290,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public static TableSchema generateTableSchema(
+    public static Optional<TableSchema> generateTableSchema(
             TableSchema oldTableSchema,
             List<SchemaChange> changes,
             LazyField<Boolean> hasSnapshots,
@@ -324,7 +325,98 @@ public class SchemaManager implements Serializable {
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
         String newComment = oldTableSchema.comment();
         List<String> newPrimaryKeys = oldTableSchema.primaryKeys();
+
+        // Filter out ineffective changes
+        List<SchemaChange> effectiveChanges = new ArrayList<>();
         for (SchemaChange change : changes) {
+            if (change instanceof SetOption) {
+                SetOption setOption = (SetOption) change;
+                String oldValue = oldOptions.get(setOption.key());
+                if (oldValue == null || !oldValue.equals(setOption.value())) {
+                    effectiveChanges.add(change);
+                }
+            } else if (change instanceof RemoveOption) {
+                RemoveOption removeOption = (RemoveOption) change;
+                if (oldOptions.containsKey(removeOption.key())) {
+                    effectiveChanges.add(change);
+                }
+            } else if (change instanceof UpdateComment) {
+                UpdateComment updateComment = (UpdateComment) change;
+                if (!Objects.equals(oldTableSchema.comment(), updateComment.comment())) {
+                    effectiveChanges.add(change);
+                }
+            } else if (change instanceof RenameColumn) {
+                RenameColumn rename = (RenameColumn) change;
+                DataField field = findField(oldTableSchema.fields(), rename.fieldNames());
+                if (field != null && !field.name().equals(rename.newName())) {
+                    effectiveChanges.add(change);
+                }
+            } else if (change instanceof UpdateColumnType) {
+                UpdateColumnType update = (UpdateColumnType) change;
+                DataField field = findField(oldTableSchema.fields(), update.fieldNames());
+                if (field != null) {
+                    DataType oldType = field.type();
+                    DataType newType = update.newDataType();
+                    if (update.keepNullability()) {
+                        newType = newType.copy(oldType.isNullable());
+                    }
+                    if (!oldType.equals(newType)) {
+                        effectiveChanges.add(change);
+                    }
+                }
+            } else if (change instanceof UpdateColumnNullability) {
+                UpdateColumnNullability update = (UpdateColumnNullability) change;
+                DataField field = findField(oldTableSchema.fields(), update.fieldNames());
+                if (field != null) {
+                    DataType oldType = field.type();
+                    DataType sourceRootType =
+                            getRootType(
+                                    oldType,
+                                    update.fieldNames().length - 1,
+                                    update.fieldNames().length);
+                    if (sourceRootType.isNullable() != update.newNullability()) {
+                        effectiveChanges.add(change);
+                    }
+                }
+            } else if (change instanceof UpdateColumnComment) {
+                UpdateColumnComment update = (UpdateColumnComment) change;
+                DataField field = findField(oldTableSchema.fields(), update.fieldNames());
+                if (field != null
+                        && !Objects.equals(field.description(), update.newDescription())) {
+                    effectiveChanges.add(change);
+                }
+            } else if (change instanceof UpdateColumnPosition) {
+                UpdateColumnPosition update = (UpdateColumnPosition) change;
+                SchemaChange.Move move = update.move();
+                String fieldName = move.fieldName();
+                DataField field = findFieldByName(newFields, fieldName);
+                if (field != null) {
+                    int currentIndex = -1;
+                    for (int i = 0; i < newFields.size(); i++) {
+                        if (newFields.get(i).name().equals(fieldName)) {
+                            currentIndex = i;
+                            break;
+                        }
+                    }
+                    int newIndex = calculateNewPosition(newFields, move);
+                    if (currentIndex != newIndex) {
+                        effectiveChanges.add(change);
+                    }
+                }
+            } else if (change instanceof UpdateColumnDefaultValue) {
+                UpdateColumnDefaultValue update = (UpdateColumnDefaultValue) change;
+                DataField field = findField(oldTableSchema.fields(), update.fieldNames());
+                if (field != null
+                        && !Objects.equals(field.defaultValue(), update.newDefaultValue())) {
+                    effectiveChanges.add(change);
+                }
+            } else {
+                // AddColumn and DropColumn always change the schema
+                effectiveChanges.add(change);
+            }
+        }
+
+        for (SchemaChange change : effectiveChanges) {
             if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
                 if (hasSnapshots.get()) {
@@ -581,18 +673,76 @@ public class SchemaManager implements Serializable {
                         newFields,
                         oldTableSchema.partitionKeys(),
                         applyNotNestedColumnRename(
-                                newPrimaryKeys, Iterables.filter(changes, RenameColumn.class)),
-                        applyRenameColumnsToOptions(newOptions, changes),
+                                newPrimaryKeys,
+                                Iterables.filter(effectiveChanges, RenameColumn.class)),
+                        applyRenameColumnsToOptions(newOptions, effectiveChanges),
                         newComment);
 
-        return new TableSchema(
-                oldTableSchema.id() + 1,
-                newSchema.fields(),
-                highestFieldId.get(),
-                newSchema.partitionKeys(),
-                newSchema.primaryKeys(),
-                newSchema.options(),
-                newSchema.comment());
+        TableSchema newTableSchema =
+                new TableSchema(
+                        oldTableSchema.id() + 1,
+                        newSchema.fields(),
+                        highestFieldId.get(),
+                        newSchema.partitionKeys(),
+                        newSchema.primaryKeys(),
+                        newSchema.options(),
+                        newSchema.comment());
+
+        if (oldTableSchema.sameContent(newTableSchema)) {
+            return Optional.empty();
+        }
+        return Optional.of(newTableSchema);
+    }
+
+    private static DataField findField(List<DataField> fields, String[] fieldNames) {
+        if (fieldNames.length == 0) {
+            return null;
+        }
+        String firstName = fieldNames[0];
+        for (DataField field : fields) {
+            if (field.name().equals(firstName)) {
+                if (fieldNames.length == 1) {
+                    return field;
+                }
+                // Handle nested fields
+                if (field.type() instanceof RowType) {
+                    return findField(
+                            ((RowType) field.type()).getFields(),
+                            Arrays.copyOfRange(fieldNames, 1, fieldNames.length));
+                }
+            }
+        }
+        return null;
+    }
+
+    private static DataField findFieldByName(List<DataField> fields, String fieldName) {
+        for (DataField field : fields) {
+            if (field.name().equals(fieldName)) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    private static int calculateNewPosition(List<DataField> fields, SchemaChange.Move move) {
+        if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
+            return 0;
+        } else if (move.type().equals(SchemaChange.Move.MoveType.LAST)) {
+            return fields.size() - 1;
+        } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
+            for (int i = 0; i < fields.size(); i++) {
+                if (fields.get(i).name().equals(move.referenceFieldName())) {
+                    return i + 1;
+                }
+            }
+        } else if (move.type().equals(SchemaChange.Move.MoveType.BEFORE)) {
+            for (int i = 0; i < fields.size(); i++) {
+                if (fields.get(i).name().equals(move.referenceFieldName())) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     // gets the rootType at the defined depth

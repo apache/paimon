@@ -2455,10 +2455,12 @@ public class RESTCatalogServer {
                 if (isFormatTable(schema.toSchema())) {
                     TableSchema newSchema =
                             SchemaManager.generateTableSchema(
-                                    schema,
-                                    changes,
-                                    new LazyField<>(() -> false),
-                                    new LazyField<>(() -> identifier));
+                                            schema,
+                                            changes,
+                                            new LazyField<>(() -> false),
+                                            new LazyField<>(() -> identifier))
+                                    .orElse(schema);
+
                     TableMetadata newTableMetadata =
                             createTableMetadata(
                                     identifier,
