@@ -109,7 +109,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 @ThreadSafe
 public class SchemaManager implements Serializable {
 
-    private static final String SCHEMA_PREFIX = "schema-";
+    public static final String SCHEMA_PREFIX = "schema-";
 
     private final FileIO fileIO;
     private final Path tableRoot;

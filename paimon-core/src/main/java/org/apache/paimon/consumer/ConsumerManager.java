@@ -45,7 +45,7 @@ public class ConsumerManager implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final String CONSUMER_PREFIX = "consumer-";
+    public static final String CONSUMER_PREFIX = "consumer-";
 
     private final FileIO fileIO;
     private final Path tablePath;
