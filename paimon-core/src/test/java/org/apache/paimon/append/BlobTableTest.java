@@ -41,6 +41,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
@@ -552,6 +554,101 @@ public class BlobTableTest extends TableTestBase {
         commitDefault(compactMessages);
 
         // Step 5: read after compaction
+        readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
+    }
+
+    @Test
+    void testReadBlobAfterAddColumnAndCompaction() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        commitDefault(writeDataDefault(100, 1));
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+
+        List<CommitMessage> messages = new ArrayList<>();
+        FileStoreTable newTable = getTableDefault();
+        StreamWriteBuilder builder = newTable.newStreamWriteBuilder();
+        builder.withCommitUser(commitUser);
+        try (StreamTableWrite write = builder.newWrite()) {
+            for (int j = 0; j < 100; j++) {
+                write.write(
+                        GenericRow.of(
+                                RANDOM.nextInt(),
+                                BinaryString.fromBytes(randomBytes()),
+                                new BlobData(blobBytes),
+                                null));
+            }
+            messages.addAll(write.prepareCommit(false, Long.MAX_VALUE));
+        }
+        commitDefault(messages);
+
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
+    }
+
+    @Test
+    void testReadBlobAfterDropColumnAndCompaction() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.column("f3", DataTypes.STRING());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        FileStoreTable tableV0 = getTableDefault();
+        List<CommitMessage> messages = new ArrayList<>();
+        StreamWriteBuilder builderV0 = tableV0.newStreamWriteBuilder();
+        builderV0.withCommitUser(commitUser);
+        try (StreamTableWrite write = builderV0.newWrite()) {
+            for (int j = 0; j < 100; j++) {
+                write.write(
+                        GenericRow.of(
+                                RANDOM.nextInt(),
+                                BinaryString.fromBytes(randomBytes()),
+                                new BlobData(blobBytes),
+                                BinaryString.fromString("extra")));
+            }
+            messages.addAll(write.prepareCommit(false, Long.MAX_VALUE));
+        }
+        commitDefault(messages);
+
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("f3"), false);
+
+        commitDefault(writeDataDefault(100, 1));
+
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
         readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
     }
 
