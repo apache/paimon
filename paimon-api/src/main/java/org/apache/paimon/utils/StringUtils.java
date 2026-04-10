@@ -552,6 +552,58 @@ public class StringUtils {
     }
 
     /**
+     * Joins the elements of the provided array into a single String containing the provided list of
+     * elements.
+     *
+     * <p>No delimiter is added before or after the list. A {@code null} separator is the same as an
+     * empty String ("").
+     *
+     * @param array the array of values to join together, may be null
+     * @param separator the separator character to use, null treated as ""
+     * @return the joined String, {@code null} if null array input
+     */
+    public static String join(final Object[] array, final String separator) {
+        if (array == null) {
+            return null;
+        }
+        return join(array, separator, 0, array.length);
+    }
+
+    /**
+     * Joins the elements of the provided array into a single String containing the provided list of
+     * elements.
+     *
+     * <p>No delimiter is added before or after the list. A {@code null} separator is the same as an
+     * empty String ("").
+     *
+     * @param array the array of values to join together, may be null
+     * @param separator the separator character to use, null treated as ""
+     * @param startIndex the first index to start joining from
+     * @param endIndex the index to stop joining from (exclusive)
+     * @return the joined String, {@code null} if null array input
+     */
+    public static String join(
+            final Object[] array, final String separator, final int startIndex, final int endIndex) {
+        if (array == null) {
+            return null;
+        }
+        final int noOfItems = endIndex - startIndex;
+        if (noOfItems <= 0) {
+            return EMPTY;
+        }
+        final StringBuilder buf = new StringBuilder(noOfItems * 16);
+        for (int i = startIndex; i < endIndex; i++) {
+            if (i > startIndex) {
+                buf.append(separator);
+            }
+            if (array[i] != null) {
+                buf.append(array[i]);
+            }
+        }
+        return buf.toString();
+    }
+
+    /**
      * Joins the elements of the provided {@code Iterable} into a single String containing the
      * provided elements.
      *
