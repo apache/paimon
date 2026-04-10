@@ -23,22 +23,30 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Projection;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -166,5 +174,121 @@ public class PartitionsTableTest extends TableTestBase {
 
         List<InternalRow> result = read(testPartitionsTable, new int[] {0, 1});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testPartitionPredicateFilterEqual() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        // Equal filter: partition = 'pt=1'
+        Predicate filter = builder.equal(0, BinaryString.fromString("pt=1"));
+        assertThat(readWithFilter(partitionsTable, filter, new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(BinaryString.fromString("pt=1"), 2L));
+
+        // Equal filter: partition = 'pt=2'
+        filter = builder.equal(0, BinaryString.fromString("pt=2"));
+        assertThat(readWithFilter(partitionsTable, filter, new int[] {0, 1}))
+                .containsExactlyInAnyOrder(GenericRow.of(BinaryString.fromString("pt=2"), 1L));
+    }
+
+    @Test
+    public void testPartitionPredicateFilterIn() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        Predicate filter =
+                builder.in(
+                        0,
+                        Arrays.asList(
+                                BinaryString.fromString("pt=1"), BinaryString.fromString("pt=3")));
+        assertThat(readWithFilter(partitionsTable, filter, new int[] {0, 1}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("pt=1"), 2L),
+                        GenericRow.of(BinaryString.fromString("pt=3"), 1L));
+    }
+
+    @Test
+    public void testPartitionPredicateFilterNoMatch() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        Predicate filter = builder.equal(0, BinaryString.fromString("pt=999"));
+        assertThat(readWithFilter(partitionsTable, filter, new int[] {0, 1})).isEmpty();
+    }
+
+    @Test
+    public void testPartitionPredicateFilterNonPartitionColumn() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        // Filter on record_count column — should be safely ignored, return all partitions
+        Predicate filter = builder.greaterThan(1, 0L);
+        assertThat(readWithFilter(partitionsTable, filter, new int[] {0, 1})).hasSize(3);
+    }
+
+    @Test
+    public void testPartitionPredicateFilterMultiColumnKeys() throws Exception {
+        String testTableName = "MultiPartTable";
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, testTableName));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("dt", DataTypes.INT())
+                        .column("region", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("dt", "region")
+                        .primaryKey("pk", "dt", "region")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option("bucket", "1")
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+        FileStoreTable multiTable =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+
+        Identifier multiPartitionsTableId =
+                identifier(testTableName + SYSTEM_TABLE_SPLITTER + PartitionsTable.PARTITIONS);
+        PartitionsTable multiPartitionsTable =
+                (PartitionsTable) catalog.getTable(multiPartitionsTableId);
+
+        write(multiTable, GenericRow.of(1, 20260410, 1, 100));
+        write(multiTable, GenericRow.of(2, 20260410, 2, 200));
+        write(multiTable, GenericRow.of(3, 20260411, 1, 300));
+
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        // Equal filter on multi-column partition
+        Predicate filter = builder.equal(0, BinaryString.fromString("dt=20260410/region=1"));
+        assertThat(readWithFilter(multiPartitionsTable, filter, new int[] {0, 1}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("dt=20260410/region=1"), 1L));
+
+        // IN filter on multi-column partition
+        filter =
+                builder.in(
+                        0,
+                        Arrays.asList(
+                                BinaryString.fromString("dt=20260410/region=1"),
+                                BinaryString.fromString("dt=20260411/region=1")));
+        assertThat(readWithFilter(multiPartitionsTable, filter, new int[] {0, 1}))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("dt=20260410/region=1"), 1L),
+                        GenericRow.of(BinaryString.fromString("dt=20260411/region=1"), 1L));
+    }
+
+    private List<InternalRow> readWithFilter(Table table, Predicate filter, int[] projection)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(filter);
+        if (projection != null) {
+            readBuilder.withProjection(projection);
+        }
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
+                        projection == null
+                                ? table.rowType()
+                                : Projection.of(projection).project(table.rowType()));
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        return rows;
     }
 }

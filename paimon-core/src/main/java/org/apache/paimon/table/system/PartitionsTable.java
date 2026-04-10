@@ -35,7 +35,12 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -56,15 +61,19 @@ import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.PartitionPredicateHelper;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -140,14 +149,67 @@ public class PartitionsTable implements ReadonlyTable {
 
     private static class PartitionsScan extends ReadOnceTableScan {
 
+        @Nullable private LeafPredicate partitionPredicate;
+
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE);
+            this.partitionPredicate = leafPredicates.get("partition");
+
+            // Handle Or(Equal, Equal...) pattern from PredicateBuilder.in() with <=20 literals
+            if (this.partitionPredicate == null) {
+                for (Predicate andChild : PredicateBuilder.splitAnd(predicate)) {
+                    LeafPredicate inPred = convertOrEqualsToIn(andChild, "partition");
+                    if (inPred != null) {
+                        this.partitionPredicate = inPred;
+                        break;
+                    }
+                }
+            }
             return this;
+        }
+
+        @Nullable
+        private static LeafPredicate convertOrEqualsToIn(Predicate predicate, String targetField) {
+            List<Predicate> orChildren = PredicateBuilder.splitOr(predicate);
+            if (orChildren.size() <= 1) {
+                return null;
+            }
+            List<Object> literals = new ArrayList<>();
+            String fieldName = null;
+            int fieldIndex = -1;
+            DataType fieldType = null;
+            for (Predicate child : orChildren) {
+                if (!(child instanceof LeafPredicate)) {
+                    return null;
+                }
+                LeafPredicate leaf = (LeafPredicate) child;
+                if (!(leaf.function() instanceof Equal)) {
+                    return null;
+                }
+                if (fieldName == null) {
+                    fieldName = leaf.fieldName();
+                    fieldIndex = leaf.index();
+                    fieldType = leaf.type();
+                } else if (!fieldName.equals(leaf.fieldName())) {
+                    return null;
+                }
+                literals.addAll(leaf.literals());
+            }
+            if (!targetField.equals(fieldName)) {
+                return null;
+            }
+            return new LeafPredicate(In.INSTANCE, fieldType, fieldIndex, fieldName, literals);
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new PartitionsSplit());
+            return () -> Collections.singletonList(new PartitionsSplit(partitionPredicate));
         }
     }
 
@@ -155,17 +217,27 @@ public class PartitionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
+        @Nullable private final LeafPredicate partitionPredicate;
+
+        private PartitionsSplit(@Nullable LeafPredicate partitionPredicate) {
+            this.partitionPredicate = partitionPredicate;
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
             }
-            return o != null && getClass() == o.getClass();
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            PartitionsSplit that = (PartitionsSplit) o;
+            return Objects.equals(partitionPredicate, that.partitionPredicate);
         }
 
         @Override
         public int hashCode() {
-            return 1;
+            return Objects.hash(partitionPredicate);
         }
 
         @Override
@@ -186,7 +258,7 @@ public class PartitionsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            // filter pushdown is handled at the Scan layer through PartitionsSplit
             return this;
         }
 
@@ -207,7 +279,8 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<Partition> partitions = listPartitions();
+            PartitionsSplit partitionsSplit = (PartitionsSplit) split;
+            List<Partition> partitions = listPartitions(partitionsSplit.partitionPredicate);
 
             List<DataType> fieldTypes =
                     fileStoreTable.schema().logicalPartitionType().getFieldTypes();
@@ -320,17 +393,17 @@ public class PartitionsTable implements ReadonlyTable {
                             Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault()));
         }
 
-        private List<Partition> listPartitions() {
+        private List<Partition> listPartitions(@Nullable LeafPredicate partitionPredicate) {
             CatalogLoader catalogLoader = fileStoreTable.catalogEnvironment().catalogLoader();
             if (TimeTravelUtil.hasTimeTravelOptions(new Options(fileStoreTable.options()))
                     || catalogLoader == null) {
-                return listPartitionEntries();
+                return listPartitionEntries(partitionPredicate);
             }
 
             try (Catalog catalog = catalogLoader.load()) {
                 Identifier baseIdentifier = fileStoreTable.catalogEnvironment().identifier();
                 if (baseIdentifier == null) {
-                    return listPartitionEntries();
+                    return listPartitionEntries(partitionPredicate);
                 }
                 String branch = fileStoreTable.coreOptions().branch();
                 Identifier identifier;
@@ -343,15 +416,53 @@ public class PartitionsTable implements ReadonlyTable {
                 } else {
                     identifier = baseIdentifier;
                 }
-                return catalog.listPartitions(identifier);
+                List<Partition> partitions = catalog.listPartitions(identifier);
+                return filterByPredicate(partitions, partitionPredicate);
             } catch (Exception e) {
-                return listPartitionEntries();
+                return listPartitionEntries(partitionPredicate);
             }
         }
 
-        private List<Partition> listPartitionEntries() {
-            List<PartitionEntry> partitionEntries =
-                    fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
+        private List<Partition> filterByPredicate(
+                List<Partition> partitions, @Nullable LeafPredicate partitionPredicate) {
+            if (partitionPredicate == null) {
+                return partitions;
+            }
+            List<String> partitionKeys = fileStoreTable.partitionKeys();
+            return partitions.stream()
+                    .filter(
+                            p -> {
+                                StringBuilder sb = new StringBuilder();
+                                for (int i = 0; i < partitionKeys.size(); i++) {
+                                    if (i > 0) {
+                                        sb.append("/");
+                                    }
+                                    sb.append(partitionKeys.get(i))
+                                            .append("=")
+                                            .append(p.spec().get(partitionKeys.get(i)));
+                                }
+                                return partitionPredicate.test(
+                                        GenericRow.of(BinaryString.fromString(sb.toString())));
+                            })
+                    .collect(Collectors.toList());
+        }
+
+        private List<Partition> listPartitionEntries(@Nullable LeafPredicate partitionPredicate) {
+            InnerTableScan scan = fileStoreTable.newScan().withLevelFilter(level -> true);
+
+            if (partitionPredicate != null) {
+                List<String> partitionKeys = fileStoreTable.partitionKeys();
+                RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+                Predicate partPred =
+                        PartitionPredicateHelper.buildPartitionPredicate(
+                                partitionPredicate, partitionKeys, partitionType);
+                if (partPred == null) {
+                    return Collections.emptyList();
+                }
+                scan.withPartitionFilter(partPred);
+            }
+
+            List<PartitionEntry> partitionEntries = scan.listPartitionEntries();
             RowType partitionType = fileStoreTable.schema().logicalPartitionType();
             String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
             String[] partitionColumns = fileStoreTable.partitionKeys().toArray(new String[0]);
