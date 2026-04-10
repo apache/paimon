@@ -34,7 +34,6 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
-
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.Dataset;
