@@ -455,13 +455,19 @@ public class PartitionsTable implements ReadonlyTable {
             if (partitionPredicate != null) {
                 List<String> partitionKeys = fileStoreTable.partitionKeys();
                 RowType partitionType = fileStoreTable.schema().logicalPartitionType();
-                Predicate partPred =
+                String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
+                Predicate partitionFilter =
                         PartitionPredicateHelper.buildPartitionPredicate(
-                                partitionPredicate, partitionKeys, partitionType);
-                if (partPred == null) {
-                    return Collections.emptyList();
+                                partitionPredicate,
+                                partitionKeys,
+                                partitionType,
+                                defaultPartitionName);
+                if (partitionFilter != null) {
+                    if (PartitionPredicateHelper.isAlwaysFalse(partitionFilter)) {
+                        return Collections.emptyList();
+                    }
+                    scan.withPartitionFilter(partitionFilter);
                 }
-                scan.withPartitionFilter(partPred);
             }
 
             List<PartitionEntry> partitionEntries = scan.listPartitionEntries();

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.AlwaysFalse;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafBinaryFunction;
@@ -44,26 +45,33 @@ public class PartitionPredicateHelper {
      * Build a partition-typed predicate from a string-based leaf predicate on the "partition"
      * column.
      *
-     * @return the predicate on partition fields, or {@code null} if the partition spec is invalid
-     *     (indicating no results should be returned)
+     * @return {@code null} if the predicate type is unsupported for pushdown (caller should skip
+     *     pushdown), {@link PredicateBuilder#alwaysFalse()} if no partition can match (caller
+     *     should return empty), or a normal predicate to push down.
      */
     @Nullable
     public static Predicate buildPartitionPredicate(
-            LeafPredicate partitionPredicate, List<String> partitionKeys, RowType partitionType) {
+            LeafPredicate partitionPredicate,
+            List<String> partitionKeys,
+            RowType partitionType,
+            String defaultPartitionName) {
         if (partitionPredicate.function() instanceof Equal) {
             LinkedHashMap<String, String> partSpec =
                     parsePartitionSpec(
                             partitionPredicate.literals().get(0).toString(), partitionKeys);
             if (partSpec == null) {
-                return null;
+                return PredicateBuilder.alwaysFalse();
             }
             PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
             List<Predicate> predicates = new ArrayList<>();
             for (int i = 0; i < partitionKeys.size(); i++) {
-                Object value =
-                        TypeUtils.castFromString(
-                                partSpec.get(partitionKeys.get(i)), partitionType.getTypeAt(i));
-                predicates.add(partBuilder.equal(i, value));
+                String strValue = partSpec.get(partitionKeys.get(i));
+                if (defaultPartitionName.equals(strValue)) {
+                    predicates.add(partBuilder.isNull(i));
+                } else {
+                    Object value = TypeUtils.castFromString(strValue, partitionType.getTypeAt(i));
+                    predicates.add(partBuilder.equal(i, value));
+                }
             }
             return PredicateBuilder.and(predicates);
         } else if (partitionPredicate.function() instanceof In) {
@@ -77,34 +85,44 @@ public class PartitionPredicateHelper {
                 }
                 List<Predicate> andPredicates = new ArrayList<>();
                 for (int i = 0; i < partitionKeys.size(); i++) {
-                    Object value =
-                            TypeUtils.castFromString(
-                                    partSpec.get(partitionKeys.get(i)), partitionType.getTypeAt(i));
-                    andPredicates.add(partBuilder.equal(i, value));
+                    String strValue = partSpec.get(partitionKeys.get(i));
+                    if (defaultPartitionName.equals(strValue)) {
+                        andPredicates.add(partBuilder.isNull(i));
+                    } else {
+                        Object value =
+                                TypeUtils.castFromString(strValue, partitionType.getTypeAt(i));
+                        andPredicates.add(partBuilder.equal(i, value));
+                    }
                 }
                 orPredicates.add(PredicateBuilder.and(andPredicates));
             }
-            return orPredicates.isEmpty() ? null : PredicateBuilder.or(orPredicates);
-        } else if (partitionPredicate.function() instanceof LeafBinaryFunction) {
+            return orPredicates.isEmpty()
+                    ? PredicateBuilder.alwaysFalse()
+                    : PredicateBuilder.or(orPredicates);
+        }
+        if (partitionPredicate.function() instanceof LeafBinaryFunction) {
             LinkedHashMap<String, String> partSpec =
                     parsePartitionSpec(
                             partitionPredicate.literals().get(0).toString(), partitionKeys);
             if (partSpec == null) {
-                return null;
+                return PredicateBuilder.alwaysFalse();
             }
             PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
             List<Predicate> predicates = new ArrayList<>();
             for (int i = 0; i < partitionKeys.size(); i++) {
-                Object value =
-                        TypeUtils.castFromString(
-                                partSpec.get(partitionKeys.get(i)), partitionType.getTypeAt(i));
-                predicates.add(
-                        new LeafPredicate(
-                                partitionPredicate.function(),
-                                partitionType.getTypeAt(i),
-                                i,
-                                partitionKeys.get(i),
-                                Collections.singletonList(value)));
+                String strValue = partSpec.get(partitionKeys.get(i));
+                if (defaultPartitionName.equals(strValue)) {
+                    predicates.add(partBuilder.isNull(i));
+                } else {
+                    Object value = TypeUtils.castFromString(strValue, partitionType.getTypeAt(i));
+                    predicates.add(
+                            new LeafPredicate(
+                                    partitionPredicate.function(),
+                                    partitionType.getTypeAt(i),
+                                    i,
+                                    partitionKeys.get(i),
+                                    Collections.singletonList(value)));
+                }
             }
             return PredicateBuilder.and(predicates);
         }
@@ -115,18 +133,28 @@ public class PartitionPredicateHelper {
             SnapshotReader snapshotReader,
             @Nullable LeafPredicate partitionPredicate,
             List<String> partitionKeys,
-            RowType partitionType) {
+            RowType partitionType,
+            String defaultPartitionName) {
         if (partitionPredicate == null) {
             return true;
         }
 
-        Predicate predicate =
-                buildPartitionPredicate(partitionPredicate, partitionKeys, partitionType);
-        if (predicate == null) {
+        Predicate result =
+                buildPartitionPredicate(
+                        partitionPredicate, partitionKeys, partitionType, defaultPartitionName);
+        if (result == null) {
+            return true;
+        }
+        if (isAlwaysFalse(result)) {
             return false;
         }
-        snapshotReader.withPartitionFilter(predicate);
+        snapshotReader.withPartitionFilter(result);
         return true;
+    }
+
+    public static boolean isAlwaysFalse(Predicate predicate) {
+        return predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).function().equals(AlwaysFalse.INSTANCE);
     }
 
     @Nullable
