@@ -226,8 +226,6 @@ public class PartitionsTableTest extends TableTestBase {
     @Test
     public void testPartitionPredicateFilterMultiColumnKeys() throws Exception {
         String testTableName = "MultiPartTable";
-        FileIO fileIO = LocalFileIO.create();
-        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, testTableName));
         Schema schema =
                 Schema.newBuilder()
                         .column("pk", DataTypes.INT())
@@ -239,10 +237,9 @@ public class PartitionsTableTest extends TableTestBase {
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
                         .option("bucket", "1")
                         .build();
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
-        FileStoreTable multiTable =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        Identifier multiTableId = identifier(testTableName);
+        catalog.createTable(multiTableId, schema, true);
+        FileStoreTable multiTable = (FileStoreTable) catalog.getTable(multiTableId);
 
         Identifier multiPartitionsTableId =
                 identifier(testTableName + SYSTEM_TABLE_SPLITTER + PartitionsTable.PARTITIONS);
