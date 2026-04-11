@@ -429,6 +429,7 @@ public class PartitionsTable implements ReadonlyTable {
                 return partitions;
             }
             List<String> partitionKeys = fileStoreTable.partitionKeys();
+            String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
             return partitions.stream()
                     .filter(
                             p -> {
@@ -437,9 +438,10 @@ public class PartitionsTable implements ReadonlyTable {
                                     if (i > 0) {
                                         sb.append("/");
                                     }
+                                    String value = p.spec().get(partitionKeys.get(i));
                                     sb.append(partitionKeys.get(i))
                                             .append("=")
-                                            .append(p.spec().get(partitionKeys.get(i)));
+                                            .append(value == null ? defaultPartitionName : value);
                                 }
                                 return partitionPredicate.test(
                                         GenericRow.of(BinaryString.fromString(sb.toString())));
