@@ -611,3 +611,61 @@ class JavaPyReadWriteTest(unittest.TestCase):
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
         self.assertEqual(result.num_rows, 200)
+
+    def test_compact_conflict_shard_update(self):
+        """
+        1. Java writes 5 base files (testCompactConflictWriteBase)
+        2. pypaimon ShardTableUpdator scans table, prepares evolution
+        3. Java runs compact (testCompactConflictRunCompact)
+        4. pypaimon commits stale evolution -> conflict detected, raises RuntimeError
+        """
+        import subprocess
+
+        table = self.catalog.get_table('default.compact_conflict_test')
+
+        # Step 2: pypaimon shard update - scan and prepare commit
+        wb = table.new_batch_write_builder()
+        update = wb.new_update()
+        update.with_read_projection(['f0'])
+        update.with_update_type(['f2'])
+        upd = update.new_shard_updator(shard_num=0, total_shard_count=3)
+        print(f"Shard 0 row_ranges: {[(r[1].from_, r[1].to) for r in upd.row_ranges]}")
+
+        reader = upd.arrow_reader()
+        import pyarrow as pa
+        rows_read = 0
+        for batch in iter(reader.read_next_batch, None):
+            n = batch.num_rows
+            rows_read += n
+            upd.update_by_arrow_batch(
+                pa.RecordBatch.from_pydict(
+                    {'f2': [f'evo_{i}' for i in range(n)]},
+                    schema=pa.schema([('f2', pa.string())])
+                )
+            )
+        print(f"Shard update read {rows_read} rows")
+        stale_commit_msgs = upd.prepare_commit()
+
+        # Step 3: Java compact (compact happening between scan and commit)
+        project_root = os.path.join(self.tempdir, '..', '..', '..', '..')
+        result = subprocess.run(
+            ['mvn', 'test',
+             '-pl', 'paimon-core',
+             '-Dtest=org.apache.paimon.JavaPyE2ETest#testCompactConflictRunCompact',
+             '-Drun.e2e.tests=true',
+             '-Dsurefire.failIfNoSpecifiedTests=false',
+             '-q'],
+            cwd=os.path.abspath(project_root),
+            capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"Java compact failed:\n{result.stdout}\n{result.stderr}")
+        print("Java compact completed")
+
+        # Step 4: pypaimon commits stale evolution -> conflict detected
+        tc = wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            tc.commit(stale_commit_msgs)
+        self.assertIn("conflicts", str(ctx.exception))
+        tc.close()
+        print(f"Conflict detected as expected: {ctx.exception}")
