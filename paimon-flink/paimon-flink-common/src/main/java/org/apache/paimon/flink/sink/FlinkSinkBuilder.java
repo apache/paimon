@@ -364,7 +364,9 @@ public class FlinkSinkBuilder {
             }
         }
 
-        return new RowAppendTableSink(table, overwritePartition, parallelism).sinkFrom(input);
+        RowAppendTableSink sink = new RowAppendTableSink(table, overwritePartition, parallelism);
+        sink.setOverwriteBaseSnapshotId(overwriteBaseSnapshotId);
+        return sink.sinkFrom(input);
     }
 
     private DataStream<InternalRow> applyDynamicPartitionShuffle(DataStream<InternalRow> input) {
