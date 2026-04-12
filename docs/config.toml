@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//paimon.apache.org/docs/release-1.4'
+baseURL = '//paimon.apache.org/docs/1.4'
 languageCode = 'en-us'
 title = 'Apache Paimon'
 enableGitInfo = false
@@ -64,7 +64,7 @@ pygmentsUseClasses = true
   # of the menu
   MenuLinks = [
     ["Project Homepage", "//paimon.apache.org"],
-    ["JavaDocs", "//paimon.apache.org/docs/release-1.4/api/java/"],
+    ["JavaDocs", "//paimon.apache.org/docs/1.4/api/java/"],
   ]
 
   StableDocs = "https://paimon.apache.org/docs/1.3"
