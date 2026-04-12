@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
-import org.apache.paimon.data.GenericRow
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.utils.SparkProcedureUtils
@@ -1369,7 +1368,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       batchWrite.close()
 
       // Attempt overwrite with baseSnapshotId: should detect conflict
-      val user = UUID.randomUUID().toString
+      val user = util.UUID.randomUUID().toString
       val tableCommit = table
         .newCommit(user)
         .withOverwrite(overwritePartition)
