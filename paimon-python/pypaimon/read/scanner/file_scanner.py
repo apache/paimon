@@ -200,6 +200,8 @@ class FileScanner:
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
         self._global_index_result = None
+        self._scanned_snapshot = None
+        self._scanned_snapshot_id = None
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -216,7 +218,8 @@ class FileScanner:
         bucket_files = set()
         for e in entries:
             bucket_files.add((tuple(e.partition.values), e.bucket))
-        return self._scan_dv_index(self.snapshot_manager.get_latest_snapshot(), bucket_files)
+        snapshot = self._scanned_snapshot if self._scanned_snapshot else self.snapshot_manager.get_latest_snapshot()
+        return self._scan_dv_index(snapshot, bucket_files)
 
     def scan(self) -> Plan:
         start_ms = time.time() * 1000
@@ -241,7 +244,7 @@ class FileScanner:
             )
 
         if not entries:
-            return Plan([])
+            return Plan([], snapshot_id=self._scanned_snapshot_id)
 
         # Configure sharding if needed
         if self.idx_of_this_subtask is not None:
@@ -258,7 +261,7 @@ class FileScanner:
             "File store scan plan completed in %d ms. Files size: %d",
             duration_ms, len(entries)
         )
-        return Plan(splits)
+        return Plan(splits, snapshot_id=self._scanned_snapshot_id)
 
     def _create_data_evolution_split_generator(self):
         row_ranges = None
@@ -272,7 +275,9 @@ class FileScanner:
         if row_ranges is None and self.predicate is not None:
             row_ranges = _row_ranges_from_predicate(self.predicate)
 
-        manifest_files = self.manifest_scanner()
+        manifest_files, snapshot = self.manifest_scanner()
+        self._scanned_snapshot = snapshot
+        self._scanned_snapshot_id = snapshot.id if snapshot else None
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
@@ -293,7 +298,9 @@ class FileScanner:
         )
 
     def plan_files(self) -> List[ManifestEntry]:
-        manifest_files = self.manifest_scanner()
+        manifest_files, snapshot = self.manifest_scanner()
+        self._scanned_snapshot = snapshot
+        self._scanned_snapshot_id = snapshot.id if snapshot else None
         if len(manifest_files) == 0:
             return []
         return self.read_manifest_entries(manifest_files)

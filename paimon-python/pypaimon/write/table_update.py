@@ -170,11 +170,10 @@ class ShardTableUpdator:
         self.writer: Optional[SingleWriter] = None
         self.dict = defaultdict(list)
 
-        snapshot = self.table.snapshot_manager().get_latest_snapshot()
-        self.snapshot_id = snapshot.id if snapshot else -1
-
         scanner = self.table.new_read_builder().new_scan()
-        splits = scanner.plan().splits()
+        plan = scanner.plan()
+        self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
         self.splits = splits
 
