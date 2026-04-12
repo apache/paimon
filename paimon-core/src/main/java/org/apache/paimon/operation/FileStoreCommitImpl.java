@@ -631,13 +631,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         tryOverwritePartition(
-                partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                partitionFilter,
+                emptyList(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>(),
+                null);
     }
 
     @Override
     public void truncateTable(long commitIdentifier) {
         tryOverwritePartition(
-                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>(), null);
     }
 
     @Override
