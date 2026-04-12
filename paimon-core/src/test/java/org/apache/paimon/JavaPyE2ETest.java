@@ -18,6 +18,8 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -48,9 +50,11 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -935,6 +939,71 @@ public class JavaPyE2ETest {
 
     protected GenericRow createRow3ColsWithKind(RowKind rowKind, Object... values) {
         return GenericRow.ofKind(rowKind, values[0], values[1], values[2]);
+    }
+
+    /** Step 1: Write 5 base files for compact conflict test. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testCompactConflictWriteBase() throws Exception {
+        Identifier id = identifier("compact_conflict_test");
+        try {
+            catalog.dropTable(id, true);
+        } catch (Exception ignore) {
+        }
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.STRING())
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "-1")
+                        .build();
+        catalog.createTable(id, schema, false);
+
+        RowType fullType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        for (int fileIdx = 0; fileIdx < 5; fileIdx++) {
+            int startId = fileIdx * 200;
+            FileStoreTable t = (FileStoreTable) catalog.getTable(id);
+            BatchWriteBuilder builder = t.newBatchWriteBuilder();
+            try (BatchTableWrite w = builder.newWrite().withWriteType(fullType)) {
+                for (int i = 0; i < 200; i++) {
+                    w.write(
+                            GenericRow.of(
+                                    startId + i, BinaryString.fromString("n" + (startId + i))));
+                }
+                builder.newCommit().commit(w.prepareCommit());
+            }
+        }
+        LOG.info("compact_conflict_test: 5 base files written (200 rows each, total 1000)");
+    }
+
+    /** Step 3: Run compact on compact_conflict_test table. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testCompactConflictRunCompact() throws Exception {
+        Identifier id = identifier("compact_conflict_test");
+        doDataEvolutionCompact((FileStoreTable) catalog.getTable(id));
+        LOG.info("compact_conflict_test: compact done, 5 files merged into 1 (1000 rows)");
+    }
+
+    private void doDataEvolutionCompact(FileStoreTable table) throws Exception {
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<CommitMessage> messages = new ArrayList<>();
+        try {
+            List<DataEvolutionCompactTask> tasks;
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    messages.add(task.doCompact(table, "test-compact"));
+                }
+            }
+        } catch (EndOfScanException ignore) {
+        }
+        if (!messages.isEmpty()) {
+            table.newBatchWriteBuilder().newCommit().commit(messages);
+        }
     }
 
     private static String rowToStringWithStruct(InternalRow row, RowType type) {

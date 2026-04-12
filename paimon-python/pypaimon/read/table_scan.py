@@ -59,7 +59,7 @@ class TableScan:
             earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             if earliest_snapshot is None or latest_snapshot is None:
-                return FileScanner(self.table, lambda: [])
+                return FileScanner(self.table, lambda: ([], None))
             start_timestamp = int(ts[0])
             end_timestamp = int(ts[1])
             if start_timestamp >= end_timestamp:
@@ -67,7 +67,7 @@ class TableScan:
                     "Ending timestamp %s should be >= starting timestamp %s." % (end_timestamp, start_timestamp))
             if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
                     or end_timestamp < earliest_snapshot.time_millis):
-                return FileScanner(self.table, lambda: [])
+                return FileScanner(self.table, lambda: ([], None))
 
             starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
             earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
@@ -84,8 +84,10 @@ class TableScan:
 
             def incremental_manifest():
                 snapshots_in_range = []
+                end_snapshot = snapshot_manager.get_snapshot_by_id(end_id) if end_id >= 1 else None
                 for snapshot_id in range(start_id + 1, end_id + 1):
                     snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+                    end_snapshot = snapshot
                     if snapshot.commit_kind == "APPEND":
                         snapshots_in_range.append(snapshot)
 
@@ -94,7 +96,7 @@ class TableScan:
                 for snapshot in snapshots_in_range:
                     manifest_files = manifest_list_manager.read_delta(snapshot)
                     manifests.extend(manifest_files)
-                return manifests
+                return manifests, end_snapshot
 
             return FileScanner(self.table, incremental_manifest, self.predicate, self.limit)
         elif options.contains(CoreOptions.SCAN_TAG_NAME):  # Handle tag-based reading
@@ -104,7 +106,7 @@ class TableScan:
                 tag_manager = self.table.tag_manager()
                 tag = tag_manager.get_or_throw(tag_name)
                 snapshot = tag.trim_to_snapshot()
-                return manifest_list_manager.read_all(snapshot)
+                return manifest_list_manager.read_all(snapshot), snapshot
 
             return FileScanner(
                 self.table,
@@ -115,7 +117,7 @@ class TableScan:
 
         def all_manifests():
             snapshot = snapshot_manager.get_latest_snapshot()
-            return manifest_list_manager.read_all(snapshot)
+            return manifest_list_manager.read_all(snapshot), snapshot
 
         return FileScanner(
             self.table,

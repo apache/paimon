@@ -323,7 +323,7 @@ class AsyncStreamingTableScan:
     def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
         """Create a Plan for the initial full scan of the latest snapshot."""
         def all_manifests():
-            return self._manifest_list_manager.read_all(snapshot)
+            return self._manifest_list_manager.read_all(snapshot), snapshot
 
         starting_scanner = FileScanner(
             self.table,

@@ -65,7 +65,8 @@ class TableUpdateByRowId:
 
         read_builder = self.table.new_read_builder()
         scan = read_builder.new_scan()
-        splits = scan.plan().splits()
+        plan = scan.plan()
+        splits = plan.splits()
 
         for split in splits:
             for file in split.files:
@@ -77,7 +78,7 @@ class TableUpdateByRowId:
 
         total_row_count = sum(first_row_id_to_row_count_map.values())
 
-        snapshot_id = self.table.snapshot_manager().get_latest_snapshot().id
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         return (snapshot_id,
                 sorted(list(set(first_row_ids))),
                 first_row_id_to_partition_map,
