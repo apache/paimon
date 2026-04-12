@@ -332,6 +332,29 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
         sortCompactAction.run();
     }
 
+    @Test
+    public void testSortCompactDetectsConcurrentWriteConflict() throws Exception {
+        createTable();
+        commit(writeOnce(getTable(), 0, 2));
+        commit(writeOnce(getTable(), 1, 2));
+
+        TestSortCompactAction action =
+                new TestSortCompactAction(
+                                database,
+                                tableName,
+                                Collections.singletonMap("warehouse", warehouse),
+                                Collections.emptyMap())
+                        .withOrderStrategy("order")
+                        .withOrderColumns(Collections.singletonList("f1"));
+        action.build();
+
+        commit(writeOnce(getTable(), 0, 1));
+
+        Assertions.assertThatThrownBy(action::executeBuilt)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Sort compact conflict detected");
+    }
+
     private void zorder(List<String> columns) throws Exception {
         String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
         createAction("zorder", rangeStrategy, columns).run();
@@ -495,5 +518,30 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
         byte[] binary = new byte[RANDOM.nextInt(10)];
         RANDOM.nextBytes(binary);
         return binary;
+    }
+
+    private static class TestSortCompactAction extends SortCompactAction {
+
+        private TestSortCompactAction(
+                String database,
+                String tableName,
+                java.util.Map<String, String> catalogConfig,
+                java.util.Map<String, String> tableConf) {
+            super(database, tableName, catalogConfig, tableConf);
+        }
+
+        @Override
+        public TestSortCompactAction withOrderStrategy(String sortStrategy) {
+            return (TestSortCompactAction) super.withOrderStrategy(sortStrategy);
+        }
+
+        @Override
+        public TestSortCompactAction withOrderColumns(List<String> orderColumns) {
+            return (TestSortCompactAction) super.withOrderColumns(orderColumns);
+        }
+
+        private void executeBuilt() throws Exception {
+            execute("Sort Compact Job");
+        }
     }
 }

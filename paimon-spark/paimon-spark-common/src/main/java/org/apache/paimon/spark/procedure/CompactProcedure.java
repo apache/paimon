@@ -20,7 +20,7 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
-import org.apache.paimon.Snapshot;
+
 import org.apache.paimon.append.AppendCompactCoordinator;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
@@ -621,7 +621,9 @@ public class CompactProcedure extends BaseProcedure {
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
-        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
+        SnapshotReader.Plan readPlan = snapshotReader.read();
+        Long readSnapshotId = readPlan.snapshotId();
+        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(readPlan.dataSplits());
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
         Dataset<Row> datasetForWrite =
                 packedSplits.values().stream()
@@ -637,9 +639,6 @@ public class CompactProcedure extends BaseProcedure {
                         .reduce(Dataset::union)
                         .orElse(null);
         if (datasetForWrite != null) {
-            Snapshot readSnapshot = table.snapshotManager().latestSnapshot();
-            Long readSnapshotId = readSnapshot == null ? null : readSnapshot.id();
-
             PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
             writer.writeBuilder().withOverwrite();
             writer.withOverwriteBaseSnapshot(readSnapshotId);

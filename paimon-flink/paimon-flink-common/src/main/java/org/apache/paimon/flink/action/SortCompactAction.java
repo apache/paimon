@@ -102,6 +102,12 @@ public class SortCompactAction extends CompactAction {
             sourceBuilder.sourceParallelism(Integer.parseInt(scanParallelism));
         }
 
+        // Capture the base snapshot before building the source so that
+        // baseSnapshotId <= the snapshot the source actually reads at runtime.
+        // This guarantees conflict detection is conservative (may false-positive, never false-negative).
+        Snapshot readSnapshot = fileStoreTable.snapshotManager().latestSnapshot();
+        Long readSnapshotId = readSnapshot == null ? null : readSnapshot.id();
+
         DataStream<RowData> source = sourceBuilder.env(env).sourceBounded(true).build();
         int localSampleMagnification =
                 ((FileStoreTable) table).coreOptions().getLocalSampleMagnification();
@@ -135,9 +141,6 @@ public class SortCompactAction extends CompactAction {
                         fileStoreTable.coreOptions(),
                         fileStoreTable.rowType(),
                         sortInfo);
-
-        Snapshot readSnapshot = fileStoreTable.snapshotManager().latestSnapshot();
-        Long readSnapshotId = readSnapshot == null ? null : readSnapshot.id();
 
         new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)

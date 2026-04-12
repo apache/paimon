@@ -81,6 +81,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -618,13 +619,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         tryOverwritePartition(
-                partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                partitionFilter,
+                emptyList(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>(),
+                null);
     }
 
     @Override
     public void truncateTable(long commitIdentifier) {
         tryOverwritePartition(
-                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>(), null);
     }
 
     @Override
@@ -757,7 +764,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .distinct()
                                 .collect(Collectors.toList());
                 List<SimpleFileEntry> incrementalChanges =
-                        readIncrementalChanges(
+                        scanner.readIncrementalChanges(
                                 snapshotManager.snapshot(baseSnapshotId),
                                 latestSnapshot,
                                 changedPartitions);
