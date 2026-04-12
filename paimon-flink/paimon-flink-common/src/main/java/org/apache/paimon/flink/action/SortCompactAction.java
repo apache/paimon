@@ -104,7 +104,8 @@ public class SortCompactAction extends CompactAction {
 
         // Capture the base snapshot before building the source so that
         // baseSnapshotId <= the snapshot the source actually reads at runtime.
-        // This guarantees conflict detection is conservative (may false-positive, never false-negative).
+        // This guarantees conflict detection is conservative (may false-positive, never
+        // false-negative).
         Snapshot readSnapshot = fileStoreTable.snapshotManager().latestSnapshot();
         Long readSnapshotId = readSnapshot == null ? null : readSnapshot.id();
 
