@@ -102,6 +102,51 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_plan_snapshot_id_for_empty_and_non_empty_scan(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_plan_snapshot_id', schema, False)
+        table = self.catalog.get_table('default.test_plan_snapshot_id')
+
+        empty_plan = table.new_read_builder().new_scan().plan()
+        self.assertIsNone(empty_plan.snapshot_id)
+        self.assertEqual(len(empty_plan.splits()), 0)
+
+        self._write_test_table(table)
+
+        plan = table.new_read_builder().new_scan().plan()
+        self.assertEqual(plan.snapshot_id, 2)
+        self.assertGreater(len(plan.splits()), 0)
+
+    def test_incremental_timestamp_empty_range_keeps_end_snapshot_id(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_incremental_empty_range_snapshot', schema, False)
+        table = self.catalog.get_table('default.test_incremental_empty_range_snapshot')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        pa_table = pa.Table.from_pydict({
+            'user_id': [1],
+            'item_id': [1001],
+            'behavior': ['a'],
+            'dt': ['p1'],
+        }, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        snapshot_manager = SnapshotManager(table)
+        snapshot = snapshot_manager.get_latest_snapshot()
+        table_inc = table.copy({
+            CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key():
+                "{},{}".format(snapshot.time_millis, snapshot.time_millis + 1)
+        })
+
+        plan = table_inc.new_read_builder().new_scan().plan()
+        self.assertEqual(plan.snapshot_id, snapshot.id)
+        self.assertEqual(len(plan.splits()), 0)
+
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
         self.catalog.create_table('default.test_append_only_lance_filter', schema, False)

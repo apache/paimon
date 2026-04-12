@@ -244,6 +244,32 @@ run_compressed_text_test() {
     fi
 }
 
+run_compact_conflict_test() {
+    echo -e "${YELLOW}=== Running Compact Conflict Test (Java Write Base, Python Shard Update + Java Compact) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    # Step 1: Java writes 5 base files
+    echo "Running Maven test for JavaPyE2ETest.testCompactConflictWriteBase..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testCompactConflictWriteBase -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java write base files completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java write base files failed${NC}"
+        return 1
+    fi
+
+    # Step 2-4: Python shard update (scan -> Java compact -> commit conflict detected)
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_compact_conflict_shard_update..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_compact_conflict_shard_update -v; then
+        echo -e "${GREEN}✓ Python compact conflict test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python compact conflict test failed${NC}"
+        return 1
+    fi
+}
+
 run_blob_alter_compact_test() {
     echo -e "${YELLOW}=== Running Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read) ===${NC}"
 
@@ -276,6 +302,7 @@ main() {
     local pk_dv_result=0
     local btree_index_result=0
     local compressed_text_result=0
+    local compact_conflict_result=0
     local blob_alter_compact_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
@@ -335,6 +362,13 @@ main() {
 
     echo ""
 
+    # Run compact conflict test (Java write+compact, Python read)
+    if ! run_compact_conflict_test; then
+        compact_conflict_result=1
+    fi
+
+    echo ""
+
     # Run blob alter+compact test (Java write+alter+compact, Python read)
     if ! run_blob_alter_compact_test; then
         blob_alter_compact_result=1
@@ -386,6 +420,12 @@ main() {
         echo -e "${RED}✗ Compressed Text Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $compact_conflict_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Compact Conflict Test (Java Write+Compact, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Compact Conflict Test (Java Write+Compact, Python Read): FAILED${NC}"
+    fi
+
     if [[ $blob_alter_compact_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read): PASSED${NC}"
     else
@@ -397,7 +437,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $blob_alter_compact_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

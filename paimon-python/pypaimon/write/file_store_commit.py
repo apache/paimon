@@ -516,7 +516,7 @@ class FileStoreCommit:
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latest_snapshot is None \
-            else (FileScanner(self.table, lambda: [], partition_filter).
+            else (FileScanner(self.table, lambda: ([], None), partition_filter).
                   read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
