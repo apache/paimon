@@ -117,7 +117,7 @@ class BinaryRowTest(unittest.TestCase):
 
     def test_is_not_null_append(self):
         table = self.catalog.get_table('default.test_append')
-        file_scanner = FileScanner(table, lambda: [])
+        file_scanner = FileScanner(table, lambda: ([], None))
         latest_snapshot = file_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = file_scanner.manifest_file_manager.read(manifest_files[0].file_name)
@@ -254,7 +254,7 @@ class BinaryRowTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        file_scanner = FileScanner(table, lambda: [])
+        file_scanner = FileScanner(table, lambda: ([], None))
         latest_snapshot = file_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = file_scanner.manifest_file_manager.read(manifest_files[0].file_name)
@@ -293,7 +293,7 @@ class BinaryRowTest(unittest.TestCase):
                          }
         self.assertEqual(expected_data, actual.to_pydict())
 
-        file_scanner = FileScanner(table, lambda: [])
+        file_scanner = FileScanner(table, lambda: ([], None))
         latest_snapshot = file_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = file_scanner.manifest_file_manager.read(manifest_files[0].file_name)
@@ -324,7 +324,7 @@ class BinaryRowTest(unittest.TestCase):
                                                                                 trimmed_pk_fields)
 
     def _overwrite_manifest_entry(self, table):
-        file_scanner = FileScanner(table, lambda: [])
+        file_scanner = FileScanner(table, lambda: ([], None))
         latest_snapshot = file_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = file_scanner.manifest_file_manager.read(manifest_files[0].file_name)

@@ -84,7 +84,7 @@ class TableScan:
 
             def incremental_manifest():
                 snapshots_in_range = []
-                end_snapshot = None
+                end_snapshot = snapshot_manager.get_snapshot_by_id(end_id) if end_id >= 1 else None
                 for snapshot_id in range(start_id + 1, end_id + 1):
                     snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
                     end_snapshot = snapshot

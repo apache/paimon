@@ -18,7 +18,7 @@ limitations under the License.
 import logging
 import os
 import time
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ from pypaimon.read.scanner.data_evolution_split_generator import \
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
+from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.source.deletion_file import DeletionFile
@@ -165,7 +166,7 @@ class FileScanner:
     def __init__(
         self,
         table,
-        manifest_scanner: Callable[[], List[ManifestFileMeta]],
+        manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None
     ):
