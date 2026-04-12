@@ -656,7 +656,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
              '-Dsurefire.failIfNoSpecifiedTests=false',
              '-q'],
             cwd=os.path.abspath(project_root),
-            capture_output=True, text=True, timeout=120
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=120
         )
         self.assertEqual(result.returncode, 0,
                          f"Java compact failed:\n{result.stdout}\n{result.stderr}")
