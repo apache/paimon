@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -64,6 +65,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -218,6 +220,29 @@ public class GenericIndexTopoBuilder {
                 indexType,
                 indexColumn,
                 maxIndexedRowId);
+
+        // Filter out files whose schema does not contain the index column.
+        // This happens when the column is added later and old data files have null values.
+        SchemaManager schemaManager = table.schemaManager();
+        Map<Long, Boolean> schemaContainsColumn = new HashMap<>();
+        List<ManifestEntry> indexableEntries = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            long sid = entry.file().schemaId();
+            boolean contains =
+                    schemaContainsColumn.computeIfAbsent(
+                            sid, id -> schemaManager.schema(id).fieldNames().contains(indexColumn));
+            if (contains) {
+                indexableEntries.add(entry);
+            }
+        }
+        if (indexableEntries.size() < entries.size()) {
+            LOG.info(
+                    "Filtered {} files without column '{}', {} files remain.",
+                    entries.size() - indexableEntries.size(),
+                    indexColumn,
+                    indexableEntries.size());
+        }
+        entries = indexableEntries;
 
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
@@ -577,7 +602,16 @@ public class GenericIndexTopoBuilder {
                         }
                         // Only write rows within this shard's range
                         if (currentRowId >= task.shardRange.from) {
-                            indexWriter.write(indexFieldGetter.getFieldOrNull(row));
+                            Object fieldData = indexFieldGetter.getFieldOrNull(row);
+                            if (fieldData == null) {
+                                LOG.info(
+                                        "Null vector at rowId={}, stopping shard [{}, {}].",
+                                        currentRowId,
+                                        task.shardRange.from,
+                                        task.shardRange.to);
+                                break;
+                            }
+                            indexWriter.write(fieldData);
                             rowsWritten++;
                         }
                     }
