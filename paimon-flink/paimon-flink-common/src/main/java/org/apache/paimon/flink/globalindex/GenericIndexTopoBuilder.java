@@ -221,28 +221,9 @@ public class GenericIndexTopoBuilder {
                 indexColumn,
                 maxIndexedRowId);
 
-        // Filter out files whose schema does not contain the index column.
-        // This happens when the column is added later and old data files have null values.
-        SchemaManager schemaManager = table.schemaManager();
-        Map<Long, Boolean> schemaContainsColumn = new HashMap<>();
-        List<ManifestEntry> indexableEntries = new ArrayList<>();
-        for (ManifestEntry entry : entries) {
-            long sid = entry.file().schemaId();
-            boolean contains =
-                    schemaContainsColumn.computeIfAbsent(
-                            sid, id -> schemaManager.schema(id).fieldNames().contains(indexColumn));
-            if (contains) {
-                indexableEntries.add(entry);
-            }
-        }
-        if (indexableEntries.size() < entries.size()) {
-            LOG.info(
-                    "Filtered {} files without column '{}', {} files remain.",
-                    entries.size() - indexableEntries.size(),
-                    indexColumn,
-                    indexableEntries.size());
-        }
-        entries = indexableEntries;
+        long minNonIndexableRowId =
+                findMinNonIndexableRowId(table.schemaManager(), entries, indexColumn);
+        entries = filterEntriesBefore(entries, minNonIndexableRowId);
 
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
@@ -315,6 +296,49 @@ public class GenericIndexTopoBuilder {
 
         commit(table, indexType, built);
         return true;
+    }
+
+    /**
+     * Find the minimum firstRowId among files whose schema does not contain the index column. Files
+     * at or beyond this rowId cannot be indexed because the column was added later via ALTER TABLE.
+     *
+     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the column
+     */
+    static long findMinNonIndexableRowId(
+            SchemaManager schemaManager, List<ManifestEntry> entries, String indexColumn) {
+        Map<Long, Boolean> schemaContainsColumn = new HashMap<>();
+        long minRowId = Long.MAX_VALUE;
+        for (ManifestEntry entry : entries) {
+            long sid = entry.file().schemaId();
+            boolean contains =
+                    schemaContainsColumn.computeIfAbsent(
+                            sid, id -> schemaManager.schema(id).fieldNames().contains(indexColumn));
+            if (!contains && entry.file().firstRowId() != null) {
+                minRowId = Math.min(minRowId, entry.file().nonNullFirstRowId());
+            }
+        }
+        return minRowId;
+    }
+
+    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
+    static List<ManifestEntry> filterEntriesBefore(
+            List<ManifestEntry> entries, long boundaryRowId) {
+        if (boundaryRowId == Long.MAX_VALUE) {
+            return entries;
+        }
+        List<ManifestEntry> result = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            if (entry.file().firstRowId() != null
+                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
+                result.add(entry);
+            }
+        }
+        LOG.info(
+                "Filtered {} files at or beyond rowId {}, {} files remain.",
+                entries.size() - result.size(),
+                boundaryRowId,
+                result.size());
+        return result;
     }
 
     /**
