@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -84,9 +85,11 @@ public class TableIndexesTable implements ReadonlyTable {
                             new DataField(4, "file_size", new BigIntType(false)),
                             new DataField(5, "row_count", new BigIntType(false)),
                             new DataField(
-                                    6,
-                                    "dv_ranges",
-                                    new ArrayType(true, DeletionVectorMeta.SCHEMA))));
+                                    6, "dv_ranges", new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            new DataField(7, "row_range_start", new BigIntType(true)),
+                            new DataField(8, "row_range_end", new BigIntType(true)),
+                            new DataField(9, "index_field_id", new IntType(true)),
+                            new DataField(10, "index_field_name", newStringType(true))));
 
     private final FileStoreTable dataTable;
 
@@ -201,10 +204,16 @@ public class TableIndexesTable implements ReadonlyTable {
                             CastExecutors.resolveToString(
                                     dataTable.schema().logicalPartitionType());
 
+            RowType logicalRowType = dataTable.schema().logicalRowType();
+
             Iterator<InternalRow> rows =
                     Iterators.transform(
                             manifestFileMetas.iterator(),
-                            indexManifestEntry -> toRow(indexManifestEntry, partitionCastExecutor));
+                            indexManifestEntry ->
+                                    toRow(
+                                            indexManifestEntry,
+                                            partitionCastExecutor,
+                                            logicalRowType));
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -218,9 +227,18 @@ public class TableIndexesTable implements ReadonlyTable {
 
         private InternalRow toRow(
                 IndexManifestEntry indexManifestEntry,
-                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
+                CastExecutor<InternalRow, BinaryString> partitionCastExecutor,
+                RowType logicalRowType) {
             LinkedHashMap<String, DeletionVectorMeta> dvMetas =
                     indexManifestEntry.indexFile().dvRanges();
+            GlobalIndexMeta globalMeta = indexManifestEntry.indexFile().globalIndexMeta();
+            String indexFieldName = null;
+            if (globalMeta != null) {
+                try {
+                    indexFieldName = logicalRowType.getField(globalMeta.indexFieldId()).name();
+                } catch (RuntimeException ignored) {
+                }
+            }
             return GenericRow.of(
                     partitionCastExecutor.cast(indexManifestEntry.partition()),
                     indexManifestEntry.bucket(),
@@ -230,7 +248,11 @@ public class TableIndexesTable implements ReadonlyTable {
                     indexManifestEntry.indexFile().rowCount(),
                     dvMetas == null
                             ? null
-                            : IndexFileMetaSerializer.dvMetasToRowArrayData(dvMetas.values()));
+                            : IndexFileMetaSerializer.dvMetasToRowArrayData(dvMetas.values()),
+                    globalMeta != null ? globalMeta.rowRangeStart() : null,
+                    globalMeta != null ? globalMeta.rowRangeEnd() : null,
+                    globalMeta != null ? globalMeta.indexFieldId() : null,
+                    indexFieldName != null ? BinaryString.fromString(indexFieldName) : null);
         }
     }
 
