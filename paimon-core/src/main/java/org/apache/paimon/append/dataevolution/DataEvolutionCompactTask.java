@@ -37,6 +37,9 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +54,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Data evolution table compaction task. */
 public class DataEvolutionCompactTask extends AppendCompactTask {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionCompactTask.class);
 
     private static final Map<String, String> DYNAMIC_WRITE_OPTIONS =
             Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
@@ -121,6 +126,13 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         List<DataFileMeta> writeResult = writer.prepareCommit(false).newFilesIncrement().newFiles();
         checkArgument(
                 writeResult.size() == 1, "Data evolution compaction should produce one file.");
+
+        try {
+            writer.close();
+            storeWrite.close();
+        } catch (Exception e) {
+            LOG.warn("Failed to close reader and writer.", e);
+        }
 
         DataFileMeta dataFileMeta = writeResult.get(0).assignFirstRowId(firstRowId);
         long minSequenceId =
