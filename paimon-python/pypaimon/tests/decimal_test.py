@@ -276,6 +276,31 @@ class DecimalTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             GenericRowDeserializer.from_bytes(serialized, fields_bad)
 
+    def test_decimal_bare_defaults_to_10_0(self):
+        """Bare DECIMAL must match Java DecimalType.DEFAULT_PRECISION=10,
+        DEFAULT_SCALE=0 — compact layout, integer values round-trip."""
+        fields = [DataField(0, "d", AtomicType("DECIMAL"))]
+        row = GenericRow([Decimal("42")], fields, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+
+        data = serialized[4:]
+        fixed_part_size = 8 + 1 * 8
+        self.assertEqual(len(data), fixed_part_size)
+
+        unscaled_long = struct.unpack('<q', data[8:16])[0]
+        self.assertEqual(unscaled_long, 42)
+
+        result = GenericRowDeserializer.from_bytes(serialized, fields)
+        self.assertEqual(result.values[0], Decimal("42"))
+
+    def test_decimal_bare_numeric_defaults_to_10_0(self):
+        """Bare NUMERIC aliases DECIMAL with the same default precision/scale."""
+        fields = [DataField(0, "d", AtomicType("NUMERIC"))]
+        row = GenericRow([Decimal("123")], fields, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+        result = GenericRowDeserializer.from_bytes(serialized, fields)
+        self.assertEqual(result.values[0], Decimal("123"))
+
 
 if __name__ == '__main__':
     unittest.main()

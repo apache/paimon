@@ -50,17 +50,30 @@ def _decimal_to_unscaled_with_check(d: Decimal, precision: int, scale: int):
 
 
 def _parse_type_precision_scale(data_type):
-    """Parse precision and scale from type string like DECIMAL(38, 10)."""
-    type_str = str(data_type)
+    """Parse precision and scale from type string like DECIMAL(38, 10).
+
+    Falls back to Java-side defaults for parameter-less types:
+      - DECIMAL / NUMERIC -> (10, 0)  (DecimalType.DEFAULT_PRECISION / DEFAULT_SCALE)
+      - TIMESTAMP / TIMESTAMP_LTZ / TIMESTAMP WITH LOCAL TIME ZONE -> (6, 0)
+        (TimestampType.DEFAULT_PRECISION)
+    """
+    type_str = str(data_type).upper().strip()
     if '(' in type_str and ')' in type_str:
         try:
-            params_str = type_str.split('(')[1].split(')')[0]
+            params_str = type_str.split('(', 1)[1].split(')', 1)[0]
             parts = [p.strip() for p in params_str.split(',')]
             precision = int(parts[0])
             scale = int(parts[1]) if len(parts) > 1 else 0
             return precision, scale
         except (ValueError, IndexError):
-            return 0, 0
+            pass
+    # Strip trailing NOT NULL / nullability suffixes and any parenthesised
+    # params — handles "DECIMAL NOT NULL" and malformed "DECIMAL()" alike.
+    head = type_str.split('(', 1)[0].split()[0] if type_str.strip() else ''
+    if head in ('DECIMAL', 'NUMERIC'):
+        return 10, 0
+    if head in ('TIMESTAMP', 'TIMESTAMP_LTZ'):
+        return 6, 0
     return 0, 0
 
 
@@ -385,15 +398,17 @@ class GenericRowSerializer:
                 'CHAR', 'VARCHAR', 'STRING', 'BINARY', 'VARBINARY', 'BYTES', 'BLOB'])
             is_decimal_type = type_name.startswith('DECIMAL') or type_name.startswith('NUMERIC')
             is_timestamp_type = type_name.startswith('TIMESTAMP')
-            decimal_precision, decimal_scale = _parse_type_precision_scale(field.type) if is_decimal_type else (0, 0)
-            is_high_precision_decimal = is_decimal_type and decimal_precision > 18
-            timestamp_precision = _parse_type_precision_scale(field.type)[0] if is_timestamp_type else 0
-            is_non_compact_timestamp = is_timestamp_type and timestamp_precision > 3
+            if is_decimal_type or is_timestamp_type:
+                precision, scale = _parse_type_precision_scale(field.type)
+            else:
+                precision, scale = 0, 0
+            is_high_precision_decimal = is_decimal_type and precision > 18
+            is_non_compact_timestamp = is_timestamp_type and precision > 3
 
             # Precision overflow -> null
             if is_decimal_type and value is not None:
                 d = value if isinstance(value, Decimal) else Decimal(str(value))
-                unscaled_value, overflow = _decimal_to_unscaled_with_check(d, decimal_precision, decimal_scale)
+                unscaled_value, overflow = _decimal_to_unscaled_with_check(d, precision, scale)
                 if overflow:
                     cls._set_null_bit(fixed_part, 0, i)
                     struct.pack_into('<q', fixed_part, field_fixed_offset, 0)
