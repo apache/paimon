@@ -26,6 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -36,6 +38,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -450,7 +453,63 @@ class GenericIndexTopoBuilderTest {
         assertThat(tasks.get(1).shardRange).isEqualTo(new Range(400, 499));
     }
 
+    @Test
+    void testAppendFilterOldFilesBeforeNewFiles() {
+        // Typical append: write file0[0,99](schema1), file1[100,199](schema1),
+        // then file2[200,299](schema0) arrives (old schema).
+        // Boundary = 200, keep files with firstRowId < 200.
+        SchemaManager schemaManager = mock(SchemaManager.class);
+        TableSchema oldSchema = mock(TableSchema.class);
+        TableSchema newSchema = mock(TableSchema.class);
+        when(schemaManager.schema(0L)).thenReturn(oldSchema);
+        when(schemaManager.schema(1L)).thenReturn(newSchema);
+        when(oldSchema.fieldNames()).thenReturn(Arrays.asList("id", "name"));
+        when(newSchema.fieldNames()).thenReturn(Arrays.asList("id", "name", "vec"));
+
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 0L, 100, 1L));
+        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 100L, 100, 1L));
+        entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 200L, 100, 0L));
+
+        List<ManifestEntry> result =
+                GenericIndexTopoBuilder.filterEntriesBefore(
+                        entries,
+                        GenericIndexTopoBuilder.findMinNonIndexableRowId(
+                                schemaManager, entries, "vec"));
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).file().nonNullFirstRowId()).isEqualTo(0L);
+        assertThat(result.get(1).file().nonNullFirstRowId()).isEqualTo(100L);
+    }
+
     // -- Helpers --
+
+    private static ManifestEntry createEntryWithSchemaId(
+            BinaryRow partition, Long firstRowId, long rowCount, long schemaId) {
+        PojoDataFileMeta file =
+                new PojoDataFileMeta(
+                        "test-file-" + UUID.randomUUID(),
+                        1024L,
+                        rowCount,
+                        BinaryRow.EMPTY_ROW,
+                        BinaryRow.EMPTY_ROW,
+                        SimpleStats.EMPTY_STATS,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        schemaId,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        firstRowId,
+                        null);
+        return ManifestEntry.create(FileKind.ADD, partition, 0, 1, file);
+    }
 
     private static ManifestEntry createEntry(BinaryRow partition, Long firstRowId, long rowCount) {
         PojoDataFileMeta file =

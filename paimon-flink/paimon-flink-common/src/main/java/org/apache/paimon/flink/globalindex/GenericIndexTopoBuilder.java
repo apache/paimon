@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -64,6 +65,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -219,6 +221,10 @@ public class GenericIndexTopoBuilder {
                 indexColumn,
                 maxIndexedRowId);
 
+        long minNonIndexableRowId =
+                findMinNonIndexableRowId(table.schemaManager(), entries, indexColumn);
+        entries = filterEntriesBefore(entries, minNonIndexableRowId);
+
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
         // Project indexColumn + _ROW_ID so we can read the actual row ID from data
@@ -290,6 +296,49 @@ public class GenericIndexTopoBuilder {
 
         commit(table, indexType, built);
         return true;
+    }
+
+    /**
+     * Find the minimum firstRowId among files whose schema does not contain the index column. Files
+     * at or beyond this rowId cannot be indexed because the column was added later via ALTER TABLE.
+     *
+     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the column
+     */
+    static long findMinNonIndexableRowId(
+            SchemaManager schemaManager, List<ManifestEntry> entries, String indexColumn) {
+        Map<Long, Boolean> schemaContainsColumn = new HashMap<>();
+        long minRowId = Long.MAX_VALUE;
+        for (ManifestEntry entry : entries) {
+            long sid = entry.file().schemaId();
+            boolean contains =
+                    schemaContainsColumn.computeIfAbsent(
+                            sid, id -> schemaManager.schema(id).fieldNames().contains(indexColumn));
+            if (!contains && entry.file().firstRowId() != null) {
+                minRowId = Math.min(minRowId, entry.file().nonNullFirstRowId());
+            }
+        }
+        return minRowId;
+    }
+
+    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
+    static List<ManifestEntry> filterEntriesBefore(
+            List<ManifestEntry> entries, long boundaryRowId) {
+        if (boundaryRowId == Long.MAX_VALUE) {
+            return entries;
+        }
+        List<ManifestEntry> result = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            if (entry.file().firstRowId() != null
+                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
+                result.add(entry);
+            }
+        }
+        LOG.info(
+                "Filtered {} files at or beyond rowId {}, {} files remain.",
+                entries.size() - result.size(),
+                boundaryRowId,
+                result.size());
+        return result;
     }
 
     /**
@@ -577,7 +626,16 @@ public class GenericIndexTopoBuilder {
                         }
                         // Only write rows within this shard's range
                         if (currentRowId >= task.shardRange.from) {
-                            indexWriter.write(indexFieldGetter.getFieldOrNull(row));
+                            Object fieldData = indexFieldGetter.getFieldOrNull(row);
+                            if (fieldData == null) {
+                                LOG.info(
+                                        "Null vector at rowId={}, stopping shard [{}, {}].",
+                                        currentRowId,
+                                        task.shardRange.from,
+                                        task.shardRange.to);
+                                break;
+                            }
+                            indexWriter.write(fieldData);
                             rowsWritten++;
                         }
                     }
