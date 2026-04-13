@@ -43,8 +43,10 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.IntStream;
@@ -204,10 +206,14 @@ public class ClusteringCompactManager extends CompactFutureManager {
         // Snapshot sorted files before Phase 1 to avoid including newly created files in Phase 2
         List<DataFileMeta> existingSortedFiles = fileLevels.sortedFiles();
         for (DataFileMeta file : unsortedFiles) {
+            Set<String> originalFileNames = Collections.singleton(file.fileName());
             List<DataFileMeta> sortedFiles =
                     fileRewriter.sortAndRewriteFiles(
-                            singletonList(file), kvSerializer, kvSchemaType);
-            keyIndex.updateIndex(file, sortedFiles);
+                            singletonList(file),
+                            kvSerializer,
+                            kvSchemaType,
+                            keyIndex,
+                            originalFileNames);
             result.before().add(file);
             result.after().addAll(sortedFiles);
         }
@@ -232,19 +238,23 @@ public class ClusteringCompactManager extends CompactFutureManager {
                     keyIndex.rebuildIndex(newFile);
                 }
                 // Remove stale deletion vectors for merged-away files
-                for (DataFileMeta file : mergeGroup) {
-                    dvMaintainer.removeDeletionVectorOf(file.fileName());
+                if (dvMaintainer != null) {
+                    for (DataFileMeta file : mergeGroup) {
+                        dvMaintainer.removeDeletionVectorOf(file.fileName());
+                    }
                 }
                 result.before().addAll(mergeGroup);
                 result.after().addAll(mergedFiles);
             }
         }
 
-        CompactDeletionFile deletionFile =
-                lazyGenDeletionFile
-                        ? CompactDeletionFile.lazyGeneration(dvMaintainer)
-                        : CompactDeletionFile.generateFiles(dvMaintainer);
-        result.setDeletionFile(deletionFile);
+        if (dvMaintainer != null) {
+            CompactDeletionFile deletionFile =
+                    lazyGenDeletionFile
+                            ? CompactDeletionFile.lazyGeneration(dvMaintainer)
+                            : CompactDeletionFile.generateFiles(dvMaintainer);
+            result.setDeletionFile(deletionFile);
+        }
         return result;
     }
 

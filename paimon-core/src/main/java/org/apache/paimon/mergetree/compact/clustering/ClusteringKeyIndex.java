@@ -45,8 +45,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -209,61 +207,47 @@ public class ClusteringKeyIndex implements Closeable {
     }
 
     /**
-     * Update the key index after a single original file is replaced by new sorted files.
+     * Check a key against the index during sort-and-rewrite writing.
      *
-     * <p>For DEDUPLICATE mode: mark the old position in deletion vectors, keep the new position.
+     * <p>For FIRST_ROW mode: if key exists pointing to a non-original file, return false (skip
+     * writing this record — it's a duplicate).
      *
-     * <p>For FIRST_ROW mode: if key exists, mark the new position in deletion vectors (keep the
-     * first/old one); if key is new, store the new position.
+     * <p>For DEDUPLICATE mode: if key exists pointing to a non-original file, mark the old position
+     * in deletion vectors, return true (write the new record).
+     *
+     * @param keyBytes serialized key bytes
+     * @param originalFileNames file names of the original unsorted files being replaced
+     * @return true if the record should be written, false to skip (FIRST_ROW dedup)
      */
-    public void updateIndex(DataFileMeta originalFile, List<DataFileMeta> newSortedFiles)
-            throws Exception {
-        updateIndex(Collections.singletonList(originalFile), newSortedFiles);
+    public boolean checkKey(byte[] keyBytes, Set<String> originalFileNames) throws Exception {
+        byte[] oldValue = kvDb.get(keyBytes);
+        if (oldValue != null) {
+            ByteArrayInputStream valueIn = new ByteArrayInputStream(oldValue);
+            int oldFileId = decodeInt(valueIn);
+            int oldPosition = decodeInt(valueIn);
+            DataFileMeta oldFile = fileLevels.getFileById(oldFileId);
+            if (oldFile != null && !originalFileNames.contains(oldFile.fileName())) {
+                if (firstRow) {
+                    return false;
+                } else {
+                    dvMaintainer.notifyNewDeletion(oldFile.fileName(), oldPosition);
+                }
+            }
+        }
+        return true;
     }
 
     /**
-     * Update the key index after multiple original files are replaced by new sorted files.
-     *
-     * @see #updateIndex(DataFileMeta, List)
+     * Batch update the key index for a new sorted file using pre-collected key bytes. Avoids
+     * re-reading the file.
      */
-    public void updateIndex(List<DataFileMeta> originalFiles, List<DataFileMeta> newSortedFiles)
-            throws Exception {
-        RowCompactedSerializer keySerializer = new RowCompactedSerializer(keyType);
-
-        Set<String> originalFileNames = new HashSet<>();
-        for (DataFileMeta file : originalFiles) {
-            originalFileNames.add(file.fileName());
-        }
-
-        for (DataFileMeta sortedFile : newSortedFiles) {
-            int fileId = fileLevels.getFileIdByName(sortedFile.fileName());
-            int position = 0;
-            try (CloseableIterator<InternalRow> iterator = readKeyIterator(sortedFile)) {
-                while (iterator.hasNext()) {
-                    byte[] key = keySerializer.serializeToBytes(iterator.next());
-                    byte[] oldValue = kvDb.get(key);
-                    if (oldValue != null) {
-                        ByteArrayInputStream valueIn = new ByteArrayInputStream(oldValue);
-                        int oldFileId = decodeInt(valueIn);
-                        int oldPosition = decodeInt(valueIn);
-                        DataFileMeta oldFile = fileLevels.getFileById(oldFileId);
-                        if (oldFile != null && !originalFileNames.contains(oldFile.fileName())) {
-                            if (firstRow) {
-                                dvMaintainer.notifyNewDeletion(sortedFile.fileName(), position);
-                                position++;
-                                continue;
-                            } else {
-                                dvMaintainer.notifyNewDeletion(oldFile.fileName(), oldPosition);
-                            }
-                        }
-                    }
-                    ByteArrayOutputStream value = new ByteArrayOutputStream(8);
-                    encodeInt(value, fileId);
-                    encodeInt(value, position);
-                    kvDb.put(key, value.toByteArray());
-                    position++;
-                }
-            }
+    public void batchPutIndex(DataFileMeta sortedFile, List<byte[]> keyBytesList) throws Exception {
+        int fileId = fileLevels.getFileIdByName(sortedFile.fileName());
+        for (int position = 0; position < keyBytesList.size(); position++) {
+            ByteArrayOutputStream value = new ByteArrayOutputStream(8);
+            encodeInt(value, fileId);
+            encodeInt(value, position);
+            kvDb.put(keyBytesList.get(position), value.toByteArray());
         }
     }
 

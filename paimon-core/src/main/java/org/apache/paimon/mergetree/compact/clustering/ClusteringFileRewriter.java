@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.ChannelReaderInputView;
 import org.apache.paimon.disk.ChannelReaderInputViewIterator;
 import org.apache.paimon.disk.ChannelWithMeta;
@@ -47,6 +48,8 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.KeyValueWithLevelNoReusingSerializer;
 import org.apache.paimon.utils.MutableObjectIterator;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,6 +57,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 /**
  * Handles file rewriting for clustering compaction, including sorting unsorted files (Phase 1) and
@@ -112,10 +116,19 @@ public class ClusteringFileRewriter {
 
     /**
      * Sort and rewrite unsorted files by clustering columns. Reads all KeyValue records, sorts them
-     * using an external sort buffer, and writes to new level-1 files.
+     * using an external sort buffer, and writes to new level-1 files. Checks the key index inline
+     * during writing to handle deduplication (FIRST_ROW skips duplicates, DEDUPLICATE marks old
+     * positions in DV) and updates the index without re-reading the output files.
+     *
+     * @param keyIndex the key index for inline checking and batch update, or null to skip
+     * @param originalFileNames file names of the original files being replaced (for index check)
      */
     public List<DataFileMeta> sortAndRewriteFiles(
-            List<DataFileMeta> inputFiles, KeyValueSerializer kvSerializer, RowType kvSchemaType)
+            List<DataFileMeta> inputFiles,
+            KeyValueSerializer kvSerializer,
+            RowType kvSchemaType,
+            @Nullable ClusteringKeyIndex keyIndex,
+            Set<String> originalFileNames)
             throws Exception {
         int[] sortFieldsInKeyValue =
                 Arrays.stream(clusteringColumns)
@@ -145,6 +158,10 @@ public class ClusteringFileRewriter {
             }
         }
 
+        RowCompactedSerializer keySerializer =
+                keyIndex != null ? new RowCompactedSerializer(keyType) : null;
+        List<byte[]> collectedKeys = keyIndex != null ? new ArrayList<>() : null;
+
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingClusteringFileWriter();
         try {
@@ -152,10 +169,18 @@ public class ClusteringFileRewriter {
             BinaryRow binaryRow = new BinaryRow(kvSchemaType.getFieldCount());
             while ((binaryRow = sortedIterator.next(binaryRow)) != null) {
                 KeyValue kv = kvSerializer.fromRow(binaryRow);
-                writer.write(
+                KeyValue copied =
                         kv.copy(
                                 new InternalRowSerializer(keyType),
-                                new InternalRowSerializer(valueType)));
+                                new InternalRowSerializer(valueType));
+                if (keyIndex != null) {
+                    byte[] keyBytes = keySerializer.serializeToBytes(copied.key());
+                    if (!keyIndex.checkKey(keyBytes, originalFileNames)) {
+                        continue;
+                    }
+                    collectedKeys.add(keyBytes);
+                }
+                writer.write(copied);
             }
         } finally {
             sortBuffer.clear();
@@ -168,6 +193,16 @@ public class ClusteringFileRewriter {
         }
         for (DataFileMeta newFile : newFiles) {
             fileLevels.addNewFile(newFile);
+        }
+
+        // Batch update index using collected keys, split by file rowCount
+        if (keyIndex != null) {
+            int offset = 0;
+            for (DataFileMeta newFile : newFiles) {
+                int count = (int) newFile.rowCount();
+                keyIndex.batchPutIndex(newFile, collectedKeys.subList(offset, offset + count));
+                offset += count;
+            }
         }
 
         return newFiles;

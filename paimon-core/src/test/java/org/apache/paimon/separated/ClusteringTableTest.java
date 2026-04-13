@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -631,6 +632,59 @@ class ClusteringTableTest {
         // Should still see the very first values
         assertThat(readRows(firstRowTable))
                 .containsExactlyInAnyOrder(GenericRow.of(1, 10), GenericRow.of(2, 20));
+    }
+
+    /**
+     * Test that FIRST_ROW inline dedup actually reduces the number of records written. Duplicate
+     * keys should be dropped during sort-and-rewrite, resulting in fewer total rows across data
+     * files compared to the number of rows written.
+     */
+    @Test
+    public void testFirstRowInlineDedupReducesFileRows() throws Exception {
+        Table firstRowTable = createFirstRowTable();
+
+        // Commit 1: write 5 unique keys
+        writeRows(
+                firstRowTable,
+                Arrays.asList(
+                        GenericRow.of(1, 10),
+                        GenericRow.of(2, 20),
+                        GenericRow.of(3, 30),
+                        GenericRow.of(4, 40),
+                        GenericRow.of(5, 50)));
+
+        // Commit 2: write 5 duplicate keys (all should be dropped inline)
+        writeRows(
+                firstRowTable,
+                Arrays.asList(
+                        GenericRow.of(1, 99),
+                        GenericRow.of(2, 99),
+                        GenericRow.of(3, 99),
+                        GenericRow.of(4, 99),
+                        GenericRow.of(5, 99)));
+
+        // Verify correctness: still see first values
+        assertThat(readRows(firstRowTable))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 10),
+                        GenericRow.of(2, 20),
+                        GenericRow.of(3, 30),
+                        GenericRow.of(4, 40),
+                        GenericRow.of(5, 50));
+
+        // Verify optimization: total row count across all data files should be exactly 5
+        // (duplicates dropped during writing, not just DV-marked)
+        List<Split> splits = firstRowTable.newReadBuilder().newScan().plan().splits();
+        long totalRows =
+                splits.stream()
+                        .mapToLong(
+                                split ->
+                                        ((DataSplit) split)
+                                                .dataFiles().stream()
+                                                        .mapToLong(DataFileMeta::rowCount)
+                                                        .sum())
+                        .sum();
+        assertThat(totalRows).isEqualTo(5);
     }
 
     /** Test first-row mode with many writes to trigger compaction. */
