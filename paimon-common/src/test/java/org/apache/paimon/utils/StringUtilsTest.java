@@ -260,6 +260,58 @@ class StringUtilsTest {
     }
 
     @Nested
+    class CommonsCompatibilityTests {
+
+        @Test
+        void testIsBlank() {
+            assertThat(StringUtils.isBlank(null)).isTrue();
+            assertThat(StringUtils.isBlank("")).isTrue();
+            assertThat(StringUtils.isBlank(" \t")).isTrue();
+            assertThat(StringUtils.isBlank("paimon")).isFalse();
+        }
+
+        @Test
+        void testEquals() {
+            assertThat(StringUtils.equals(null, null)).isTrue();
+            assertThat(StringUtils.equals(null, "paimon")).isFalse();
+            assertThat(StringUtils.equals("paimon", "paimon")).isTrue();
+            assertThat(StringUtils.equals("paimon", "Paimon")).isFalse();
+        }
+
+        @Test
+        void testStartsWithAndEndsWith() {
+            assertThat(StringUtils.startsWith("manifest-1", "manifest")).isTrue();
+            assertThat(StringUtils.startsWith(null, "manifest")).isFalse();
+            assertThat(StringUtils.startsWith(null, null)).isTrue();
+            assertThat(StringUtils.endsWith("part-0.parquet", ".parquet")).isTrue();
+            assertThat(StringUtils.endsWith("part-0.orc", ".parquet")).isFalse();
+            assertThat(StringUtils.endsWith(null, null)).isTrue();
+        }
+
+        @Test
+        void testSubstringBeforeAndAfterLast() {
+            assertThat(StringUtils.substringBeforeLast("a/b/c", "/")).isEqualTo("a/b");
+            assertThat(StringUtils.substringBeforeLast("abc", "/")).isEqualTo("abc");
+            assertThat(StringUtils.substringAfterLast("a/b/c", "/")).isEqualTo("c");
+            assertThat(StringUtils.substringAfterLast("abc/", "/")).isEmpty();
+        }
+
+        @Test
+        void testStripEnd() {
+            assertThat(StringUtils.stripEnd("cpu\n", null)).isEqualTo("cpu");
+            assertThat(StringUtils.stripEnd("abccc", "c")).isEqualTo("ab");
+            assertThat(StringUtils.stripEnd("abc", "")).isEqualTo("abc");
+        }
+
+        @Test
+        void testTrimToNull() {
+            assertThat(StringUtils.trimToNull(null)).isNull();
+            assertThat(StringUtils.trimToNull("   ")).isNull();
+            assertThat(StringUtils.trimToNull("  paimon  ")).isEqualTo("paimon");
+        }
+    }
+
+    @Nested
     class RandomNumericStringTests {
 
         @Test
@@ -328,6 +380,30 @@ class StringUtilsTest {
             assertThat(StringUtils.join(Arrays.asList("a", "b", "c"), null)).isEqualTo("abc");
             assertThat(StringUtils.join(Arrays.asList("single"), ",")).isEqualTo("single");
             assertThat(StringUtils.join(Arrays.asList("a", null, "c"), ",")).isEqualTo("a,,c");
+        }
+
+        @Test
+        void testJoinArrayNullDelimiter() {
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, null))
+                    .isInstanceOf(NullPointerException.class)
+                    .hasMessage("The delimiter must not be null");
+        }
+
+        @Test
+        void testJoinArrayStartAndEndIndex() {
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, "--", 1, 3))
+                    .isEqualTo("b--c");
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, "--", 2, 2)).isEmpty();
+        }
+
+        @Test
+        void testJoinArrayInvalidIndex() {
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 0, -1))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 3, 3))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 0, 4))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
         }
 
         @Test
