@@ -522,7 +522,7 @@ public class SchemaValidation {
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for NONE/INPUT/LOOKUP changelog producer now.");
 
-        // pk-clustering-override mode requires deletion vectors even for first-row
+        // pk-clustering-override mode allows deletion vectors for first-row
         if (!options.pkClusteringOverride()) {
             checkArgument(
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
@@ -847,7 +847,8 @@ public class SchemaValidation {
                 throw new IllegalArgumentException(
                         "Cannot support 'pk-clustering-override' mode without 'clustering.columns'.");
             }
-            if (!options.deletionVectorsEnabled()) {
+            if (!options.deletionVectorsEnabled()
+                    && options.mergeEngine() != CoreOptions.MergeEngine.FIRST_ROW) {
                 throw new UnsupportedOperationException(
                         "Cannot support deletion-vectors disabled in 'pk-clustering-override' mode.");
             }
