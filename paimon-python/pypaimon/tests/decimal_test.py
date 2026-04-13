@@ -20,7 +20,8 @@ import unittest
 from decimal import Decimal
 
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer, GenericRowDeserializer
+from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
+                                            GenericRowSerializer)
 from pypaimon.table.row.row_kind import RowKind
 
 
@@ -113,7 +114,6 @@ class DecimalTest(unittest.TestCase):
         self.assertEqual(result.values[3], Decimal("12312455.22"))
         self.assertAlmostEqual(result.values[4], 3.14)
 
-
     def test_decimal_compact_binary_format(self):
         """Verify compact decimal binary layout: unscaled long in fixed part."""
         fields = [DataField(0, "d", AtomicType("DECIMAL(4, 2)"))]
@@ -148,7 +148,7 @@ class DecimalTest(unittest.TestCase):
 
         # cursor should point to the variable area (== fixed_part_size)
         self.assertEqual(cursor, fixed_part_size)
-        # variable area should be exactly 16 bytes (matching Java's cursor += 16)
+        # variable area should be exactly 16 bytes
         var_area = data[cursor:]
         self.assertEqual(len(var_area), 16)
         # unscaled bytes are big-endian signed
@@ -156,7 +156,6 @@ class DecimalTest(unittest.TestCase):
         unscaled_value = int.from_bytes(unscaled_bytes, byteorder='big', signed=True)
         # Decimal("5.55000") with scale=5 => unscaled = 555000
         self.assertEqual(unscaled_value, 555000)
-
 
     def test_decimal_boundary_precision(self):
         """Test boundary: DECIMAL(18, ...) is compact, DECIMAL(19, ...) is non-compact."""
@@ -197,12 +196,85 @@ class DecimalTest(unittest.TestCase):
                 result = GenericRowDeserializer.from_bytes(serialized, fields)
                 self.assertEqual(result.values[0], val)
 
-    def test_decimal_truncation_raises(self):
-        """Serializing a value with more fractional digits than scale should raise."""
+    def test_decimal_half_up_rounding(self):
+        """Excess fractional digits should be rounded with HALF_UP."""
         fields = [DataField(0, "d", AtomicType("DECIMAL(10, 2)"))]
-        row = GenericRow([Decimal("1.999")], fields, RowKind.INSERT)
-        with self.assertRaises(ArithmeticError):
-            GenericRowSerializer.to_bytes(row)
+
+        test_cases = [
+            (Decimal("1.999"), Decimal("2.00")),    # .999 rounds up
+            (Decimal("1.235"), Decimal("1.24")),    # .235 rounds up (HALF_UP)
+            (Decimal("1.234"), Decimal("1.23")),    # .234 rounds down
+            (Decimal("1.225"), Decimal("1.23")),    # .225 rounds up (HALF_UP)
+            (Decimal("-1.235"), Decimal("-1.24")),   # negative HALF_UP
+        ]
+        for val, expected in test_cases:
+            with self.subTest(value=val):
+                row = GenericRow([val], fields, RowKind.INSERT)
+                serialized = GenericRowSerializer.to_bytes(row)
+                result = GenericRowDeserializer.from_bytes(serialized, fields)
+                self.assertEqual(result.values[0], expected)
+
+    def test_decimal_precision_overflow_returns_null(self):
+        """Values exceeding declared precision should be stored as null."""
+        # DECIMAL(4, 2) can hold at most 2 integer + 2 fractional digits => max 99.99
+        fields = [DataField(0, "d", AtomicType("DECIMAL(4, 2)"))]
+
+        # 999.99 needs 5 digits total, exceeds precision=4
+        row = GenericRow([Decimal("999.99")], fields, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+        result = GenericRowDeserializer.from_bytes(serialized, fields)
+        self.assertIsNone(result.values[0])
+
+        # 99.999 rounds to 100.00 (5 digits), also overflows
+        row2 = GenericRow([Decimal("99.999")], fields, RowKind.INSERT)
+        serialized2 = GenericRowSerializer.to_bytes(row2)
+        result2 = GenericRowDeserializer.from_bytes(serialized2, fields)
+        self.assertIsNone(result2.values[0])
+
+        # 99.99 fits exactly in DECIMAL(4, 2)
+        row3 = GenericRow([Decimal("99.99")], fields, RowKind.INSERT)
+        serialized3 = GenericRowSerializer.to_bytes(row3)
+        result3 = GenericRowDeserializer.from_bytes(serialized3, fields)
+        self.assertEqual(result3.values[0], Decimal("99.99"))
+
+    def test_decimal_precision_overflow_high_precision(self):
+        """Precision overflow check also works for non-compact decimals."""
+        # DECIMAL(20, 5) can hold 15 integer + 5 fractional digits
+        fields = [DataField(0, "d", AtomicType("DECIMAL(20, 5)"))]
+
+        # This value fits: 15 integer digits + 5 fractional
+        row = GenericRow([Decimal("123456789012345.12345")], fields, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+        result = GenericRowDeserializer.from_bytes(serialized, fields)
+        self.assertEqual(result.values[0], Decimal("123456789012345.12345"))
+
+        # This value overflows: 16 integer digits + 5 fractional = 21 > 20
+        row2 = GenericRow([Decimal("1234567890123456.12345")], fields, RowKind.INSERT)
+        serialized2 = GenericRowSerializer.to_bytes(row2)
+        result2 = GenericRowDeserializer.from_bytes(serialized2, fields)
+        self.assertIsNone(result2.values[0])
+
+    def test_decimal_deserialization_precision_overflow_non_compact(self):
+        """Non-compact decimal deserialization returns None if precision overflows."""
+        # Serialize with DECIMAL(38, 5) which fits, then deserialize as DECIMAL(20, 5)
+        fields_wide = [DataField(0, "d", AtomicType("DECIMAL(38, 5)"))]
+        fields_narrow = [DataField(0, "d", AtomicType("DECIMAL(20, 5)"))]
+
+        # 21 digits total exceeds precision=20
+        row = GenericRow([Decimal("1234567890123456.12345")], fields_wide, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+        result = GenericRowDeserializer.from_bytes(serialized, fields_narrow)
+        self.assertIsNone(result.values[0])
+
+    def test_decimal_deserialization_invalid_precision(self):
+        """Deserialization with precision <= 0 raises ValueError."""
+        fields_valid = [DataField(0, "d", AtomicType("DECIMAL(10, 2)"))]
+        row = GenericRow([Decimal("1.23")], fields_valid, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+
+        fields_bad = [DataField(0, "d", AtomicType("DECIMAL(0, 2)"))]
+        with self.assertRaises(ValueError):
+            GenericRowDeserializer.from_bytes(serialized, fields_bad)
 
 
 if __name__ == '__main__':
