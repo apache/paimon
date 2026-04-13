@@ -1664,7 +1664,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 2, 2));
         commit.commit(1, write.prepareCommit(true, 1));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 2]");
+        assertThat(result).isEmpty();
 
         // 3. Update After
         write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 2, 3));
@@ -1746,7 +1746,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 11, 2, 29, 29, 2));
         commit.commit(1, write.prepareCommit(true, 1));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, NULL, 2, NULL, NULL, 2]");
+        assertThat(result).isEmpty();
 
         // 3. Update After
         write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 11, 2, 30, 30, 3));
