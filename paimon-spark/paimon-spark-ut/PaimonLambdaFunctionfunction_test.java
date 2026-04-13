@@ -1,1 +1,0 @@
-public class PaimonLambdaFunctionfunction_test { public static java.lang.Long apply(Integer length, Integer width){ return (long) length * width; } }
