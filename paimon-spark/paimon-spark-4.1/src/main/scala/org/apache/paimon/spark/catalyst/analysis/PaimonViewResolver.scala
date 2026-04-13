@@ -38,8 +38,8 @@ import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog}
  *
  * In Spark 4.1, SubstituteUnresolvedOrdinals was removed and its functionality was refactored into
  * the resolver package. This shim removes the reference to SubstituteUnresolvedOrdinals from the
- * earlyRules sequence. Ordinal substitution is handled by the Analyzer's Resolution batch in
- * Spark 4.1.
+ * earlyRules sequence. Ordinal substitution is handled by the Analyzer's Resolution batch in Spark
+ * 4.1.
  */
 case class PaimonViewResolver(spark: SparkSession)
   extends Rule[LogicalPlan]

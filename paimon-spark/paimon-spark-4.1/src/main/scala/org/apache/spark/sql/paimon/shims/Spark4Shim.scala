@@ -42,8 +42,8 @@ import java.util.{Map => JMap}
 /**
  * Spark 4.1 shim for Spark4Shim.
  *
- * In Spark 4.1, CTERelationRef gained two new parameters (maxDepth, isRecursive), going from 6 to
- * 8 params. The base Spark4Shim in paimon-spark4-common was compiled against Spark 4.0.2's
+ * In Spark 4.1, CTERelationRef gained two new parameters (maxDepth, isRecursive), going from 6 to 8
+ * params. The base Spark4Shim in paimon-spark4-common was compiled against Spark 4.0.2's
  * 6-parameter CTERelationRef, causing NoSuchMethodError at runtime. This shim recompiles against
  * Spark 4.1.1.
  */

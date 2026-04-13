@@ -23,11 +23,11 @@ import org.apache.paimon.table.Table
 /**
  * Spark 4.1 shim for SparkTable.
  *
- * In Spark 4.1, RewriteMergeIntoTable / RewriteDeleteFromTable / RewriteUpdateTable were moved
- * into the Resolution batch, running BEFORE Paimon's post-hoc resolution rules. If SparkTable
- * implements SupportsRowLevelOperations, Spark's built-in rewrite rules match and rewrite
- * MergeIntoTable / DeleteFromTable / UpdateTable using the V2 write path, which Paimon's PK/DV
- * tables do not support.
+ * In Spark 4.1, RewriteMergeIntoTable / RewriteDeleteFromTable / RewriteUpdateTable were moved into
+ * the Resolution batch, running BEFORE Paimon's post-hoc resolution rules. If SparkTable implements
+ * SupportsRowLevelOperations, Spark's built-in rewrite rules match and rewrite MergeIntoTable /
+ * DeleteFromTable / UpdateTable using the V2 write path, which Paimon's PK/DV tables do not
+ * support.
  *
  * This shim removes SupportsRowLevelOperations so that MergeIntoTable.rewritable returns false,
  * preventing Spark's rewrite rules from matching. Paimon's post-hoc rules (PaimonMergeInto,

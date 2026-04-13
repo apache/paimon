@@ -43,13 +43,12 @@ import org.apache.spark.sql.types.DataType
  *
  * Two incompatibilities with Spark 4.1.1:
  *
- * 1. UnResolvedPaimonV1Function extends Unevaluable. In Spark 4.0.2, Unevaluable extends
- *    FoldableUnevaluable. In Spark 4.1.1, FoldableUnevaluable was removed entirely, so the class
- *    compiled against 4.0.2 fails with ClassNotFoundException at runtime.
- *
- * 2. UnresolvedWith.cteRelations changed from Seq[(String, SubqueryAlias)] in 4.0.2 to
- *    Seq[(String, SubqueryAlias, Option[Boolean])] in 4.1.1. The transformPaimonV1Function method
- *    must preserve the third tuple element.
+ *   1. UnResolvedPaimonV1Function extends Unevaluable. In Spark 4.0.2, Unevaluable extends
+ *      FoldableUnevaluable. In Spark 4.1.1, FoldableUnevaluable was removed entirely, so the class
+ *      compiled against 4.0.2 fails with ClassNotFoundException at runtime.
+ *   2. UnresolvedWith.cteRelations changed from Seq[(String, SubqueryAlias)] in 4.0.2 to
+ *      Seq[(String, SubqueryAlias, Option[Boolean])] in 4.1.1. The transformPaimonV1Function method
+ *      must preserve the third tuple element.
  */
 case class RewritePaimonFunctionCommands(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -117,8 +116,8 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
       case u: UnresolvedWith =>
         // In Spark 4.1.1, cteRelations is Seq[(String, SubqueryAlias, Option[Boolean])].
         // Preserve the third element (allowRecursion flag) when transforming.
-        u.copy(cteRelations = u.cteRelations.map(t =>
-          (t._1, transformPaimonV1Function(t._2).asInstanceOf[SubqueryAlias], t._3)))
+        u.copy(cteRelations = u.cteRelations.map(
+          t => (t._1, transformPaimonV1Function(t._2).asInstanceOf[SubqueryAlias], t._3)))
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
           case u: UnresolvedFunction =>

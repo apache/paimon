@@ -25,12 +25,12 @@ import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueries
 import org.apache.paimon.spark.execution.TruncatePaimonTableWithFilterExec
 
 import org.apache.spark.sql.{DataFrame, PaimonUtils, Row}
+import org.apache.spark.sql.{functions => fn}
 import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, GetStructField, Literal, NamedExpression, ScalarSubquery}
 import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.execution.CommandResultExec
-import org.apache.spark.sql.{functions => fn}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.junit.jupiter.api.Assertions
 
