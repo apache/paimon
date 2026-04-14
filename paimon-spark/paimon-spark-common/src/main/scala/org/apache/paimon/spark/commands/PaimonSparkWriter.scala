@@ -32,6 +32,7 @@ import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
 import org.apache.paimon.spark.{SparkRow, SparkTypeUtils}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
+import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
@@ -422,7 +423,9 @@ case class PaimonSparkWriter(
     } else {
       writeBuilder
     }
+    val metricRegistry = SparkMetricRegistry()
     val tableCommit = finalWriteBuilder.newCommit()
+    tableCommit.withMetricRegistry(metricRegistry)
     try {
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
