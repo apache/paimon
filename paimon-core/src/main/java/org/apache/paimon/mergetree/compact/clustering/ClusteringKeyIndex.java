@@ -39,6 +39,8 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIterator;
 
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -63,7 +65,7 @@ public class ClusteringKeyIndex implements Closeable {
     private final RowType keyType;
     private final IOManager ioManager;
     private final KeyValueFileReaderFactory keyReaderFactory;
-    private final BucketedDvMaintainer dvMaintainer;
+    private final @Nullable BucketedDvMaintainer dvMaintainer;
     private final SimpleLsmKvDb kvDb;
     private final ClusteringFiles fileLevels;
     private final boolean firstRow;
@@ -76,7 +78,7 @@ public class ClusteringKeyIndex implements Closeable {
             RowType keyType,
             IOManager ioManager,
             KeyValueFileReaderFactory keyReaderFactory,
-            BucketedDvMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             SimpleLsmKvDb kvDb,
             ClusteringFiles fileLevels,
             boolean firstRow,
