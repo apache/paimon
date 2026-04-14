@@ -2447,6 +2447,9 @@ public class RESTCatalogServer {
         RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromView = requestBody.getSource();
         Identifier toView = requestBody.getDestination();
+        if (noPermissionViews.contains(fromView.getFullName())) {
+            throw new Catalog.ViewNoPermissionException(fromView);
+        }
         if (!viewStore.containsKey(fromView.getFullName())) {
             throw new Catalog.ViewNotExistException(fromView);
         }
