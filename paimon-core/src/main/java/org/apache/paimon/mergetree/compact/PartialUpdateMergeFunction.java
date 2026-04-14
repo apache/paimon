@@ -420,6 +420,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             .map(fieldName -> requireField(fieldName, fieldNames))
                             .forEach(
                                     field -> {
+                                        String protectedFieldName = fieldNames.get(field);
+                                        if (primaryKeys.contains(protectedFieldName)) {
+                                            throw new IllegalArgumentException(
+                                                    String.format(
+                                                            "The sequence-group '%s' contains primary key field '%s', "
+                                                                    + "which is not allowed. Primary key columns cannot be put in sequence-group.",
+                                                            k, protectedFieldName));
+                                        }
                                         if (fieldSeqComparators.containsKey(field)) {
                                             throw new IllegalArgumentException(
                                                     String.format(
@@ -427,13 +435,20 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                             fieldNames.get(field), k));
                                         }
                                         fieldSeqComparators.put(field, userDefinedSeqComparator);
-                                        fieldsProtectedBySequenceGroup.add(fieldNames.get(field));
+                                        fieldsProtectedBySequenceGroup.add(protectedFieldName);
                                     });
 
                     // add self
                     for (int index : sequenceFields) {
-                        allSequenceFields.add(fieldNames.get(index));
                         String fieldName = fieldNames.get(index);
+                        if (primaryKeys.contains(fieldName)) {
+                            throw new IllegalArgumentException(
+                                    String.format(
+                                            "The sequence-group '%s' contains primary key field '%s', "
+                                                    + "which is not allowed. Primary key columns cannot be put in sequence-group.",
+                                            k, fieldName));
+                        }
+                        allSequenceFields.add(fieldName);
                         fieldSeqComparators.put(index, userDefinedSeqComparator);
                         sequenceGroupMap.put(fieldName, index);
                     }

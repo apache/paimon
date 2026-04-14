@@ -888,6 +888,69 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testSequenceGroupCannotContainPrimaryKey() {
+        // Issue #7052: Putting a primary key column in sequence-group should be forbidden
+        // as it causes Parquet decoding failures during compaction
+        Options options = new Options();
+        options.set("fields.f0.sequence-group", "f1,f2");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f0")))
+                .hasMessageContaining(
+                        "The sequence-group 'fields.f0.sequence-group' contains primary key field 'f0', "
+                                + "which is not allowed. Primary key columns cannot be put in sequence-group.");
+    }
+
+    @Test
+    public void testMultiSequenceFieldsCannotContainPrimaryKey() {
+        // Issue #7052: Multi-field sequence-group also cannot contain primary key columns
+        // The sequence fields (f2,f3) are the "self" part, they must not contain PKs
+        Options options = new Options();
+        options.set("fields.f2,f3.sequence-group", "f0,f4");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f2")))
+                .hasMessageContaining(
+                        "The sequence-group 'fields.f2,f3.sequence-group' contains primary key field 'f2', "
+                                + "which is not allowed. Primary key columns cannot be put in sequence-group.");
+    }
+
+    @Test
+    public void testMultiPrimaryKeyCannotBeInSequenceGroup() {
+        // Issue #7052: With composite primary keys, none of them can be in sequence-group
+        // f2 is a PK and appears in the value part of the sequence-group
+        Options options = new Options();
+        options.set("fields.f4.sequence-group", "f1,f2");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f2")))
+                .hasMessageContaining(
+                        "The sequence-group 'fields.f4.sequence-group' contains primary key field 'f2', "
+                                + "which is not allowed. Primary key columns cannot be put in sequence-group.");
+    }
+
+    @Test
     public void testDeleteReproduceCorrectSequenceNumber() {
         Options options = new Options();
         options.set("partial-update.remove-record-on-delete", "true");
