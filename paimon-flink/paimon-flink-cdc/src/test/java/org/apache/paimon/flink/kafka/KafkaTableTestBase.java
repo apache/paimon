@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink.kafka;
 
+import org.apache.paimon.flink.DockerImageVersions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
