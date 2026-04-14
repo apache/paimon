@@ -153,21 +153,22 @@ class AggregateMergeFunctionTest {
                                         .fields(
                                                 new DataType[] {
                                                     DataTypes.INT().notNull(),
+                                                    DataTypes.INT().notNull(),
                                                     DataTypes.INT(),
                                                     DataTypes.INT()
                                                 },
-                                                new String[] {"k", "a", "b"})
+                                                new String[] {"k", "a", "b", "c"})
                                         .build(),
                                 Collections.singletonList("k"))
                         .create();
         aggregateFunction.reset();
 
         // insert some data first
-        aggregateFunction.add(value(1, 3, 5));
+        aggregateFunction.add(value(1, 0, 0, 5));
         // send a DELETE with nullable field as null, triggers initRow
-        aggregateFunction.add(deleteValue(1, null, 2));
+        aggregateFunction.add(deleteValue(1, 2, 2, null));
         // after delete with removeRecordOnDelete, row is re-initialized via initRow
-        assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, null, 2));
+        assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, 2, 2, null));
     }
 
     private KeyValue value(Integer... values) {

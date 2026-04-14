@@ -919,7 +919,7 @@ public class PartialUpdateMergeFunctionTest {
         RowType rowType =
                 RowType.of(
                         DataTypes.INT().notNull(),
-                        DataTypes.INT(),
+                        DataTypes.INT().notNull(),
                         DataTypes.INT(),
                         DataTypes.INT());
         MergeFunction<KeyValue> func =
@@ -930,9 +930,9 @@ public class PartialUpdateMergeFunctionTest {
         // insert some data first
         add(func, 1, 3, 5, 7);
         // send a DELETE with nullable field as null, triggers initRow
-        add(func, RowKind.DELETE, 1, null, 2, null);
+        add(func, RowKind.DELETE, 1, 2, 2, null);
         // after delete with removeRecordOnDelete, row is re-initialized via initRow
-        validate(func, 1, null, 2, null);
+        validate(func, 1, 2, 2, null);
     }
 
     private void add(MergeFunction<KeyValue> function, Integer... f) {
