@@ -116,13 +116,24 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     @Override
     public boolean namespaceExists(String[] namespace) {
+        if (isPaimonSystemNamespace(namespace)) {
+            return true;
+        }
         return asNamespaceCatalog().namespaceExists(namespace);
     }
 
     @Override
     public Map<String, String> loadNamespaceMetadata(String[] namespace)
             throws NoSuchNamespaceException {
+        if (isPaimonSystemNamespace(namespace)) {
+            return sparkCatalog.loadNamespaceMetadata(namespace);
+        }
         return asNamespaceCatalog().loadNamespaceMetadata(namespace);
+    }
+
+    private boolean isPaimonSystemNamespace(String[] namespace) {
+        return namespace.length == 1
+                && Catalog.SYSTEM_DATABASE_NAME.equals(namespace[0]);
     }
 
     @Override

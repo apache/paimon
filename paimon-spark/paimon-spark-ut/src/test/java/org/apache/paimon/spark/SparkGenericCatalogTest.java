@@ -108,6 +108,12 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
+    public void testSystemDatabaseExists() {
+        // Paimon's system database 'sys' should be visible via SparkGenericCatalog
+        assertThatCode(() -> spark.sql("USE sys")).doesNotThrowAnyException();
+    }
+
+    @Test
     public void testCsvTable() {
         spark.sql("CREATE TABLE CT (a INT, b INT, c STRING) USING csv");
         testReadWrite("CT");
