@@ -43,10 +43,8 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.IntStream;
@@ -71,7 +69,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
     private final RowType keyType;
     private final RowType valueType;
     private final ExecutorService executor;
-    private final BucketedDvMaintainer dvMaintainer;
+    @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
@@ -89,7 +87,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
             KeyValueFileReaderFactory valueReaderFactory,
             KeyValueFileWriterFactory writerFactory,
             ExecutorService executor,
-            BucketedDvMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             List<DataFileMeta> restoreFiles,
             long targetFileSize,
@@ -206,14 +204,8 @@ public class ClusteringCompactManager extends CompactFutureManager {
         // Snapshot sorted files before Phase 1 to avoid including newly created files in Phase 2
         List<DataFileMeta> existingSortedFiles = fileLevels.sortedFiles();
         for (DataFileMeta file : unsortedFiles) {
-            Set<String> originalFileNames = Collections.singleton(file.fileName());
             List<DataFileMeta> sortedFiles =
-                    fileRewriter.sortAndRewriteFiles(
-                            singletonList(file),
-                            kvSerializer,
-                            kvSchemaType,
-                            keyIndex,
-                            originalFileNames);
+                    fileRewriter.sortAndRewriteFile(file, kvSerializer, kvSchemaType, keyIndex);
             result.before().add(file);
             result.after().addAll(sortedFiles);
         }

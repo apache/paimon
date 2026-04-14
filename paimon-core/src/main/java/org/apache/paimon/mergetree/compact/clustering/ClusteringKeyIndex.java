@@ -39,6 +39,8 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIterator;
 
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -48,9 +50,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
@@ -63,7 +65,7 @@ public class ClusteringKeyIndex implements Closeable {
     private final RowType keyType;
     private final IOManager ioManager;
     private final KeyValueFileReaderFactory keyReaderFactory;
-    private final BucketedDvMaintainer dvMaintainer;
+    private final @Nullable BucketedDvMaintainer dvMaintainer;
     private final SimpleLsmKvDb kvDb;
     private final ClusteringFiles fileLevels;
     private final boolean firstRow;
@@ -76,7 +78,7 @@ public class ClusteringKeyIndex implements Closeable {
             RowType keyType,
             IOManager ioManager,
             KeyValueFileReaderFactory keyReaderFactory,
-            BucketedDvMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             SimpleLsmKvDb kvDb,
             ClusteringFiles fileLevels,
             boolean firstRow,
@@ -216,39 +218,25 @@ public class ClusteringKeyIndex implements Closeable {
      * in deletion vectors, return true (write the new record).
      *
      * @param keyBytes serialized key bytes
-     * @param originalFileNames file names of the original unsorted files being replaced
      * @return true if the record should be written, false to skip (FIRST_ROW dedup)
      */
-    public boolean checkKey(byte[] keyBytes, Set<String> originalFileNames) throws Exception {
+    public boolean checkKey(byte[] keyBytes) throws Exception {
         byte[] oldValue = kvDb.get(keyBytes);
         if (oldValue != null) {
             ByteArrayInputStream valueIn = new ByteArrayInputStream(oldValue);
             int oldFileId = decodeInt(valueIn);
             int oldPosition = decodeInt(valueIn);
             DataFileMeta oldFile = fileLevels.getFileById(oldFileId);
-            if (oldFile != null && !originalFileNames.contains(oldFile.fileName())) {
+            if (oldFile != null) {
                 if (firstRow) {
                     return false;
                 } else {
+                    checkNotNull(dvMaintainer, "DvMaintainer cannot be null for DEDUPLICATE mode.");
                     dvMaintainer.notifyNewDeletion(oldFile.fileName(), oldPosition);
                 }
             }
         }
         return true;
-    }
-
-    /**
-     * Batch update the key index for a new sorted file using pre-collected key bytes. Avoids
-     * re-reading the file.
-     */
-    public void batchPutIndex(DataFileMeta sortedFile, List<byte[]> keyBytesList) throws Exception {
-        int fileId = fileLevels.getFileIdByName(sortedFile.fileName());
-        for (int position = 0; position < keyBytesList.size(); position++) {
-            ByteArrayOutputStream value = new ByteArrayOutputStream(8);
-            encodeInt(value, fileId);
-            encodeInt(value, position);
-            kvDb.put(keyBytesList.get(position), value.toByteArray());
-        }
     }
 
     /** Delete key index entries for the given file (only if they still point to it). */
