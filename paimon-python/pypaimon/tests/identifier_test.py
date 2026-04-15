@@ -92,6 +92,22 @@ class IdentifierTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             Identifier.from_string("`a`.`b`.`c`")
 
+    def test_is_system_table_regular_table(self):
+        """A plain table object is not a system table."""
+        self.assertFalse(Identifier.create("mydb", "mytable").is_system_table())
+
+    def test_is_system_table_snapshots_suffix(self):
+        """object name '<base>$snapshots' is a system table."""
+        self.assertTrue(Identifier.create("mydb", "orders$snapshots").is_system_table())
+
+    def test_is_system_table_schemas_suffix(self):
+        """object name '<base>$schemas' is a system table."""
+        self.assertTrue(Identifier.create("mydb", "orders$schemas").is_system_table())
+
+    def test_is_system_table_files_suffix(self):
+        """object name '<base>$files' is a system table."""
+        self.assertTrue(Identifier.create("mydb", "orders$files").is_system_table())
+
 
 if __name__ == '__main__':
     unittest.main()
