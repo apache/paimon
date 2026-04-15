@@ -899,6 +899,8 @@ public class RESTCatalog implements Catalog {
             return toView(identifier.getDatabaseName(), response);
         } catch (NoSuchResourceException e) {
             throw new ViewNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 
@@ -911,6 +913,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(identifier);
             }
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 
@@ -934,6 +938,8 @@ public class RESTCatalog implements Catalog {
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 
@@ -945,6 +951,8 @@ public class RESTCatalog implements Catalog {
                     : api.listViews(databaseName);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -959,6 +967,8 @@ public class RESTCatalog implements Catalog {
             return api.listViewsPaged(databaseName, maxResults, pageToken, viewNamePattern);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -979,6 +989,8 @@ public class RESTCatalog implements Catalog {
                     views.getNextPageToken());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(db, e);
         }
     }
 
@@ -1020,6 +1032,8 @@ public class RESTCatalog implements Catalog {
             throw new ViewAlreadyExistException(toView);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(fromView, e);
         }
     }
 
@@ -1040,6 +1054,8 @@ public class RESTCatalog implements Catalog {
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 

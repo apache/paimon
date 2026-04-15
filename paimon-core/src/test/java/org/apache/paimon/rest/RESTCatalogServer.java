@@ -195,6 +195,7 @@ public class RESTCatalogServer {
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
     private final List<String> noPermissionTables = new ArrayList<>();
+    private final List<String> noPermissionViews = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
@@ -274,6 +275,10 @@ public class RESTCatalogServer {
 
     public void addNoPermissionTable(Identifier identifier) {
         noPermissionTables.add(identifier.getFullName());
+    }
+
+    public void addNoPermissionView(Identifier identifier) {
+        noPermissionViews.add(identifier.getFullName());
     }
 
     public void addTableColumnAuth(Identifier identifier, List<String> select) {
@@ -627,6 +632,14 @@ public class RESTCatalogServer {
                     response =
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_TABLE,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    403);
+                    return mockResponse(response, 403);
+                } catch (Catalog.ViewNoPermissionException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_VIEW,
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     403);
@@ -2327,6 +2340,9 @@ public class RESTCatalogServer {
     private MockResponse viewHandle(String method, Identifier identifier, String requestData)
             throws Exception {
         RESTResponse response;
+        if (noPermissionViews.contains(identifier.getFullName())) {
+            throw new Catalog.ViewNoPermissionException(identifier);
+        }
         if (viewStore.containsKey(identifier.getFullName())) {
             switch (method) {
                 case "GET":
@@ -2431,6 +2447,9 @@ public class RESTCatalogServer {
         RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromView = requestBody.getSource();
         Identifier toView = requestBody.getDestination();
+        if (noPermissionViews.contains(fromView.getFullName())) {
+            throw new Catalog.ViewNoPermissionException(fromView);
+        }
         if (!viewStore.containsKey(fromView.getFullName())) {
             throw new Catalog.ViewNotExistException(fromView);
         }

@@ -1433,6 +1433,33 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /** Exception for trying to operate on the view that doesn't have permission. */
+    class ViewNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "View %s has no permission. Caused by %s.";
+
+        private final Identifier identifier;
+
+        public ViewNoPermissionException(Identifier identifier, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.identifier = identifier;
+        }
+
+        @VisibleForTesting
+        public ViewNoPermissionException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
     /** Exception for trying to alter a column that already exists. */
     class ColumnAlreadyExistException extends Exception {
 

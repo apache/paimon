@@ -279,6 +279,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testApiWhenViewNoPermission() throws Exception {
+        Identifier identifier = Identifier.create("test_view_db", "no_permission_view");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        View view = createView(identifier);
+        catalog.createView(identifier, view, false);
+        revokeViewPermission(identifier);
+        assertThrows(Catalog.ViewNoPermissionException.class, () -> catalog.getView(identifier));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class, () -> catalog.dropView(identifier, false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.renameView(
+                                identifier,
+                                Identifier.create("test_view_db", "no_permission_view2"),
+                                false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(
+                                        ViewChange.addDialect(
+                                                "flink_1", "SELECT * FROM FLINK_TABLE_1")),
+                                false));
+    }
+
+    @Test
     void testApiWhenDatabaseNoExistAndNotIgnore() {
         String database = "test_no_exist_db";
         assertThrows(
@@ -3931,6 +3959,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
+
+    protected abstract void revokeViewPermission(Identifier identifier);
 
     protected abstract void authTableColumns(Identifier identifier, List<String> columns);
 
