@@ -99,7 +99,6 @@ public class BlobDescriptor implements Serializable {
         return "BlobDescriptor{"
                 + "version="
                 + version
-                + '\''
                 + ", uri='"
                 + uri
                 + '\''
