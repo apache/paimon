@@ -26,7 +26,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
 import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, StringUtils}
 import org.apache.spark.sql.connector.catalog.Identifier
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{StructField, StructType}
 import org.apache.spark.unsafe.types.UTF8String
 
 import scala.collection.JavaConverters._
@@ -49,10 +49,18 @@ case class CreatePaimonViewExec(
   override def output: Seq[Attribute] = Nil
 
   override protected def run(): Seq[InternalRow] = {
-    if (columnAliases.nonEmpty || columnComments.nonEmpty || queryColumnNames.nonEmpty) {
-      throw new UnsupportedOperationException(
-        "columnAliases, columnComments and queryColumnNames are not supported now")
+    if (queryColumnNames.nonEmpty) {
+      throw new UnsupportedOperationException("queryColumnNames is not supported now")
     }
+
+    if (columnAliases.nonEmpty && columnAliases.length != viewSchema.fields.length) {
+      throw new UnsupportedOperationException(
+        s"The number of column aliases (${columnAliases.length}) " +
+          s"must match the number of columns (${viewSchema.fields.length})")
+    }
+
+    // Apply column aliases and comments to the view schema
+    val finalSchema = applyColumnAliasesAndComments(viewSchema, columnAliases, columnComments)
 
     // Note: for replace just drop then create ,this operation is non-atomic.
     if (replace) {
@@ -61,13 +69,42 @@ case class CreatePaimonViewExec(
 
     catalog.createView(
       ident,
-      viewSchema,
+      finalSchema,
       queryText,
       comment.orNull,
       properties.asJava,
       allowExisting)
 
     Nil
+  }
+
+  /**
+   * Apply column aliases and comments to the view schema. If columnAliases is empty, the original
+   * column names are used. If columnComments is empty or a specific comment is None, no comment is
+   * added. The length of aliases (if non-empty) is validated before calling this method.
+   */
+  private def applyColumnAliasesAndComments(
+      schema: StructType,
+      aliases: Seq[String],
+      comments: Seq[Option[String]]): StructType = {
+    if (aliases.isEmpty && comments.isEmpty) {
+      return schema
+    }
+
+    val fields = schema.fields.zipWithIndex.map {
+      case (field, index) =>
+        val newName = if (aliases.nonEmpty) aliases(index) else field.name
+        val newComment = if (index < comments.length) comments(index) else None
+
+        val newField = StructField(newName, field.dataType, field.nullable, field.metadata)
+
+        newComment match {
+          case Some(c) => newField.withComment(c)
+          case None => newField
+        }
+    }
+
+    StructType(fields)
   }
 
   override def simpleString(maxFields: Int): String = {
