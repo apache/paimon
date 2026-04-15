@@ -935,9 +935,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table = self.catalog.get_table(table_name)
 
         variant_col = GenericVariant.to_arrow_array([
-            GenericVariant.from_json('{"name":"test","value":42}'),
-            GenericVariant.from_json('[10,20,30]'),
-            GenericVariant.from_json('"hello"'),
+            GenericVariant.from_python({"name": "test", "value": 42}),
+            GenericVariant.from_python([10, 20, 30]),
+            GenericVariant.from_python("hello"),
             None,  # SQL NULL at the column level, not a VARIANT containing JSON null
         ])
         data = pa.table({
@@ -980,9 +980,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # Use data with age+city fields so the shredded sub-columns are exercised.
         # Row 3 is an array — it has no age/city, so it goes entirely to overflow.
         shredded_variant_col = GenericVariant.to_arrow_array([
-            GenericVariant.from_json('{"age":30,"city":"Beijing"}'),
-            GenericVariant.from_json('{"age":25,"city":"Shanghai"}'),
-            GenericVariant.from_json('[1,2,3]'),
+            GenericVariant.from_python({"age": 30, "city": "Beijing"}),
+            GenericVariant.from_python({"age": 25, "city": "Shanghai"}),
+            GenericVariant.from_python([1, 2, 3]),
         ])
         shredded_data = pa.table(
             {
