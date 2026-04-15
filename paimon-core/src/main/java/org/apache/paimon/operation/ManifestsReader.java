@@ -66,6 +66,10 @@ public class ManifestsReader {
         this.manifestListFactory = manifestListFactory;
     }
 
+    public RowType partitionType() {
+        return partitionType;
+    }
+
     public ManifestsReader onlyReadRealBuckets() {
         this.onlyReadRealBuckets = true;
         return this;

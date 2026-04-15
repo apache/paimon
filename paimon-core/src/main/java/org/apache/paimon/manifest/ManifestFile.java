@@ -40,6 +40,9 @@ import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -52,6 +55,8 @@ import java.util.List;
  * snapshot.
  */
 public class ManifestFile extends ObjectsFile<ManifestEntry> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ManifestFile.class);
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
@@ -108,6 +113,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         try {
             Path path = pathFactory.toPath(fileName);
             if (cache != null) {
+                LOG.info("Reading manifest file from cache: {}", fileName);
                 return cache.read(
                         path,
                         fileSize,
@@ -115,6 +121,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                                 partitionFilter, bucketFilter, readFilter, readTFilter));
             }
 
+            LOG.info("Reading manifest file without cache: {}", fileName);
             return readFromIterator(
                     createIterator(path, fileSize), serializer, readFilter, readTFilter);
         } catch (IOException e) {
