@@ -68,8 +68,7 @@ public class FieldListaggAgg extends FieldAggregator {
 
         if (distinct) {
             BinaryString[] accumulatorTokens =
-                    splitByWholeSeparatorPreserveAllTokens(
-                            mergeFieldSD, delimiterBinaryString);
+                    splitByWholeSeparatorPreserveAllTokens(mergeFieldSD, delimiterBinaryString);
             Set<BinaryString> existingTokens = new HashSet<>(accumulatorTokens.length);
             for (BinaryString token : accumulatorTokens) {
                 existingTokens.add(token);
@@ -95,7 +94,6 @@ public class FieldListaggAgg extends FieldAggregator {
             return BinaryStringUtils.concat(result);
         }
 
-        return BinaryStringUtils.concat(
-                mergeFieldSD, delimiterBinaryString, inFieldSD);
+        return BinaryStringUtils.concat(mergeFieldSD, delimiterBinaryString, inFieldSD);
     }
 }
