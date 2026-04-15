@@ -357,6 +357,46 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldListAggDistinctShouldNotMatchSubstring() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString accumulator = BinaryString.fromString("abc,def,asd");
+        BinaryString inputField = BinaryString.fromString("ab,xy");
+        Object result = fieldListaggAgg.agg(accumulator, inputField);
+
+        assertNotNull(result);
+        assertEquals("abc,def,asd,ab,xy", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggDistinctSubstringWithCustomDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.distinct",
+                                                "true",
+                                                "fields.fieldName.list-agg-delimiter",
+                                                ";")),
+                                "fieldName");
+
+        BinaryString accumulator = BinaryString.fromString("abc;def;asd");
+        BinaryString inputField = BinaryString.fromString("ab;xy;def");
+        Object result = fieldListaggAgg.agg(accumulator, inputField);
+
+        assertNotNull(result);
+        assertEquals("abc;def;asd;ab;xy", result.toString());
+    }
+
+    @Test
     public void testFieldListAggWithBoundedVarcharShouldFail() {
         FieldListaggAggFactory factory = new FieldListaggAggFactory();
         // Should throw IllegalArgumentException when using VARCHAR(n) with length limit
