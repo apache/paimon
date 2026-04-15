@@ -56,6 +56,10 @@ import scala.collection.mutable
  *   - All usages of the variant column in the projection are through [[VariantGet]] (no direct
  *     attribute reference)
  *   - The path argument of [[VariantGet]] is foldable (constant-evaluable at planning time)
+ *
+ * Note: the rule does not check whether the column is physically shredded. If it is not, the
+ * format layer falls back to extracting fields from the binary blob, so correctness is preserved
+ * — just without the IO benefit.
  */
 object PushDownVariantExtract extends Rule[LogicalPlan] {
 
