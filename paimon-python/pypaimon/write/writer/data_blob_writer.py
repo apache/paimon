@@ -307,6 +307,8 @@ class DataBlobWriter(DataWriter):
         file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
+        self._check_no_variant_for_format(data.schema)
+
         # Write file based on format
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)

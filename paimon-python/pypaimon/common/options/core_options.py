@@ -405,6 +405,21 @@ class CoreOptions:
         )
     )
 
+    VARIANT_SHREDDING_SCHEMA: ConfigOption[str] = (
+        ConfigOptions.key("variant.shreddingSchema")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "JSON-encoded ROW type specifying which VARIANT sub-fields to shred when "
+            "writing Parquet (static shredding mode). The top-level fields map VARIANT "
+            "column names to their sub-field schemas. "
+            "Alias: 'parquet.variant.shreddingSchema'. "
+            "Example: '{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"payload\","
+            "\"type\":{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"age\","
+            "\"type\":\"BIGINT\"}]}}]}'"
+        )
+    )
+
     PARTITION_DEFAULT_NAME: ConfigOption[str] = (
         ConfigOptions.key("partition.default-name")
         .string_type()
@@ -479,6 +494,13 @@ class CoreOptions:
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
+
+    def variant_shredding_schema(self) -> Optional[str]:
+        val = self.options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA)
+        if val is None:
+            # Support alias used by Java: parquet.variant.shreddingSchema
+            val = self.options.data.get("parquet.variant.shreddingSchema")
+        return val
 
     def blob_descriptor_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)

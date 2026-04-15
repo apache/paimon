@@ -26,7 +26,7 @@ from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import PyarrowFieldParser, is_variant_struct
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 
@@ -70,6 +70,19 @@ class DataWriter(ABC):
         )
         # Store the current generated external path to preserve scheme in metadata
         self._current_external_path: Optional[str] = None
+        self._variant_format_checked: bool = False
+
+        # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
+        self._variant_shredding: Dict[str, Tuple] = {}
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+            shredding_json = self.options.variant_shredding_schema()
+            if shredding_json:
+                from pypaimon.data.variant_shredding import (
+                    parse_shredding_schema_option, shredding_schema_to_arrow_type)
+                col_schemas = parse_shredding_schema_option(shredding_json)
+                for col_name, obj_fields in col_schemas.items():
+                    target_type = shredding_schema_to_arrow_type(obj_fields)
+                    self._variant_shredding[col_name] = (obj_fields, target_type)
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -154,6 +167,22 @@ class DataWriter(ABC):
             self._write_data_to_file(data_to_write)
             self.pending_data = remaining_data
 
+    def _check_no_variant_for_format(self, schema: pa.Schema):
+        """Raise NotImplementedError if any VARIANT column is present for an unsupported format.
+
+        The check is performed only once per writer instance; subsequent calls are no-ops
+        because the schema and file format are both fixed for the lifetime of the writer.
+        """
+        if self._variant_format_checked:
+            return
+        self._variant_format_checked = True
+        if self.file_format in (CoreOptions.FILE_FORMAT_ORC, CoreOptions.FILE_FORMAT_AVRO):
+            for field in schema:
+                if pa.types.is_struct(field.type) and is_variant_struct(field.type):
+                    raise NotImplementedError(
+                        f"VARIANT type is not supported for {self.file_format} format"
+                    )
+
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
             return
@@ -166,6 +195,11 @@ class DataWriter(ABC):
             external_path_str = self._current_external_path if self._current_external_path else None
         else:
             external_path_str = None
+
+        self._check_no_variant_for_format(data.schema)
+
+        if self._variant_shredding:
+            data = self._apply_variant_shredding(data)
 
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
@@ -236,6 +270,37 @@ class DataWriter(ABC):
             # None means all columns in the table have been written
             file_path=file_path,
         ))
+
+    def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
+        """Transform VARIANT columns into shredded Parquet format.
+
+        Each shredded parent column is tagged with a ``PARQUET:field_id`` so that
+        the Java ``ParquetSchemaConverter.convertToPaimonField`` (called from
+        ``VariantUtils.variantFileType``) can read ``parquetType.getId().intValue()``
+        without a NullPointerException.
+        """
+        from pypaimon.data.variant_shredding import shred_variant_column
+        columns = list(data.columns)
+        fields = list(data.schema)
+        changed = False
+
+        paimon_field_id: Dict[str, int] = {}
+        for pf in self.table.fields:
+            paimon_field_id[pf.name] = pf.id
+
+        for i, f in enumerate(fields):
+            if f.name in self._variant_shredding:
+                obj_fields, target_type = self._variant_shredding[f.name]
+                columns[i] = shred_variant_column(columns[i], obj_fields, target_type)
+                pid = paimon_field_id.get(f.name)
+                parent_meta = {b'PARQUET:field_id': str(pid).encode()} if pid is not None else None
+                fields[i] = pa.field(f.name, target_type, nullable=f.nullable, metadata=parent_meta)
+                changed = True
+        if not changed:
+            return data
+        if isinstance(data, pa.Table):
+            return pa.Table.from_arrays(columns, schema=pa.schema(fields))
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:

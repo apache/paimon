@@ -454,6 +454,28 @@ class DataTypeParser:
         )
 
 
+def is_variant_struct(pa_type: pyarrow.StructType) -> bool:
+    """Return True if *pa_type* is the two-field BINARY struct used to encode VARIANT.
+
+    Paimon Java stores VARIANT as a Parquet GROUP with exactly two non-nullable
+    BINARY primitives: ``value`` (field index 0) and ``metadata`` (field index 1).
+    PyArrow surfaces this group as a struct type; we fingerprint it here so that
+    :meth:`PyarrowFieldParser.to_paimon_type` can round-trip it back to VARIANT
+    instead of misclassifying it as a generic ROW type.
+
+    This heuristic is fragile by necessity — Arrow has no native Variant type yet.
+    It will not mis-fire on ordinary ROW fields as long as callers do not name two
+    non-nullable binary columns ``value`` / ``metadata`` at the same nesting level.
+    """
+    if pa_type.num_fields != 2:
+        return False
+    f0, f1 = pa_type[0], pa_type[1]
+    return (
+        f0.name == 'value' and pyarrow.types.is_binary(f0.type) and not f0.nullable
+        and f1.name == 'metadata' and pyarrow.types.is_binary(f1.type) and not f1.nullable
+    )
+
+
 class PyarrowFieldParser:
 
     @staticmethod
@@ -481,6 +503,11 @@ class PyarrowFieldParser:
                 return pyarrow.binary()
             elif type_name == 'BLOB':
                 return pyarrow.large_binary()
+            elif type_name == 'VARIANT':
+                return pyarrow.struct([
+                    pyarrow.field('value', pyarrow.binary(), nullable=False),
+                    pyarrow.field('metadata', pyarrow.binary(), nullable=False),
+                ])
             elif type_name.startswith('DECIMAL'):
                 if type_name == 'DECIMAL':
                     return pyarrow.decimal128(10, 0)  # default to 10, 0
@@ -591,6 +618,8 @@ class PyarrowFieldParser:
             key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
             value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
+        elif types.is_struct(pa_type) and is_variant_struct(pa_type):
+            return AtomicType('VARIANT', nullable)
         elif types.is_struct(pa_type):
             pa_type: pyarrow.StructType
             fields = []
