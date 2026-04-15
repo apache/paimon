@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearc
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions._
@@ -43,10 +44,13 @@ case class PaimonScan(
     override val pushedTopN: Option[TopN],
     override val pushedVectorSearch: Option[VectorSearch],
     override val pushedFullTextSearch: Option[FullTextSearch] = None,
-    bucketedScanDisabled: Boolean = false)
+    bucketedScanDisabled: Boolean = false,
+    variantProjections: Map[String, RowType] = Map.empty)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning
   with SupportsReportOrdering {
+
+  override protected def variantProjectionMap: Map[String, RowType] = variantProjections
 
   def disableBucketedScan(): PaimonScan = {
     copy(bucketedScanDisabled = true)

@@ -78,13 +78,31 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
   }
 
-  private[paimon] val (readTableRowType, metadataFields) = {
+  /** Hook for subclasses to provide variant column projections (colName -> VariantRowType). */
+  protected def variantProjectionMap: Map[String, RowType] = Map.empty
+
+  private[paimon] lazy val (readTableRowType, metadataFields) = {
     requiredSchema.fields.foreach(f => checkMetadataColumn(f.name))
     val (_requiredTableFields, _metadataFields) =
       requiredSchema.fields.partition(field => tableRowType.containsField(field.name))
     val _readTableRowType =
       SparkTypeUtils.prunePaimonRowType(StructType(_requiredTableFields), tableRowType)
-    (_readTableRowType, _metadataFields)
+    val _finalReadType = applyVariantProjections(_readTableRowType, variantProjectionMap)
+    (_finalReadType, _metadataFields)
+  }
+
+  private def applyVariantProjections(
+      rowType: RowType,
+      projections: Map[String, RowType]): RowType = {
+    if (projections.isEmpty) return rowType
+    val newFields = rowType.getFields.asScala.map {
+      field =>
+        projections.get(field.name()) match {
+          case Some(variantRowType) => field.newType(variantRowType)
+          case None => field
+        }
+    }
+    rowType.copy(newFields.asJava)
   }
 
   private def checkMetadataColumn(fieldName: String): Unit = {

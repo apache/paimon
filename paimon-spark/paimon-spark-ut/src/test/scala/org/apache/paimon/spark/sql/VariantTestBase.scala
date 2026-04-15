@@ -982,4 +982,82 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       Seq(Row(2, 2))
     )
   }
+
+  // ---- variant_get pushdown tests ----
+  // The shreddingSchema below declares 3 sub-fields (age, city, score) for column v.
+  // Queries that only touch a subset of them via variant_get should cause the optimizer
+  // to project only the needed sub-columns into the scan (PushDownVariantExtract rule).
+  private val shreddedSchema3 =
+    """{"type":"ROW","fields":[{"name":"v","type":{"type":"ROW","fields":[""" +
+      """{"name":"age","type":"INT"},""" +
+      """{"name":"city","type":"STRING"},""" +
+      """{"name":"score","type":"DOUBLE"}""" +
+      """]}}]}"""
+
+  test("Paimon Variant: variant_get pushdown reduces projected sub-columns for shredded variant") {
+    sql(s"""
+           |CREATE TABLE T (id INT, v VARIANT)
+           |TBLPROPERTIES ('parquet.variant.shreddingSchema' = '$shreddedSchema3')
+           |""".stripMargin)
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, parse_json('{"age":26,"city":"Beijing","score":9.5}')),
+          | (2, parse_json('{"age":27,"city":"Hangzhou","score":8.0}'))
+          |""".stripMargin)
+
+    // Query only uses 2 of 3 shredded fields (age + score, city is intentionally skipped).
+    val q =
+      "SELECT variant_get(v, '$.age', 'int'), variant_get(v, '$.score', 'double') FROM T ORDER BY id"
+    checkAnswer(sql(q), Seq(Row(26, 9.5d), Row(27, 8.0d)))
+
+    // Performance assertion: the scan should carry a projection with exactly 2 sub-fields,
+    // not all 3. Fewer projected sub-fields means fewer Parquet column reads at runtime.
+    val scan = getPaimonScan(q)
+    assert(
+      scan.variantProjections.contains("v"),
+      "PushDownVariantExtract should have populated variantProjections for column 'v'")
+    assert(
+      scan.variantProjections("v").getFieldCount == 2,
+      s"expected 2 projected sub-fields (age, score) out of 3 total, " +
+        s"got ${scan.variantProjections("v").getFieldCount}"
+    )
+  }
+
+  test("Paimon Variant: variant_get pushdown does not fire when variant column is read directly") {
+    sql(s"""
+           |CREATE TABLE T (id INT, v VARIANT)
+           |TBLPROPERTIES ('parquet.variant.shreddingSchema' = '$shreddedSchema3')
+           |""".stripMargin)
+    sql("INSERT INTO T VALUES (1, parse_json('{\"age\":26,\"city\":\"Beijing\",\"score\":9.5}'))")
+
+    // Direct reference to the full variant column must prevent pushdown for that column.
+    val q = "SELECT v, variant_get(v, '$.age', 'int') FROM T"
+    checkAnswer(
+      sql(q),
+      sql("SELECT parse_json('{\"age\":26,\"city\":\"Beijing\",\"score\":9.5}'), 26"))
+
+    val scan = getPaimonScan(q)
+    assert(
+      scan.variantProjections.isEmpty,
+      "pushdown must NOT fire when the variant column itself is projected")
+  }
+
+  test("Paimon Variant: variant_get pushdown deduplicates repeated access to the same path") {
+    sql(s"""
+           |CREATE TABLE T (id INT, v VARIANT)
+           |TBLPROPERTIES ('parquet.variant.shreddingSchema' = '$shreddedSchema3')
+           |""".stripMargin)
+    sql("INSERT INTO T VALUES (1, parse_json('{\"age\":26,\"city\":\"Beijing\",\"score\":9.5}'))")
+
+    // The same path accessed twice should still map to a single sub-column in the projection.
+    val q =
+      "SELECT variant_get(v, '$.age', 'int') AS a1, variant_get(v, '$.age', 'int') AS a2 FROM T"
+    checkAnswer(sql(q), Seq(Row(26, 26)))
+
+    val scan = getPaimonScan(q)
+    assert(scan.variantProjections.contains("v"))
+    assert(
+      scan.variantProjections("v").getFieldCount == 1,
+      "two accesses to the same path should deduplicate to a single projected sub-column")
+  }
 }

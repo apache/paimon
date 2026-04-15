@@ -88,6 +88,9 @@ trait SparkShim {
       notMatchedBySourceActions: Seq[MergeAction],
       withSchemaEvolution: Boolean): MergeIntoTable
 
+  // for variant_get pushdown (Spark 4 only; returns None on Spark 3)
+  def variantExtractRule(): Option[Rule[LogicalPlan]] = None
+
   // for variant
   def toPaimonVariant(o: Object): Variant
 

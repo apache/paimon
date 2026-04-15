@@ -26,6 +26,8 @@ import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
 import org.apache.paimon.spark.execution.adaptive.DisableUnnecessaryPaimonBucketedScan
 
 import org.apache.spark.sql.SparkSessionExtensions
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 /** Spark session extension to extends the syntax and adds the rules. */
@@ -66,6 +68,26 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     // optimization rules
     extensions.injectOptimizerRule(_ => OptimizeMetadataOnlyDeleteFromPaimonTable)
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
+    SparkShimLoader.shim.variantExtractRule().foreach {
+      rule =>
+        // PushDownVariantExtract must run AFTER V2ScanRelationPushDown converts
+        // DataSourceV2Relation to DataSourceV2ScanRelation in the "Early Filter and Projection
+        // Push-Down" batch. injectOptimizerRule places rules in the "Operator Optimization" batch
+        // (part of super.defaultBatches), which runs BEFORE the scan push-down. The only batch
+        // that runs after scan building is "User Provided Optimizers", populated via
+        // experimentalMethods.extraOptimizations. We register there via a side effect and return
+        // a no-op placeholder for the injectOptimizerRule slot.
+        extensions.injectOptimizerRule {
+          session =>
+            if (!session.experimental.extraOptimizations.exists(_ eq rule)) {
+              session.experimental.extraOptimizations =
+                session.experimental.extraOptimizations :+ rule
+            }
+            new Rule[LogicalPlan] {
+              override def apply(plan: LogicalPlan): LogicalPlan = plan
+            }
+        }
+    }
 
     // planner extensions
     extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
