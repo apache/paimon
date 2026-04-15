@@ -80,6 +80,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     Seq(
       RewritePaimonViewCommands(sparkSession),
       RewritePaimonFunctionCommands(sparkSession),
+      RewriteCreateTableLikeCommand(sparkSession),
       RewriteSparkDDLCommands(sparkSession)
     )
   }

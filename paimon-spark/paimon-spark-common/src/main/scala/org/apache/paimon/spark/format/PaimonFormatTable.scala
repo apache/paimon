@@ -36,6 +36,7 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
+import java.util.Locale
 
 import scala.collection.JavaConverters._
 
@@ -50,6 +51,7 @@ case class PaimonFormatTable(table: FormatTable)
 
   override def properties: util.Map[String, String] = {
     val properties = new util.HashMap[String, String](table.options())
+    properties.put(TableCatalog.PROP_PROVIDER, table.format.name().toLowerCase(Locale.ROOT))
     if (table.comment.isPresent) {
       properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
     }
