@@ -36,6 +36,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
+import org.apache.paimon.table.SchemaBucketFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.BlobDescriptorUtils;
@@ -300,10 +301,16 @@ public class FlinkSinkBuilder {
                             + " then the parallelism of writerOperator will be set to bucketNums.");
             parallelism = bucketNums;
         }
+        // When overwriting a specific partition on a partitioned fixed-bucket table, wrap the
+        // table in SchemaBucketFileStoreTable so that createRowKeyExtractor() uses the new schema
+        // bucket count for row routing, instead of loading the old per-partition bucket
+        // mapping from the manifest.
+        FileStoreTable sinkTable =
+                overwritePartition != null ? new SchemaBucketFileStoreTable(table) : table;
         RowDataChannelComputer channelComputer =
-                new RowDataChannelComputer(table.createRowKeyExtractor());
+                new RowDataChannelComputer(sinkTable.createRowKeyExtractor());
         DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition);
+        FixedBucketSink sink = new FixedBucketSink(sinkTable, overwritePartition);
         return sink.sinkFrom(partitioned);
     }
 
