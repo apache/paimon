@@ -690,6 +690,82 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: update with coalesce referencing both source and target columns") {
+    withTable("source", "target") {
+
+      Seq((1, "guid_src_1"), (3, "guid_src_3"))
+        .toDF("a", "b")
+        .createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b STRING", Seq("a"))
+      spark.sql("INSERT INTO target values (1, 'guid_tgt_1'), (2, 'guid_tgt_2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target AS dest
+                   |USING source AS src
+                   |ON dest.a = src.a
+                   |WHEN MATCHED AND (nullif(cast(src.b as STRING), '') IS NOT NULL) THEN
+                   |UPDATE SET dest.b = COALESCE(nullif(cast(src.b as STRING), ''), dest.b)
+                   |WHEN NOT MATCHED THEN
+                   |INSERT (a, b) VALUES (src.a, src.b)
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a"),
+        Row(1, "guid_src_1") :: Row(2, "guid_tgt_2") :: Row(3, "guid_src_3") :: Nil)
+    }
+  }
+
+  test(s"Paimon MergeInto: two paimon tables with coalesce referencing both source and target") {
+    withTable("source", "target") {
+
+      createTable("source", "a INT, b STRING", Seq("a"))
+      createTable("target", "a INT, b STRING", Seq("a"))
+      spark.sql("INSERT INTO source values (1, 'guid_src_1'), (3, 'guid_src_3')")
+      spark.sql("INSERT INTO target values (1, 'guid_tgt_1'), (2, 'guid_tgt_2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target AS dest
+                   |USING source AS src
+                   |ON dest.a = src.a
+                   |WHEN MATCHED AND (nullif(cast(src.b as STRING), '') IS NOT NULL) THEN
+                   |UPDATE SET dest.b = COALESCE(nullif(cast(src.b as STRING), ''), dest.b)
+                   |WHEN NOT MATCHED THEN
+                   |INSERT (a, b) VALUES (src.a, src.b)
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a"),
+        Row(1, "guid_src_1") :: Row(2, "guid_tgt_2") :: Row(3, "guid_src_3") :: Nil)
+    }
+  }
+
+  test(s"Paimon MergeInto: subquery source with coalesce referencing both source and target") {
+    withTable("source", "target") {
+
+      Seq((1, "guid_src_1"), (3, "guid_src_3"))
+        .toDF("a", "b")
+        .createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b STRING", Seq("a"))
+      spark.sql("INSERT INTO target values (1, 'guid_tgt_1'), (2, 'guid_tgt_2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target AS dest
+                   |USING (SELECT * FROM source) AS src
+                   |ON dest.a = src.a
+                   |WHEN MATCHED AND (nullif(cast(src.b as STRING), '') IS NOT NULL) THEN
+                   |UPDATE SET dest.b = COALESCE(nullif(cast(src.b as STRING), ''), dest.b)
+                   |WHEN NOT MATCHED THEN
+                   |INSERT (a, b) VALUES (src.a, src.b)
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a"),
+        Row(1, "guid_src_1") :: Row(2, "guid_tgt_2") :: Row(3, "guid_src_3") :: Nil)
+    }
+  }
+
   test(s"Paimon MergeInto: merge into with varchar") {
     withTable("source", "target") {
       createTable("source", "a INT, b VARCHAR(32)", Seq("a"))

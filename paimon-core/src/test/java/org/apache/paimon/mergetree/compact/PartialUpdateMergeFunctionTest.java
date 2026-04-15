@@ -125,11 +125,11 @@ public class PartialUpdateMergeFunctionTest {
         add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, null);
         validate(func, 1, null, null, 3, 3, 3, 3);
         add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, 4);
-        validate(func, null, null, null, null, null, null, null);
+        validate(func, 1, 1, 1, 3, 1, 1, 4);
         add(func, 1, 4, 4, 4, 5, 5, 5);
         validate(func, 1, 4, 4, 4, 5, 5, 5);
         add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 6);
-        validate(func, null, null, null, null, null, null, null);
+        validate(func, 1, 1, 1, 6, 1, 1, 6);
     }
 
     @Test
@@ -169,7 +169,7 @@ public class PartialUpdateMergeFunctionTest {
         add(func, 11, 22, 100, 200, 1, 12, 21);
         add(func, RowKind.DELETE, 11, 22, 100, 200, 1, 12, 21);
 
-        validate(func, null, null, null, null, null, null, null);
+        validate(func, 11, 22, 100, 200, 1, 12, 21);
     }
 
     @Test
@@ -910,6 +910,29 @@ public class PartialUpdateMergeFunctionTest {
         add(func, RowKind.DELETE, 1, 1, 1, 1, 1);
 
         assertThat(func.getResult().sequenceNumber()).isEqualTo(1);
+    }
+
+    @Test
+    public void testInitRowWithNullableFieldOnDelete() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT().notNull(),
+                        DataTypes.INT().notNull(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+
+        // insert some data first
+        add(func, 1, 3, 5, 7);
+        // send a DELETE with nullable field as null, triggers initRow
+        add(func, RowKind.DELETE, 1, 2, 2, null);
+        // after delete with removeRecordOnDelete, row is re-initialized via initRow
+        validate(func, 1, 2, 2, null);
     }
 
     private void add(MergeFunction<KeyValue> function, Integer... f) {

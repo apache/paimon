@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.ChannelReaderInputView;
 import org.apache.paimon.disk.ChannelReaderInputViewIterator;
 import org.apache.paimon.disk.ChannelWithMeta;
@@ -111,11 +112,16 @@ public class ClusteringFileRewriter {
     }
 
     /**
-     * Sort and rewrite unsorted files by clustering columns. Reads all KeyValue records, sorts them
-     * using an external sort buffer, and writes to new level-1 files.
+     * Sort and rewrite unsorted file by clustering columns. Reads all KeyValue records, sorts them
+     * using an external sort buffer, and writes to new level-1 files. Checks the key index inline
+     * during writing to handle deduplication (FIRST_ROW skips duplicates, DEDUPLICATE marks old
+     * positions in DV) and updates the index.
      */
-    public List<DataFileMeta> sortAndRewriteFiles(
-            List<DataFileMeta> inputFiles, KeyValueSerializer kvSerializer, RowType kvSchemaType)
+    public List<DataFileMeta> sortAndRewriteFile(
+            DataFileMeta inputFile,
+            KeyValueSerializer kvSerializer,
+            RowType kvSchemaType,
+            ClusteringKeyIndex keyIndex)
             throws Exception {
         int[] sortFieldsInKeyValue =
                 Arrays.stream(clusteringColumns)
@@ -133,17 +139,17 @@ public class ClusteringFileRewriter {
                         MemorySize.MAX_VALUE,
                         false);
 
-        for (DataFileMeta file : inputFiles) {
-            try (RecordReader<KeyValue> reader = valueReaderFactory.createRecordReader(file)) {
-                try (CloseableIterator<KeyValue> iterator = reader.toCloseableIterator()) {
-                    while (iterator.hasNext()) {
-                        KeyValue kv = iterator.next();
-                        InternalRow serializedRow = kvSerializer.toRow(kv);
-                        sortBuffer.write(serializedRow);
-                    }
+        try (RecordReader<KeyValue> reader = valueReaderFactory.createRecordReader(inputFile)) {
+            try (CloseableIterator<KeyValue> iterator = reader.toCloseableIterator()) {
+                while (iterator.hasNext()) {
+                    KeyValue kv = iterator.next();
+                    InternalRow serializedRow = kvSerializer.toRow(kv);
+                    sortBuffer.write(serializedRow);
                 }
             }
         }
+
+        RowCompactedSerializer keySerializer = new RowCompactedSerializer(keyType);
 
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingClusteringFileWriter();
@@ -152,10 +158,15 @@ public class ClusteringFileRewriter {
             BinaryRow binaryRow = new BinaryRow(kvSchemaType.getFieldCount());
             while ((binaryRow = sortedIterator.next(binaryRow)) != null) {
                 KeyValue kv = kvSerializer.fromRow(binaryRow);
-                writer.write(
+                KeyValue copied =
                         kv.copy(
                                 new InternalRowSerializer(keyType),
-                                new InternalRowSerializer(valueType)));
+                                new InternalRowSerializer(valueType));
+                byte[] keyBytes = keySerializer.serializeToBytes(copied.key());
+                if (!keyIndex.checkKey(keyBytes)) {
+                    continue;
+                }
+                writer.write(copied);
             }
         } finally {
             sortBuffer.clear();
@@ -163,13 +174,13 @@ public class ClusteringFileRewriter {
         }
 
         List<DataFileMeta> newFiles = writer.result();
-        for (DataFileMeta file : inputFiles) {
-            fileLevels.removeFile(file);
-        }
+        fileLevels.removeFile(inputFile);
         for (DataFileMeta newFile : newFiles) {
             fileLevels.addNewFile(newFile);
         }
-
+        for (DataFileMeta sortedFile : newFiles) {
+            keyIndex.rebuildIndex(sortedFile);
+        }
         return newFiles;
     }
 

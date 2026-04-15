@@ -39,20 +39,20 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIterator;
 
+import javax.annotation.Nullable;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
@@ -65,7 +65,7 @@ public class ClusteringKeyIndex implements Closeable {
     private final RowType keyType;
     private final IOManager ioManager;
     private final KeyValueFileReaderFactory keyReaderFactory;
-    private final BucketedDvMaintainer dvMaintainer;
+    private final @Nullable BucketedDvMaintainer dvMaintainer;
     private final SimpleLsmKvDb kvDb;
     private final ClusteringFiles fileLevels;
     private final boolean firstRow;
@@ -78,7 +78,7 @@ public class ClusteringKeyIndex implements Closeable {
             RowType keyType,
             IOManager ioManager,
             KeyValueFileReaderFactory keyReaderFactory,
-            BucketedDvMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             SimpleLsmKvDb kvDb,
             ClusteringFiles fileLevels,
             boolean firstRow,
@@ -209,62 +209,34 @@ public class ClusteringKeyIndex implements Closeable {
     }
 
     /**
-     * Update the key index after a single original file is replaced by new sorted files.
+     * Check a key against the index during sort-and-rewrite writing.
      *
-     * <p>For DEDUPLICATE mode: mark the old position in deletion vectors, keep the new position.
+     * <p>For FIRST_ROW mode: if key exists pointing to a non-original file, return false (skip
+     * writing this record — it's a duplicate).
      *
-     * <p>For FIRST_ROW mode: if key exists, mark the new position in deletion vectors (keep the
-     * first/old one); if key is new, store the new position.
+     * <p>For DEDUPLICATE mode: if key exists pointing to a non-original file, mark the old position
+     * in deletion vectors, return true (write the new record).
+     *
+     * @param keyBytes serialized key bytes
+     * @return true if the record should be written, false to skip (FIRST_ROW dedup)
      */
-    public void updateIndex(DataFileMeta originalFile, List<DataFileMeta> newSortedFiles)
-            throws Exception {
-        updateIndex(Collections.singletonList(originalFile), newSortedFiles);
-    }
-
-    /**
-     * Update the key index after multiple original files are replaced by new sorted files.
-     *
-     * @see #updateIndex(DataFileMeta, List)
-     */
-    public void updateIndex(List<DataFileMeta> originalFiles, List<DataFileMeta> newSortedFiles)
-            throws Exception {
-        RowCompactedSerializer keySerializer = new RowCompactedSerializer(keyType);
-
-        Set<String> originalFileNames = new HashSet<>();
-        for (DataFileMeta file : originalFiles) {
-            originalFileNames.add(file.fileName());
-        }
-
-        for (DataFileMeta sortedFile : newSortedFiles) {
-            int fileId = fileLevels.getFileIdByName(sortedFile.fileName());
-            int position = 0;
-            try (CloseableIterator<InternalRow> iterator = readKeyIterator(sortedFile)) {
-                while (iterator.hasNext()) {
-                    byte[] key = keySerializer.serializeToBytes(iterator.next());
-                    byte[] oldValue = kvDb.get(key);
-                    if (oldValue != null) {
-                        ByteArrayInputStream valueIn = new ByteArrayInputStream(oldValue);
-                        int oldFileId = decodeInt(valueIn);
-                        int oldPosition = decodeInt(valueIn);
-                        DataFileMeta oldFile = fileLevels.getFileById(oldFileId);
-                        if (oldFile != null && !originalFileNames.contains(oldFile.fileName())) {
-                            if (firstRow) {
-                                dvMaintainer.notifyNewDeletion(sortedFile.fileName(), position);
-                                position++;
-                                continue;
-                            } else {
-                                dvMaintainer.notifyNewDeletion(oldFile.fileName(), oldPosition);
-                            }
-                        }
-                    }
-                    ByteArrayOutputStream value = new ByteArrayOutputStream(8);
-                    encodeInt(value, fileId);
-                    encodeInt(value, position);
-                    kvDb.put(key, value.toByteArray());
-                    position++;
+    public boolean checkKey(byte[] keyBytes) throws Exception {
+        byte[] oldValue = kvDb.get(keyBytes);
+        if (oldValue != null) {
+            ByteArrayInputStream valueIn = new ByteArrayInputStream(oldValue);
+            int oldFileId = decodeInt(valueIn);
+            int oldPosition = decodeInt(valueIn);
+            DataFileMeta oldFile = fileLevels.getFileById(oldFileId);
+            if (oldFile != null) {
+                if (firstRow) {
+                    return false;
+                } else {
+                    checkNotNull(dvMaintainer, "DvMaintainer cannot be null for DEDUPLICATE mode.");
+                    dvMaintainer.notifyNewDeletion(oldFile.fileName(), oldPosition);
                 }
             }
         }
+        return true;
     }
 
     /** Delete key index entries for the given file (only if they still point to it). */

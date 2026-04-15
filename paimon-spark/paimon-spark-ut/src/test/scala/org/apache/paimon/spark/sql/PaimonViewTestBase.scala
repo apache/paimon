@@ -290,4 +290,108 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
         }
     }
   }
+
+  test("Paimon View: create view with column comments") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withTable("t") {
+            withView("v1") {
+              sql("CREATE TABLE t (id INT, name STRING) USING paimon")
+              sql("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')")
+
+              // Create view with column comments
+              sql("""
+                    |CREATE VIEW v1 (
+                    |  id COMMENT 'the user id',
+                    |  name COMMENT 'the user name'
+                    |) AS SELECT * FROM t
+                    |""".stripMargin)
+
+              // Verify view works
+              checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1, "alice"), Row(2, "bob")))
+
+              // Verify column comments via DESCRIBE
+              val descRows = sql("DESC TABLE v1").collectAsList()
+              assert(descRows.get(0).get(0).equals("id"))
+              assert(descRows.get(0).get(2).equals("the user id"))
+              assert(descRows.get(1).get(0).equals("name"))
+              assert(descRows.get(1).get(2).equals("the user name"))
+
+              // Verify column comments via SHOW CREATE TABLE
+              val showCreateRows = sql("SHOW CREATE TABLE v1").collectAsList()
+              val showCreateStr = showCreateRows.get(0).get(0).toString
+              assert(showCreateStr.contains("COMMENT 'the user id'"))
+              assert(showCreateStr.contains("COMMENT 'the user name'"))
+            }
+          }
+        }
+    }
+  }
+
+  test("Paimon View: create view with column aliases") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withTable("t") {
+            withView("v1") {
+              sql("CREATE TABLE t (id INT, name STRING) USING paimon")
+              sql("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')")
+
+              // Create view with column aliases (without comments)
+              sql("CREATE VIEW v1 (user_id, user_name) AS SELECT * FROM t")
+
+              // Verify view works
+              checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1, "alice"), Row(2, "bob")))
+
+              // Verify column names via DESCRIBE
+              val descRows = sql("DESC TABLE v1").collectAsList()
+              assert(descRows.get(0).get(0).equals("user_id"))
+              assert(descRows.get(1).get(0).equals("user_name"))
+            }
+          }
+        }
+    }
+  }
+
+  test("Paimon View: create view with column aliases and comments") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withTable("t") {
+            withView("v1") {
+              sql("CREATE TABLE t (id INT, name STRING) USING paimon")
+              sql("INSERT INTO t VALUES (1, 'alice'), (2, 'bob')")
+
+              // Create view with column aliases and comments
+              sql("""
+                    |CREATE VIEW v1 (
+                    |  user_id COMMENT 'the user id',
+                    |  user_name COMMENT 'the user name'
+                    |) AS SELECT * FROM t
+                    |""".stripMargin)
+
+              // Verify view works
+              checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1, "alice"), Row(2, "bob")))
+
+              // Verify column names and comments via DESCRIBE
+              val descRows = sql("DESC TABLE v1").collectAsList()
+              assert(descRows.get(0).get(0).equals("user_id"))
+              assert(descRows.get(0).get(2).equals("the user id"))
+              assert(descRows.get(1).get(0).equals("user_name"))
+              assert(descRows.get(1).get(2).equals("the user name"))
+            }
+          }
+        }
+    }
+  }
 }

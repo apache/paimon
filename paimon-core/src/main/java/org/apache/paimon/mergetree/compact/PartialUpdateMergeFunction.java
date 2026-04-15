@@ -344,13 +344,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private void initRow(GenericRow row, InternalRow value) {
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(value);
-            if (!nullables[i]) {
-                if (field != null) {
-                    row.setField(i, field);
-                } else {
-                    throw new IllegalArgumentException("Field " + i + " can not be null");
-                }
+            if (!nullables[i] && field == null) {
+                throw new IllegalArgumentException("Field " + i + " can not be null");
             }
+            row.setField(i, field);
         }
     }
 

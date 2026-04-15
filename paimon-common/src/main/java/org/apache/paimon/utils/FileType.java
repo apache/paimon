@@ -18,11 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.service.ServiceManager;
 
 /**
  * Classification of Paimon files.
@@ -43,6 +39,25 @@ public enum FileType {
     GLOBAL_INDEX,
     FILE_INDEX;
 
+    // keep in sync with SnapshotManager.SNAPSHOT_PREFIX
+    private static final String SNAPSHOT_PREFIX = "snapshot-";
+    // keep in sync with SchemaManager.SCHEMA_PREFIX
+    private static final String SCHEMA_PREFIX = "schema-";
+    // keep in sync with FileStorePathFactory.STATISTICS_PREFIX
+    private static final String STATISTICS_PREFIX = "stat-";
+    // keep in sync with TagManager.TAG_PREFIX
+    private static final String TAG_PREFIX = "tag-";
+    // keep in sync with ConsumerManager.CONSUMER_PREFIX
+    private static final String CONSUMER_PREFIX = "consumer-";
+    // keep in sync with ServiceManager.SERVICE_PREFIX
+    private static final String SERVICE_PREFIX = "service-";
+    // keep in sync with DataFilePathFactory.INDEX_PATH_SUFFIX
+    private static final String INDEX_PATH_SUFFIX = ".index";
+    // keep in sync with FileStorePathFactory.INDEX_PREFIX
+    private static final String INDEX_PREFIX = "index-";
+    // keep in sync with ChangelogManager.CHANGELOG_PREFIX
+    private static final String CHANGELOG_PREFIX = "changelog-";
+
     private static final String MANIFEST = "manifest";
     private static final String CHANGELOG_DIR = "changelog";
     private static final String GLOBAL_INDEX_INFIX = "global-index-";
@@ -61,18 +76,18 @@ public enum FileType {
         String name = filePath.getName();
 
         // meta file prefixes: snapshot-, schema-, stat-, tag-, consumer-, service-
-        if (name.startsWith(SnapshotManager.SNAPSHOT_PREFIX)
-                || name.startsWith(SchemaManager.SCHEMA_PREFIX)
-                || name.startsWith(FileStorePathFactory.STATISTICS_PREFIX)
-                || name.startsWith(TagManager.TAG_PREFIX)
-                || name.startsWith(ConsumerManager.CONSUMER_PREFIX)
-                || name.startsWith(ServiceManager.SERVICE_PREFIX)) {
+        if (name.startsWith(SNAPSHOT_PREFIX)
+                || name.startsWith(SCHEMA_PREFIX)
+                || name.startsWith(STATISTICS_PREFIX)
+                || name.startsWith(TAG_PREFIX)
+                || name.startsWith(CONSUMER_PREFIX)
+                || name.startsWith(SERVICE_PREFIX)) {
             return META;
         }
 
         // file index: {data-file}.index (e.g. data-xxx.orc.index)
         // must check before global index since global index also ends with ".index"
-        if (name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX)) {
+        if (name.endsWith(INDEX_PATH_SUFFIX)) {
             if (name.contains(GLOBAL_INDEX_INFIX)) {
                 return GLOBAL_INDEX;
             }
@@ -85,7 +100,7 @@ public enum FileType {
         }
 
         // bucket index: name starts with "index-" (e.g. index-{uuid}-{N})
-        if (name.startsWith(FileStorePathFactory.INDEX_PREFIX)) {
+        if (name.startsWith(INDEX_PREFIX)) {
             return BUCKET_INDEX;
         }
 
@@ -100,7 +115,7 @@ public enum FileType {
         }
 
         // changelog metadata: parent dir is "changelog" and name starts with "changelog-"
-        if (name.startsWith(ChangelogManager.CHANGELOG_PREFIX)
+        if (name.startsWith(CHANGELOG_PREFIX)
                 && CHANGELOG_DIR.equals(filePath.getParent().getName())) {
             return META;
         }
