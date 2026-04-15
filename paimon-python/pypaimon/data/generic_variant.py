@@ -39,18 +39,17 @@ Primary entry points:
     GenericVariant.to_arrow_array(variants)– convert a list to a PyArrow StructArray
 
 Inspection helpers (for debugging/testing):
-    v.to_json()   – decode back to a JSON string
     v.to_python() – decode to native Python objects
     v.value()     – raw value bytes
     v.metadata()  – raw metadata bytes
 """
 
-import base64
 import datetime
 import decimal as _decimal
 import enum
 import json as _json
 import struct
+import uuid as _uuid
 
 # ---------------------------------------------------------------------------
 # Constants (matching GenericVariantUtil.java)
@@ -92,7 +91,7 @@ _MAX_DECIMAL4_PRECISION = 9
 _MAX_DECIMAL8_PRECISION = 18
 _MAX_DECIMAL16_PRECISION = 38
 
-# Epoch for date/timestamp conversions (used by to_json / to_python)
+# Epoch for date/timestamp conversions (used by to_python)
 _EPOCH_DATE = datetime.date(1970, 1, 1)
 _EPOCH_DT_UTC = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 _EPOCH_DT_NTZ = datetime.datetime(1970, 1, 1)
@@ -566,7 +565,6 @@ class GenericVariant:
         for row in result.column('payload').to_pylist():
             if row is not None:
                 gv = GenericVariant.from_arrow_struct(row)
-                print(gv.to_json())   # e.g. '{"age":30,"city":"Beijing"}'
                 print(gv.to_python()) # e.g. {'age': 30, 'city': 'Beijing'}
     """
 
@@ -617,7 +615,7 @@ class GenericVariant:
             for row in result.column("payload").to_pylist():
                 if row is not None:
                     gv = GenericVariant.from_arrow_struct(row)
-                    print(gv.to_json())
+                    print(gv.to_python())
         """
         return cls(bytes(d['value']), bytes(d['metadata']))
 
@@ -678,97 +676,6 @@ class GenericVariant:
         return self._metadata
 
     # -- inspection helpers (for debugging / testing) --
-
-    def to_json(self) -> str:
-        """Decode the variant to a JSON string.
-
-        Useful for debugging and testing.  Variant semantics and path-based
-        queries are the responsibility of the application layer.
-        """
-        parts = []
-        self._to_json_impl(self._value, self._metadata, self._pos, parts)
-        return ''.join(parts)
-
-    def _to_json_impl(self, value, metadata, pos, parts):
-        vtype = _variant_get_type(value, pos)
-        if vtype == _Type.OBJECT:
-            def _render(size, id_size, offset_size, id_start, offset_start, data_start):
-                parts.append('{')
-                for i in range(size):
-                    fid = _read_unsigned(value, id_start + id_size * i, id_size)
-                    key = _get_metadata_key(metadata, fid)
-                    offset = _read_unsigned(
-                        value, offset_start + offset_size * i, offset_size)
-                    if i != 0:
-                        parts.append(',')
-                    parts.append(_json.dumps(key))
-                    parts.append(':')
-                    self._to_json_impl(value, metadata, data_start + offset, parts)
-                parts.append('}')
-            _handle_object(value, pos, _render)
-        elif vtype == _Type.ARRAY:
-            def _render_arr(size, offset_size, offset_start, data_start):
-                parts.append('[')
-                for i in range(size):
-                    offset = _read_unsigned(
-                        value, offset_start + offset_size * i, offset_size)
-                    if i != 0:
-                        parts.append(',')
-                    self._to_json_impl(value, metadata, data_start + offset, parts)
-                parts.append(']')
-            _handle_array(value, pos, _render_arr)
-        else:
-            b = value[pos]
-            basic_type = b & 0x3
-            type_info = (b >> 2) & 0x3F
-            if vtype == _Type.NULL:
-                parts.append('null')
-            elif vtype == _Type.BOOLEAN:
-                parts.append('true' if type_info == _TRUE else 'false')
-            elif vtype == _Type.LONG:
-                n = _LONG_FAMILY_SIZES.get(type_info)
-                parts.append(str(_read_signed(value, pos + 1, n)))
-            elif vtype == _Type.STRING:
-                if basic_type == _SHORT_STR:
-                    s = value[pos + 1:pos + 1 + type_info].decode('utf-8')
-                else:
-                    length = _read_unsigned(value, pos + 1, _U32_SIZE)
-                    s = value[pos + 1 + _U32_SIZE:pos + 1 + _U32_SIZE + length].decode('utf-8')
-                parts.append(_json.dumps(s))
-            elif vtype == _Type.DOUBLE:
-                d = struct.unpack_from('<d', value, pos + 1)[0]
-                parts.append(_json.dumps(d) if d == d and d not in (float('inf'), float('-inf'))
-                             else _json.dumps(str(d)))
-            elif vtype == _Type.FLOAT:
-                f = struct.unpack_from('<f', value, pos + 1)[0]
-                parts.append(_json.dumps(float(f)) if f == f and f not in (float('inf'), float('-inf'))
-                             else _json.dumps(str(f)))
-            elif vtype == _Type.DECIMAL:
-                scale = value[pos + 1] & 0xFF
-                if type_info == _DECIMAL4:
-                    unscaled = _read_signed(value, pos + 2, 4)
-                elif type_info == _DECIMAL8:
-                    unscaled = _read_signed(value, pos + 2, 8)
-                else:
-                    raw = bytes(value[pos + 2:pos + 18])
-                    unscaled = int.from_bytes(raw, 'little', signed=True)
-                d = _decimal.Decimal(unscaled) / (_decimal.Decimal(10) ** scale)
-                parts.append(str(d.normalize()))
-            elif vtype == _Type.DATE:
-                days = _read_signed(value, pos + 1, 4)
-                parts.append(_json.dumps(str(_EPOCH_DATE + datetime.timedelta(days=days))))
-            elif vtype == _Type.TIMESTAMP:
-                micros = _read_signed(value, pos + 1, 8)
-                dt = _EPOCH_DT_UTC + datetime.timedelta(microseconds=micros)
-                parts.append(_json.dumps(dt.strftime('%Y-%m-%d %H:%M:%S.%f+00:00')))
-            elif vtype == _Type.TIMESTAMP_NTZ:
-                micros = _read_signed(value, pos + 1, 8)
-                dt = _EPOCH_DT_NTZ + datetime.timedelta(microseconds=micros)
-                parts.append(_json.dumps(dt.strftime('%Y-%m-%d %H:%M:%S.%f')))
-            elif vtype == _Type.BINARY:
-                length = _read_unsigned(value, pos + 1, _U32_SIZE)
-                b_val = bytes(value[pos + 1 + _U32_SIZE:pos + 1 + _U32_SIZE + length])
-                parts.append(_json.dumps(base64.b64encode(b_val).decode('ascii')))
 
     def to_python(self):
         """Decode the variant to native Python objects.
@@ -835,6 +742,11 @@ class GenericVariant:
         if vtype == _Type.BINARY:
             length = _read_unsigned(value, pos + 1, _U32_SIZE)
             return bytes(value[pos + 1 + _U32_SIZE:pos + 1 + _U32_SIZE + length])
+        if vtype == _Type.UUID:
+            # 16 bytes: two little-endian int64 (msb, lsb) → standard UUID
+            msb = _read_unsigned(value, pos + 1, 8)
+            lsb = _read_unsigned(value, pos + 9, 8)
+            return _uuid.UUID(int=(msb << 64) | lsb)
         if vtype == _Type.OBJECT:
             def _build_dict(size, id_size, offset_size, id_start, offset_start, data_start):
                 result = {}
@@ -858,10 +770,10 @@ class GenericVariant:
     # -- dunder --
 
     def __repr__(self) -> str:
-        return f'GenericVariant({self.to_json()!r})'
+        return f'GenericVariant({self.to_python()!r})'
 
     def __str__(self) -> str:
-        return self.to_json()
+        return str(self.to_python())
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, GenericVariant):

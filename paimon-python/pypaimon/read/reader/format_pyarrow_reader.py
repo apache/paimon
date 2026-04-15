@@ -44,28 +44,11 @@ class FormatPyArrowReader(RecordBatchReader):
     reconstructs the standard ``struct<value: binary, metadata: binary>`` representation.
     """
 
-    def __init__(
-        self,
-        file_io: FileIO,
-        file_format: str,
-        file_path: str,
-        read_fields: List[DataField],
-        push_down_predicate: Any,
-        batch_size: int = 1024,
-    ):
-        """
-        Args:
-            file_io:            FileIO for the storage backend.
-            file_format:        ``'parquet'`` or ``'orc'``.
-            file_path:          Path to the data file.
-            read_fields:        Fields to project (in order).
-            push_down_predicate: Optional Arrow expression predicate.
-            batch_size:         Target rows per batch.
-        """
+    def __init__(self, file_io: FileIO, file_format: str, file_path: str,
+                 read_fields: List[DataField],
+                 push_down_predicate: Any, batch_size: int = 1024):
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
-        self.dataset = ds.dataset(
-            file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem
-        )
+        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
         self._file_format = file_format
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
@@ -73,27 +56,21 @@ class FormatPyArrowReader(RecordBatchReader):
         # Identify which fields exist in the file and which are missing
         file_schema = self.dataset.schema
         file_schema_names = set(file_schema.names)
-        self.existing_fields = [
-            f.name for f in read_fields if f.name in file_schema_names
-        ]
-        self.missing_fields = [
-            f.name for f in read_fields if f.name not in file_schema_names
-        ]
+        self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
+        self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
 
         # column name → VariantSchema for shredded columns that need assembly
         self._shredded_schemas: Dict[str, VariantSchema] = {}
         for name in self.existing_fields:
-            try:
-                field_type = file_schema.field(name).type
-            except KeyError:
-                continue
+            field_type = file_schema.field(name).type
             if is_shredded_variant(field_type):
                 self._shredded_schemas[name] = build_variant_schema(field_type)
 
+        # Only pass existing fields to PyArrow scanner to avoid errors
         self.reader = self.dataset.scanner(
             columns=self.existing_fields,
             filter=push_down_predicate,
-            batch_size=batch_size,
+            batch_size=batch_size
         ).to_reader()
 
         self._output_schema = (
@@ -104,7 +81,7 @@ class FormatPyArrowReader(RecordBatchReader):
         try:
             batch = self.reader.read_next_batch()
 
-            if self._file_format == "orc" and self._output_schema is not None:
+            if self._file_format == 'orc' and self._output_schema is not None:
                 batch = self._cast_orc_time_columns(batch)
 
             if self._shredded_schemas:
@@ -141,7 +118,7 @@ class FormatPyArrowReader(RecordBatchReader):
                     all_columns.append(missing_columns[column_idx])
                     nullable = not SpecialFields.is_system_field(field_name)
                     out_fields.append(pa.field(field_name, col_type, nullable=nullable))
-
+            # Create a new RecordBatch with all columns
             return pa.RecordBatch.from_arrays(all_columns, schema=pa.schema(out_fields))
 
         except StopIteration:
@@ -166,18 +143,16 @@ class FormatPyArrowReader(RecordBatchReader):
         return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
 
     def _cast_orc_time_columns(self, batch):
-        """Cast int32 TIME columns back to time32('ms') when reading ORC."""
+        """Cast int32 TIME columns back to time32('ms') when reading ORC.
+        """
         columns = []
         fields = []
         changed = False
         for i, name in enumerate(batch.schema.names):
             col = batch.column(i)
             idx = self._output_schema.get_field_index(name)
-            if (
-                idx >= 0
-                and pa.types.is_int32(col.type)
-                and pa.types.is_time(self._output_schema.field(idx).type)
-            ):
+            if idx >= 0 and pa.types.is_int32(col.type) \
+                    and pa.types.is_time(self._output_schema.field(idx).type):
                 col = col.cast(self._output_schema.field(idx).type)
                 fields.append(self._output_schema.field(idx))
                 changed = True

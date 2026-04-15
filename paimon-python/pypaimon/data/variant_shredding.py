@@ -420,13 +420,19 @@ def _extract_overflow_fields(overflow_bytes: bytes) -> List[Tuple[int, bytes]]:
     sentinel = _read_unsigned(overflow_bytes, offset_start + size * offset_size, offset_size)
 
     # Sort by offset so that adjacent entries define contiguous data boundaries.
-    sorted_pairs = sorted(pairs, key=lambda p: p[1])
-    boundaries = [p[1] for p in sorted_pairs] + [sentinel]
-    offset_to_end = {boundaries[j]: boundaries[j + 1] for j in range(len(boundaries) - 1)}
+    # Track by original index (always unique) to avoid dict key collisions when
+    # two fields share the same offset (malformed data).
+    indexed_pairs = sorted(enumerate(pairs), key=lambda x: x[1][1])
+    boundaries = [ip[1][1] for ip in indexed_pairs] + [sentinel]
+
+    # end_by_orig[i] = end offset for pairs[i]
+    end_by_orig = [0] * size
+    for rank, (orig_idx, _) in enumerate(indexed_pairs):
+        end_by_orig[orig_idx] = boundaries[rank + 1]
 
     fields: List[Tuple[int, bytes]] = []
-    for key_id, off in pairs:
-        end = offset_to_end[off]
+    for orig_idx, (key_id, off) in enumerate(pairs):
+        end = end_by_orig[orig_idx]
         field_bytes = bytes(overflow_bytes[data_start + off:data_start + end])
         fields.append((key_id, field_bytes))
     return fields
@@ -593,8 +599,8 @@ def assemble_shredded_column(column: pa.Array, schema: VariantSchema) -> pa.Arra
     """
     rows = column.to_pylist()
     assembled = []
-    # all rows in a batch typically share the same metadata; cache the parsed dict
-    key_dict_cache: Optional[Dict[str, int]] = None
+    # cache parsed key dicts keyed by metadata bytes; most files share one metadata
+    key_dict_cache: Dict[bytes, Dict[str, int]] = {}
 
     for row in rows:
         if row is None:
@@ -607,10 +613,10 @@ def assemble_shredded_column(column: pa.Array, schema: VariantSchema) -> pa.Arra
             continue
 
         metadata = bytes(raw_meta)
-        if key_dict_cache is None:
-            key_dict_cache = parse_metadata_dict(metadata)
+        if metadata not in key_dict_cache:
+            key_dict_cache[metadata] = parse_metadata_dict(metadata)
 
-        value_bytes = rebuild_value(row, schema, key_dict_cache)
+        value_bytes = rebuild_value(row, schema, key_dict_cache[metadata])
         if value_bytes is None:
             value_bytes = _NULL_VALUE_BYTES
 

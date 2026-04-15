@@ -322,12 +322,6 @@ class TestGenericVariantContainer(unittest.TestCase):
         self.assertEqual(restored.value(), original.value())
         self.assertEqual(restored.metadata(), original.metadata())
 
-    def test_to_json_roundtrip(self):
-        json_str = '{"age":30,"city":"Beijing"}'
-        gv = GenericVariant.from_json(json_str)
-        parsed = json.loads(gv.to_json())
-        self.assertEqual(parsed, json.loads(json_str))
-
     def test_to_python_object(self):
         gv = GenericVariant.from_json('{"age":30,"city":"Beijing"}')
         result = gv.to_python()
@@ -402,7 +396,7 @@ class TestJsonRoundtrip(unittest.TestCase):
 
     def _check(self, json_str):
         gv = GenericVariant.from_json(json_str)
-        self.assertEqual(json.loads(gv.to_json()), json.loads(json_str))
+        self.assertEqual(gv.to_python(), json.loads(json_str))
 
     def test_nested_object_array(self):
         self._check('{"users":[{"name":"Alice","age":30},{"name":"Bob","age":25}]}')
