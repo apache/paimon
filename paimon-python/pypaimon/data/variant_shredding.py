@@ -192,7 +192,7 @@ def is_shredded_variant(pa_type: pa.DataType) -> bool:
     """
     if not pa.types.is_struct(pa_type):
         return False
-    names = {pa_type.field(i).name for i in range(pa_type.num_fields)}
+    names = {pa_type[i].name for i in range(pa_type.num_fields)}
     return 'metadata' in names and 'value' in names and 'typed_value' in names
 
 
@@ -205,7 +205,7 @@ def build_variant_schema(pa_type: pa.StructType) -> VariantSchema:
     """
     schema = VariantSchema(num_fields=pa_type.num_fields)
     for i in range(pa_type.num_fields):
-        f = pa_type.field(i)
+        f = pa_type[i]
         if f.name == 'metadata':
             schema.metadata_idx = i
         elif f.name == 'value':
