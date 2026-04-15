@@ -630,16 +630,21 @@ main() {
 
     echo ""
 
-    # Run VARIANT type test (Java write, Python read)
-    if ! run_java_variant_write_py_read_test; then
-        java_variant_write_py_read_result=1
-    fi
+    # Run VARIANT type tests (requires Python >= 3.7)
+    if [[ "$PYTHON_MINOR" -ge 7 ]]; then
+        if ! run_java_variant_write_py_read_test; then
+            java_variant_write_py_read_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run VARIANT Python-write Java-read test
-    if ! run_py_variant_write_java_read_test; then
-        py_variant_write_java_read_result=1
+        if ! run_py_variant_write_java_read_test; then
+            py_variant_write_java_read_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping VARIANT Type Tests (requires Python >= 3.7, current: $PYTHON_VERSION)${NC}"
+        java_variant_write_py_read_result=0
+        py_variant_write_java_read_result=0
     fi
 
     echo ""
