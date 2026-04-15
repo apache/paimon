@@ -32,7 +32,6 @@ are the responsibility of the compute engine or application layer, not of
 pypaimon (the storage layer).
 
 Primary entry points:
-    GenericVariant.from_json(json_str)     – build from a JSON string (for writing)
     GenericVariant.from_python(obj)        – build from a Python object (for writing)
     GenericVariant(value, metadata)        – wrap raw bytes read from a VARIANT column
     GenericVariant.from_arrow_struct(d)    – wrap a row dict from a VARIANT Arrow column
@@ -47,7 +46,6 @@ Inspection helpers (for debugging/testing):
 import datetime
 import decimal as _decimal
 import enum
-import json as _json
 import struct
 import uuid as _uuid
 
@@ -278,7 +276,7 @@ def _get_metadata_key(metadata, key_id):
 
 
 # ---------------------------------------------------------------------------
-# _GenericVariantBuilder (for from_json / from_python)
+# _GenericVariantBuilder (for from_python)
 # ---------------------------------------------------------------------------
 
 class _GenericVariantBuilder:
@@ -552,8 +550,8 @@ class GenericVariant:
         import pyarrow as pa
         from pypaimon.data.generic_variant import GenericVariant
 
-        gv1 = GenericVariant.from_json('{"age": 30, "city": "Beijing"}')
-        gv2 = GenericVariant.from_json('[1, 2, 3]')
+        gv1 = GenericVariant.from_python({'age': 30, 'city': 'Beijing'})
+        gv2 = GenericVariant.from_python([1, 2, 3])
         # Create an Arrow StructArray ready for writing
         col = GenericVariant.to_arrow_array([gv1, gv2, None])
         table = pa.table({'id': [1, 2, 3], 'payload': col})
@@ -578,20 +576,6 @@ class GenericVariant:
             raise ValueError('MALFORMED_VARIANT: invalid metadata version')
 
     # -- constructors --
-
-    @classmethod
-    def from_json(cls, json_str: str) -> 'GenericVariant':
-        """Parse a JSON string and encode it as VARIANT binary bytes.
-
-        Use this when writing VARIANT data from Python::
-
-            gv = GenericVariant.from_json('{"name": "Alice", "age": 30}')
-            col = GenericVariant.to_arrow_array([gv])
-        """
-        obj = _json.loads(json_str, parse_float=_decimal.Decimal)
-        builder = _GenericVariantBuilder()
-        builder.build_python(obj)
-        return builder.result()
 
     @classmethod
     def from_python(cls, obj) -> 'GenericVariant':
@@ -631,8 +615,8 @@ class GenericVariant:
 
         Example::
 
-            gv1 = GenericVariant.from_json('{"age":30}')
-            gv2 = GenericVariant.from_json('[1,2,3]')
+            gv1 = GenericVariant.from_python({'age': 30})
+            gv2 = GenericVariant.from_python([1, 2, 3])
             col = GenericVariant.to_arrow_array([gv1, gv2, None])
             table = pa.table({'id': [1, 2, 3], 'payload': col})
         """

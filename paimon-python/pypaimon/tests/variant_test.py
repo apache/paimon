@@ -302,45 +302,37 @@ class TestVariantSchemaRoundTrip(unittest.TestCase):
 
 class TestGenericVariantContainer(unittest.TestCase):
 
-    def test_from_json_returns_instance(self):
-        gv = GenericVariant.from_json('{"age":30}')
-        self.assertIsInstance(gv, GenericVariant)
-        self.assertIsInstance(gv.value(), bytes)
-        self.assertIsInstance(gv.metadata(), bytes)
-        self.assertGreater(len(gv.value()), 0)
-        self.assertGreater(len(gv.metadata()), 0)
-
     def test_from_python_returns_instance(self):
         gv = GenericVariant.from_python({'a': 1, 'b': 'hello'})
         self.assertIsInstance(gv, GenericVariant)
         self.assertIsInstance(gv.value(), bytes)
 
     def test_from_arrow_struct_roundtrip(self):
-        original = GenericVariant.from_json('{"x":1,"y":2}')
+        original = GenericVariant.from_python({'x': 1, 'y': 2})
         restored = GenericVariant.from_arrow_struct(
             {'value': original.value(), 'metadata': original.metadata()})
         self.assertEqual(restored.value(), original.value())
         self.assertEqual(restored.metadata(), original.metadata())
 
     def test_to_python_object(self):
-        gv = GenericVariant.from_json('{"age":30,"city":"Beijing"}')
+        gv = GenericVariant.from_python({'age': 30, 'city': 'Beijing'})
         result = gv.to_python()
         self.assertEqual(result, {'age': 30, 'city': 'Beijing'})
 
     def test_to_python_array(self):
-        gv = GenericVariant.from_json('[1,2,3]')
+        gv = GenericVariant.from_python([1, 2, 3])
         self.assertEqual(gv.to_python(), [1, 2, 3])
 
     def test_to_python_null(self):
-        gv = GenericVariant.from_json('null')
+        gv = GenericVariant.from_python(None)
         self.assertIsNone(gv.to_python())
 
     def test_to_python_string(self):
-        gv = GenericVariant.from_json('"hello"')
+        gv = GenericVariant.from_python('hello')
         self.assertEqual(gv.to_python(), 'hello')
 
     def test_to_python_number(self):
-        gv = GenericVariant.from_json('42')
+        gv = GenericVariant.from_python(42)
         self.assertEqual(gv.to_python(), 42)
 
     def test_from_python_none(self):
@@ -356,12 +348,12 @@ class TestGenericVariantContainer(unittest.TestCase):
         self.assertTrue(result['active'])
 
     def test_equality(self):
-        gv1 = GenericVariant.from_json('{"a":1}')
-        gv2 = GenericVariant.from_json('{"a":1}')
+        gv1 = GenericVariant.from_python({'a': 1})
+        gv2 = GenericVariant.from_python({'a': 1})
         self.assertEqual(gv1, gv2)
 
     def test_repr_and_str(self):
-        gv = GenericVariant.from_json('"hello"')
+        gv = GenericVariant.from_python('hello')
         self.assertIn('hello', repr(gv))
         self.assertIn('hello', str(gv))
 
@@ -369,8 +361,8 @@ class TestGenericVariantContainer(unittest.TestCase):
 class TestToArrowArray(unittest.TestCase):
 
     def test_basic(self):
-        gv1 = GenericVariant.from_json('{"a":1}')
-        gv2 = GenericVariant.from_json('[1,2]')
+        gv1 = GenericVariant.from_python({'a': 1})
+        gv2 = GenericVariant.from_python([1, 2])
         arr = GenericVariant.to_arrow_array([gv1, gv2])
         self.assertIsInstance(arr, pa.StructArray)
         self.assertEqual(len(arr), 2)
@@ -378,7 +370,7 @@ class TestToArrowArray(unittest.TestCase):
         self.assertEqual(restored.to_python(), {'a': 1})
 
     def test_with_nulls(self):
-        arr = GenericVariant.to_arrow_array([GenericVariant.from_json('42'), None])
+        arr = GenericVariant.to_arrow_array([GenericVariant.from_python(42), None])
         self.assertEqual(len(arr), 2)
         self.assertIsNotNone(arr[0].as_py())
         self.assertIsNone(arr[1].as_py())
@@ -387,7 +379,7 @@ class TestToArrowArray(unittest.TestCase):
         self.assertEqual(len(GenericVariant.to_arrow_array([])), 0)
 
     def test_arrow_type(self):
-        gv = GenericVariant.from_json('true')
+        gv = GenericVariant.from_python(True)
         arr = GenericVariant.to_arrow_array([gv])
         self.assertEqual(arr.type, _variant_arrow_type())
 
@@ -395,7 +387,7 @@ class TestToArrowArray(unittest.TestCase):
 class TestJsonRoundtrip(unittest.TestCase):
 
     def _check(self, json_str):
-        gv = GenericVariant.from_json(json_str)
+        gv = GenericVariant.from_python(json.loads(json_str))
         self.assertEqual(gv.to_python(), json.loads(json_str))
 
     def test_nested_object_array(self):
@@ -411,11 +403,11 @@ class TestJsonRoundtrip(unittest.TestCase):
         self._check('{"n":null,"b":true,"i":42,"s":"hello","f":1.5}')
 
     def test_empty_object(self):
-        gv = GenericVariant.from_json('{}')
+        gv = GenericVariant.from_python({})
         self.assertEqual(gv.to_python(), {})
 
     def test_empty_array(self):
-        gv = GenericVariant.from_json('[]')
+        gv = GenericVariant.from_python([])
         self.assertEqual(gv.to_python(), [])
 
 
@@ -599,7 +591,7 @@ class TestEncodeScalar(unittest.TestCase):
 
     def _roundtrip(self, json_str: str, arrow_type: pa.DataType):
         """Encode a scalar to bytes via the Arrow type, then decode via GenericVariant."""
-        gv_orig = GenericVariant.from_json(json_str)
+        gv_orig = GenericVariant.from_python(json.loads(json_str))
         typed_value = pa.array([gv_orig.to_python()], type=arrow_type).to_pylist()[0]
         value_bytes = _encode_scalar_to_value_bytes(typed_value, arrow_type)
         gv = GenericVariant(value_bytes, b'\x01\x00')
@@ -741,7 +733,7 @@ class TestRebuildValue(unittest.TestCase):
 
     def test_object_with_overflow(self):
         """Fields not in typed_value are preserved from overflow bytes."""
-        original = GenericVariant.from_json('{"age": 30, "extra": "overflow_val"}')
+        original = GenericVariant.from_python({'age': 30, 'extra': 'overflow_val'})
         overflow_bytes = original.value()
         meta = original.metadata()
         key_dict = parse_metadata_dict(meta)
@@ -763,7 +755,7 @@ class TestRebuildValue(unittest.TestCase):
 
     def test_typed_value_null_uses_overflow(self):
         """If typed_value struct is None for the whole row, full overflow bytes are used."""
-        original = GenericVariant.from_json('{"age": 99}')
+        original = GenericVariant.from_python({'age': 99})
         meta = original.metadata()
         key_dict = parse_metadata_dict(meta)
 
@@ -779,9 +771,9 @@ class TestRebuildValue(unittest.TestCase):
         self.assertEqual(gv.to_python()['age'], 99)
 
     def test_rebuild_matches_direct_variant(self):
-        """Bytes rebuilt from shredded form must equal bytes from GenericVariant.from_json."""
+        """Bytes rebuilt from shredded form must equal bytes from GenericVariant.from_python."""
         original_json = '{"score": 42, "tag": "test"}'
-        original_gv = GenericVariant.from_json(original_json)
+        original_gv = GenericVariant.from_python(json.loads(original_json))
         meta = original_gv.metadata()
         key_dict = parse_metadata_dict(meta)
 
@@ -1063,7 +1055,7 @@ class TestVariantPaimonTable(unittest.TestCase):
         gvs = [
             GenericVariant.from_python({'age': 30, 'city': 'Beijing'}),
             GenericVariant.from_python({'score': 99, 'active': True}),
-            GenericVariant.from_json('[1, 2, 3]'),
+            GenericVariant.from_python([1, 2, 3]),
         ]
         data = pa.table(
             {'id': [1, 2, 3], 'payload': GenericVariant.to_arrow_array(gvs)},

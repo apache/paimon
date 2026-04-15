@@ -23,6 +23,7 @@ import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.variant_shredding import (
     VariantSchema,
     assemble_shredded_column,
@@ -46,7 +47,8 @@ class FormatPyArrowReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_format: str, file_path: str,
                  read_fields: List[DataField],
-                 push_down_predicate: Any, batch_size: int = 1024):
+                 push_down_predicate: Any, batch_size: int = 1024,
+                 options: CoreOptions = None):
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
         self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
         self._file_format = file_format
@@ -61,10 +63,11 @@ class FormatPyArrowReader(RecordBatchReader):
 
         # column name → VariantSchema for shredded columns that need assembly
         self._shredded_schemas: Dict[str, VariantSchema] = {}
-        for name in self.existing_fields:
-            field_type = file_schema.field(name).type
-            if is_shredded_variant(field_type):
-                self._shredded_schemas[name] = build_variant_schema(field_type)
+        if options is None or options.variant_shredding_enabled():
+            for name in self.existing_fields:
+                field_type = file_schema.field(name).type
+                if is_shredded_variant(field_type):
+                    self._shredded_schemas[name] = build_variant_schema(field_type)
 
         # Only pass existing fields to PyArrow scanner to avoid errors
         self.reader = self.dataset.scanner(

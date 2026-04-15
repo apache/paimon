@@ -72,7 +72,8 @@ class DataWriter(ABC):
         self._current_external_path: Optional[str] = None
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
+                and self.options.variant_shredding_enabled():
             shredding_json = self.options.variant_shredding_schema()
             if shredding_json:
                 from pypaimon.data.variant_shredding import (

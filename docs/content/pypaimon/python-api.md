@@ -740,7 +740,7 @@ Row kind values:
 in the [Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding.md).
 
 pypaimon exposes VARIANT columns as Arrow `struct<value: binary NOT NULL, metadata: binary NOT NULL>` and
-provides `GenericVariant` for encoding, decoding, and path extraction.
+provides `GenericVariant` for encoding and decoding.
 
 Paimon supports two Parquet storage layouts for VARIANT:
 
@@ -766,11 +766,10 @@ for record in result.to_pylist():
     if (payload := record["payload"]) is not None:
         gv = GenericVariant.from_arrow_struct(payload)
         print(gv.to_python())   # decode to Python dict / list / scalar
-        print(gv.to_json())     # decode to JSON string
 ```
 
 `from_arrow_struct` is a lightweight operation — it only wraps the two raw byte arrays without
-parsing them. Actual variant binary decoding is deferred to `to_python()` / `to_json()`.
+parsing them. Actual variant binary decoding is deferred to `to_python()`.
 
 **Write**
 
@@ -780,7 +779,7 @@ Build `GenericVariant` values and convert them to an Arrow column with `to_arrow
 import pyarrow as pa
 from pypaimon.data.generic_variant import GenericVariant
 
-gv1 = GenericVariant.from_json('{"city": "Beijing", "age": 30}')
+gv1 = GenericVariant.from_python({'city': 'Beijing', 'age': 30})
 gv2 = GenericVariant.from_python({'tags': [1, 2, 3], 'active': True})
 # None represents SQL NULL
 
@@ -894,18 +893,16 @@ Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT
 
 | Method | Description |
 |:-------|:------------|
-| `GenericVariant.from_json(json_str)` | Build from a JSON string |
 | `GenericVariant.from_python(obj)` | Build from a Python object (`dict`, `list`, `int`, `str`, …) |
 | `GenericVariant.from_arrow_struct({"value": b"...", "metadata": b"..."})` | Wrap raw bytes from an Arrow VARIANT struct row (read path) |
 | `GenericVariant.to_arrow_array([gv1, gv2, None, ...])` | Convert a list of `GenericVariant` (or `None`) to a `pa.StructArray` for writing |
 | `gv.to_python()` | Decode to native Python (`dict`, `list`, `int`, `str`, `None`, …) |
-| `gv.to_json()` | Decode to a JSON string |
 | `gv.value()` | Return raw value bytes |
 | `gv.metadata()` | Return raw metadata bytes |
 
 **Limitations:**
 
-- `VARIANT` is only supported with Parquet file format. Writing to ORC or Avro raises `NotImplementedError`.
+- `VARIANT` is only supported with Parquet file format. ORC and Avro are not supported.
 - `VARIANT` cannot be used as a primary key or partition key.
 
 ## Predicate
