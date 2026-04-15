@@ -20,8 +20,10 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.core.execution.JobClient;
@@ -33,6 +35,8 @@ import org.junit.jupiter.api.Test;
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -227,6 +231,79 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         expected = Arrays.asList(Row.of(1), Row.of(2), Row.of(3), Row.of(4), Row.of(5), Row.of(6));
         assertThat(batchSql("SELECT * FROM %s", tableName))
                 .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    public void testRescaleSinglePartitionViaInsertOverwrite() throws Exception {
+        // Create a partitioned primary-key table with 2 buckets.
+        // Primary-key tables are sensitive to bucket routing: each row must land in the
+        // bucket determined by hash(pk) % totalBuckets, otherwise merging during reads
+        // produces duplicates (LSM finds the same key in different buckets and returns both).
+        batchSql("USE CATALOG fs_catalog");
+        batchSql("DROP TABLE IF EXISTS `TP`");
+        batchSql(
+                "CREATE TABLE `TP` "
+                        + "(dt STRING, f0 INT, PRIMARY KEY (dt, f0) NOT ENFORCED) "
+                        + "PARTITIONED BY (dt) "
+                        + "WITH ('bucket' = '2')");
+
+        // Insert data into two partitions
+        batchSql("INSERT INTO TP VALUES ('p1', 1), ('p1', 2), ('p1', 3)");
+        batchSql("INSERT INTO TP VALUES ('p2', 4), ('p2', 5), ('p2', 6)");
+
+        // Alter bucket count to 4
+        batchSql(alterTableSql, "TP", 4);
+
+        // INSERT OVERWRITE only partition p1 via the SQL path.
+        // The SQL path goes through FlinkTableSinkBase which does NOT wrap the table in
+        // OverwriteFileStoreTable. As a result, table.createRowKeyExtractor() calls
+        // PartitionBucketMapping.loadFromTable() which reads the old per-partition bucket
+        // count from the manifest (2 for p1) and uses it for row routing (hashing).
+        // Rows land in buckets [0,1] but files are stamped totalBuckets=4.
+        // A subsequent upsert into p1 routes rows using the new 4-bucket mapping — the
+        // same key may appear in two different files with different bucket assignments,
+        // causing duplicate reads.
+        batchSql("INSERT OVERWRITE TP PARTITION (dt = 'p1') SELECT f0 FROM TP WHERE dt = 'p1'");
+
+        // Verify the overwrite preserved data correctly
+        assertThat(batchSql("SELECT * FROM TP WHERE dt = 'p1'"))
+                .containsExactlyInAnyOrder(Row.of("p1", 1), Row.of("p1", 2), Row.of("p1", 3));
+        assertThat(batchSql("SELECT * FROM TP WHERE dt = 'p2'"))
+                .containsExactlyInAnyOrder(Row.of("p2", 4), Row.of("p2", 5), Row.of("p2", 6));
+
+        // Now upsert (update) existing rows in p1 — this uses the new 4-bucket mapping.
+        // If the overwrite used the old 2-bucket hashing, the original row for key (p1,1)
+        // lands in bucket hash(1)%2, but the update lands in bucket hash(1)%4.
+        // The LSM reader finds two files for key (p1,1) in different buckets and returns
+        // both — causing duplicate rows.
+        batchSql("INSERT INTO TP VALUES ('p1', 1), ('p1', 2), ('p1', 3)");
+        assertThat(batchSql("SELECT * FROM TP WHERE dt = 'p1'"))
+                .as(
+                        "After rescale overwrite + upsert of same keys, each key must appear "
+                                + "exactly once. If INSERT OVERWRITE used the old 2-bucket "
+                                + "routing instead of the new 4-bucket routing (via "
+                                + "OverwriteFileStoreTable), the same key will exist in two "
+                                + "different buckets causing duplicate rows on read.")
+                .containsExactlyInAnyOrder(Row.of("p1", 1), Row.of("p1", 2), Row.of("p1", 3));
+
+        // Also verify the files written by INSERT OVERWRITE are stamped with the new bucket count
+        FileStoreTable fileStoreTable = paimonTable("TP");
+        Iterator<ManifestEntry> it =
+                fileStoreTable
+                        .newSnapshotReader()
+                        .withPartitionFilter(Collections.singletonMap("dt", "p1"))
+                        .onlyReadRealBuckets()
+                        .readFileIterator();
+        assertThat(it.hasNext()).isTrue();
+        while (it.hasNext()) {
+            ManifestEntry entry = it.next();
+            assertThat(entry.totalBuckets())
+                    .as("Files in partition p1 must be stamped with the new bucket count (4)")
+                    .isEqualTo(4);
+            assertThat(entry.bucket()).as("Bucket index must be in range [0, 3]").isBetween(0, 3);
+        }
+
+        batchSql("USE CATALOG default_catalog");
     }
 
     private void executeBoth(List<String> sqlList) {

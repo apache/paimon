@@ -32,13 +32,13 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * A {@link FileStoreTable} wrapper for rescale operations that overrides bucket-related behavior to
- * use the new target bucket count instead of loading per-partition bucket mappings from the
- * manifest.
+ * A {@link FileStoreTable} wrapper that uses the schema number of buckets assign writes instead of
+ * using the number of buckets defined in each partition. Useful for postpone buckets, overrides and
+ * rescales.
  */
-public class RescaleFileStoreTable extends DelegatedFileStoreTable {
+public class SchemaBucketFileStoreTable extends DelegatedFileStoreTable {
 
-    public RescaleFileStoreTable(FileStoreTable wrapped) {
+    public SchemaBucketFileStoreTable(FileStoreTable wrapped) {
         super(wrapped);
     }
 
@@ -67,26 +67,26 @@ public class RescaleFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        return new RescaleFileStoreTable(wrapped().copy(dynamicOptions));
+        return new SchemaBucketFileStoreTable(wrapped().copy(dynamicOptions));
     }
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
-        return new RescaleFileStoreTable(wrapped().copy(newTableSchema));
+        return new SchemaBucketFileStoreTable(wrapped().copy(newTableSchema));
     }
 
     @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
-        return new RescaleFileStoreTable(wrapped().copyWithoutTimeTravel(dynamicOptions));
+        return new SchemaBucketFileStoreTable(wrapped().copyWithoutTimeTravel(dynamicOptions));
     }
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
-        return new RescaleFileStoreTable(wrapped().copyWithLatestSchema());
+        return new SchemaBucketFileStoreTable(wrapped().copyWithLatestSchema());
     }
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
-        return new RescaleFileStoreTable(wrapped().switchToBranch(branchName));
+        return new SchemaBucketFileStoreTable(wrapped().switchToBranch(branchName));
     }
 }

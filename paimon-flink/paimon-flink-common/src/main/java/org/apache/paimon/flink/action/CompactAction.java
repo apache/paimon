@@ -45,8 +45,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
-import org.apache.paimon.table.sink.PartitionBucketMapping;
+import org.apache.paimon.table.SchemaBucketFileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
@@ -337,7 +336,8 @@ public class CompactAction extends TableActionBase {
 
             bucketOptions = new HashMap<>(table.options());
             bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(partitionBucketNum));
-            FileStoreTable realTable = table.copy(table.schema().copy(bucketOptions));
+            FileStoreTable realTable =
+                    new SchemaBucketFileStoreTable(table.copy(table.schema().copy(bucketOptions)));
 
             LinkedHashMap<String, String> partitionSpec =
                     partitionComputer.generatePartValues(partition);
@@ -348,18 +348,13 @@ public class CompactAction extends TableActionBase {
                             partitionSpec,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
-            PartitionBucketMapping partitionBucketMapping =
-                    new PartitionBucketMapping(partitionBucketNum);
-            FixedBucketRowKeyExtractor extractor =
-                    new FixedBucketRowKeyExtractor(realTable.schema(), partitionBucketMapping);
-
             DataStream<InternalRow> partitioned =
                     FlinkStreamPartitioner.partition(
                             FlinkSinkBuilder.mapToInternalRow(
                                     sourcePair.getLeft(),
                                     realTable.rowType(),
                                     table.catalogEnvironment().catalogContext()),
-                            new RowDataChannelComputer(extractor),
+                            new RowDataChannelComputer(realTable.createRowKeyExtractor()),
                             null);
             FixedBucketSink sink = new FixedBucketSink(realTable, null);
             DataStream<Committable> written =

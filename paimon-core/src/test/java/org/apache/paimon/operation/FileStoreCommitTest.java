@@ -1091,35 +1091,35 @@ public class FileStoreCommitTest {
         // Re-commit the same data but with a different totalBuckets value.
         // This simulates a stale writer that loaded an old bucket mapping.
         assertThatThrownBy(
-            () ->
-                store.commitDataImpl(
-                    data,
-                    gen::getPartition,
-                    kv -> 0,
-                    false,
-                    null,
-                    null,
-                    Collections.emptyList(),
-                    (commit, committable) -> {
-                        ManifestCommittable tampered =
-                            new ManifestCommittable(
-                                committable.identifier(),
-                                committable.watermark());
-                        for (CommitMessage msg :
-                            committable.fileCommittables()) {
-                            CommitMessageImpl impl = (CommitMessageImpl) msg;
-                            tampered.addFileCommittable(
-                                new CommitMessageImpl(
-                                    impl.partition(),
-                                    impl.bucket(),
-                                    99,
-                                    impl.newFilesIncrement(),
-                                    impl.compactIncrement()));
-                        }
-                        commit.commit(tampered, true);
-                    }))
-            .isInstanceOf(RuntimeException.class)
-            .hasMessageContaining("without overwrite");
+                        () ->
+                                store.commitDataImpl(
+                                        data,
+                                        gen::getPartition,
+                                        kv -> 0,
+                                        false,
+                                        null,
+                                        null,
+                                        Collections.emptyList(),
+                                        (commit, committable) -> {
+                                            ManifestCommittable tampered =
+                                                    new ManifestCommittable(
+                                                            committable.identifier(),
+                                                            committable.watermark());
+                                            for (CommitMessage msg :
+                                                    committable.fileCommittables()) {
+                                                CommitMessageImpl impl = (CommitMessageImpl) msg;
+                                                tampered.addFileCommittable(
+                                                        new CommitMessageImpl(
+                                                                impl.partition(),
+                                                                impl.bucket(),
+                                                                99,
+                                                                impl.newFilesIncrement(),
+                                                                impl.compactIncrement()));
+                                            }
+                                            commit.commit(tampered, true);
+                                        }))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("without overwrite");
     }
 
     private FileStoreCommitImpl newCommitWithSnapshotCommit(
