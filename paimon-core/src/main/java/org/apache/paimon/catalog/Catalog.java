@@ -1436,7 +1436,7 @@ public interface Catalog extends AutoCloseable {
     /** Exception for trying to operate on the view that doesn't have permission. */
     class ViewNoPermissionException extends RuntimeException {
 
-        private static final String MSG = "View %s has no permission. Cause by %s.";
+        private static final String MSG = "View %s has no permission. Caused by %s.";
 
         private final Identifier identifier;
 
