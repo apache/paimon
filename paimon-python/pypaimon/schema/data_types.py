@@ -455,7 +455,10 @@ class DataTypeParser:
 
 
 def is_variant_struct(pa_type: pyarrow.StructType) -> bool:
-    """Return True if *pa_type* is the ``struct<value: binary NOT NULL, metadata: binary NOT NULL>`` encoding of VARIANT."""
+    """Return True if *pa_type* is the shredded VARIANT struct encoding.
+
+    Matches ``struct<value: binary NOT NULL, metadata: binary NOT NULL>``.
+    """
     if pa_type.num_fields != 2:
         return False
     names = {pa_type.field(i).name for i in range(pa_type.num_fields)}

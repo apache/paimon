@@ -47,8 +47,6 @@ structure recursively.  No ``field_`` prefix is used; sub-column names are
 the exact variant key names.
 """
 
-from __future__ import annotations
-
 import datetime
 import decimal as _decimal
 from dataclasses import dataclass
