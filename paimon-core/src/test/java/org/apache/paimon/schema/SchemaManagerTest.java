@@ -939,4 +939,41 @@ public class SchemaManagerTest {
                                         new ChangelogManager(LocalFileIO.create(), path, null)))
                 .hasMessageContaining("Schema 999 does not exist");
     }
+
+    @Test
+    public void testDropColumnCleansUpFieldOptions() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("fields.extra_col.default-value", "1970-01-01 00:00:00");
+        tableOptions.put("key", "value");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", new IntType()),
+                        new DataField(1, "f1", new BigIntType()),
+                        new DataField(2, "f2", new VarCharType()),
+                        new DataField(3, "extra_col", DataTypes.TIMESTAMP(0)));
+        Schema schemaWithFieldOptions =
+                new Schema(
+                        fields,
+                        Collections.singletonList("f0"),
+                        Arrays.asList("f0", "f1"),
+                        tableOptions,
+                        "");
+
+        SchemaManager mgr = new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        TableSchema created = mgr.createTable(schemaWithFieldOptions);
+
+        assertThat(created.options()).containsKey("fields.extra_col.default-value");
+
+        List<SchemaChange> changes =
+                Collections.singletonList(SchemaChange.dropColumn(new String[] {"extra_col"}));
+        assertThatCode(() -> mgr.commitChanges(changes)).doesNotThrowAnyException();
+
+        // Verify the column is removed and field-level options are cleaned up
+        TableSchema updated = mgr.latest().get();
+        assertThat(updated.fieldNames()).doesNotContain("extra_col");
+        assertThat(updated.options()).doesNotContainKey("fields.extra_col.default-value");
+        // Other options should remain
+        assertThat(updated.options()).containsKey("key");
+    }
 }

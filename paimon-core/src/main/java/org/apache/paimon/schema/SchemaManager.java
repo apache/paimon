@@ -447,6 +447,11 @@ public class SchemaManager implements Serializable {
                         }
                     }
                 }.updateIntermediateColumn(newFields, 0);
+                if (drop.fieldNames().length == 1) {
+                    String droppedField = drop.fieldNames()[0];
+                    String prefix = FIELDS_PREFIX + "." + droppedField + ".";
+                    newOptions.keySet().removeIf(k -> k.startsWith(prefix));
+                }
             } else if (change instanceof UpdateColumnType) {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
