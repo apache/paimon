@@ -107,12 +107,12 @@ public class MergeFunctionTestUtils {
                         new ReusingTestData(last.key, last.sequenceNumber, RowKind.INSERT, sum));
             } else {
                 if (group.stream().noneMatch(data -> data.valueKind == RowKind.INSERT)) {
-                    // No insert: fill the pk and left nullable fields to null; sequenceNumber =
-                    // latest
+                    // No insert: initRow now sets all fields including nullable ones,
+                    // so the value is from the last DELETE record
                     ReusingTestData last = group.get(group.size() - 1);
                     expected.add(
                             new ReusingTestData(
-                                    last.key, last.sequenceNumber, RowKind.DELETE, null));
+                                    last.key, last.sequenceNumber, RowKind.DELETE, last.value));
                 } else {
                     RowKind rowKind = null;
                     Long sum = null;
@@ -122,7 +122,7 @@ public class MergeFunctionTestUtils {
                             sum = sum == null ? data.value : sum + data.value;
                         } else {
                             rowKind = RowKind.DELETE;
-                            sum = null;
+                            sum = data.value;
                         }
                     }
                     ReusingTestData last = group.get(group.size() - 1);
