@@ -15,10 +15,105 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
+import atexit
 import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
 from setuptools import find_packages, setup
 
 VERSION = "1.5.dev"
+
+
+def get_dev_version():
+    """Generate dev version with commit date.
+    Format: 1.5.devYYYYMMDD (e.g. 1.5.dev20260415)
+    Uses the commit date (author date) for reproducibility.
+    """
+    base = VERSION.rstrip(".")
+    if not base.endswith("dev"):
+        return None
+
+    try:
+        date_str = subprocess.check_output(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d"],
+            stderr=subprocess.DEVNULL
+        ).decode("utf-8").strip()
+    except Exception:
+        print("Warning: git not available, skipping dev package.")
+        return None
+
+    return base + date_str
+
+
+def _build_dev_package():
+    """After sdist completes, repack a copy with dev version."""
+    if "sdist" not in sys.argv:
+        return
+
+    dev_version = get_dev_version()
+    if dev_version is None:
+        return
+
+    from packaging.version import Version
+    normalized = str(Version(VERSION))
+    dev_normalized = str(Version(dev_version))
+
+    src_name = "pypaimon-{}".format(normalized)
+    dev_name = "pypaimon-{}".format(dev_normalized)
+
+    src_tar = os.path.join("dist", src_name + ".tar.gz")
+    if not os.path.exists(src_tar):
+        return
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        with tarfile.open(src_tar, "r:gz") as tar:
+            tar.extractall(tmp_dir)
+
+        src_dir = os.path.join(tmp_dir, src_name)
+        dev_dir = os.path.join(tmp_dir, dev_name)
+        os.rename(src_dir, dev_dir)
+
+        # Update version in PKG-INFO files
+        for pkg_info in [
+            os.path.join(dev_dir, "PKG-INFO"),
+            os.path.join(dev_dir, "pypaimon.egg-info", "PKG-INFO"),
+        ]:
+            if os.path.exists(pkg_info):
+                with open(pkg_info, "r") as f:
+                    content = f.read()
+                content = content.replace(
+                    "Version: " + normalized,
+                    "Version: " + dev_normalized
+                )
+                with open(pkg_info, "w") as f:
+                    f.write(content)
+
+        # Update VERSION in setup.py so pip install gets the correct version
+        setup_py = os.path.join(dev_dir, "setup.py")
+        if os.path.exists(setup_py):
+            with open(setup_py, "r") as f:
+                content = f.read()
+            content = content.replace(
+                'VERSION = "' + VERSION + '"',
+                'VERSION = "' + dev_version + '"'
+            )
+            with open(setup_py, "w") as f:
+                f.write(content)
+
+        dev_tar = os.path.join("dist", dev_name + ".tar.gz")
+        with tarfile.open(dev_tar, "w:gz") as tar:
+            tar.add(dev_dir, arcname=dev_name)
+
+        print("Created dev package: " + dev_tar)
+    finally:
+        shutil.rmtree(tmp_dir)
+
+
+atexit.register(_build_dev_package)
 
 PACKAGES = find_packages(include=["pypaimon*"])
 
