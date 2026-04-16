@@ -107,4 +107,9 @@ class Identifier:
         return hash((self.database, self.object, self.branch))
 
     def is_system_table(self) -> bool:
-        return self.object.startswith('$')
+        if SYSTEM_TABLE_SPLITTER not in self.object:
+            return False
+        parts = self.object.split(SYSTEM_TABLE_SPLITTER)
+        if len(parts) == 2:
+            return not parts[1].startswith(SYSTEM_BRANCH_PREFIX)
+        return len(parts) == 3
