@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -589,6 +590,65 @@ class ShardTableUpdatorTest(unittest.TestCase):
             "with_read_projection(['a','b','c']) should return only a,b,c; "
             "got %s. _ROW_ID and _SEQUENCE_NUMBER should NOT be returned when not in projection."
             % actual_columns
+        )
+
+    def test_shard_update_passes_allow_rollback_true(self):
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
+        )
+        name = self._create_unique_table_name('rollback')
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        write_builder = table.new_batch_write_builder()
+        tw = write_builder.new_write().with_write_type(['a', 'b'])
+        tc = write_builder.new_commit()
+        tw.write_arrow(pa.Table.from_pydict(
+            {'a': [1, 2], 'b': [10, 20]},
+            schema=table_schema,
+        ))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        upd = write_builder.new_update()
+        upd.with_read_projection(['a'])
+        upd.with_update_type(['b'])
+        shard = upd.new_shard_updator(0, 1)
+        reader = shard.arrow_reader()
+        for batch in iter(reader.read_next_batch, None):
+            shard.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+                {'b': [99] * batch.num_rows},
+                schema=pa.schema([('b', pa.int32())]),
+            ))
+        commit_messages = shard.prepare_commit()
+
+        from pypaimon.write.file_store_commit import FileStoreCommit
+        original_try_commit = FileStoreCommit._try_commit
+        captured_args = {}
+
+        def spy_try_commit(self_inner, **kwargs):
+            captured_args.update(kwargs)
+            return original_try_commit(self_inner, **kwargs)
+
+        with patch.object(FileStoreCommit, '_try_commit', spy_try_commit):
+            tc2 = write_builder.new_commit()
+            tc2.commit(commit_messages)
+            tc2.close()
+
+        self.assertTrue(
+            captured_args.get('allow_rollback', False),
+            "Row-id-check commits must pass allow_rollback=True so that "
+            "concurrent COMPACT snapshots can be rolled back on conflict."
+        )
+        self.assertTrue(
+            captured_args.get('detect_conflicts', False),
+            "Row-id-check commits must enable conflict detection."
         )
 
 
