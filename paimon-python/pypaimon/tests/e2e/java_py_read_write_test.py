@@ -393,6 +393,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
         self._test_read_btree_index_large()
         self._test_read_btree_index_null()
+        self._test_index_manifest_inherited_after_write()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -490,6 +491,29 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'v': ["v1", "v2", "v4"]
         })
         self.assertEqual(expected, actual)
+
+    def _test_index_manifest_inherited_after_write(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+
+        snapshot_before = table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot_before.index_manifest,
+                             "Index manifest should exist before Python write")
+
+        write_builder = table.new_batch_write_builder()
+        write = write_builder.new_write()
+        commit = write_builder.new_commit()
+        data = pa.table({'k': ['k4'], 'v': ['v4']})
+        write.write_arrow(data)
+        commit.commit(write.prepare_commit())
+        write.close()
+        commit.close()
+
+        snapshot_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snapshot_after.id, snapshot_before.id)
+        self.assertIsNotNone(
+            snapshot_after.index_manifest,
+            "index_manifest lost after Python data write - indexes become invisible"
+        )
 
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):
