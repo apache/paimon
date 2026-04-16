@@ -381,6 +381,10 @@ class FileStoreCommit:
                     delta_record_count -= entry.file.row_count
 
             total_record_count += delta_record_count
+            index_manifest = None
+            if latest_snapshot and commit_kind == "APPEND":
+                index_manifest = latest_snapshot.index_manifest
+
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
@@ -394,7 +398,7 @@ class FileStoreCommit:
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),
                 next_row_id=next_row_id,
-                index_manifest=latest_snapshot.index_manifest if latest_snapshot else None,
+                index_manifest=index_manifest,
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
