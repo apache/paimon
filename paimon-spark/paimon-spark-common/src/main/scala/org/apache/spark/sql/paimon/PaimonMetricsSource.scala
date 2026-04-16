@@ -49,6 +49,10 @@ class PaimonMetricsSource extends Source {
     .build()
 
   jmxReporter.start()
+
+  def stop(): Unit = {
+    jmxReporter.stop()
+  }
 }
 
 object PaimonMetricsSource {
@@ -64,6 +68,9 @@ object PaimonMetricsSource {
           if (env != null) {
             env.metricsSystem.registerSource(source)
           }
+          Runtime.getRuntime.addShutdownHook(new Thread("paimon-jmx-reporter-shutdown") {
+            override def run(): Unit = source.stop()
+          })
           instance = source
         }
       }
