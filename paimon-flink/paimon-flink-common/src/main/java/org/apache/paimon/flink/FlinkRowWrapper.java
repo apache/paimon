@@ -22,7 +22,9 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobReference;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -32,7 +34,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.data.DecimalData;
@@ -55,7 +56,8 @@ public class FlinkRowWrapper implements InternalRow {
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
         this.row = row;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory =
+                catalogContext == null ? null : new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -142,15 +144,13 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
+        return BlobUtils.fromBytes(row.getBinary(pos), uriReaderFactory, null);
+    }
+
+    @Override
+    public BlobRef getBlobRef(int pos) {
         byte[] bytes = row.getBinary(pos);
-        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
-        if (blobDes) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
-        } else {
-            return new BlobData(bytes);
-        }
+        return new BlobRef(BlobReference.deserialize(bytes));
     }
 
     @Override
@@ -256,6 +256,11 @@ public class FlinkRowWrapper implements InternalRow {
         @Override
         public Blob getBlob(int pos) {
             return new BlobData(array.getBinary(pos));
+        }
+
+        @Override
+        public BlobRef getBlobRef(int pos) {
+            throw new UnsupportedOperationException("FlinkArrayWrapper does not support BlobRef.");
         }
 
         @Override

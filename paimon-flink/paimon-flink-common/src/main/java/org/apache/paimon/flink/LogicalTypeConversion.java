@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -51,6 +52,13 @@ public class LogicalTypeConversion {
                 logicalType instanceof BinaryType || logicalType instanceof VarBinaryType,
                 "Expected BinaryType or VarBinaryType, but got: " + logicalType);
         return new BlobType();
+    }
+
+    public static BlobRefType toBlobRefType(LogicalType logicalType) {
+        checkArgument(
+                logicalType instanceof BinaryType || logicalType instanceof VarBinaryType,
+                "Expected BinaryType or VarBinaryType, but got: " + logicalType);
+        return new BlobRefType();
     }
 
     public static VectorType toVectorType(

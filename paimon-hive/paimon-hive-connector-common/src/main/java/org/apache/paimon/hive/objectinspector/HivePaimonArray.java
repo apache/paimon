@@ -20,6 +20,7 @@ package org.apache.paimon.hive.objectinspector;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -125,6 +126,11 @@ public class HivePaimonArray implements InternalArray {
     @Override
     public Blob getBlob(int pos) {
         return getAs(pos);
+    }
+
+    @Override
+    public BlobRef getBlobRef(int pos) {
+        throw new UnsupportedOperationException("HivePaimonArray does not support BlobRef.");
     }
 
     @Override

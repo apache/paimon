@@ -109,6 +109,8 @@ public class ParquetRowDataWriter {
                     return new BinaryWriter();
                 case BLOB:
                     return new BlobDescriptorWriter();
+                case BLOB_REF:
+                    return new BlobReferenceWriter();
                 case DECIMAL:
                     DecimalType decimalType = (DecimalType) t;
                     return createDecimalWriter(decimalType.getPrecision(), decimalType.getScale());
@@ -341,6 +343,21 @@ public class ParquetRowDataWriter {
                                 + "serialized BlobDescriptor (magic 'BLOBDESC').",
                         t);
             }
+        }
+    }
+
+    /** Writes BLOB_REF as serialized {@link org.apache.paimon.data.BlobReference} bytes. */
+    private class BlobReferenceWriter implements FieldWriter {
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            byte[] bytes = row.getBlobRef(ordinal).reference().serialize();
+            recordConsumer.addBinary(Binary.fromReusedByteArray(bytes));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            throw new UnsupportedOperationException("BLOB_REF in array is not supported.");
         }
     }
 

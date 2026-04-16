@@ -24,23 +24,59 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.UriReader;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Objects;
 
 /**
- * A {@link Blob} refers blob in {@link BlobDescriptor}.
+ * A {@link Blob} that can represent both descriptor-backed blobs (for BLOB type) and
+ * reference-based blobs (for BLOB_REF type).
+ *
+ * <p>For BLOB type: created via {@link #BlobRef(UriReader, BlobDescriptor)}, always resolved.
+ *
+ * <p>For BLOB_REF type: created via {@link #BlobRef(BlobReference)}, initially unresolved. Call
+ * {@link #resolve(UriReader, BlobDescriptor)} to make it readable.
  *
  * @since 1.4.0
  */
 @Public
-public class BlobRef implements Blob {
+public class BlobRef implements Blob, Serializable {
 
-    private final UriReader uriReader;
-    private final BlobDescriptor descriptor;
+    private static final long serialVersionUID = 1L;
 
+    @Nullable private final BlobReference reference;
+    @Nullable private UriReader uriReader;
+    @Nullable private BlobDescriptor descriptor;
+
+    /** Creates a resolved descriptor-backed blob (for BLOB type). */
     public BlobRef(UriReader uriReader, BlobDescriptor descriptor) {
+        this.reference = null;
         this.uriReader = uriReader;
         this.descriptor = descriptor;
+    }
+
+    /** Creates an unresolved blob ref (for BLOB_REF type). */
+    public BlobRef(BlobReference reference) {
+        this.reference = reference;
+        this.uriReader = null;
+        this.descriptor = null;
+    }
+
+    @Nullable
+    public BlobReference reference() {
+        return reference;
+    }
+
+    public boolean isResolved() {
+        return uriReader != null && descriptor != null;
+    }
+
+    /** Resolves this blob ref in place by setting the reader and descriptor. */
+    public void resolve(UriReader reader, BlobDescriptor desc) {
+        this.uriReader = reader;
+        this.descriptor = desc;
     }
 
     @Override
@@ -54,15 +90,21 @@ public class BlobRef implements Blob {
 
     @Override
     public BlobDescriptor toDescriptor() {
-        return descriptor;
+        if (descriptor != null) {
+            return descriptor;
+        }
+        throw new IllegalStateException("BlobRef is not resolved.");
     }
 
     @Override
     public SeekableInputStream newInputStream() throws IOException {
-        return new OffsetSeekableInputStream(
-                uriReader.newInputStream(descriptor.uri()),
-                descriptor.offset(),
-                descriptor.length());
+        if (uriReader != null && descriptor != null) {
+            return new OffsetSeekableInputStream(
+                    uriReader.newInputStream(descriptor.uri()),
+                    descriptor.offset(),
+                    descriptor.length());
+        }
+        throw new IllegalStateException("BlobRef is not resolved.");
     }
 
     @Override
@@ -70,12 +112,15 @@ public class BlobRef implements Blob {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        BlobRef blobRef = (BlobRef) o;
-        return Objects.deepEquals(descriptor, blobRef.descriptor);
+        BlobRef that = (BlobRef) o;
+        if (reference != null) {
+            return Objects.equals(reference, that.reference);
+        }
+        return Objects.equals(descriptor, that.descriptor);
     }
 
     @Override
     public int hashCode() {
-        return descriptor.hashCode();
+        return reference != null ? Objects.hash(reference) : Objects.hash(descriptor);
     }
 }

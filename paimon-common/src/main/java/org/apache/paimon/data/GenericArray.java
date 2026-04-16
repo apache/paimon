@@ -216,6 +216,11 @@ public final class GenericArray implements InternalArray, Serializable {
     }
 
     @Override
+    public BlobRef getBlobRef(int pos) {
+        throw new UnsupportedOperationException("GenericArray does not support BlobRef.");
+    }
+
+    @Override
     public BinaryString getString(int pos) {
         return (BinaryString) getObject(pos);
     }

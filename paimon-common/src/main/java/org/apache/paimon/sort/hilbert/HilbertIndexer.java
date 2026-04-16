@@ -25,6 +25,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -269,6 +270,11 @@ public class HilbertIndexer implements Serializable {
 
         @Override
         public HProcessFunction visit(BlobType blobType) {
+            throw new RuntimeException("Unsupported type");
+        }
+
+        @Override
+        public HProcessFunction visit(BlobRefType blobRefType) {
             throw new RuntimeException("Unsupported type");
         }
 

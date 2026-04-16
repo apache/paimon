@@ -147,7 +147,17 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public InnerTableRead newRead() {
         return new KeyValueTableRead(
-                () -> store().newRead(), () -> store().newBatchRawFileRead(), schema());
+                () -> store().newRead(),
+                () -> store().newBatchRawFileRead(),
+                schema(),
+                catalogEnvironment().catalogContext(),
+                () ->
+                        new KeyValueTableRead(
+                                () -> store().newRead(),
+                                () -> store().newBatchRawFileRead(),
+                                schema(),
+                                null,
+                                null));
     }
 
     @Override

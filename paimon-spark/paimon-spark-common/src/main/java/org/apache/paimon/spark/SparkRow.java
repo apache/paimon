@@ -22,7 +22,9 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobReference;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -38,7 +40,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.Row;
@@ -72,7 +73,8 @@ public class SparkRow implements InternalRow, Serializable {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory =
+                catalogContext == null ? null : new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -161,15 +163,13 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public Blob getBlob(int i) {
+        return BlobUtils.fromBytes(row.getAs(i), uriReaderFactory, null);
+    }
+
+    @Override
+    public BlobRef getBlobRef(int i) {
         byte[] bytes = row.getAs(i);
-        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
-        if (blobDes) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
-        } else {
-            return new BlobData(bytes);
-        }
+        return new BlobRef(BlobReference.deserialize(bytes));
     }
 
     @Override
@@ -342,6 +342,11 @@ public class SparkRow implements InternalRow, Serializable {
         @Override
         public Blob getBlob(int i) {
             return new BlobData(getAs(i));
+        }
+
+        @Override
+        public BlobRef getBlobRef(int i) {
+            throw new UnsupportedOperationException("PaimonArray does not support BlobRef.");
         }
 
         @Override

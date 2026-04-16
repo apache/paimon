@@ -144,13 +144,14 @@ class SchemaValidationTest {
 
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, emptyList()))
-                .hasMessage("Data evolution config must enabled for table with BLOB type column.");
+                .hasMessage(
+                        "Data evolution config must enabled for table with BLOB or BLOB_REF type column.");
 
         options.clear();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         assertThatThrownBy(() -> validateBlobSchema(options, singletonList("f2")))
-                .hasMessage("The BLOB type column can not be part of partition keys.");
+                .hasMessage("The BLOB or BLOB_REF type column can not be part of partition keys.");
 
         assertThatThrownBy(
                         () -> {
@@ -164,7 +165,8 @@ class SchemaValidationTest {
                                             options,
                                             ""));
                         })
-                .hasMessage("Table with BLOB type column must have other normal columns.");
+                .hasMessage(
+                        "Table with BLOB or BLOB_REF type column must have other normal columns.");
     }
 
     @Test

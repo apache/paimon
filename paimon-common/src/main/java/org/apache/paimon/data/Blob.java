@@ -65,6 +65,10 @@ public interface Blob {
         return new BlobRef(reader, descriptor);
     }
 
+    static BlobRef fromReference(BlobReference reference) {
+        return new BlobRef(reference);
+    }
+
     static Blob fromInputStream(Supplier<SeekableInputStream> supplier) {
         return new BlobStream(supplier);
     }

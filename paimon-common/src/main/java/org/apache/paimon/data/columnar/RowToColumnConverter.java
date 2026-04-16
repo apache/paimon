@@ -41,6 +41,7 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -259,6 +260,11 @@ public class RowToColumnConverter {
 
             @Override
             public TypeConverter visit(BlobType blobType) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public TypeConverter visit(BlobRefType blobRefType) {
                 throw new UnsupportedOperationException();
             }
 

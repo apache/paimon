@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -151,6 +152,11 @@ public class ProjectedRow implements InternalRow {
     @Override
     public Blob getBlob(int pos) {
         return row.getBlob(indexMapping[pos]);
+    }
+
+    @Override
+    public BlobRef getBlobRef(int pos) {
+        return row.getBlobRef(indexMapping[pos]);
     }
 
     @Override

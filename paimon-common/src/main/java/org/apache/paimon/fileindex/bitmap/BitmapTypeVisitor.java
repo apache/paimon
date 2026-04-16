@@ -21,6 +21,7 @@ package org.apache.paimon.fileindex.bitmap;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -175,5 +176,10 @@ public abstract class BitmapTypeVisitor<R> implements DataTypeVisitor<R> {
     @Override
     public final R visit(BlobType blobType) {
         throw new UnsupportedOperationException("Does not support type blob");
+    }
+
+    @Override
+    public final R visit(BlobRefType blobRefType) {
+        throw new UnsupportedOperationException("Does not support type blob ref");
     }
 }

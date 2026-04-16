@@ -66,6 +66,8 @@ public interface DataTypeVisitor<R> {
 
     R visit(BlobType blobType);
 
+    R visit(BlobRefType blobRefType);
+
     R visit(ArrayType arrayType);
 
     R visit(VectorType vectorType);

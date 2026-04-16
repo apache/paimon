@@ -81,6 +81,9 @@ public interface DataGetters {
     /** Returns the blob value at the given position. */
     Blob getBlob(int pos);
 
+    /** Returns the blob ref value at the given position. For BLOB_REF type fields only. */
+    BlobRef getBlobRef(int pos);
+
     /** Returns the array value at the given position. */
     InternalArray getArray(int pos);
 

@@ -291,7 +291,13 @@ public final class NestedRow extends BinarySection implements InternalRow, DataS
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
+        return BlobUtils.fromBytes(getBinary(pos), null, null);
+    }
+
+    @Override
+    public BlobRef getBlobRef(int pos) {
+        byte[] bytes = getBinary(pos);
+        return new BlobRef(BlobReference.deserialize(bytes));
     }
 
     @Override

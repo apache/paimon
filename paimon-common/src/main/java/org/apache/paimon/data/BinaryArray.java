@@ -251,6 +251,11 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
     }
 
     @Override
+    public BlobRef getBlobRef(int pos) {
+        throw new UnsupportedOperationException("BinaryArray does not support BlobRef.");
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));

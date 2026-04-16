@@ -25,7 +25,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableMap, 
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
-import org.apache.paimon.spark.function.{DescriptorToStringUnbound, PathToDescriptorUnbound}
+import org.apache.paimon.spark.function.{BlobReferenceUnbound, DescriptorToStringUnbound, PathToDescriptorUnbound}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.types.{ArrayType, DataType => PaimonDataType, LocalZonedTimestampType, MapType, RowType, TimestampType}
 import org.apache.paimon.utils.ProjectedRow
@@ -47,6 +47,7 @@ object PaimonFunctions {
   val MAX_PT: String = "max_pt"
   val PATH_TO_DESCRIPTOR: String = "path_to_descriptor"
   val DESCRIPTOR_TO_STRING: String = "descriptor_to_string"
+  val BLOB_REFERENCE: String = "blob_reference"
 
   private val FUNCTIONS = ImmutableMap
     .builder[String, UnboundFunction]()
@@ -56,6 +57,7 @@ object PaimonFunctions {
     .put(MAX_PT, new MaxPtFunction)
     .put(PATH_TO_DESCRIPTOR, new PathToDescriptorUnbound)
     .put(DESCRIPTOR_TO_STRING, new DescriptorToStringUnbound)
+    .put(BLOB_REFERENCE, new BlobReferenceUnbound)
     .build()
 
   /** The bucket function type to the function name mapping */

@@ -19,6 +19,9 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -35,6 +38,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for InternalRowToSizeVisitor. */
 public class InternalRowToSizeVisitorTest {
@@ -191,5 +199,20 @@ public class InternalRowToSizeVisitorTest {
         Assertions.assertThat(feildSizeCalculator.get(22).apply(row, 22)).isEqualTo(6);
 
         Assertions.assertThat(feildSizeCalculator.get(23).apply(row, 23)).isEqualTo(0);
+    }
+
+    @Test
+    void testBlobRefSizeUsesSerializedReferenceBytes() {
+        BlobReference reference = new BlobReference("default.t", 1, 0L);
+        BlobRef blobRef = Blob.fromReference(reference);
+        DataGetters row = mock(DataGetters.class);
+        when(row.isNullAt(0)).thenReturn(false);
+        when(row.getBlobRef(0)).thenReturn(blobRef);
+
+        int size = new InternalRowToSizeVisitor().visit(DataTypes.BLOB_REF()).apply(row, 0);
+
+        Assertions.assertThat(size).isEqualTo(reference.serialize().length);
+        verify(row).getBlobRef(0);
+        verify(row, never()).getBinary(0);
     }
 }

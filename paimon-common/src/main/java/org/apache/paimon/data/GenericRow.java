@@ -198,6 +198,15 @@ public final class GenericRow implements InternalRow, Serializable {
     }
 
     @Override
+    public BlobRef getBlobRef(int pos) {
+        Object value = this.fields[pos];
+        if (value instanceof BlobRef) {
+            return (BlobRef) value;
+        }
+        throw new ClassCastException("Cannot cast " + value.getClass().getName() + " to BlobRef");
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         return (InternalArray) this.fields[pos];
     }

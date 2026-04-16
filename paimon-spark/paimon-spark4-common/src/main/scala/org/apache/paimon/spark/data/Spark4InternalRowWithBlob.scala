@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.data
 
 import org.apache.paimon.spark.AbstractSparkInternalRow
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{DataTypeRoot, RowType}
 import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -28,13 +28,17 @@ import org.apache.spark.unsafe.types.VariantVal
 class Spark4InternalRowWithBlob(rowType: RowType, blobFields: Set[Int], blobAsDescriptor: Boolean)
   extends Spark4InternalRow(rowType) {
 
+  private val blobRefFields: Set[Int] =
+    blobFields.filter(i => rowType.getTypeAt(i).getTypeRoot.equals(DataTypeRoot.BLOB_REF))
+  private val pureBlobFields: Set[Int] = blobFields -- blobRefFields
+
   override def getBinary(ordinal: Int): Array[Byte] = {
-    if (blobFields.contains(ordinal)) {
-      if (blobAsDescriptor) {
-        row.getBlob(ordinal).toDescriptor.serialize()
-      } else {
-        row.getBlob(ordinal).toData
-      }
+    if (blobRefFields.contains(ordinal)) {
+      val blobRef = row.getBlobRef(ordinal)
+      if (blobAsDescriptor) blobRef.toDescriptor.serialize() else blobRef.toData
+    } else if (pureBlobFields.contains(ordinal)) {
+      val blob = row.getBlob(ordinal)
+      if (blobAsDescriptor) blob.toDescriptor.serialize() else blob.toData
     } else {
       super.getBinary(ordinal)
     }

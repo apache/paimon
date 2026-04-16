@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
 
 import java.util.Set;
@@ -27,18 +28,26 @@ import java.util.Set;
 public class FlinkRowDataWithBlob extends FlinkRowData {
 
     private final Set<Integer> blobFields;
+    private final Set<Integer> blobRefFields;
     private final boolean blobAsDescriptor;
 
     public FlinkRowDataWithBlob(
-            InternalRow row, Set<Integer> blobFields, boolean blobAsDescriptor) {
+            InternalRow row,
+            Set<Integer> blobFields,
+            Set<Integer> blobRefFields,
+            boolean blobAsDescriptor) {
         super(row);
         this.blobFields = blobFields;
+        this.blobRefFields = blobRefFields;
         this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        if (blobFields.contains(pos)) {
+        if (blobRefFields.contains(pos)) {
+            BlobRef blobRef = row.getBlobRef(pos);
+            return blobAsDescriptor ? blobRef.toDescriptor().serialize() : blobRef.toData();
+        } else if (blobFields.contains(pos)) {
             Blob blob = row.getBlob(pos);
             return blobAsDescriptor ? blob.toDescriptor().serialize() : blob.toData();
         } else {

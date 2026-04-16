@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -185,6 +186,11 @@ public class LanceFileFormat extends FileFormat {
 
         @Override
         public Void visit(BlobType blobType) {
+            return null;
+        }
+
+        @Override
+        public Void visit(BlobRefType blobRefType) {
             return null;
         }
 

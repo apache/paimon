@@ -36,6 +36,7 @@ import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -228,6 +229,11 @@ public class ParquetVectorUpdaterFactory {
                 }
                 return new BinaryUpdater();
             };
+        }
+
+        @Override
+        public UpdaterFactory visit(BlobRefType blobRefType) {
+            return visit(new BlobType(blobRefType.isNullable()));
         }
 
         @Override

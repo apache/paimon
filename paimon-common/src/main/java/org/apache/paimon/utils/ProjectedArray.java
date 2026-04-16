@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -136,6 +137,11 @@ public class ProjectedArray implements InternalArray {
     @Override
     public Blob getBlob(int pos) {
         return array.getBlob(indexMapping[pos]);
+    }
+
+    @Override
+    public BlobRef getBlobRef(int pos) {
+        throw new UnsupportedOperationException("ProjectedArray does not support BlobRef.");
     }
 
     @Override

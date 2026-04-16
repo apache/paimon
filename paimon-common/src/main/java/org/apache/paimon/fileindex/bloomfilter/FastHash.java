@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -170,6 +171,11 @@ public interface FastHash {
         @Override
         public FastHash visit(BlobType blobType) {
             throw new UnsupportedOperationException("Does not support type blob");
+        }
+
+        @Override
+        public FastHash visit(BlobRefType blobRefType) {
+            throw new UnsupportedOperationException("Does not support type blob_ref");
         }
 
         @Override

@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -185,6 +186,12 @@ public class VortexFileFormat extends FileFormat {
         public Void visit(BlobType blobType) {
             throw new UnsupportedOperationException(
                     "Vortex file format does not support type BLOB");
+        }
+
+        @Override
+        public Void visit(BlobRefType blobRefType) {
+            throw new UnsupportedOperationException(
+                    "Vortex file format does not support type BLOB_REF");
         }
 
         @Override

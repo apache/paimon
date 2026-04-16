@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataTypeFamily;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.BIGINT;
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
+import static org.apache.paimon.types.DataTypeRoot.BLOB_REF;
 import static org.apache.paimon.types.DataTypeRoot.BOOLEAN;
 import static org.apache.paimon.types.DataTypeRoot.DECIMAL;
 import static org.apache.paimon.types.DataTypeRoot.INTEGER;
@@ -107,7 +108,7 @@ public class TypeCheckUtils {
     }
 
     public static boolean isBlob(DataType type) {
-        return type.getTypeRoot() == BLOB;
+        return type.getTypeRoot() == BLOB || type.getTypeRoot() == BLOB_REF;
     }
 
     public static boolean isComparable(DataType type) {

@@ -165,6 +165,7 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
+        validateNestedBlobRefFields(tableRowType);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
 
@@ -672,19 +673,22 @@ public class SchemaValidation {
         List<DataField> fields = schema.fields();
         List<String> blobNames =
                 fields.stream()
-                        .filter(field -> field.type().is(DataTypeRoot.BLOB))
+                        .filter(
+                                field ->
+                                        field.type().is(DataTypeRoot.BLOB)
+                                                || field.type().is(DataTypeRoot.BLOB_REF))
                         .map(DataField::name)
                         .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
-                    "Data evolution config must enabled for table with BLOB type column.");
+                    "Data evolution config must enabled for table with BLOB or BLOB_REF type column.");
             checkArgument(
                     fields.size() > blobNames.size(),
-                    "Table with BLOB type column must have other normal columns.");
+                    "Table with BLOB or BLOB_REF type column must have other normal columns.");
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),
-                    "The BLOB type column can not be part of partition keys.");
+                    "The BLOB or BLOB_REF type column can not be part of partition keys.");
         }
 
         FileFormat vectorFileFormat = vectorFileFormat(options);
@@ -699,6 +703,49 @@ public class SchemaValidation {
 
             List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
             vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
+        }
+    }
+
+    private static void validateNestedBlobRefFields(RowType rowType) {
+        for (DataField field : rowType.getFields()) {
+            checkArgument(
+                    !containsNestedBlobRef(field.type()),
+                    "Nested BLOB_REF type is not supported. Field '%s' contains a nested BLOB_REF.",
+                    field.name());
+        }
+    }
+
+    private static boolean containsNestedBlobRef(DataType dataType) {
+        switch (dataType.getTypeRoot()) {
+            case ARRAY:
+                DataType arrayElementType = ((ArrayType) dataType).getElementType();
+                return arrayElementType.is(DataTypeRoot.BLOB_REF)
+                        || containsNestedBlobRef(arrayElementType);
+            case MULTISET:
+                DataType multisetElementType = ((MultisetType) dataType).getElementType();
+                return multisetElementType.is(DataTypeRoot.BLOB_REF)
+                        || containsNestedBlobRef(multisetElementType);
+            case MAP:
+                MapType mapType = (MapType) dataType;
+                return mapType.getKeyType().is(DataTypeRoot.BLOB_REF)
+                        || containsNestedBlobRef(mapType.getKeyType())
+                        || mapType.getValueType().is(DataTypeRoot.BLOB_REF)
+                        || containsNestedBlobRef(mapType.getValueType());
+            case ROW:
+                for (DataField field : ((RowType) dataType).getFields()) {
+                    if (field.type().is(DataTypeRoot.BLOB_REF)
+                            || containsNestedBlobRef(field.type())) {
+                        return true;
+                    }
+                }
+                return false;
+            case VECTOR:
+                DataType vectorElementType =
+                        ((org.apache.paimon.types.VectorType) dataType).getElementType();
+                return vectorElementType.is(DataTypeRoot.BLOB_REF)
+                        || containsNestedBlobRef(vectorElementType);
+            default:
+                return false;
         }
     }
 

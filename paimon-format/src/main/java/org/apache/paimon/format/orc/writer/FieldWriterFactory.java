@@ -28,6 +28,7 @@ import org.apache.paimon.data.LocalZoneTimestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -261,6 +262,16 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                                 + "serialized BlobDescriptor (magic 'BLOBDESC').",
                         t);
             }
+        };
+    }
+
+    @Override
+    public FieldWriter visit(BlobRefType blobRefType) {
+        return (rowId, column, getters, columnId) -> {
+            BytesColumnVector vector = (BytesColumnVector) column;
+            byte[] bytes = getters.getBlobRef(columnId).reference().serialize();
+            vector.setVal(rowId, bytes, 0, bytes.length);
+            return bytes.length;
         };
     }
 

@@ -2254,6 +2254,14 @@ public class CoreOptions implements Serializable {
                             "Specifies column names that should be stored as blob type. "
                                     + "This is used when you want to treat a BYTES column as a BLOB.");
 
+    public static final ConfigOption<String> BLOB_REF_FIELD =
+            key("blob-ref-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies column names that should be stored as blob reference type. "
+                                    + "This is used when you want to treat a BYTES column as a BLOB_REF.");
+
     @Immutable
     public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
             key("blob-descriptor-field")
@@ -2935,7 +2943,13 @@ public class CoreOptions implements Serializable {
      * subset of descriptor fields and therefore are also updatable.
      */
     public Set<String> updatableBlobFields() {
-        return blobDescriptorField();
+        Set<String> fields = new HashSet<>(blobDescriptorField());
+        fields.addAll(blobRefField());
+        return fields;
+    }
+
+    public Set<String> blobRefField() {
+        return parseCommaSeparatedSet(BLOB_REF_FIELD);
     }
 
     /**
@@ -3267,6 +3281,15 @@ public class CoreOptions implements Serializable {
 
     public static List<String> blobField(Map<String, String> options) {
         String string = options.get(BLOB_FIELD.key());
+        if (string == null) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(string.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public static List<String> blobRefField(Map<String, String> options) {
+        String string = options.get(BLOB_REF_FIELD.key());
         if (string == null) {
             return Collections.emptyList();
         }

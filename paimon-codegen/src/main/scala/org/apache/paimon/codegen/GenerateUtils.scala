@@ -386,6 +386,7 @@ object GenerateUtils {
     case ROW => className[InternalRow]
     case VARIANT => className[Variant]
     case BLOB => className[Blob]
+    case BLOB_REF => className[BlobRef]
     case _ =>
       throw new IllegalArgumentException("Illegal type: " + t)
   }
@@ -430,6 +431,8 @@ object GenerateUtils {
         s"$rowTerm.getVariant($indexTerm)"
       case BLOB =>
         s"$rowTerm.getBlob($indexTerm)"
+      case BLOB_REF =>
+        s"$rowTerm.getBlobRef($indexTerm)"
       case _ =>
         throw new IllegalArgumentException("Illegal type: " + t)
     }

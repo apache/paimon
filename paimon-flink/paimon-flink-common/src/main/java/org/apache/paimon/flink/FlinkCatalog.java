@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.function.BuiltInFunctions;
+import org.apache.paimon.flink.function.InlineCatalogFunction;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -111,6 +112,7 @@ import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.factories.FunctionDefinitionFactory;
 import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.resource.ResourceType;
 import org.apache.flink.table.resource.ResourceUri;
@@ -153,6 +155,7 @@ import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
+import static org.apache.paimon.flink.LogicalTypeConversion.toBlobRefType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toBlobType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -212,6 +215,31 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public Optional<Factory> getFactory() {
         return Optional.of(new FlinkTableFactory(this));
+    }
+
+    @Override
+    public Optional<FunctionDefinitionFactory> getFunctionDefinitionFactory() {
+        return Optional.of(new PaimonFunctionDefinitionFactory());
+    }
+
+    private static class PaimonFunctionDefinitionFactory implements FunctionDefinitionFactory {
+        @Override
+        public org.apache.flink.table.functions.FunctionDefinition createFunctionDefinition(
+                String name, CatalogFunction catalogFunction) {
+            if (catalogFunction instanceof InlineCatalogFunction) {
+                return ((InlineCatalogFunction) catalogFunction).getFunction();
+            }
+            // Return null to let Flink use its default class-loading mechanism.
+            // Flink's FunctionCatalog will fall back to instantiating the class by name.
+            try {
+                Class<?> clazz = Class.forName(catalogFunction.getClassName());
+                return (org.apache.flink.table.functions.FunctionDefinition)
+                        clazz.newInstance();
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Failed to instantiate function: " + catalogFunction.getClassName(), e);
+            }
+        }
     }
 
     @Override
@@ -1038,11 +1066,21 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
         List<String> blobFields = CoreOptions.blobField(options);
+        List<String> blobRefFields = CoreOptions.blobRefField(options);
         if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
                     "When setting '"
                             + CoreOptions.BLOB_FIELD.key()
+                            + "', you must also set '"
+                            + CoreOptions.DATA_EVOLUTION_ENABLED.key()
+                            + "'");
+        }
+        if (!blobRefFields.isEmpty()) {
+            checkArgument(
+                    options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
+                    "When setting '"
+                            + CoreOptions.BLOB_REF_FIELD.key()
                             + "', you must also set '"
                             + CoreOptions.DATA_EVOLUTION_ENABLED.key()
                             + "'");
@@ -1077,8 +1115,12 @@ public class FlinkCatalog extends AbstractCatalog {
             org.apache.flink.table.types.logical.LogicalType logicalType,
             Map<String, String> options) {
         List<String> blobFields = CoreOptions.blobField(options);
+        List<String> blobRefFields = CoreOptions.blobRefField(options);
         if (blobFields.contains(fieldName)) {
             return toBlobType(logicalType);
+        }
+        if (blobRefFields.contains(fieldName)) {
+            return toBlobRefType(logicalType);
         }
         Set<String> vectorFields = CoreOptions.vectorField(options);
         if (vectorFields.contains(fieldName)) {
@@ -1364,6 +1406,7 @@ public class FlinkCatalog extends AbstractCatalog {
         List<String> functions = new ArrayList<>();
         if (isSystemNamespace(dbName)) {
             functions.addAll(BuiltInFunctions.FUNCTIONS.keySet());
+            functions.addAll(BuiltInFunctions.CATALOG_AWARE_FUNCTIONS);
         }
         try {
             functions.addAll(catalog.listFunctions(dbName));
@@ -1381,6 +1424,12 @@ public class FlinkCatalog extends AbstractCatalog {
                 String builtInFunction =
                         BuiltInFunctions.FUNCTIONS.get(functionPath.getObjectName());
                 return new CatalogFunctionImpl(builtInFunction, FunctionLanguage.JAVA);
+            }
+            if (BuiltInFunctions.CATALOG_AWARE_FUNCTIONS.contains(
+                    functionPath.getObjectName())) {
+                return new InlineCatalogFunction(
+                        BuiltInFunctions.createCatalogAwareFunction(
+                                functionPath.getObjectName(), catalog.options()));
             }
         }
 

@@ -22,7 +22,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryWriter;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -206,6 +208,13 @@ public class EqualiserCodeGeneratorTest {
                         Pair.of(
                                 new BlobData(new byte[] {1, 2, 3}),
                                 new BlobData(new byte[] {4, 5, 6}))));
+        TEST_DATA.put(
+                DataTypeRoot.BLOB_REF,
+                new GeneratedData(
+                        DataTypes.BLOB_REF(),
+                        Pair.of(
+                                Blob.fromReference(new BlobReference("default.t1", 1, 0L)),
+                                Blob.fromReference(new BlobReference("default.t2", 2, 1L)))));
     }
 
     @ParameterizedTest

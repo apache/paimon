@@ -21,6 +21,7 @@ package org.apache.paimon.format.avro;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
@@ -93,12 +94,24 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
                 }
             };
 
+    private static final FieldWriter BLOB_REFERENCE_BYTES_WRITER =
+            (container, i, encoder) -> {
+                BlobRef blobRef = container.getBlobRef(i);
+                if (blobRef == null) {
+                    throw new IllegalArgumentException("Null blob_ref is not allowed.");
+                }
+                encoder.writeBytes(blobRef.reference().serialize());
+            };
+
     @Override
     public FieldWriter primitive(Schema primitive, DataType type) {
-        if (primitive.getType() == Schema.Type.BYTES
-                && type != null
-                && type.getTypeRoot() == DataTypeRoot.BLOB) {
-            return BLOB_DESCRIPTOR_BYTES_WRITER;
+        if (primitive.getType() == Schema.Type.BYTES && type != null) {
+            if (type.getTypeRoot() == DataTypeRoot.BLOB) {
+                return BLOB_DESCRIPTOR_BYTES_WRITER;
+            }
+            if (type.getTypeRoot() == DataTypeRoot.BLOB_REF) {
+                return BLOB_REFERENCE_BYTES_WRITER;
+            }
         }
         return AvroSchemaVisitor.super.primitive(primitive, type);
     }

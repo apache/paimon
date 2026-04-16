@@ -60,6 +60,7 @@ class OrcTypeUtilTest {
         test("varchar(123)", DataTypes.VARCHAR(123));
         test("string", DataTypes.STRING());
         test("binary", DataTypes.BYTES());
+        test("binary", DataTypes.BLOB_REF());
         test("tinyint", DataTypes.TINYINT());
         test("smallint", DataTypes.SMALLINT());
         test("int", DataTypes.INT());

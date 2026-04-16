@@ -32,6 +32,8 @@ import org.apache.spark.sql.Row
 import java.util
 import java.util.Random
 
+import scala.collection.JavaConverters._
+
 class BlobTestBase extends PaimonSparkTestBase {
 
   private val RANDOM = new Random
@@ -310,6 +312,45 @@ class BlobTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT id, name FROM t ORDER BY id"),
         Seq(Row(1, "updated_name1"), Row(2, "name2"))
+      )
+    }
+  }
+
+  test("BlobRef: test write and read blob reference") {
+    withTable("upstream", "downstream") {
+      // 1. Create upstream blob table and write data
+      sql("CREATE TABLE upstream (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      sql("INSERT INTO upstream VALUES (1, 'row1', X'48656C6C6F')")
+      sql("INSERT INTO upstream VALUES (2, 'row2', X'5945')")
+
+      // 2. Get fieldId for the "picture" column
+      val upstreamTable = loadTable("upstream")
+      val pictureFieldId = upstreamTable
+        .rowType()
+        .getFields
+        .asScala
+        .find(_.name() == "picture")
+        .map(_.id())
+        .getOrElse(throw new RuntimeException("picture field not found"))
+
+      // 3. Create downstream blob_ref table
+      val fullTableName = s"$dbName0.upstream"
+      sql("CREATE TABLE downstream (id INT, label STRING, image_ref BINARY) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-ref-field'='image_ref')")
+
+      // 4. Insert by reading _ROW_ID from $row_tracking directly
+      sql(
+        s"INSERT INTO downstream " +
+          s"SELECT id, name, sys.blob_reference('$fullTableName', $pictureFieldId, _ROW_ID) " +
+          s"FROM `upstream`")
+
+      // 5. Read back — blob references should resolve to upstream blob data
+      checkAnswer(
+        sql("SELECT * FROM downstream ORDER BY id"),
+        Seq(
+          Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
+          Row(2, "row2", Array[Byte](89, 69)))
       )
     }
   }

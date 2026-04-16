@@ -269,15 +269,22 @@ public class FileStoreSourceSplitReader
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
         private final Set<Integer> blobFields;
+        private final Set<Integer> blobRefFields;
 
         private FileStoreRecordIterator(@Nullable RowType rowType) {
-            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndex(rowType);
+            if (rowType == null) {
+                this.blobFields = Collections.emptySet();
+                this.blobRefFields = Collections.emptySet();
+            } else {
+                this.blobFields = fieldIndexByType(rowType, DataTypeRoot.BLOB);
+                this.blobRefFields = fieldIndexByType(rowType, DataTypeRoot.BLOB_REF);
+            }
         }
 
-        private Set<Integer> blobFieldIndex(RowType rowType) {
+        private Set<Integer> fieldIndexByType(RowType rowType, DataTypeRoot typeRoot) {
             Set<Integer> result = new HashSet<>();
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                if (rowType.getTypeAt(i).getTypeRoot() == typeRoot) {
                     result.add(i);
                 }
             }
@@ -307,9 +314,10 @@ public class FileStoreSourceSplitReader
             }
 
             recordAndPosition.setNext(
-                    blobFields.isEmpty()
+                    blobFields.isEmpty() && blobRefFields.isEmpty()
                             ? new FlinkRowData(row)
-                            : new FlinkRowDataWithBlob(row, blobFields, blobAsDescriptor));
+                            : new FlinkRowDataWithBlob(
+                                    row, blobFields, blobRefFields, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();

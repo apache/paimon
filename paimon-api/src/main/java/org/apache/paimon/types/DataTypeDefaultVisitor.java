@@ -120,6 +120,11 @@ public abstract class DataTypeDefaultVisitor<R> implements DataTypeVisitor<R> {
     }
 
     @Override
+    public R visit(BlobRefType blobRefType) {
+        return defaultMethod(blobRefType);
+    }
+
+    @Override
     public R visit(ArrayType arrayType) {
         return defaultMethod(arrayType);
     }

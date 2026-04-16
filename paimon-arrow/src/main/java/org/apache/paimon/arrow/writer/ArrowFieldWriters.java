@@ -199,6 +199,42 @@ public class ArrowFieldWriters {
         }
     }
 
+    /**
+     * Writer for BLOB_REF. The batch path is identical to {@link BinaryWriter} (columnar data is
+     * already serialized bytes). The row-by-row path serializes the {@link
+     * org.apache.paimon.data.Blob} via {@link BlobUtils#serializeBlobReference}.
+     */
+    public static class BlobRefWriter extends ArrowFieldWriter {
+
+        public BlobRefWriter(FieldVector fieldVector, boolean isNullable) {
+            super(fieldVector, isNullable);
+        }
+
+        @Override
+        protected void doWrite(
+                ColumnVector columnVector,
+                @Nullable int[] pickedInColumn,
+                int startIndex,
+                int batchRows) {
+            VarBinaryVector varBinaryVector = (VarBinaryVector) fieldVector;
+            for (int i = 0; i < batchRows; i++) {
+                int row = getRowNumber(startIndex, i, pickedInColumn);
+                if (columnVector.isNullAt(row)) {
+                    varBinaryVector.setNull(i);
+                } else {
+                    byte[] value = ((BytesColumnVector) columnVector).getBytes(row).getBytes();
+                    varBinaryVector.setSafe(i, value);
+                }
+            }
+        }
+
+        @Override
+        protected void doWrite(int rowIndex, DataGetters getters, int pos) {
+            byte[] bytes = getters.getBlobRef(pos).reference().serialize();
+            ((VarBinaryVector) fieldVector).setSafe(rowIndex, bytes);
+        }
+    }
+
     /** Writer for DECIMAL. */
     public static class DecimalWriter extends ArrowFieldWriter {
 

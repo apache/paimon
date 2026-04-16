@@ -32,7 +32,7 @@ import org.apache.paimon.utils.Pair;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -106,6 +106,10 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                         ? DataFileIndexWriter.EMPTY_RESULT
                         : dataFileIndexWriter.result();
         String externalPath = isExternalPath ? path.toString() : null;
+        List<String> extraFiles = new ArrayList<>();
+        if (indexResult.independentIndexFile() != null) {
+            extraFiles.add(indexResult.independentIndexFile());
+        }
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileSize,
@@ -114,9 +118,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 seqNumCounter.getValue() - super.recordCount(),
                 seqNumCounter.getValue() - 1,
                 schemaId,
-                indexResult.independentIndexFile() == null
-                        ? Collections.emptyList()
-                        : Collections.singletonList(indexResult.independentIndexFile()),
+                extraFiles,
                 indexResult.embeddedIndexBytes(),
                 fileSource,
                 statsPair.getKey(),

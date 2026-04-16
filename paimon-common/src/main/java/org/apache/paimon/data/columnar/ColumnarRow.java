@@ -20,7 +20,9 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobReference;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -31,7 +33,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.UriReader;
 
 import java.io.Serializable;
 
@@ -162,14 +163,16 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
         if (bytes == null) {
             return null;
         }
-        if (fileIO == null) {
-            throw new IllegalStateException("FileIO is null, cannot read blob data from uri!");
-        }
+        return BlobUtils.fromBytes(bytes, null, fileIO);
+    }
 
-        // Only blob descriptor could be able to stored in columnar format.
-        BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-        UriReader uriReader = UriReader.fromFile(fileIO);
-        return Blob.fromDescriptor(uriReader, blobDescriptor);
+    @Override
+    public BlobRef getBlobRef(int pos) {
+        byte[] bytes = getBinary(pos);
+        if (bytes == null) {
+            return null;
+        }
+        return new BlobRef(BlobReference.deserialize(bytes));
     }
 
     @Override

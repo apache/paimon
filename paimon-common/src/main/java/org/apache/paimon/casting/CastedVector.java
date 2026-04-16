@@ -20,6 +20,7 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -89,6 +90,11 @@ public class CastedVector extends CastedArray implements InternalVector {
     @Override
     public Blob getBlob(int pos) {
         throw new UnsupportedOperationException("CastedVector does not support Blob.");
+    }
+
+    @Override
+    public BlobRef getBlobRef(int pos) {
+        throw new UnsupportedOperationException("CastedVector does not support BlobRef.");
     }
 
     @Override

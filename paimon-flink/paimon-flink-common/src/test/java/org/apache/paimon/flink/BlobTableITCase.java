@@ -374,6 +374,45 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(AbstractFlinkTableFactory.schemaEquals(convertedRowType, flinkRowType)).isTrue();
     }
 
+    @Test
+    public void testWriteBlobRefWithBuiltInFunction() throws Exception {
+        // 1. Create upstream blob table and write data
+        tEnv.executeSql(
+                "CREATE TABLE upstream_blob (id INT, name STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture')");
+        batchSql("INSERT INTO upstream_blob VALUES (1, 'row1', X'48656C6C6F')");
+        batchSql("INSERT INTO upstream_blob VALUES (2, 'row2', X'5945')");
+
+        // 2. Create downstream blob_ref table
+        String fullTableName = tEnv.getCurrentDatabase() + ".upstream_blob";
+        tEnv.executeSql(
+                "CREATE TABLE downstream_ref (id INT, label STRING, image_ref BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-ref-field'='image_ref')");
+
+        // 3. Insert by reading _ROW_ID from $row_tracking, using field name directly
+        batchSql(
+                String.format(
+                        "INSERT INTO downstream_ref"
+                                + " SELECT id, name, sys.blob_reference('%s', 'picture', _ROW_ID)"
+                                + " FROM `upstream_blob$row_tracking`",
+                        fullTableName));
+
+        // 4. Read back — blob references should resolve to upstream blob data
+        List<Row> result = batchSql("SELECT * FROM downstream_ref ORDER BY id");
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getField(0)).isEqualTo(1);
+        assertThat(result.get(0).getField(1)).isEqualTo("row1");
+        assertThat((byte[]) result.get(0).getField(2))
+                .isEqualTo(new byte[] {72, 101, 108, 108, 111});
+        assertThat(result.get(1).getField(0)).isEqualTo(2);
+        assertThat(result.get(1).getField(1)).isEqualTo("row2");
+        assertThat((byte[]) result.get(1).getField(2)).isEqualTo(new byte[] {89, 69});
+    }
+
     private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
 
     public static String bytesToHex(byte[] bytes) {
