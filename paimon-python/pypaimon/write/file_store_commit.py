@@ -394,6 +394,7 @@ class FileStoreCommit:
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),
                 next_row_id=next_row_id,
+                index_manifest=latest_snapshot.index_manifest if latest_snapshot else None,
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
