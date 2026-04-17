@@ -103,10 +103,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 || limit <= 0
                 || deletionVectorsEnabled
                 || dataEvolutionEnabled
-                || inputFilter != null
-                // Partition filter runs after this method, so early truncation here
-                // may discard files belonging to the target partition.
-                || manifestsReader().partitionFilter() != null) {
+                || inputFilter != null) {
             return result;
         }
 
