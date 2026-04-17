@@ -92,6 +92,16 @@ object SparkFormatTable {
     }
   }
 
+  private def alignPartitionSpec(
+      inferred: PartitionSpec,
+      partitionSchema: StructType): PartitionSpec = {
+    if (inferred.partitionColumns.isEmpty && partitionSchema.nonEmpty) {
+      PartitionSpec(partitionSchema, inferred.partitions)
+    } else {
+      inferred
+    }
+  }
+
   // Extend from MetadataLogFileIndex to override partitionSchema
   private class PartitionedMetadataLogFileIndex(
       sparkSession: SparkSession,
@@ -99,7 +109,12 @@ object SparkFormatTable {
       parameters: Map[String, String],
       userSpecifiedSchema: Option[StructType],
       override val partitionSchema: StructType)
-    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
+    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema) {
+
+    override def partitionSpec(): PartitionSpec = {
+      alignPartitionSpec(super.partitionSpec(), partitionSchema)
+    }
+  }
 
   // Extend from InMemoryFileIndex to override partitionSchema
   private class PartitionedInMemoryFileIndex(
@@ -118,7 +133,12 @@ object SparkFormatTable {
       userSpecifiedSchema,
       fileStatusCache,
       userSpecifiedPartitionSpec,
-      metadataOpsTimeNs)
+      metadataOpsTimeNs) {
+
+    override def partitionSpec(): PartitionSpec = {
+      alignPartitionSpec(super.partitionSpec(), partitionSchema)
+    }
+  }
 }
 
 trait PartitionedFormatTable extends SupportsPartitionManagement {

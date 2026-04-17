@@ -405,6 +405,27 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test(
+    "PartitionedFormatTable: engine impl should return empty result when selecting a partition column on an empty table") {
+    val tableName = "engine_empty_partition_select"
+    withTable(tableName) {
+      val location = s"${tempDBDir.getCanonicalPath}/engine_empty_partition_select"
+      sql(s"""CREATE TABLE $tableName (clickid STRING, geo STRING, dt STRING, hour STRING)
+             |USING parquet PARTITIONED BY (dt, hour) LOCATION '$location'
+             |TBLPROPERTIES ('format-table.implementation'='engine')
+             |""".stripMargin)
+      fileIO.mkdirs(new Path(location))
+      checkAnswer(sql(s"SELECT clickid, hour FROM $tableName WHERE dt='20260418'"), Nil)
+      checkAnswer(sql(s"SELECT clickid, dt FROM $tableName WHERE hour='00'"), Nil)
+      checkAnswer(
+        sql(s"""SELECT clickid, max(hour) AS max_hour FROM $tableName
+               |WHERE dt='20260418' AND hour <= '11' AND geo IS NOT NULL
+               |GROUP BY clickid""".stripMargin),
+        Nil
+      )
+    }
+  }
+
   test("Paimon format table: show partitions") {
     withTable("t") {
       sql("""
