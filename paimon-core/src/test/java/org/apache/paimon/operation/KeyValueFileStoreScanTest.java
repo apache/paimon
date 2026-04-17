@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -334,21 +335,25 @@ public class KeyValueFileStoreScanTest {
         List<KeyValue> data = generateData(200);
         Snapshot snapshot = writeData(data);
 
-        KeyValueFileStoreScan scanAll = store.newScan();
-        scanAll.withSnapshot(snapshot.id());
-        int totalFiles = scanAll.plan().files().size();
-        assertThat(totalFiles).isGreaterThan(0);
+        Predicate keyPredicate =
+                new PredicateBuilder(RowType.of(new IntType(false)))
+                        .equal(0, data.get(0).key().getInt(0));
+
+        // baseline: keyFilter without limit
+        KeyValueFileStoreScan scanFilterOnly = store.newScan();
+        scanFilterOnly.withSnapshot(snapshot.id());
+        scanFilterOnly.withKeyFilter(keyPredicate);
+        int filteredFiles = scanFilterOnly.plan().files().size();
+        assertThat(filteredFiles).isGreaterThan(0);
 
         // keyFilter + limit: early-stop by rowCount() is unsafe, should be disabled
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
-        scan.withKeyFilter(
-                new PredicateBuilder(RowType.of(new IntType(false)))
-                        .equal(0, data.get(0).key().getInt(0)));
+        scan.withKeyFilter(keyPredicate);
         scan.withLimit(5);
 
         assertThat(scan.limitPushdownEnabled()).isFalse();
-        assertThat(scan.plan().files().size()).isEqualTo(totalFiles);
+        assertThat(scan.plan().files().size()).isEqualTo(filteredFiles);
     }
 
     @Test
