@@ -569,6 +569,48 @@ public class KeyValueFileStoreScanTest {
         return store.toKvMap(actualKvs);
     }
 
+    @Test
+    void testLimitPushdownWithFilter() throws Exception {
+        int numFiles = 10;
+        int rowsPerFile = 100;
+
+        Snapshot snapshot = null;
+        for (int bucket = 0; bucket < numFiles; bucket++) {
+            List<KeyValue> data = new ArrayList<>();
+            for (int i = 0; i < rowsPerFile; i++) {
+                data.add(gen.nextInsert("", 0, (long) i, null, null));
+            }
+            snapshot = writeData(data, bucket);
+        }
+
+        KeyValueFileStoreScan scanAll = store.newScan();
+        scanAll.withSnapshot(snapshot.id());
+        List<ManifestEntry> allFiles = scanAll.plan().files();
+        assertThat(allFiles.size()).isEqualTo(numFiles);
+
+        KeyValueFileStoreScan scanFilterOnly = store.newScan();
+        scanFilterOnly.withSnapshot(snapshot.id());
+        scanFilterOnly.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE).equal(4, 50L));
+        List<ManifestEntry> filteredFiles = scanFilterOnly.plan().files();
+        assertThat(filteredFiles.size()).isEqualTo(numFiles); // no file eliminated by stats
+
+        KeyValueFileStoreScan scanWithLimit = store.newScan();
+        scanWithLimit.withSnapshot(snapshot.id());
+        scanWithLimit.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE).equal(4, 50L));
+        scanWithLimit.withLimit(5);
+
+        assertThat(scanWithLimit.limitPushdownEnabled()).isFalse();
+
+        List<ManifestEntry> limitedFiles = scanWithLimit.plan().files();
+
+        assertThat(limitedFiles.size())
+                .as(
+                        "When filter is present, limit pushdown should be disabled, returning all files")
+                .isEqualTo(numFiles);
+    }
+
     private List<KeyValue> generateData(int numRecords) {
         List<KeyValue> data = new ArrayList<>();
         for (int i = 0; i < numRecords; i++) {

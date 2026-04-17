@@ -50,6 +50,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private boolean hasNext;
 
     private Integer pushDownLimit;
+    private Predicate filter;
     private TopN topN;
 
     private final SchemaManager schemaManager;
@@ -78,6 +79,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
+        this.filter = predicate;
         super.withFilter(predicate);
         return this;
     }
@@ -126,7 +128,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (pushDownLimit == null) {
+        if (pushDownLimit == null || filter != null) {
             return Optional.empty();
         }
 

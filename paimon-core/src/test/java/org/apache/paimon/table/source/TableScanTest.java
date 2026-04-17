@@ -114,42 +114,53 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
-    public void testLimitPushdownWithFilter() throws Exception {
+    void testLimitPushdownWithFilter() throws Exception {
         createAppendOnlyTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
-        // Write 50 files, each with 1 row. Rows 0-24 have 'a' = 10, rows 25-49 have 'a' = 20.
-        for (int i = 0; i < 25; i++) {
-            write.write(rowData(i, 10, (long) i * 100));
-            commit.commit(i, write.prepareCommit(true, i));
-        }
-        for (int i = 25; i < 50; i++) {
-            write.write(rowData(i, 20, (long) i * 100));
-            commit.commit(i, write.prepareCommit(true, i));
+        int filesCount = 10;
+        int rowsPerFile = 100;
+        int filterValue = 50;
+
+        for (int fileIdx = 0; fileIdx < filesCount; fileIdx++) {
+            for (int i = 0; i < rowsPerFile; i++) {
+                write.write(rowData(fileIdx, i, (long) (fileIdx * rowsPerFile + i)));
+            }
+            commit.commit(fileIdx, write.prepareCommit(true, fileIdx));
         }
 
-        // Without limit, should read all 50 files
-        TableScan.Plan planWithoutLimit = table.newScan().plan();
-        int totalSplits = planWithoutLimit.splits().size();
-        assertThat(totalSplits).isEqualTo(50);
+        TableScan.Plan planAll = table.newScan().plan();
+        assertThat(planAll.splits().size()).isEqualTo(filesCount);
 
-        // With filter (a = 20) and limit (10)
-        // filterByStats has already been applied in baseIterator, so only files 25-49 will be
-        // returned
-        // To get 10 rows, it should read 10 files (from index 25 to 34)
         Predicate filter =
-                new PredicateBuilder(table.schema().logicalRowType())
-                        .equal(1, 20); // Filter on 'a' = 20
-        TableScan.Plan planWithFilterAndLimit =
-                table.newScan().withFilter(filter).withLimit(10).plan();
-        int splitsWithFilterAndLimit = planWithFilterAndLimit.splits().size();
+                new PredicateBuilder(table.schema().logicalRowType()).equal(1, filterValue);
+        TableScan.Plan planFilterOnly = table.newScan().withFilter(filter).plan();
+        assertThat(planFilterOnly.splits().size()).isEqualTo(filesCount);
 
-        // Should read exactly 10 files (from index 25 to 34) to get 10 rows
-        assertThat(splitsWithFilterAndLimit).isLessThanOrEqualTo(10);
-        assertThat(splitsWithFilterAndLimit).isGreaterThan(0);
-        assertThat(splitsWithFilterAndLimit).isLessThan(totalSplits);
+        List<String> allRows = getResult(table.newRead(), planFilterOnly.splits());
+        long totalMatchingRows =
+                allRows.stream().filter(r -> r.contains("|" + filterValue + "|")).count();
+        assertThat(totalMatchingRows).isEqualTo(filesCount);
+
+        int limit = 5;
+        TableScan.Plan planWithFilterAndLimit =
+                table.newScan().withFilter(filter).withLimit(limit).plan();
+
+        List<String> limitedAllRows = getResult(table.newRead(), planWithFilterAndLimit.splits());
+        long limitedMatchingRows =
+                limitedAllRows.stream().filter(r -> r.contains("|" + filterValue + "|")).count();
+
+        assertThat(limitedMatchingRows)
+                .as(
+                        "Filter+limit bug: scan returned %d splits, but only %d rows match "
+                                + "filter (expected >= %d). Total matching = %d",
+                        planWithFilterAndLimit.splits().size(),
+                        limitedMatchingRows,
+                        limit,
+                        totalMatchingRows)
+                .isGreaterThanOrEqualTo(limit);
 
         write.close();
         commit.close();
