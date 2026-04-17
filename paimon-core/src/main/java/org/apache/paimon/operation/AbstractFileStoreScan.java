@@ -141,10 +141,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
-    protected boolean hasPartitionFilter() {
-        return manifestsReader.partitionFilter() != null;
-    }
-
     @Override
     public FileStoreScan onlyReadRealBuckets() {
         manifestsReader.onlyReadRealBuckets();
