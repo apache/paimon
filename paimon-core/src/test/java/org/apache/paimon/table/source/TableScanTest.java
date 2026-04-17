@@ -114,7 +114,48 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
-    void testLimitPushdownWithFilter() throws Exception {
+    public void testLimitPushdownWithFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 50 files, each with 1 row. Rows 0-24 have 'a' = 10, rows 25-49 have 'a' = 20.
+        for (int i = 0; i < 25; i++) {
+            write.write(rowData(i, 10, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        for (int i = 25; i < 50; i++) {
+            write.write(rowData(i, 20, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Without limit, should read all 50 files
+        TableScan.Plan planWithoutLimit = table.newScan().plan();
+        int totalSplits = planWithoutLimit.splits().size();
+        assertThat(totalSplits).isEqualTo(50);
+
+        // With filter (a = 20) and limit (10)
+        // filterByStats has already been applied in baseIterator, so only files 25-49 will be
+        // returned
+        // To get 10 rows, it should read 10 files (from index 25 to 34)
+        Predicate filter =
+                new PredicateBuilder(table.schema().logicalRowType())
+                        .equal(1, 20); // Filter on 'a' = 20
+        TableScan.Plan planWithFilterAndLimit =
+                table.newScan().withFilter(filter).withLimit(10).plan();
+        int splitsWithFilterAndLimit = planWithFilterAndLimit.splits().size();
+
+        // With non-partition filter, limit pushdown should be disabled to avoid
+        // returning insufficient rows. All 25 matching files should be returned.
+        assertThat(splitsWithFilterAndLimit).isEqualTo(25);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    void testLimitPushdownWithNonPartitionFilter() throws Exception {
         createAppendOnlyTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
