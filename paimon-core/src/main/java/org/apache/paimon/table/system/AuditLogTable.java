@@ -478,6 +478,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public boolean hasNonPartitionFilter() {
+            return wrapped.hasNonPartitionFilter();
+        }
+
+        @Override
         public Plan read() {
             return wrapped.read();
         }

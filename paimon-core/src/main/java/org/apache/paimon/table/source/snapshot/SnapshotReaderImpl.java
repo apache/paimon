@@ -102,6 +102,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Nullable private final DVMetaCache dvMetaCache;
 
     private ScanMode scanMode = ScanMode.ALL;
+    private boolean hasNonPartitionFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
 
@@ -239,6 +240,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             scan.withPartitionFilter(pair.getLeft().get());
         }
         if (!pair.getRight().isEmpty()) {
+            this.hasNonPartitionFilter = true;
             nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pair.getRight()));
         }
         scan.withCompleteFilter(predicate);
@@ -336,6 +338,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public SnapshotReader withLimit(int limit) {
         scan.withLimit(limit);
         return this;
+    }
+
+    @Override
+    public boolean hasNonPartitionFilter() {
+        return hasNonPartitionFilter;
     }
 
     @Override

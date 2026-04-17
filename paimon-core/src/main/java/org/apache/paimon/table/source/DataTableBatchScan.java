@@ -126,7 +126,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (pushDownLimit == null) {
+        if (pushDownLimit == null || snapshotReader.hasNonPartitionFilter()) {
             return Optional.empty();
         }
 

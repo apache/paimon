@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -331,20 +332,28 @@ public class KeyValueFileStoreScanTest {
 
     @Test
     public void testLimitPushdownWithKeyFilter() throws Exception {
-        // Write data with different shop IDs
         List<KeyValue> data = generateData(200);
         Snapshot snapshot = writeData(data);
 
-        // With keyFilter, limit pushdown should still work (keyFilter doesn't affect limit
-        // pushdown)
+        Predicate keyPredicate =
+                new PredicateBuilder(RowType.of(new IntType(false)))
+                        .equal(0, data.get(0).key().getInt(0));
+
+        // baseline: keyFilter without limit
+        KeyValueFileStoreScan scanFilterOnly = store.newScan();
+        scanFilterOnly.withSnapshot(snapshot.id());
+        scanFilterOnly.withKeyFilter(keyPredicate);
+        int filteredFiles = scanFilterOnly.plan().files().size();
+        assertThat(filteredFiles).isGreaterThan(0);
+
+        // keyFilter + limit: early-stop by rowCount() is unsafe, should be disabled
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
-        scan.withKeyFilter(
-                new PredicateBuilder(RowType.of(new IntType(false)))
-                        .equal(0, data.get(0).key().getInt(0)));
+        scan.withKeyFilter(keyPredicate);
         scan.withLimit(5);
-        List<ManifestEntry> files = scan.plan().files();
-        assertThat(files.size()).isGreaterThan(0);
+
+        assertThat(scan.limitPushdownEnabled()).isFalse();
+        assertThat(scan.plan().files().size()).isEqualTo(filteredFiles);
     }
 
     @Test
@@ -567,6 +576,48 @@ public class KeyValueFileStoreScanTest {
         List<KeyValue> actualKvs = store.readKvsFromManifestEntries(plan.files(), false);
         gen.sort(actualKvs);
         return store.toKvMap(actualKvs);
+    }
+
+    @Test
+    void testLimitPushdownWithFilter() throws Exception {
+        int numFiles = 10;
+        int rowsPerFile = 100;
+
+        Snapshot snapshot = null;
+        for (int bucket = 0; bucket < numFiles; bucket++) {
+            List<KeyValue> data = new ArrayList<>();
+            for (int i = 0; i < rowsPerFile; i++) {
+                data.add(gen.nextInsert("", 0, (long) i, null, null));
+            }
+            snapshot = writeData(data, bucket);
+        }
+
+        KeyValueFileStoreScan scanAll = store.newScan();
+        scanAll.withSnapshot(snapshot.id());
+        List<ManifestEntry> allFiles = scanAll.plan().files();
+        assertThat(allFiles.size()).isEqualTo(numFiles);
+
+        KeyValueFileStoreScan scanFilterOnly = store.newScan();
+        scanFilterOnly.withSnapshot(snapshot.id());
+        scanFilterOnly.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE).equal(4, 50L));
+        List<ManifestEntry> filteredFiles = scanFilterOnly.plan().files();
+        assertThat(filteredFiles.size()).isEqualTo(numFiles); // no file eliminated by stats
+
+        KeyValueFileStoreScan scanWithLimit = store.newScan();
+        scanWithLimit.withSnapshot(snapshot.id());
+        scanWithLimit.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE).equal(4, 50L));
+        scanWithLimit.withLimit(5);
+
+        assertThat(scanWithLimit.limitPushdownEnabled()).isFalse();
+
+        List<ManifestEntry> limitedFiles = scanWithLimit.plan().files();
+
+        assertThat(limitedFiles.size())
+                .as(
+                        "When filter is present, limit pushdown should be disabled, returning all files")
+                .isEqualTo(numFiles);
     }
 
     private List<KeyValue> generateData(int numRecords) {
