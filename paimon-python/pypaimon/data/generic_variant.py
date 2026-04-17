@@ -49,14 +49,17 @@ import enum
 import struct
 import uuid as _uuid
 
+from pypaimon.data._variant_binary import (
+    _PRIMITIVE, _SHORT_STR, _OBJECT, _ARRAY,
+    _U8_MAX, _U16_MAX, _U24_MAX, _U32_SIZE,
+    _VERSION, _VERSION_MASK,
+    _read_unsigned, _get_int_size,
+    _primitive_header, _object_header, _array_header,
+)
+
 # ---------------------------------------------------------------------------
 # Constants (matching GenericVariantUtil.java)
 # ---------------------------------------------------------------------------
-
-_PRIMITIVE = 0
-_SHORT_STR = 1
-_OBJECT = 2
-_ARRAY = 3
 
 _NULL = 0
 _TRUE = 1
@@ -77,14 +80,8 @@ _BINARY = 15
 _LONG_STR = 16
 _UUID = 20
 
-_VERSION = 1
-_VERSION_MASK = 0x0F
 _SIZE_LIMIT = 128 * 1024 * 1024
 _MAX_SHORT_STR_SIZE = 0x3F   # 63
-_U8_MAX = 255
-_U16_MAX = 65535
-_U24_MAX = 16777215
-_U32_SIZE = 4
 _MAX_DECIMAL4_PRECISION = 9
 _MAX_DECIMAL8_PRECISION = 18
 _MAX_DECIMAL16_PRECISION = 38
@@ -145,10 +142,6 @@ _LONG_FAMILY_SIZES = {
 # Low-level binary utilities
 # ---------------------------------------------------------------------------
 
-def _read_unsigned(data, pos, n):
-    return int.from_bytes(data[pos:pos + n], 'little', signed=False)
-
-
 def _read_signed(data, pos, n):
     return int.from_bytes(data[pos:pos + n], 'little', signed=True)
 
@@ -157,39 +150,8 @@ def _write_le(buf, pos, value, n):
     buf[pos:pos + n] = value.to_bytes(n, 'little')
 
 
-def _get_int_size(value):
-    if value <= _U8_MAX:
-        return 1
-    if value <= _U16_MAX:
-        return 2
-    if value <= _U24_MAX:
-        return 3
-    return 4
-
-
-def _primitive_header(type_id):
-    return (type_id << 2) | _PRIMITIVE
-
-
 def _short_str_header(size):
     return (size << 2) | _SHORT_STR
-
-
-def _object_header(large_size, id_size, offset_size):
-    return (
-        ((1 if large_size else 0) << 6)
-        | ((id_size - 1) << 4)
-        | ((offset_size - 1) << 2)
-        | _OBJECT
-    )
-
-
-def _array_header(large_size, offset_size):
-    return (
-        ((1 if large_size else 0) << 4)
-        | ((offset_size - 1) << 2)
-        | _ARRAY
-    )
 
 
 def _variant_get_type(value, pos):

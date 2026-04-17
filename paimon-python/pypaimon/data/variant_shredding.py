@@ -54,68 +54,31 @@ from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-# ---------------------------------------------------------------------------
-# Variant binary constants (mirror generic_variant.py)
-# ---------------------------------------------------------------------------
+from pypaimon.data._variant_binary import (
+    _PRIMITIVE, _SHORT_STR, _OBJECT, _ARRAY,
+    _U8_MAX, _U32_SIZE,
+    _VERSION, _VERSION_MASK,
+    _read_unsigned, _get_int_size,
+    _primitive_header, _object_header, _array_header,
+)
 
-_PRIMITIVE = 0
-_SHORT_STR = 1
-_OBJECT = 2
-_ARRAY = 3
+# ---------------------------------------------------------------------------
+# Local constants for null/true/false type IDs
+# ---------------------------------------------------------------------------
 
 _NULL_TYPE_ID = 0
 _TRUE_TYPE_ID = 1
 _FALSE_TYPE_ID = 2
 
-_U8_MAX = 255
-_U32_SIZE = 4
-_VERSION = 1
-_VERSION_MASK = 0x0F
-
-_NULL_VALUE_BYTES: bytes = bytes([((_NULL_TYPE_ID << 2) | _PRIMITIVE)])
+_NULL_VALUE_BYTES: bytes = bytes([_primitive_header(_NULL_TYPE_ID)])
 
 
 # ---------------------------------------------------------------------------
-# Low-level binary helpers
+# Low-level binary helpers (shredding-specific)
 # ---------------------------------------------------------------------------
-
-def _read_unsigned(data: bytes, pos: int, n: int) -> int:
-    return int.from_bytes(data[pos:pos + n], 'little', signed=False)
-
-
-def _get_int_size(value: int) -> int:
-    if value <= 0xFF:
-        return 1
-    if value <= 0xFFFF:
-        return 2
-    if value <= 0xFFFFFF:
-        return 3
-    return 4
-
 
 def _append_le(buf: bytearray, value: int, n: int) -> None:
     buf.extend(value.to_bytes(n, 'little'))
-
-
-def _primitive_header(type_id: int) -> int:
-    return (type_id << 2) | _PRIMITIVE
-
-
-def _object_header(large_size: bool, id_size: int, offset_size: int) -> int:
-    return (
-        ((1 if large_size else 0) << 6)
-        | ((id_size - 1) << 4)
-        | ((offset_size - 1) << 2)
-        | _OBJECT
-    )
-
-
-def _array_header(large_size: bool, offset_size: int) -> int:
-    return (
-        ((1 if large_size else 0) << 4)
-        | ((offset_size - 1) << 2)
-        | _ARRAY
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +372,14 @@ def _extract_overflow_fields(overflow_bytes: bytes) -> List[Tuple[int, bytes]]:
     # but the DATA section may be laid out in a different order (e.g. GenericVariantBuilder
     # sorts the id/offset tables alphabetically while writing data in insertion order).
     # We must sort by offset to determine each field's byte boundaries correctly.
+    #
+    # Example: variant {"b": 2, "a": 1} written by GenericVariantBuilder
+    #   id_table:     [id_a=0,  id_b=1]    (alphabetical order)
+    #   offset_table: [off_a=2, off_b=0]   (id-order: a first, then b)
+    #   data section: [enc(2),  enc(1)]    (insertion order: b first, then a)
+    #   So pairs = [(id_a=0, off=2), (id_b=1, off=0)]
+    #   Sorted by offset: [(id_b=1, off=0), (id_a=0, off=2)]
+    #   Boundaries:        [0, 2, sentinel] → enc(2)=data[0:2], enc(1)=data[2:sentinel]
     pairs: List[Tuple[int, int]] = []
     for i in range(size):
         key_id = _read_unsigned(overflow_bytes, id_start + i * id_size, id_size)
