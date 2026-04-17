@@ -81,7 +81,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        this.hasNonPartitionFilter =
+        this.hasNonPartitionFilter |=
                 !new HashSet<>(schema.partitionKeys())
                         .containsAll(PredicateVisitor.collectFieldNames(predicate));
         super.withFilter(predicate);
