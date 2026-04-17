@@ -248,6 +248,86 @@ class AoReaderTest(unittest.TestCase):
         ])
         self.assertEqual(actual.sort_by('user_id'), expected)
 
+    def test_lance_sliced_split_row_range_pushdown(self):
+        """
+        SlicedSplit with Lance format calls read_range() instead of read_all(),
+        reading only the requested row slice from disk rather than the full file.
+        """
+        import unittest.mock as mock
+        try:
+            import lance as _lance
+            import lance.file  # ensure submodule is loaded before write_lance uses it
+        except ImportError:
+            self.skipTest("lance not installed")
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('id', pa.int64()), ('value', pa.string())]),
+            options={'file.format': 'lance'})
+        self.catalog.create_table('default.test_lance_sliced_split', schema, False)
+        table = self.catalog.get_table('default.test_lance_sliced_split')
+
+        # Write 1000 rows in a single shot so they land in one file
+        n = 1000
+        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        scan = table.new_read_builder().new_scan()
+        splits = scan.plan().splits()
+        self.assertEqual(len(splits), 1, "Expected single split (no partition, single bucket)")
+        data_split = splits[0]
+        self.assertEqual(len(data_split.files), 1, "Expected single file in split")
+
+        file_name = data_split.files[0].file_name
+        slice_start, slice_end = 200, 700  # request 500 of 1000 rows
+
+        from pypaimon.read.sliced_split import SlicedSplit
+        sliced = SlicedSplit(data_split, {file_name: (slice_start, slice_end)})
+
+        # Spy on lance.file.LanceFileReader to verify read_range is used
+        OrigReader = _lance.file.LanceFileReader
+        read_all_calls = []
+        read_range_calls = []
+
+        class SpyLanceFileReader:
+            def __init__(self, *args, **kwargs):
+                self._r = OrigReader(*args, **kwargs)
+
+            def read_all(self, *args, **kwargs):
+                read_all_calls.append(())
+                return self._r.read_all(*args, **kwargs)
+
+            def read_range(self, start, count, **kwargs):
+                read_range_calls.append((start, count))
+                return self._r.read_range(start, count, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._r, name)
+
+        table_read = table.new_read_builder().new_read()
+        with mock.patch.object(_lance.file, 'LanceFileReader', SpyLanceFileReader):
+            result = table_read.to_arrow([sliced])
+
+        # Verify that read_range was used, not read_all
+        self.assertEqual(len(read_all_calls), 0,
+                         "read_all() must not be called when SlicedSplit row range is available")
+        self.assertEqual(len(read_range_calls), 1)
+        actual_start, actual_count = read_range_calls[0]
+        self.assertEqual(actual_start, slice_start)
+        self.assertEqual(actual_count, slice_end - slice_start,
+                         f"read_range should request exactly {slice_end - slice_start} rows, "
+                         f"not the full {n} rows of the file")
+
+        # Verify functional correctness: correct rows returned
+        self.assertEqual(result.num_rows, slice_end - slice_start)
+        result_ids = sorted(result.column('id').to_pylist())
+        self.assertEqual(result_ids, list(range(slice_start, slice_end)))
+
     def test_append_only_multi_write_once_commit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_multi_once_commit', schema, False)
