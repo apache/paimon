@@ -331,20 +331,24 @@ public class KeyValueFileStoreScanTest {
 
     @Test
     public void testLimitPushdownWithKeyFilter() throws Exception {
-        // Write data with different shop IDs
         List<KeyValue> data = generateData(200);
         Snapshot snapshot = writeData(data);
 
-        // With keyFilter, limit pushdown should still work (keyFilter doesn't affect limit
-        // pushdown)
+        KeyValueFileStoreScan scanAll = store.newScan();
+        scanAll.withSnapshot(snapshot.id());
+        int totalFiles = scanAll.plan().files().size();
+        assertThat(totalFiles).isGreaterThan(0);
+
+        // keyFilter + limit: early-stop by rowCount() is unsafe, should be disabled
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
         scan.withKeyFilter(
                 new PredicateBuilder(RowType.of(new IntType(false)))
                         .equal(0, data.get(0).key().getInt(0)));
         scan.withLimit(5);
-        List<ManifestEntry> files = scan.plan().files();
-        assertThat(files.size()).isGreaterThan(0);
+
+        assertThat(scan.limitPushdownEnabled()).isFalse();
+        assertThat(scan.plan().files().size()).isEqualTo(totalFiles);
     }
 
     @Test

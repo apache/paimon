@@ -228,7 +228,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         return mergeEngine != PARTIAL_UPDATE
                 && mergeEngine != AGGREGATE
                 && !deletionVectorsEnabled
-                && valueFilter == null;
+                && valueFilter == null
+                && keyFilter == null;
     }
 
     @Override
