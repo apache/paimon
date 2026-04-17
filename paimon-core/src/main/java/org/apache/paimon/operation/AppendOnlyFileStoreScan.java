@@ -22,6 +22,7 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -33,6 +34,9 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -89,6 +93,32 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     public FileStoreScan withCompleteFilter(Predicate predicate) {
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
+    }
+
+    @Override
+    public Iterator<ManifestEntry> readManifestEntries(
+            List<ManifestFileMeta> manifestFiles, boolean useSequential) {
+        Iterator<ManifestEntry> result = super.readManifestEntries(manifestFiles, useSequential);
+        if (limit == null
+                || limit <= 0
+                || deletionVectorsEnabled
+                || dataEvolutionEnabled
+                || inputFilter != null
+                || manifestsReader().partitionFilter() != null) {
+            return result;
+        }
+
+        List<ManifestEntry> filtered = new ArrayList<>();
+        long accumulatedRowCount = 0;
+        while (result.hasNext()) {
+            ManifestEntry next = result.next();
+            filtered.add(next);
+            accumulatedRowCount += next.file().rowCount();
+            if (accumulatedRowCount >= limit) {
+                break;
+            }
+        }
+        return filtered.iterator();
     }
 
     /** Note: Keep this thread-safe. */
