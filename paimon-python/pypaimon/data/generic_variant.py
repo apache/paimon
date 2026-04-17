@@ -50,8 +50,8 @@ import struct
 import uuid as _uuid
 
 from pypaimon.data._variant_binary import (
-    _PRIMITIVE, _SHORT_STR, _OBJECT, _ARRAY,
-    _U8_MAX, _U16_MAX, _U24_MAX, _U32_SIZE,
+    _SHORT_STR, _OBJECT, _ARRAY,
+    _U8_MAX, _U32_SIZE,
     _VERSION, _VERSION_MASK,
     _read_unsigned, _get_int_size,
     _primitive_header, _object_header, _array_header,

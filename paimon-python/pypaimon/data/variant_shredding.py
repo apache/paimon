@@ -55,7 +55,7 @@ from typing import Dict, List, Optional, Tuple
 import pyarrow as pa
 
 from pypaimon.data._variant_binary import (
-    _PRIMITIVE, _SHORT_STR, _OBJECT, _ARRAY,
+    _OBJECT,
     _U8_MAX, _U32_SIZE,
     _VERSION, _VERSION_MASK,
     _read_unsigned, _get_int_size,
