@@ -21,7 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.SchemaManager;
@@ -36,7 +35,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -52,7 +50,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private boolean hasNext;
 
     private Integer pushDownLimit;
-    private boolean hasNonPartitionFilter;
     private TopN topN;
 
     private final SchemaManager schemaManager;
@@ -81,9 +78,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        this.hasNonPartitionFilter |=
-                !new HashSet<>(schema.partitionKeys())
-                        .containsAll(PredicateVisitor.collectFieldNames(predicate));
         super.withFilter(predicate);
         return this;
     }
@@ -132,7 +126,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (pushDownLimit == null || hasNonPartitionFilter) {
+        if (pushDownLimit == null || snapshotReader.hasNonPartitionFilter()) {
             return Optional.empty();
         }
 
