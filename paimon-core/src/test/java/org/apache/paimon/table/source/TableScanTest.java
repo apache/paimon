@@ -167,6 +167,34 @@ public class TableScanTest extends ScannerTestBase {
     }
 
     @Test
+    void testLimitPushdownWithPartitionFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < 10; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        Predicate partitionFilter =
+                new PredicateBuilder(table.schema().logicalRowType()).lessOrEqual(0, 4);
+
+        TableScan.Plan planNoLimit = table.newScan().withFilter(partitionFilter).plan();
+        assertThat(planNoLimit.splits().size()).isEqualTo(5);
+
+        TableScan.Plan plan = table.newScan().withFilter(partitionFilter).withLimit(2).plan();
+
+        assertThat(plan.splits().size())
+                .as("Partition filter + limit: limit pushdown should not be disabled")
+                .isEqualTo(2);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testLimitPushdownWhenDataLessThanLimit() throws Exception {
         createAppendOnlyTable();
 

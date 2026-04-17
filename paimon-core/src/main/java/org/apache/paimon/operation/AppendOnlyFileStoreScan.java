@@ -103,7 +103,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 || limit <= 0
                 || deletionVectorsEnabled
                 || dataEvolutionEnabled
-                || inputFilter != null) {
+                || inputFilter != null
+                || hasPartitionFilter()) {
             return result;
         }
 
