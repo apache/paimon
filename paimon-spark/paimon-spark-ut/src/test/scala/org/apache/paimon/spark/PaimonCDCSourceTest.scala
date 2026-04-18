@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
 class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {

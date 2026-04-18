@@ -40,56 +40,68 @@ trait PaimonMergeIntoBase
   override val operation: RowLevelOp = MergeInto
 
   def apply(plan: LogicalPlan): LogicalPlan = {
-    plan.resolveOperators {
-      case merge: MergeIntoTable
-          if merge.resolved && PaimonRelation.isPaimonTable(merge.targetTable) =>
-        val relation = PaimonRelation.getPaimonRelation(merge.targetTable)
-        val v2Table = relation.table.asInstanceOf[SparkTable]
-        val dataEvolutionEnabled = v2Table.coreOptions.dataEvolutionEnabled()
-        val targetOutput = relation.output
+    // Spark 4.1 moved RewriteMergeIntoTable from the "DML rewrite" batch into the main Resolution
+    // batch, which marks the plan analyzed before the Post-Hoc Resolution batch runs.
+    // `plan.resolveOperators` then short-circuits on the already-analyzed MERGE node and the
+    // physical planner rejects it with "Table does not support MERGE INTO TABLE". Use
+    // `transformDown` (which unconditionally visits every node) guarded by
+    // `AnalysisHelper.allowInvokingTransformsInAnalyzer` so the in-analyzer assertion does not
+    // trip. Pure append-only Paimon tables on Spark 4.1+ are handled earlier in the Resolution
+    // batch by `Spark41MergeIntoRewrite`, so by the time this postHoc rule fires the aligned
+    // `MergeIntoTable` node is already a `ReplaceData` / `AppendData` plan for that case; this
+    // rule only sees MERGEs that still need to become the V1 command.
+    AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown {
+        case merge: MergeIntoTable
+            if merge.resolved && PaimonRelation.isPaimonTable(merge.targetTable) =>
+          val relation = PaimonRelation.getPaimonRelation(merge.targetTable)
+          val v2Table = relation.table.asInstanceOf[SparkTable]
+          val dataEvolutionEnabled = v2Table.coreOptions.dataEvolutionEnabled()
+          val targetOutput = relation.output
 
-        checkPaimonTable(v2Table.getTable)
-        checkCondition(merge.mergeCondition)
-        merge.matchedActions.flatMap(_.condition).foreach(checkCondition)
-        merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)
+          checkPaimonTable(v2Table.getTable)
+          checkCondition(merge.mergeCondition)
+          merge.matchedActions.flatMap(_.condition).foreach(checkCondition)
+          merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)
 
-        val updateActions = merge.matchedActions.collect { case a: UpdateAction => a }
-        val primaryKeys = v2Table.getTable.primaryKeys().asScala.toSeq
-        if (primaryKeys.nonEmpty) {
-          checkUpdateActionValidity(
-            AttributeSet(targetOutput),
-            merge.mergeCondition,
-            updateActions,
-            primaryKeys)
-        }
-
-        val alignedMergeIntoTable = alignMergeIntoTable(merge, targetOutput)
-
-        if (!shouldFallbackToV1MergeInto(alignedMergeIntoTable)) {
-          alignedMergeIntoTable
-        } else {
-          if (dataEvolutionEnabled) {
-            MergeIntoPaimonDataEvolutionTable(
-              v2Table,
-              merge.targetTable,
-              merge.sourceTable,
+          val updateActions = merge.matchedActions.collect { case a: UpdateAction => a }
+          val primaryKeys = v2Table.getTable.primaryKeys().asScala.toSeq
+          if (primaryKeys.nonEmpty) {
+            checkUpdateActionValidity(
+              AttributeSet(targetOutput),
               merge.mergeCondition,
-              alignedMergeIntoTable.matchedActions,
-              alignedMergeIntoTable.notMatchedActions,
-              resolveNotMatchedBySourceActions(alignedMergeIntoTable)
-            )
-          } else {
-            MergeIntoPaimonTable(
-              v2Table,
-              merge.targetTable,
-              merge.sourceTable,
-              merge.mergeCondition,
-              alignedMergeIntoTable.matchedActions,
-              alignedMergeIntoTable.notMatchedActions,
-              resolveNotMatchedBySourceActions(alignedMergeIntoTable)
-            )
+              updateActions,
+              primaryKeys)
           }
-        }
+
+          val alignedMergeIntoTable = alignMergeIntoTable(merge, targetOutput)
+
+          if (!shouldFallbackToV1MergeInto(alignedMergeIntoTable)) {
+            alignedMergeIntoTable
+          } else {
+            if (dataEvolutionEnabled) {
+              MergeIntoPaimonDataEvolutionTable(
+                v2Table,
+                merge.targetTable,
+                merge.sourceTable,
+                merge.mergeCondition,
+                alignedMergeIntoTable.matchedActions,
+                alignedMergeIntoTable.notMatchedActions,
+                resolveNotMatchedBySourceActions(alignedMergeIntoTable)
+              )
+            } else {
+              MergeIntoPaimonTable(
+                v2Table,
+                merge.targetTable,
+                merge.sourceTable,
+                merge.mergeCondition,
+                alignedMergeIntoTable.matchedActions,
+                alignedMergeIntoTable.notMatchedActions,
+                resolveNotMatchedBySourceActions(alignedMergeIntoTable)
+              )
+            }
+          }
+      }
     }
   }
 
