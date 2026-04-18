@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
@@ -120,7 +121,12 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
                             new DataField(17, "file_source", DataTypes.STRING()),
                             new DataField(18, "first_row_id", DataTypes.BIGINT()),
-                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING()))));
+                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING())),
+                            new DataField(20, "file_name", SerializationUtils.newStringType(false)),
+                            new DataField(
+                                    21,
+                                    "clustering_columns",
+                                    SerializationUtils.newStringType(true))));
 
     private final FileStoreTable storeTable;
 
@@ -353,6 +359,24 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
+
+            Function<Long, List<String>> clusteringColumnsGetter =
+                    new Function<Long, List<String>>() {
+                        final Map<Long, List<String>> cache = new HashMap<>();
+
+                        @Override
+                        public List<String> apply(Long schemaId) {
+                            if (cache.containsKey(schemaId)) {
+                                return cache.get(schemaId);
+                            }
+                            TableSchema dataSchema = schemaManager.schema(schemaId);
+                            CoreOptions options = new CoreOptions(dataSchema.options());
+                            List<String> cols = options.clusteringColumns();
+                            cache.put(schemaId, cols);
+                            return cols;
+                        }
+                    };
+
             for (Split dataSplit : splits) {
                 iteratorList.add(
                         Iterators.transform(
@@ -362,6 +386,7 @@ public class FilesTable implements ReadonlyTable {
                                                 (DataSplit) dataSplit,
                                                 partitionCastExecutor,
                                                 keyConverters,
+                                                clusteringColumnsGetter,
                                                 file,
                                                 simpleStatsEvolutions)));
             }
@@ -381,6 +406,7 @@ public class FilesTable implements ReadonlyTable {
                 DataSplit dataSplit,
                 CastExecutor<InternalRow, BinaryString> partitionCastExecutor,
                 Function<Long, RowDataToObjectArrayConverter> keyConverters,
+                Function<Long, List<String>> clusteringColumnsGetter,
                 DataFileMeta file,
                 SimpleStatsEvolutions simpleStatsEvolutions) {
             StatsLazyGetter statsGetter = new StatsLazyGetter(file, simpleStatsEvolutions);
@@ -440,6 +466,13 @@ public class FilesTable implements ReadonlyTable {
                             }
                             return new GenericArray(
                                     writeCols.stream().map(BinaryString::fromString).toArray());
+                        },
+                        () -> BinaryString.fromString(file.fileName()),
+                        () -> {
+                            List<String> cols = clusteringColumnsGetter.apply(file.schemaId());
+                            return cols.isEmpty()
+                                    ? null
+                                    : BinaryString.fromString(String.join(",", cols));
                         },
                     };
 
