@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import io
 import os
 import shutil
 import struct
@@ -1156,6 +1157,84 @@ class BlobEndToEndTest(unittest.TestCase):
         # With blob_as_descriptor=False, we should get the actual blob content
         self.assertEqual(read_content_bytes, test_content)
         reader_content.close()
+
+
+class OffsetInputStreamTest(unittest.TestCase):
+
+    def setUp(self):
+        self.test_data = bytes(range(20))
+        self.wrapped = io.BytesIO(self.test_data)
+
+    def test_constructor(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        self.assertEqual(stream.tell(), 0)
+        stream.close()
+
+    def test_get_pos_and_seek(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        stream.seek(3)
+        self.assertEqual(stream.tell(), 3)
+        stream.seek(10)
+        self.assertEqual(stream.tell(), 10)
+        stream.seek(0)
+        self.assertEqual(stream.tell(), 0)
+        stream.close()
+
+    def test_read_single_byte(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        data = stream.read(1)
+        self.assertEqual(data[0], self.test_data[5])
+        self.assertEqual(stream.tell(), 1)
+        stream.seek(9)
+        data = stream.read(1)
+        self.assertEqual(data[0], self.test_data[14])
+        self.assertEqual(stream.tell(), 10)
+        stream.close()
+
+    def test_read_single_byte_at_end(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        stream.seek(10)
+        data = stream.read(1)
+        self.assertEqual(data, b'')
+        stream.close()
+
+    def test_read_byte_array(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        data = stream.read(5)
+        self.assertEqual(data, self.test_data[5:10])
+        self.assertEqual(stream.tell(), 5)
+        stream.close()
+
+    def test_read_byte_array_hitting_end(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        stream.seek(7)
+        data = stream.read(5)
+        self.assertEqual(len(data), 3)
+        self.assertEqual(data, self.test_data[12:15])
+        self.assertEqual(stream.tell(), 10)
+        stream.close()
+
+    def test_read_byte_array_at_end(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        stream.seek(10)
+        data = stream.read(5)
+        self.assertEqual(data, b'')
+        stream.close()
+
+    def test_read_with_unlimited_length(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, -1)
+        data = stream.read(10)
+        self.assertEqual(data, self.test_data[5:15])
+        self.assertEqual(stream.tell(), 10)
+        stream.close()
 
 
 if __name__ == '__main__':
