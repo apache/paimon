@@ -201,15 +201,22 @@ class OffsetInputStream(io.RawIOBase):
 
     def seek(self, pos, whence=io.SEEK_SET):
         if whence == io.SEEK_SET:
-            return self._wrapped.seek(self._offset + pos) - self._offset
+            if pos < 0:
+                raise ValueError(f"Negative seek position: {pos}")
+            target = self._offset + pos
         elif whence == io.SEEK_CUR:
-            return self._wrapped.seek(pos, io.SEEK_CUR) - self._offset
+            target = self._wrapped.tell() + pos
+            target = max(target, self._offset)
         elif whence == io.SEEK_END:
             if self._length != -1:
-                return self._wrapped.seek(self._offset + self._length + pos) - self._offset
+                target = self._offset + self._length + pos
             else:
-                return self._wrapped.seek(pos, io.SEEK_END) - self._offset
-        raise ValueError(f"Invalid whence: {whence}")
+                result = self._wrapped.seek(pos, io.SEEK_END)
+                return max(result - self._offset, 0)
+            target = max(target, self._offset)
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+        return self._wrapped.seek(target) - self._offset
 
     def tell(self) -> int:
         return self._wrapped.tell() - self._offset

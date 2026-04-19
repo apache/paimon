@@ -1236,6 +1236,32 @@ class OffsetInputStreamTest(unittest.TestCase):
         self.assertEqual(stream.tell(), 10)
         stream.close()
 
+    def test_seek_set_negative_raises(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        with self.assertRaises(ValueError):
+            stream.seek(-1, io.SEEK_SET)
+        stream.close()
+
+    def test_seek_cur_underflow_clamps_to_zero(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        stream.seek(2)
+        stream.seek(-5, io.SEEK_CUR)
+        self.assertEqual(stream.tell(), 0)
+        data = stream.read(1)
+        self.assertEqual(data[0], self.test_data[5])
+        stream.close()
+
+    def test_seek_end_underflow_clamps_to_zero(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, 10)
+        stream.seek(-20, io.SEEK_END)
+        self.assertEqual(stream.tell(), 0)
+        data = stream.read(1)
+        self.assertEqual(data[0], self.test_data[5])
+        stream.close()
+
 
 if __name__ == '__main__':
     unittest.main()
