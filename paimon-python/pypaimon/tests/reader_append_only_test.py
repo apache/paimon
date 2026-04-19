@@ -328,6 +328,92 @@ class AoReaderTest(unittest.TestCase):
         result_ids = sorted(result.column('id').to_pylist())
         self.assertEqual(result_ids, list(range(slice_start, slice_end)))
 
+    def test_lance_indexed_split_take_rows_pushdown(self):
+        """
+        IndexedSplit row ranges (from ANN global index results) are converted to
+        local file indices and pushed down to lance.file.LanceFileReader.take_rows(),
+        so only the matched rows are physically read instead of the full file.
+        """
+        import unittest.mock as mock
+        try:
+            import lance as _lance
+            import lance.file
+        except ImportError:
+            self.skipTest("lance not installed")
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('id', pa.int64()), ('value', pa.string())]),
+            options={'file.format': 'lance',
+                     'row-tracking.enabled': 'true',
+                     'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_lance_indexed_split', schema, False)
+        table = self.catalog.get_table('default.test_lance_indexed_split')
+
+        n = 1000
+        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        splits = table.new_read_builder().new_scan().plan().splits()
+        self.assertEqual(len(splits), 1)
+        data_split = splits[0]
+        self.assertEqual(len(data_split.files), 1)
+
+        file_meta = data_split.files[0]
+        self.assertIsNotNone(file_meta.first_row_id, "row tracking must assign first_row_id")
+        first_row_id = file_meta.first_row_id
+
+        # Simulate ANN result: 3 scattered global row IDs
+        from pypaimon.globalindex.indexed_split import IndexedSplit
+        from pypaimon.utils.range import Range
+        target_global_ids = [first_row_id + 50, first_row_id + 300, first_row_id + 700]
+        row_ranges = [Range(g, g) for g in target_global_ids]
+        indexed = IndexedSplit(data_split, row_ranges)
+
+        OrigReader = _lance.file.LanceFileReader
+        take_rows_calls = []
+        read_all_calls = []
+
+        class SpyLanceFileReader:
+            def __init__(self, *args, **kwargs):
+                self._r = OrigReader(*args, **kwargs)
+
+            def take_rows(self, indices, **kwargs):
+                take_rows_calls.append(list(indices))
+                return self._r.take_rows(indices, **kwargs)
+
+            def read_all(self, *args, **kwargs):
+                read_all_calls.append(())
+                return self._r.read_all(*args, **kwargs)
+
+            def read_range(self, *args, **kwargs):
+                return self._r.read_range(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._r, name)
+
+        table_read = table.new_read_builder().new_read()
+        with mock.patch.object(_lance.file, 'LanceFileReader', SpyLanceFileReader):
+            result = table_read.to_arrow([indexed])
+
+        self.assertEqual(len(read_all_calls), 0,
+                         "read_all() must not be called when IndexedSplit row ranges are available")
+        self.assertEqual(len(take_rows_calls), 1)
+        # local indices = global_ids - first_row_id
+        expected_local = [g - first_row_id for g in target_global_ids]
+        self.assertEqual(sorted(take_rows_calls[0]), sorted(expected_local),
+                         f"take_rows should request local indices {expected_local}, "
+                         f"not read the full {n} rows")
+
+        self.assertEqual(result.num_rows, len(target_global_ids))
+        result_ids = sorted(result.column('id').to_pylist())
+        self.assertEqual(result_ids, [50, 300, 700])
+
     def test_append_only_multi_write_once_commit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_multi_once_commit', schema, False)

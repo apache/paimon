@@ -146,8 +146,8 @@ class SplitRead(ABC):
             effective_row_ranges = Range.and_(row_ranges, [file.row_id_range()])
             if len(effective_row_ranges) == 0:
                 return EmptyRecordBatchReader()
-            if file_format == CoreOptions.FILE_FORMAT_VORTEX:
-                # Convert global row ranges to local indices for Vortex pushdown
+            if file_format in (CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
+                # Convert global row ranges to local file indices for native pushdown
                 row_indices = []
                 for r in effective_row_ranges:
                     start = r.from_ - file.first_row_id
@@ -168,7 +168,7 @@ class SplitRead(ABC):
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
                                               read_arrow_predicate, batch_size=batch_size,
-                                              row_range=row_range)
+                                              row_range=row_range, row_indices=row_indices)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
