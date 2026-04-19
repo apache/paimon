@@ -22,12 +22,14 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.tantivy.TantivySearcher;
 import org.apache.paimon.utils.IOUtils;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Pool of {@link TantivySearcher} instances keyed by index file identity ({@code filePath@size}).
@@ -35,10 +37,17 @@ import java.util.concurrent.LinkedBlockingDeque;
  * <p>Each searcher holds the Tantivy index open in Rust memory (including the FST term dictionary).
  * Pooling avoids the repeated cost of loading the index on every query.
  *
+ * <p>At most one idle searcher is kept per key. Under concurrent queries on the same shard, the
+ * last entry to be returned wins; the others are closed immediately. Entries idle for more than
+ * {@link #EXPIRE_AFTER_ACCESS_MINUTES} minutes are evicted and closed automatically. The total
+ * number of idle entries across all keys is bounded by {@code maxSize}.
+ *
  * <p>Thread-safe. Borrow/return semantics guarantee at most one thread uses a given entry at a
  * time.
  */
 public class TantivySearcherPool {
+
+    static final long EXPIRE_AFTER_ACCESS_MINUTES = 30;
 
     /** A borrowed searcher + its backing stream. Both are returned together. */
     static final class PooledEntry implements Closeable {
@@ -57,12 +66,21 @@ public class TantivySearcherPool {
         }
     }
 
-    private final int maxSizePerKey;
-    private final ConcurrentHashMap<String, LinkedBlockingDeque<PooledEntry>> pool =
-            new ConcurrentHashMap<>();
+    @Nullable private final Cache<String, PooledEntry> idleCache;
 
-    public TantivySearcherPool(int maxSizePerKey) {
-        this.maxSizePerKey = maxSizePerKey;
+    public TantivySearcherPool(int maxSize) {
+        if (maxSize <= 0) {
+            this.idleCache = null;
+        } else {
+            Cache<String, PooledEntry> cache =
+                    Caffeine.newBuilder()
+                            .maximumSize(maxSize)
+                            .expireAfterAccess(EXPIRE_AFTER_ACCESS_MINUTES, TimeUnit.MINUTES)
+                            .executor(Runnable::run)
+                            .removalListener((k, v, c) -> IOUtils.closeQuietly((PooledEntry) v))
+                            .build();
+            this.idleCache = cache;
+        }
     }
 
     /**
@@ -73,24 +91,21 @@ public class TantivySearcherPool {
      */
     @Nullable
     public PooledEntry borrow(String key) {
-        LinkedBlockingDeque<PooledEntry> deque = pool.get(key);
-        return deque == null ? null : deque.pollFirst();
+        if (idleCache == null) {
+            return null;
+        }
+        return idleCache.asMap().remove(key);
     }
 
     /**
-     * Return a previously borrowed entry. If the pool is full, the entry is closed immediately.
-     *
-     * <p>The stream position after use is irrelevant — Rust always seeks before reading.
+     * Return a previously borrowed entry to the pool. Any entry displaced by size eviction, TTL
+     * expiry, or key replacement is closed automatically via the removal listener.
      */
     public void returnEntry(String key, PooledEntry entry) {
-        if (maxSizePerKey <= 0) {
+        if (idleCache == null) {
             IOUtils.closeQuietly(entry);
             return;
         }
-        LinkedBlockingDeque<PooledEntry> deque =
-                pool.computeIfAbsent(key, k -> new LinkedBlockingDeque<>(maxSizePerKey));
-        if (!deque.offerFirst(entry)) {
-            IOUtils.closeQuietly(entry);
-        }
+        idleCache.put(key, entry);
     }
 }

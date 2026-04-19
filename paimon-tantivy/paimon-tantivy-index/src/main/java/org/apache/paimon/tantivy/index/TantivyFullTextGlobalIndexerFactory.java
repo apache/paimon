@@ -32,9 +32,11 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
      * Shared pool across all indexers created by this factory. This factory instance is a JVM-level
      * singleton (loaded once via {@link java.util.ServiceLoader}), so the pool naturally survives
      * across queries and scanners.
+     *
+     * <p>The pool is initialized lazily on the first {@link #create} call so that the pool size can
+     * be read from user-supplied options.
      */
-    private final TantivySearcherPool searcherPool =
-            new TantivySearcherPool(Runtime.getRuntime().availableProcessors() * 2);
+    private volatile TantivySearcherPool searcherPool;
 
     @Override
     public String identifier() {
@@ -43,6 +45,14 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
+        if (searcherPool == null) {
+            synchronized (this) {
+                if (searcherPool == null) {
+                    int maxSize = options.get(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE);
+                    searcherPool = new TantivySearcherPool(maxSize);
+                }
+            }
+        }
         return new TantivyFullTextGlobalIndexer(searcherPool);
     }
 }
