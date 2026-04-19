@@ -23,7 +23,7 @@ use jni::JNIEnv;
 use std::ptr;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
-use tantivy::schema::{Field, NumericOptions, Schema, TEXT};
+use tantivy::schema::{Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy};
 
 use crate::jni_directory::JniDirectory;
@@ -58,7 +58,12 @@ fn build_schema() -> (Schema, Field, Field) {
         "row_id",
         NumericOptions::default().set_indexed().set_fast(),
     );
-    let text_field = builder.add_text_field("text", TEXT);
+    let text_options = TextOptions::default().set_indexing_options(
+        TextFieldIndexing::default()
+            .set_tokenizer("default")
+            .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+    );
+    let text_field = builder.add_text_field("text", text_options);
     (builder.build(), row_id_field, text_field)
 }
 
