@@ -28,6 +28,14 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     public static final String IDENTIFIER = "tantivy-fulltext";
 
+    /**
+     * Shared pool across all indexers created by this factory. This factory instance is a JVM-level
+     * singleton (loaded once via {@link java.util.ServiceLoader}), so the pool naturally survives
+     * across queries and scanners.
+     */
+    private final TantivySearcherPool searcherPool =
+            new TantivySearcherPool(Runtime.getRuntime().availableProcessors() * 2);
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -35,6 +43,6 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new TantivyFullTextGlobalIndexer();
+        return new TantivyFullTextGlobalIndexer(searcherPool);
     }
 }

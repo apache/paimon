@@ -26,11 +26,22 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Tantivy full-text global indexer. */
 public class TantivyFullTextGlobalIndexer implements GlobalIndexer {
 
-    public TantivyFullTextGlobalIndexer() {}
+    private final Map<String, ArchiveLayout> layoutCache = new ConcurrentHashMap<>();
+    private final TantivySearcherPool searcherPool;
+
+    public TantivyFullTextGlobalIndexer() {
+        this(new TantivySearcherPool(Runtime.getRuntime().availableProcessors() * 2));
+    }
+
+    public TantivyFullTextGlobalIndexer(TantivySearcherPool searcherPool) {
+        this.searcherPool = searcherPool;
+    }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
@@ -40,6 +51,6 @@ public class TantivyFullTextGlobalIndexer implements GlobalIndexer {
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) {
-        return new TantivyFullTextGlobalIndexReader(fileReader, files);
+        return new TantivyFullTextGlobalIndexReader(fileReader, files, layoutCache, searcherPool);
     }
 }

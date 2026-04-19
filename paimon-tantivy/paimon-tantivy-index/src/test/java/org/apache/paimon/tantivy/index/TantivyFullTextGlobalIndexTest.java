@@ -128,7 +128,11 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
-                new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
+                new TantivyFullTextGlobalIndexReader(
+                        fileReader,
+                        metas,
+                        new java.util.concurrent.ConcurrentHashMap<>(),
+                        new TantivySearcherPool(4))) {
             FullTextSearch search = new FullTextSearch("paimon", 10, "text");
             Optional<ScoredGlobalIndexResult> searchResult = reader.visitFullTextSearch(search);
             assertThat(searchResult).isPresent();
@@ -161,7 +165,11 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
-                new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
+                new TantivyFullTextGlobalIndexReader(
+                        fileReader,
+                        metas,
+                        new java.util.concurrent.ConcurrentHashMap<>(),
+                        new TantivySearcherPool(4))) {
             FullTextSearch search = new FullTextSearch("nonexistent", 10, "text");
             Optional<ScoredGlobalIndexResult> searchResult = reader.visitFullTextSearch(search);
             assertThat(searchResult).isPresent();
@@ -187,7 +195,11 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
-                new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
+                new TantivyFullTextGlobalIndexReader(
+                        fileReader,
+                        metas,
+                        new java.util.concurrent.ConcurrentHashMap<>(),
+                        new TantivySearcherPool(4))) {
             FullTextSearch search = new FullTextSearch("paimon", 10, "text");
             Optional<ScoredGlobalIndexResult> searchResult = reader.visitFullTextSearch(search);
             assertThat(searchResult).isPresent();
@@ -232,7 +244,11 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
-                new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
+                new TantivyFullTextGlobalIndexReader(
+                        fileReader,
+                        metas,
+                        new java.util.concurrent.ConcurrentHashMap<>(),
+                        new TantivySearcherPool(4))) {
             // Search for the special keyword — should match every 10th doc
             FullTextSearch search = new FullTextSearch("special_keyword", 1000, "text");
             Optional<ScoredGlobalIndexResult> searchResult = reader.visitFullTextSearch(search);
@@ -262,7 +278,11 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
-                new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
+                new TantivyFullTextGlobalIndexReader(
+                        fileReader,
+                        metas,
+                        new java.util.concurrent.ConcurrentHashMap<>(),
+                        new TantivySearcherPool(4))) {
             // Limit to 5 results
             FullTextSearch search = new FullTextSearch("paimon", 5, "text");
             Optional<ScoredGlobalIndexResult> searchResult = reader.visitFullTextSearch(search);
