@@ -152,13 +152,27 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         searcher = self._searcher
         query = self._index.parse_query(query_text, ["text"])
-        results = searcher.search(query, limit)
 
+        scored_results = searcher.search(query, limit)
+        if not scored_results.hits:
+            return DictBasedScoredIndexResult({})
+
+        addr_to_score: Dict[tuple, float] = {
+            (addr.segment_ord, addr.doc): score
+            for score, addr in scored_results.hits
+        }
+
+        # This can be replaced by https://github.com/quickwit-oss/tantivy-py/pull/641 when it's released
+        all_by_rowid = searcher.search(query, searcher.num_docs, order_by_field='row_id')
         id_to_scores: Dict[int, float] = {}
-        for score, doc_address in results.hits:
-            doc = searcher.doc(doc_address)
-            row_id = doc["row_id"][0]
-            id_to_scores[row_id] = score
+        remaining = len(addr_to_score)
+        for row_id, addr in all_by_rowid.hits:
+            score = addr_to_score.get((addr.segment_ord, addr.doc))
+            if score is not None:
+                id_to_scores[row_id] = score
+                remaining -= 1
+                if remaining == 0:
+                    break
 
         return DictBasedScoredIndexResult(id_to_scores)
 
@@ -178,7 +192,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
             # Open tantivy index from stream-backed directory
             schema_builder = tantivy.SchemaBuilder()
-            schema_builder.add_unsigned_field("row_id", stored=True, indexed=True, fast=True)
+            schema_builder.add_unsigned_field("row_id", stored=False, indexed=True, fast=True)
             schema_builder.add_text_field("text", stored=False)
             schema = schema_builder.build()
 

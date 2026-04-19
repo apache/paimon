@@ -56,10 +56,7 @@ fn build_schema() -> (Schema, Field, Field) {
     let mut builder = Schema::builder();
     let row_id_field = builder.add_u64_field(
         "row_id",
-        NumericOptions::default()
-            .set_stored()
-            .set_indexed()
-            .set_fast(),
+        NumericOptions::default().set_indexed().set_fast(),
     );
     let text_field = builder.add_text_field("text", TEXT);
     (builder.build(), row_id_field, text_field)
