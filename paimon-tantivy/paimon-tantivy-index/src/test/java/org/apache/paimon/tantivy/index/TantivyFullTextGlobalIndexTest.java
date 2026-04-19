@@ -298,7 +298,7 @@ public class TantivyFullTextGlobalIndexTest {
             assertThat(result.get().results().contains(0L)).isTrue();
         }
 
-        // Second query: pool hit, reuses the same searcher — results must be identical.
+        // Second query: pool hit, reuses the same searcher. Results must be identical.
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
             Optional<ScoredGlobalIndexResult> result = reader.visitFullTextSearch(search);
             assertThat(result).isPresent();
