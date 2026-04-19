@@ -93,21 +93,24 @@ public abstract class AbstractFlinkTableFactory
                 && parseBoolean(options.get(SCAN_BOUNDED.key()))) {
             unbounded = false;
         }
+        Catalog catalog = flinkCatalog != null ? flinkCatalog.catalog() : null;
         if (origin instanceof SystemCatalogTable) {
-            return new SystemTableSource(table, unbounded, context.getObjectIdentifier());
+            return new SystemTableSource(table, unbounded, context.getObjectIdentifier(), catalog);
         } else {
-            return new DataTableSource(context.getObjectIdentifier(), table, unbounded, context);
+            return new DataTableSource(
+                    context.getObjectIdentifier(), table, unbounded, context, catalog);
         }
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
         Table table = buildPaimonTable(context);
+        Catalog catalog = flinkCatalog != null ? flinkCatalog.catalog() : null;
         if (table instanceof FormatTable) {
             return new FlinkFormatTableSink(
-                    context.getObjectIdentifier(), (FormatTable) table, context);
+                    context.getObjectIdentifier(), (FormatTable) table, context, catalog);
         } else {
-            return new FlinkTableSink(context.getObjectIdentifier(), table, context);
+            return new FlinkTableSink(context.getObjectIdentifier(), table, context, catalog);
         }
     }
 

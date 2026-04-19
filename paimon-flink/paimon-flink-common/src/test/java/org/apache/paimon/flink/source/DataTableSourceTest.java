@@ -75,7 +75,11 @@ class DataTableSourceTest {
 
         DataTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+                        ObjectIdentifier.of("cat", "db", "table"),
+                        fileStoreTable,
+                        true,
+                        null,
+                        null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         sEnv1.setParallelism(-1);
@@ -105,7 +109,11 @@ class DataTableSourceTest {
 
         DataTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+                        ObjectIdentifier.of("cat", "db", "table"),
+                        fileStoreTable,
+                        true,
+                        null,
+                        null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
@@ -123,7 +131,7 @@ class DataTableSourceTest {
         ReadOptimizedTable ro = new ReadOptimizedTable(fileStoreTable);
 
         SystemTableSource tableSource =
-                new SystemTableSource(ro, false, ObjectIdentifier.of("cat", "db", "table"));
+                new SystemTableSource(ro, false, ObjectIdentifier.of("cat", "db", "table"), null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         Configuration configuration = new Configuration();
@@ -143,7 +151,10 @@ class DataTableSourceTest {
 
         SystemTableSource tableSource =
                 new SystemTableSource(
-                        auditLogTable, true, ObjectIdentifier.of("cat", "db", "table$audit_log"));
+                        auditLogTable,
+                        true,
+                        ObjectIdentifier.of("cat", "db", "table$audit_log"),
+                        null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
@@ -172,7 +183,8 @@ class DataTableSourceTest {
         ReadOptimizedTable roTable = new ReadOptimizedTable(hashFixedTable);
 
         SystemTableSource tableSource =
-                new SystemTableSource(roTable, true, ObjectIdentifier.of("cat", "db", "table$ro"));
+                new SystemTableSource(
+                        roTable, true, ObjectIdentifier.of("cat", "db", "table$ro"), null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();

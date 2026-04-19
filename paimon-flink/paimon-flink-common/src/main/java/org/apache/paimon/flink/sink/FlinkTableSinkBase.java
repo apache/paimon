@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
@@ -34,6 +35,8 @@ import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.types.RowKind;
+
+import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -56,15 +59,20 @@ public abstract class FlinkTableSinkBase
     protected final DynamicTableFactory.Context context;
 
     protected final Table table;
+    @Nullable protected final Catalog catalog;
 
     protected Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
 
     public FlinkTableSinkBase(
-            ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
+            ObjectIdentifier tableIdentifier,
+            Table table,
+            DynamicTableFactory.Context context,
+            @Nullable Catalog catalog) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.context = context;
+        this.catalog = catalog;
     }
 
     @Override
@@ -115,7 +123,8 @@ public abstract class FlinkTableSinkBase
                                             formatTable, overwrite, staticPartitions)
                                     .sinkFrom(dataStream),
                     name,
-                    table);
+                    table,
+                    catalog);
         }
 
         Options conf = Options.fromMap(table.options());
@@ -142,7 +151,8 @@ public abstract class FlinkTableSinkBase
                     return builder.build();
                 },
                 name,
-                table);
+                table,
+                catalog);
     }
 
     protected FlinkSinkBuilder createSinkBuilder() {
@@ -151,7 +161,7 @@ public abstract class FlinkTableSinkBase
 
     @Override
     public DynamicTableSink copy() {
-        FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context);
+        FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context, catalog);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         return copied;

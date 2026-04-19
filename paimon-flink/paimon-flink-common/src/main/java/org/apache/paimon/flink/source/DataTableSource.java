@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
@@ -56,8 +57,20 @@ public class DataTableSource extends BaseDataTableSource
             ObjectIdentifier tableIdentifier,
             Table table,
             boolean unbounded,
-            DynamicTableFactory.Context context) {
-        this(tableIdentifier, table, unbounded, context, null, null, null, null, null, null);
+            DynamicTableFactory.Context context,
+            @Nullable Catalog catalog) {
+        this(
+                tableIdentifier,
+                table,
+                unbounded,
+                context,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                catalog);
     }
 
     public DataTableSource(
@@ -70,7 +83,8 @@ public class DataTableSource extends BaseDataTableSource
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
             @Nullable List<String> dynamicPartitionFilteringFields,
-            @Nullable Long countPushed) {
+            @Nullable Long countPushed,
+            @Nullable Catalog catalog) {
         super(
                 tableIdentifier,
                 table,
@@ -80,7 +94,8 @@ public class DataTableSource extends BaseDataTableSource
                 projectFields,
                 limit,
                 watermarkStrategy,
-                countPushed);
+                countPushed,
+                catalog);
         this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
@@ -96,7 +111,8 @@ public class DataTableSource extends BaseDataTableSource
                 limit,
                 watermarkStrategy,
                 dynamicPartitionFilteringFields,
-                countPushed);
+                countPushed,
+                catalog);
     }
 
     @Override

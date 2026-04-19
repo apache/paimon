@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
@@ -46,14 +47,20 @@ public class SystemTableSource extends FlinkTableSource {
     private final int splitBatchSize;
     private final FlinkConnectorOptions.SplitAssignMode splitAssignMode;
     private final ObjectIdentifier tableIdentifier;
+    @Nullable private final Catalog catalog;
 
-    public SystemTableSource(Table table, boolean unbounded, ObjectIdentifier tableIdentifier) {
+    public SystemTableSource(
+            Table table,
+            boolean unbounded,
+            ObjectIdentifier tableIdentifier,
+            @Nullable Catalog catalog) {
         super(table);
         this.unbounded = unbounded;
         Options options = Options.fromMap(table.options());
         this.splitBatchSize = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
         this.splitAssignMode = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE);
         this.tableIdentifier = tableIdentifier;
+        this.catalog = catalog;
     }
 
     public SystemTableSource(
@@ -64,12 +71,14 @@ public class SystemTableSource extends FlinkTableSource {
             @Nullable Long limit,
             int splitBatchSize,
             FlinkConnectorOptions.SplitAssignMode splitAssignMode,
-            ObjectIdentifier tableIdentifier) {
+            ObjectIdentifier tableIdentifier,
+            @Nullable Catalog catalog) {
         super(table, predicate, projectFields, limit);
         this.unbounded = unbounded;
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.tableIdentifier = tableIdentifier;
+        this.catalog = catalog;
     }
 
     @Override
@@ -132,7 +141,8 @@ public class SystemTableSource extends FlinkTableSource {
                     return dataStreamSource;
                 },
                 tableIdentifier.asSummaryString(),
-                table);
+                table,
+                catalog);
     }
 
     @Override
@@ -145,7 +155,8 @@ public class SystemTableSource extends FlinkTableSource {
                 limit,
                 splitBatchSize,
                 splitAssignMode,
-                tableIdentifier);
+                tableIdentifier,
+                catalog);
     }
 
     @Override

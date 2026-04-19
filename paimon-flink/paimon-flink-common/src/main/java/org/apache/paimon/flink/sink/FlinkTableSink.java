@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 
@@ -25,13 +26,18 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
+import javax.annotation.Nullable;
+
 /** Table sink to create sink. */
 public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
         implements SupportsTruncate {
 
     public FlinkTableSink(
-            ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
-        super(tableIdentifier, table, context);
+            ObjectIdentifier tableIdentifier,
+            Table table,
+            DynamicTableFactory.Context context,
+            @Nullable Catalog catalog) {
+        super(tableIdentifier, table, context, catalog);
     }
 
     @Override

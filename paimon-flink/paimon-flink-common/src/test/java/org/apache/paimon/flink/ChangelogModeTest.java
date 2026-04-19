@@ -70,10 +70,10 @@ public class ChangelogModeTest {
                                 ""));
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
 
-        DataTableSource source = new DataTableSource(identifier, table, true, null);
+        DataTableSource source = new DataTableSource(identifier, table, true, null, null);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
-        FlinkTableSink sink = new FlinkTableSink(identifier, table, null);
+        FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
     }
 
