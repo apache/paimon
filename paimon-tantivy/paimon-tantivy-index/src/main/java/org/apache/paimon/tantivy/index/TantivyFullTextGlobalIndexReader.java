@@ -60,9 +60,6 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
 
     private volatile TantivySearcherPool.PooledEntry borrowed;
 
-    private long lastOpenNanos;
-    private long lastSearchNanos;
-
     public TantivyFullTextGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
@@ -80,24 +77,12 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     public Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
         try {
             ensureLoaded();
-            long searchStart = System.nanoTime();
             SearchResult result =
                     borrowed.searcher.search(fullTextSearch.queryText(), fullTextSearch.limit());
-            lastSearchNanos = System.nanoTime() - searchStart;
             return Optional.of(toScoredResult(result));
         } catch (IOException e) {
             throw new RuntimeException("Failed to search Tantivy full-text index", e);
         }
-    }
-
-    /** Nanos spent loading the index on the most recent pool miss (0 if pool hit). */
-    public long getLastOpenNanos() {
-        return lastOpenNanos;
-    }
-
-    /** Nanos spent in the last {@code searcher.search()} call. */
-    public long getLastSearchNanos() {
-        return lastSearchNanos;
     }
 
     private ScoredGlobalIndexResult toScoredResult(SearchResult result) {
@@ -128,7 +113,6 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     private TantivySearcherPool.PooledEntry createEntry() throws IOException {
         SeekableInputStream in = fileReader.getInputStream(ioMeta);
         try {
-            long openStart = System.nanoTime();
             ArchiveLayout layout = layoutCache.get(poolKey);
             if (layout == null) {
                 layout = parseArchiveHeader(in);
@@ -138,7 +122,6 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
             TantivySearcher searcher =
                     new TantivySearcher(
                             layout.fileNames, layout.fileOffsets, layout.fileLengths, streamInput);
-            lastOpenNanos = System.nanoTime() - openStart;
             return new TantivySearcherPool.PooledEntry(searcher, in);
         } catch (Exception e) {
             in.close();
