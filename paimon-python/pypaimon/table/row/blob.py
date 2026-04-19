@@ -213,8 +213,9 @@ class OffsetInputStream(io.RawIOBase):
             if self._length != -1:
                 target = self._offset + self._length + pos
             else:
-                result = self._wrapped.seek(pos, io.SEEK_END)
-                return max(result - self._offset, 0)
+                target = self._wrapped.seek(pos, io.SEEK_END)
+                target = max(target, self._offset)
+                return self._wrapped.seek(target) - self._offset
             target = max(target, self._offset)
         else:
             raise ValueError(f"Invalid whence: {whence}")

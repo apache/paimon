@@ -1262,6 +1262,15 @@ class OffsetInputStreamTest(unittest.TestCase):
         self.assertEqual(data[0], self.test_data[5])
         stream.close()
 
+    def test_seek_end_underflow_unlimited_length(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        stream = OffsetInputStream(io.BytesIO(self.test_data), 5, -1)
+        stream.seek(-30, io.SEEK_END)
+        self.assertEqual(stream.tell(), 0)
+        data = stream.read(2)
+        self.assertEqual(data, self.test_data[5:7])
+        stream.close()
+
 
 if __name__ == '__main__':
     unittest.main()
