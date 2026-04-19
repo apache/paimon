@@ -134,7 +134,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
             // Filter to regular files only before writing count
             List<File> indexFiles = new ArrayList<>();
             for (File file : allFiles) {
-                if (file.isFile() && !file.getName().endsWith(".store")) {
+                if (file.isFile()) {
                     indexFiles.add(file);
                 }
             }
