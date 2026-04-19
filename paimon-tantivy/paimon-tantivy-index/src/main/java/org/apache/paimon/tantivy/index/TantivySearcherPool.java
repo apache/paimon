@@ -89,7 +89,7 @@ public class TantivySearcherPool {
      */
     @Nullable
     public PooledEntry borrow(String key) {
-        if (idleCache == null) {
+        if (idleCache == null) { // pool disabled (maxSize <= 0)
             return null;
         }
         return idleCache.asMap().remove(key);
@@ -100,7 +100,7 @@ public class TantivySearcherPool {
      * expiry, or key replacement is closed automatically via the removal listener.
      */
     public void returnEntry(String key, PooledEntry entry) {
-        if (idleCache == null) {
+        if (idleCache == null) { // pool disabled (maxSize <= 0)
             IOUtils.closeQuietly(entry);
             return;
         }
