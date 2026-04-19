@@ -193,9 +193,9 @@ class OffsetInputStream(io.RawIOBase):
             remaining = self._length - self.tell()
             if remaining <= 0:
                 return b''
-            if size == -1 or size > remaining:
+            if size < 0 or size > remaining:
                 size = remaining
-        if size == -1:
+        if size < 0:
             return self._wrapped.read()
         return self._wrapped.read(size)
 
