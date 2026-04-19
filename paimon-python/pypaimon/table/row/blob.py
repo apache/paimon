@@ -195,6 +195,8 @@ class OffsetInputStream(io.RawIOBase):
                 return b''
             if size == -1 or size > remaining:
                 size = remaining
+        if size == -1:
+            return self._wrapped.read()
         return self._wrapped.read(size)
 
     def seek(self, pos, whence=io.SEEK_SET):
