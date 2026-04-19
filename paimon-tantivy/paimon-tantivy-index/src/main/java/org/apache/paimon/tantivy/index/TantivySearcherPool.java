@@ -35,12 +35,10 @@ import java.util.concurrent.TimeUnit;
  * Pool of {@link TantivySearcher} instances keyed by index file identity ({@code filePath@size}).
  *
  * <p>Each searcher holds the Tantivy index open in Rust memory (including the FST term dictionary).
- * Pooling avoids the repeated cost of loading the index on every query.
  *
  * <p>At most one idle searcher is kept per key. Under concurrent queries on the same shard, the
- * last entry to be returned wins; the others are closed immediately. Entries idle for more than
- * {@link #EXPIRE_AFTER_ACCESS_MINUTES} minutes are evicted and closed automatically. The total
- * number of idle entries across all keys is bounded by {@code maxSize}.
+ * last entry to be returned wins; the others are closed immediately. The total number of idle
+ * entries across all keys is bounded by {@code maxSize}.
  *
  * <p>Thread-safe. Borrow/return semantics guarantee at most one thread uses a given entry at a
  * time.

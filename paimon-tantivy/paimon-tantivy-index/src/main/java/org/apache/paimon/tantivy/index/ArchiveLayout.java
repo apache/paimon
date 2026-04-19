@@ -18,7 +18,6 @@
 
 package org.apache.paimon.tantivy.index;
 
-/** Parsed archive header: file names, byte offsets, and lengths within the archive stream. */
 class ArchiveLayout {
     final String[] fileNames;
     final long[] fileOffsets;
