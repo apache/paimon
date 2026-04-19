@@ -189,6 +189,8 @@ class OffsetInputStream(io.RawIOBase):
         return n if n is not None else 0
 
     def read(self, size=-1):
+        if size is None:
+            size = -1
         if self._length != -1:
             remaining = self._length - self.tell()
             if remaining <= 0:
@@ -333,7 +335,11 @@ class BlobRef(Blob):
         offset = self._descriptor.offset
         length = self._descriptor.length
         stream = self._uri_reader.new_input_stream(uri)
-        return OffsetInputStream(stream, offset, length)
+        try:
+            return OffsetInputStream(stream, offset, length)
+        except Exception:
+            stream.close()
+            raise
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BlobRef):
