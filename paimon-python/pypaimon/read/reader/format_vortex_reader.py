@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional, Any, Set
+from typing import List, Optional, Any, Set, Tuple
 
 import pyarrow as pa
 from pyarrow import RecordBatch
@@ -36,6 +36,7 @@ class FormatVortexReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
                  row_indices: Optional[Any] = None,
+                 shard_range: Optional[Tuple[int, int]] = None,
                  predicate_fields: Optional[Set[str]] = None):
         import vortex
 
@@ -70,7 +71,9 @@ class FormatVortexReader(RecordBatchReader):
                 pass
 
         indices = None
-        if row_indices is not None:
+        if shard_range is not None:
+            indices = vortex.array(range(shard_range[0], shard_range[1]))
+        elif row_indices is not None:
             indices = vortex.array(row_indices)
 
         self.record_batch_reader = vortex_file.scan(

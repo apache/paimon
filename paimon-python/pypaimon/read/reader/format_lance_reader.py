@@ -38,7 +38,8 @@ class FormatLanceReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
                  row_range: Optional[Tuple[int, int]] = None,
-                 row_indices: Optional[List[int]] = None):
+                 row_indices: Optional[List[int]] = None,
+                 shard_range: Optional[Tuple[int, int]] = None):
         """Initialize Lance reader."""
         import lance
 
@@ -68,8 +69,12 @@ class FormatLanceReader(RecordBatchReader):
         elif row_range is not None:
             start, end = row_range
             reader_results = lance_reader.read_range(start, end - start)
+        elif shard_range is not None:
+            reader_results = lance_reader.read_range(shard_range[0], shard_range[1] - shard_range[0])
         else:
             reader_results = lance_reader.read_all()
+
+        # Convert to PyArrow table
         pa_table = reader_results.to_table()
 
         # Precompute output schema for missing fields
