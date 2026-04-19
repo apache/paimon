@@ -35,12 +35,6 @@ public class TantivyFullTextGlobalIndexer implements GlobalIndexer {
     private final Map<String, ArchiveLayout> layoutCache = new ConcurrentHashMap<>();
     private final TantivySearcherPool searcherPool;
 
-    public TantivyFullTextGlobalIndexer() {
-        this(
-                new TantivySearcherPool(
-                        TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE.defaultValue()));
-    }
-
     public TantivyFullTextGlobalIndexer(TantivySearcherPool searcherPool) {
         this.searcherPool = searcherPool;
     }
