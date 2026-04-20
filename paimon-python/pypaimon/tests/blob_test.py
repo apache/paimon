@@ -1271,6 +1271,32 @@ class OffsetInputStreamTest(unittest.TestCase):
         self.assertEqual(data, self.test_data[5:7])
         stream.close()
 
+    def test_seek_end_with_real_file(self):
+        from pypaimon.table.row.blob import OffsetInputStream
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(self.test_data)
+            tmp_path = tmp.name
+        try:
+            f = open(tmp_path, 'rb')
+            stream = OffsetInputStream(f, 5, 10)
+            stream.seek(0, io.SEEK_END)
+            self.assertEqual(stream.tell(), 10)
+            stream.seek(-3, io.SEEK_END)
+            self.assertEqual(stream.tell(), 7)
+            data = stream.read(3)
+            self.assertEqual(data, self.test_data[12:15])
+            stream.close()
+
+            f = open(tmp_path, 'rb')
+            stream = OffsetInputStream(f, 5, -1)
+            stream.seek(-30, io.SEEK_END)
+            self.assertEqual(stream.tell(), 0)
+            data = stream.read(2)
+            self.assertEqual(data, self.test_data[5:7])
+            stream.close()
+        finally:
+            os.remove(tmp_path)
+
 
 if __name__ == '__main__':
     unittest.main()
