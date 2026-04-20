@@ -92,6 +92,26 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         int[] sortFieldArray = sortFields.toArray();
 
+        // build per-field ascending orders:
+        // key fields -> ascending, uds fields -> based on config, sequence number -> ascending
+        boolean[] ascendingOrders = new boolean[sortFieldArray.length];
+        int keyFieldCount = keyType.getFieldCount();
+        int udsFieldCount =
+                userDefinedSeqComparator != null
+                        ? userDefinedSeqComparator.compareFields().length
+                        : 0;
+        boolean udsAscending =
+                userDefinedSeqComparator == null || userDefinedSeqComparator.isAscendingOrder();
+        for (int i = 0; i < sortFieldArray.length; i++) {
+            if (i < keyFieldCount) {
+                ascendingOrders[i] = true;
+            } else if (i < keyFieldCount + udsFieldCount) {
+                ascendingOrders[i] = udsAscending;
+            } else {
+                ascendingOrders[i] = true;
+            }
+        }
+
         // row type
         List<DataType> fieldTypes = new ArrayList<>(keyType.getFieldTypes());
         fieldTypes.add(new BigIntType(false));
@@ -101,7 +121,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         NormalizedKeyComputer normalizedKeyComputer =
                 CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray);
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, true);
+                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, ascendingOrders);
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(

@@ -87,6 +87,18 @@ public class CodeGenUtils {
                                         inputTypes, sortFields, isAscendingOrder));
     }
 
+    public static RecordComparator newRecordComparator(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders) {
+        return generate(
+                RecordComparator.class,
+                inputTypes,
+                sortFields,
+                Arrays.hashCode(ascendingOrders),
+                () ->
+                        getCodeGenerator()
+                                .generateRecordComparator(inputTypes, sortFields, ascendingOrders));
+    }
+
     public static RecordEqualiser newRecordEqualiser(List<DataType> fieldTypes) {
         return newRecordEqualiser(fieldTypes, IntStream.range(0, fieldTypes.size()).toArray());
     }

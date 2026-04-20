@@ -53,6 +53,15 @@ public class CodeGeneratorImpl implements CodeGenerator {
     }
 
     @Override
+    public GeneratedClass<RecordComparator> generateRecordComparator(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders) {
+        return ComparatorCodeGenerator.gen(
+                "RecordComparator",
+                RowType.builder().fields(inputTypes).build(),
+                getSortSpec(sortFields, ascendingOrders));
+    }
+
+    @Override
     public GeneratedClass<RecordEqualiser> generateRecordEqualiser(
             List<DataType> fieldTypes, int[] fields) {
         return new EqualiserCodeGenerator(fieldTypes.toArray(new DataType[0]), fields)
@@ -63,6 +72,14 @@ public class CodeGeneratorImpl implements CodeGenerator {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         for (int sortField : sortFields) {
             builder.addField(sortField, isAscendingOrder, false);
+        }
+        return builder.build();
+    }
+
+    private SortSpec getSortSpec(int[] sortFields, boolean[] ascendingOrders) {
+        SortSpec.SortSpecBuilder builder = SortSpec.builder();
+        for (int i = 0; i < sortFields.length; i++) {
+            builder.addField(sortFields[i], ascendingOrders[i], false);
         }
         return builder.build();
     }
