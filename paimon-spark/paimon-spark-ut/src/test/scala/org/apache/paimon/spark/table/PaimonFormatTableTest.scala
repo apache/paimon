@@ -148,6 +148,38 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable: create table like copies properties for same provider") {
+    assume(gteqSpark3_4)
+    withTable("source_tbl", "target_tbl") {
+      sql("""
+            |CREATE TABLE source_tbl (
+            |  id INT,
+            |  pt STRING
+            |) USING CSV
+            |PARTITIONED BY (pt)
+            |COMMENT 'source comment'
+            |TBLPROPERTIES (
+            |  'k' = 'v',
+            |  'csv.field-delimiter' = ';'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE target_tbl
+            |LIKE source_tbl
+            |""".stripMargin)
+
+      val target =
+        paimonCatalog.getTable(Identifier.create("test_db", "target_tbl")).asInstanceOf[FormatTable]
+      assert(target.partitionKeys().size() == 1)
+      assert(target.partitionKeys().get(0) == "pt")
+      assert(target.comment.isPresent)
+      assert(target.comment.get == "source comment")
+      assert(target.options().get("k") == "v")
+      assert(target.options().get("csv.field-delimiter") == ";")
+    }
+  }
+
   test("PaimonFormatTable non partition table overwrite: csv") {
     val tableName = "paimon_non_partiiton_overwrite_test"
     withTable(tableName) {

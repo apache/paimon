@@ -25,3 +25,5 @@ pytest~=7.0
 ray>=2.10.0
 requests
 parameterized
+# Lumina vector search (optional, for lumina index tests)
+lumina-data>=0.1.0

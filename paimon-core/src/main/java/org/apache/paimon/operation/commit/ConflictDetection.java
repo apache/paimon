@@ -119,6 +119,10 @@ public class ConflictDetection {
         this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
     }
 
+    public boolean hasRowIdCheckFromSnapshot() {
+        return rowIdCheckFromSnapshot != null;
+    }
+
     @Nullable
     public Comparator<InternalRow> keyComparator() {
         return keyComparator;
@@ -140,7 +144,7 @@ public class ConflictDetection {
                 return true;
             }
         }
-        return rowIdCheckFromSnapshot != null;
+        return false;
     }
 
     public Optional<RuntimeException> checkConflicts(

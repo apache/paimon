@@ -1776,4 +1776,28 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         Row.of(1L, 100L, "buy", null, null, null, "2024-01-01", "10"),
                         Row.of(2L, 200L, "sell", 99.5, 10, 3.14, "2024-01-02", "11"));
     }
+
+    @Test
+    public void testDropPrimaryKeyOnEmptyTable() {
+        sql("CREATE TABLE T (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
+
+        // drop primary key on empty table should succeed
+        sql("ALTER TABLE T DROP PRIMARY KEY");
+
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString()).doesNotContain("PRIMARY KEY");
+    }
+
+    @Test
+    public void testDropPrimaryKeyOnNonEmptyTable() {
+        sql("CREATE TABLE T (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
+        sql("INSERT INTO T VALUES (1, 2, 'hello')");
+
+        // drop primary key on non-empty table should fail
+        assertThatThrownBy(() -> sql("ALTER TABLE T DROP PRIMARY KEY"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot drop primary keys on a non-empty table."));
+    }
 }

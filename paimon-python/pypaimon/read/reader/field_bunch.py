@@ -99,10 +99,11 @@ class BlobBunch(FieldBunch):
                     )
 
             if self._files:
-                if file.schema_id != self._files[0].schema_id:
-                    raise ValueError(
-                        "All files in a blob bunch should have the same schema id."
-                    )
+                if not DataFileMeta.is_blob_file(file.file_name):
+                    if file.schema_id != self._files[0].schema_id:
+                        raise ValueError(
+                            "All files in a blob bunch should have the same schema id."
+                        )
                 if file.write_cols != self._files[0].write_cols:
                     raise ValueError(
                         "All files in a blob bunch should have the same write columns."

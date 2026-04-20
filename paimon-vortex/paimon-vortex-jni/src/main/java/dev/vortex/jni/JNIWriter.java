@@ -48,6 +48,17 @@ public final class JNIWriter implements VortexWriter, AutoCloseable {
     }
 
     @Override
+    public void writeBatchFfi(long arrowArrayAddr, long arrowSchemaAddr) throws IOException {
+        logger.trace("Writing batch via FFI with arrayAddr={}, schemaAddr={}", arrowArrayAddr, arrowSchemaAddr);
+
+        boolean success = NativeWriterMethods.writeBatchFfi(ptr.getAsLong(), arrowArrayAddr, arrowSchemaAddr);
+        if (!success) {
+            logger.error("Failed to write batch via FFI to Vortex file");
+            throw new IOException("Failed to write batch via FFI to Vortex file");
+        }
+    }
+
+    @Override
     public void close() {
         if (!this.ptr.isPresent()) {
             logger.debug("Attempted to close already closed JNIWriter, skipping");

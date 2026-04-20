@@ -102,3 +102,9 @@ class FormatTable(Table):
 
     def new_stream_write_builder(self):
         raise NotImplementedError("Format table does not support stream write.")
+
+    def new_full_text_search_builder(self):
+        raise NotImplementedError("Format table does not support full text search.")
+
+    def new_vector_search_builder(self):
+        raise NotImplementedError("Format table does not support vector search.")

@@ -83,6 +83,6 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
                     .toArray(SimpleColStats[]::new);
         }
 
-        return statsProducer.extract(fileIO, path, fileSize);
+        return statsProducer.extract(fileIO, path, fileSize, writerMetadata());
     }
 }

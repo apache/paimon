@@ -147,6 +147,9 @@ class FileStoreCommit:
             commit_kind = "OVERWRITE"
             detect_conflicts = True
             allow_rollback = True
+        if self.conflict_detection.has_row_id_check_from_snapshot():
+            detect_conflicts = True
+            allow_rollback = True
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
@@ -378,6 +381,10 @@ class FileStoreCommit:
                     delta_record_count -= entry.file.row_count
 
             total_record_count += delta_record_count
+            index_manifest = None
+            if latest_snapshot and commit_kind == "APPEND":
+                index_manifest = latest_snapshot.index_manifest
+
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
@@ -391,6 +398,7 @@ class FileStoreCommit:
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),
                 next_row_id=next_row_id,
+                index_manifest=index_manifest,
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
@@ -516,7 +524,7 @@ class FileStoreCommit:
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latest_snapshot is None \
-            else (FileScanner(self.table, lambda: [], partition_filter).
+            else (FileScanner(self.table, lambda: ([], None), partition_filter).
                   read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
@@ -697,6 +705,9 @@ class FileStoreCommit:
         blob_start_by_field = {}
 
         for entry in commit_entries:
+            assert entry.file.file_source is not None, \
+                f"file_source must be present for row-tracking table, file={entry.file.file_name}"
+
             # Check if this is an append file that needs row ID assignment
             if (entry.kind == 0 and  # ADD kind
                     entry.file.file_source == 0 and  # APPEND file source

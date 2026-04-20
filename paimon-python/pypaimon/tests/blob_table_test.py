@@ -24,6 +24,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.commit_message import CommitMessage
 
@@ -3023,6 +3024,30 @@ class DataBlobWriterTest(unittest.TestCase):
         read = rb.new_read()
         result = read.to_arrow(splits)
         self.assertEqual(result.num_rows, 1)
+
+    def test_rename_blob_column_should_fail(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_col', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_rename_test', schema, False)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.catalog.alter_table(
+                'test_db.blob_rename_test',
+                [SchemaChange.rename_column('blob_col', 'blob_col_renamed')],
+                False
+            )
+        self.assertIn('Cannot rename BLOB column', str(ctx.exception))
 
 
 if __name__ == '__main__':

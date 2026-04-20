@@ -362,6 +362,48 @@ Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
 
 **Note:** Both filesystem and REST catalogs support table rename. For filesystem catalogs, the rename is performed by renaming the underlying table directory.
 
+### Table Full-Text Search
+
+Perform full-text search on a Paimon table with a Tantivy full-text index and display matching rows.
+
+```shell
+paimon table full-text-search mydb.articles --column content --query "paimon lake"
+```
+
+**Options:**
+
+- `--column, -c`: Text column to search on - **Required**
+- `--query, -q`: Query text to search for - **Required**
+- `--limit, -l`: Maximum number of results to return (default: 10)
+- `--select, -s`: Select specific columns to display (comma-separated)
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# Basic full-text search
+paimon table full-text-search mydb.articles -c content -q "paimon lake"
+
+# Search with limit
+paimon table full-text-search mydb.articles -c content -q "streaming data" -l 20
+
+# Search with column projection
+paimon table full-text-search mydb.articles -c content -q "paimon" -s "id,title,content"
+
+# Output as JSON
+paimon table full-text-search mydb.articles -c content -q "paimon" -f json
+```
+
+Output:
+```
+ id                                            content
+  0  Apache Paimon is a streaming data lake platform
+  2  Paimon supports real-time data ingestion and...
+  4  Data lake platforms like Paimon handle large-...
+```
+
+**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index]({{< ref "append-table/global-index" >}}) for how to create full-text indexes.
+
 ### Table Drop
 
 Drop a table from the catalog. This will permanently delete the table and all its data.
@@ -579,3 +621,105 @@ default
 mydb
 analytics
 ```
+
+## SQL Command
+
+Execute SQL queries on Paimon tables directly from the command line. This feature is powered by pypaimon-rust and DataFusion.
+
+**Prerequisites:**
+
+```shell
+pip install pypaimon[sql]
+```
+
+### One-Shot Query
+
+Execute a single SQL query and display the result:
+
+```shell
+paimon sql "SELECT * FROM users LIMIT 10"
+```
+
+Output:
+```
+ id    name  age      city
+  1   Alice   25   Beijing
+  2     Bob   30  Shanghai
+  3 Charlie   35 Guangzhou
+```
+
+**Options:**
+
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# Direct table name (uses default catalog and database)
+paimon sql "SELECT * FROM users"
+
+# Two-part: database.table
+paimon sql "SELECT * FROM mydb.users"
+
+# Query with filter and aggregation
+paimon sql "SELECT city, COUNT(*) AS cnt FROM users GROUP BY city ORDER BY cnt DESC"
+
+# Output as JSON
+paimon sql "SELECT * FROM users LIMIT 5" --format json
+```
+
+### Interactive REPL
+
+Start an interactive SQL session by running `paimon sql` without a query argument. The REPL supports arrow keys for line editing, and command history is persisted across sessions in `~/.paimon_history`.
+
+```shell
+paimon sql
+```
+
+Output:
+```
+    ____        _
+   / __ \____ _(_)___ ___  ____  ____
+  / /_/ / __ `/ / __ `__ \/ __ \/ __ \
+ / ____/ /_/ / / / / / / / /_/ / / / /
+/_/    \__,_/_/_/ /_/ /_/\____/_/ /_/
+
+  Powered by pypaimon-rust + DataFusion
+  Type 'help' for usage, 'exit' to quit.
+
+paimon> SHOW DATABASES;
+default
+mydb
+
+paimon> USE mydb;
+Using database 'mydb'.
+
+paimon> SHOW TABLES;
+orders
+users
+
+paimon> SELECT count(*) AS cnt
+     > FROM users
+     > WHERE age > 18;
+ cnt
+  42
+(1 row in 0.05s)
+
+paimon> exit
+Bye!
+```
+
+SQL statements end with `;` and can span multiple lines. The continuation prompt `     >` indicates that more input is expected.
+
+**REPL Commands:**
+
+| Command | Description |
+|---|---|
+| `USE <database>;` | Switch the default database |
+| `SHOW DATABASES;` | List all databases |
+| `SHOW TABLES;` | List tables in the current database |
+| `SELECT ...;` | Execute a SQL query |
+| `help` | Show usage information |
+| `exit` / `quit` | Exit the REPL |
+
+For more details on SQL syntax and the Python API, see [SQL Query]({{< ref "pypaimon/sql" >}}).

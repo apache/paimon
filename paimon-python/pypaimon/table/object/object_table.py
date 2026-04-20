@@ -101,3 +101,13 @@ class ObjectTable(Table):
         raise NotImplementedError(
             "ObjectTable is read-only and does not support stream write."
         )
+
+    def new_full_text_search_builder(self):
+        raise NotImplementedError(
+            "ObjectTable is read-only and does not support full text search."
+        )
+
+    def new_vector_search_builder(self):
+        raise NotImplementedError(
+            "ObjectTable is read-only and does not support vector search."
+        )

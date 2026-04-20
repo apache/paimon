@@ -50,6 +50,23 @@ CREATE TABLE my_table (
 );
 ```
 
+For `first-row` merge engine, deletion vectors are already built-in, so you don't need to enable them explicitly:
+
+```sql
+CREATE TABLE my_table (
+    id BIGINT,
+    dt STRING,
+    city STRING,
+    amount DOUBLE,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'pk-clustering-override' = 'true',
+    'clustering.columns' = 'city',
+    'merge-engine' = 'first-row',
+    'bucket' = '4'
+);
+```
+
 After this, data files within each bucket will be physically sorted by `city` instead of `id`. Queries like
 `SELECT * FROM my_table WHERE city = 'Beijing'` can skip irrelevant data files by checking their min/max statistics
 on the clustering column.
@@ -60,7 +77,7 @@ on the clustering column.
 |--------|-------------|
 | `pk-clustering-override` | `true` |
 | `clustering.columns` | Must be set (one or more non-primary-key columns) |
-| `deletion-vectors.enabled` | Must be `true` |
+| `deletion-vectors.enabled` | Must be `true` (not required for `first-row` merge engine) |
 | `merge-engine` | `deduplicate` (default) or `first-row` only |
 
 ## When to Use

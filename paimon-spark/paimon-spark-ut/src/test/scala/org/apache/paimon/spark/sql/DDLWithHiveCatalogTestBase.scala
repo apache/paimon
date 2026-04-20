@@ -24,7 +24,10 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.junit.jupiter.api.Assertions
+
+import scala.collection.JavaConverters._
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
@@ -643,6 +646,82 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
         spark.sql("ALTER TABLE t UNSET TBLPROPERTIES ('write-buffer-spillable')")
         assert(
           !hmsClient.getTable("paimon_db", "t").getParameters.containsKey("write-buffer-spillable"))
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create table like with SparkGenericCatalog") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("paimon_source", "paimon_like", "csv_source", "csv_like", "csv_like_paimon") {
+        spark.sql("""
+                    |CREATE TABLE paimon_source (
+                    |  id INT,
+                    |  name STRING,
+                    |  pt STRING
+                    |) USING paimon
+                    |PARTITIONED BY (pt)
+                    |COMMENT 'paimon source comment'
+                    |TBLPROPERTIES (
+                    |  'primary-key' = 'id,pt',
+                    |  'bucket' = '4',
+                    |  'target-file-size' = '128MB'
+                    |)
+                    |""".stripMargin)
+        spark.sql("CREATE TABLE paimon_like LIKE paimon_source USING paimon")
+
+        val paimonLike = loadTable("paimon_db", "paimon_like")
+        Assertions.assertEquals(
+          spark.table("paimon_source").schema,
+          spark.table("paimon_like").schema)
+        Assertions.assertEquals("paimon source comment", paimonLike.comment().get())
+        Assertions.assertEquals(List("pt"), paimonLike.partitionKeys().asScala.toList)
+        Assertions.assertEquals(List("id", "pt"), paimonLike.primaryKeys().asScala.toList)
+        Assertions.assertEquals("4", paimonLike.options().get("bucket"))
+        Assertions.assertEquals("128MB", paimonLike.options().get("target-file-size"))
+
+        spark.sql("""
+                    |CREATE TABLE csv_source (
+                    |  id INT,
+                    |  c_char CHAR(9),
+                    |  c_varchar VARCHAR(10),
+                    |  pt STRING
+                    |) USING csv
+                    |PARTITIONED BY (pt)
+                    |COMMENT 'csv source comment'
+                    |TBLPROPERTIES ('target-file-size' = '256MB')
+                    |""".stripMargin)
+        spark.sql("CREATE TABLE csv_like LIKE csv_source")
+
+        val csvLike = spark.sessionState.catalog.getTableMetadata(
+          TableIdentifier("csv_like", Some("paimon_db")))
+        Assertions.assertEquals(Seq("pt"), csvLike.partitionColumnNames)
+        Assertions.assertTrue(csvLike.provider.contains("csv"))
+        Assertions.assertTrue(csvLike.comment.isEmpty)
+        Assertions.assertFalse(csvLike.properties.contains("target-file-size"))
+
+        spark.sql("CREATE TABLE csv_like_paimon LIKE csv_source USING paimon")
+
+        val csvLikePaimon = loadTable("paimon_db", "csv_like_paimon")
+        Assertions.assertEquals(
+          spark.table("csv_source").schema,
+          spark.table("csv_like_paimon").schema)
+        checkAnswer(
+          spark
+            .sql("DESC csv_like_paimon")
+            .select("col_name", "data_type")
+            .where("col_name IN ('c_char', 'c_varchar')")
+            .orderBy("col_name"),
+          Row("c_char", "char(9)") :: Row("c_varchar", "varchar(10)") :: Nil
+        )
+        Assertions.assertEquals("csv source comment", csvLikePaimon.comment().get())
+        Assertions.assertEquals(List("pt"), csvLikePaimon.partitionKeys().asScala.toList)
+        Assertions.assertTrue(csvLikePaimon.primaryKeys().isEmpty)
+        Assertions.assertFalse(csvLikePaimon.options().containsKey("target-file-size"))
       }
     }
   }

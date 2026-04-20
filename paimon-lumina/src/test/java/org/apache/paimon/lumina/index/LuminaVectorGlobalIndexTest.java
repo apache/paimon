@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lumina.index;
 
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -31,6 +32,8 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.aliyun.lumina.Lumina;
@@ -422,6 +425,90 @@ public class LuminaVectorGlobalIndexTest {
             assertThat(result.results().getLongCardinality()).isEqualTo(3);
             assertThat(result.results().contains(0L)).isTrue();
         }
+    }
+
+    @Test
+    public void testVectorTypeEndToEnd() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        DataType vecFieldType = new VectorType(dimension, new FloatType());
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.98f, 0.05f},
+                    new float[] {0.0f, 1.0f},
+                    new float[] {0.05f, 0.98f}
+                };
+
+        Path vecIndexPath = new Path(indexPath, "vector_type");
+        GlobalIndexFileWriter fileWriter = createFileWriter(vecIndexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vecFieldType, indexOptions);
+
+        // Write using BinaryVector (InternalVector)
+        for (float[] vec : vectors) {
+            writer.write(BinaryVector.fromPrimitiveArray(vec));
+        }
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, vecIndexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(vecIndexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(fileReader, metas, vecFieldType, indexOptions)) {
+            VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
+            LuminaScoredGlobalIndexResult result =
+                    (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(3);
+            assertThat(result.results().contains(0L)).isTrue();
+            assertThat(result.results().contains(3L)).isTrue();
+        }
+    }
+
+    @Test
+    public void testVectorTypeWithFloatArrayWrite() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        DataType vecFieldType = new VectorType(dimension, new FloatType());
+
+        Path vecIndexPath = new Path(indexPath, "vector_type_float");
+        GlobalIndexFileWriter fileWriter = createFileWriter(vecIndexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vecFieldType, indexOptions);
+
+        // Write using raw float[] with VectorType field type
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.0f, 1.0f},
+                    new float[] {0.7f, 0.7f}
+                };
+        for (float[] vec : vectors) {
+            writer.write(vec);
+        }
+
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(1);
+    }
+
+    @Test
+    public void testVectorTypeRejectsNonFloatElement() {
+        DataType intVecType = new VectorType(2, new IntType());
+        Options options = createDefaultOptions(2);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+
+        assertThatThrownBy(
+                        () ->
+                                new LuminaVectorGlobalIndexWriter(
+                                        fileWriter, intVecType, indexOptions))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("float vector");
     }
 
     private Options createDefaultOptions(int dimension) {

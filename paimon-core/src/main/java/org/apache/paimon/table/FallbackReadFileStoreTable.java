@@ -215,39 +215,19 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         RowType otherRowType = other.schema().logicalRowType();
         Preconditions.checkArgument(
                 sameRowTypeIgnoreNullable(mainRowType, otherRowType),
-                "Branch %s and %s does not have the same row type.\n"
+                "Branch %s and %s does not have the same row type. "
+                        + "This validation is triggered because '%s' is configured to '%s'. "
+                        + "The fallback branch must have the same schema as the main branch.\n"
                         + "Row type of branch %s is %s.\n"
                         + "Row type of branch %s is %s.",
                 mainBranch,
+                otherBranch,
+                CoreOptions.SCAN_FALLBACK_BRANCH.key(),
                 otherBranch,
                 mainBranch,
                 mainRowType,
                 otherBranch,
                 otherRowType);
-
-        List<String> mainPrimaryKeys = wrapped.schema().primaryKeys();
-        List<String> otherPrimaryKeys = other.schema().primaryKeys();
-        if (!mainPrimaryKeys.isEmpty()) {
-            if (otherPrimaryKeys.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Branch "
-                                + mainBranch
-                                + " has primary keys while branch "
-                                + otherBranch
-                                + " does not. This is not allowed.");
-            }
-            Preconditions.checkArgument(
-                    mainPrimaryKeys.equals(otherPrimaryKeys),
-                    "Branch %s and %s both have primary keys but are not the same.\n"
-                            + "Primary keys of %s are %s.\n"
-                            + "Primary keys of %s are %s.",
-                    mainBranch,
-                    otherBranch,
-                    mainBranch,
-                    mainPrimaryKeys,
-                    otherBranch,
-                    otherPrimaryKeys);
-        }
     }
 
     private boolean sameRowTypeIgnoreNullable(RowType mainRowType, RowType otherRowType) {

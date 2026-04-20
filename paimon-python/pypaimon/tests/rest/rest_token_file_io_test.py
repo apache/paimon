@@ -148,9 +148,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.catalog_options
             )
 
-            self.assertTrue(hasattr(original_file_io, 'lock'))
-            self.assertIsNotNone(original_file_io.lock)
-
             pickled = pickle.dumps(original_file_io)
 
             deserialized_file_io = pickle.loads(pickled)
@@ -158,10 +155,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.identifier, original_file_io.identifier)
             self.assertEqual(deserialized_file_io.path, original_file_io.path)
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
-
-            self.assertTrue(hasattr(deserialized_file_io, 'lock'))
-            self.assertIsNotNone(deserialized_file_io.lock)
-            self.assertIsNot(deserialized_file_io.lock, original_file_io.lock)
 
             self.assertIsNone(deserialized_file_io.api_instance)
 
@@ -306,56 +299,183 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertIsNotNone(restored_file_io.uri_reader_factory,
                                  "uri_reader_factory should work after deserialization")
 
-    def test_should_refresh_when_token_is_none(self):
-        """_should_refresh() returns True when token is None."""
+    def test_build_cache_key_with_dlf_auth(self):
+        """Test that _build_cache_key includes DLF access_key_id for cache isolation."""
+        from pypaimon.api.auth.dlf_provider import DLFAuthProvider
+        from pypaimon.api.token_loader import DLFToken
+
+        catalog_options = Options({
+            CatalogOptions.URI.key(): "http://test-uri",
+            CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+            CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+            CatalogOptions.DLF_ACCESS_KEY_ID.key(): "test-ak-123",
+            CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "test-sk-456",
+        })
+
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
             file_io = RESTTokenFileIO(
-                self.identifier, self.warehouse_path, self.catalog_options)
-            self.assertIsNone(file_io.token)
-            self.assertTrue(file_io._should_refresh())
-
-    def test_should_refresh_when_token_not_expired(self):
-        """_should_refresh() returns False when token is far from expiry."""
-        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
-            file_io = RESTTokenFileIO(
-                self.identifier, self.warehouse_path, self.catalog_options)
-            # Token that expires 2 hours from now (well beyond the 1-hour safe margin)
-            future_millis = int(time.time() * 1000) + 7200_000
-            file_io.token = RESTToken({'ak': 'v'}, future_millis)
-            self.assertFalse(file_io._should_refresh())
-
-    def test_should_refresh_when_token_expired(self):
-        """_should_refresh() returns True when token is already expired."""
-        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
-            file_io = RESTTokenFileIO(
-                self.identifier, self.warehouse_path, self.catalog_options)
-            # Token that expired 1 second ago
-            past_millis = int(time.time() * 1000) - 1000
-            file_io.token = RESTToken({'ak': 'v'}, past_millis)
-            self.assertTrue(file_io._should_refresh())
-
-    def test_try_to_refresh_token_calls_refresh_once(self):
-        """try_to_refresh_token() calls refresh_token() exactly once via double-check."""
-        file_io = RESTTokenFileIO(
-            self.identifier, self.warehouse_path, self.catalog_options)
-        self.assertIsNone(file_io.token)
-
-        mock_response = MagicMock()
-        mock_response.token = {'ak': 'test-ak'}
-        mock_response.expires_at_millis = int(time.time() * 1000) + 7200_000
+                self.identifier,
+                self.warehouse_path,
+                catalog_options
+            )
 
         mock_api = MagicMock()
-        mock_api.load_table_token.return_value = mock_response
+        mock_dlf_provider = MagicMock(spec=DLFAuthProvider)
+        mock_dlf_provider.get_token.return_value = DLFToken(
+            access_key_id="test-ak-123",
+            access_key_secret="test-sk-456",
+            security_token=None
+        )
+        mock_api.rest_auth_function.auth_provider = mock_dlf_provider
         file_io.api_instance = mock_api
 
-        file_io.try_to_refresh_token()
+        cache_key = file_io._build_cache_key()
+        self.assertTrue(cache_key.startswith("test-ak-123:"),
+                        f"Cache key should start with access_key_id, got: {cache_key}")
+        self.assertIn(str(self.identifier), cache_key)
 
-        mock_api.load_table_token.assert_called_once()
-        self.assertIsNotNone(file_io.token)
+    def test_build_cache_key_with_bear_auth(self):
+        """Test that _build_cache_key includes bearer token for cache isolation."""
+        from pypaimon.api.auth.bearer import BearTokenAuthProvider
 
-        # Second call should NOT trigger refresh again (token is valid)
-        file_io.try_to_refresh_token()
-        mock_api.load_table_token.assert_called_once()
+        catalog_options = Options({
+            CatalogOptions.URI.key(): "http://test-uri",
+            CatalogOptions.TOKEN_PROVIDER.key(): "bear",
+            CatalogOptions.TOKEN.key(): "my-bearer-token",
+        })
+
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                catalog_options
+            )
+
+        mock_api = MagicMock()
+        mock_bear_provider = MagicMock(spec=BearTokenAuthProvider)
+        mock_bear_provider.token = "my-bearer-token"
+        mock_api.rest_auth_function.auth_provider = mock_bear_provider
+        file_io.api_instance = mock_api
+
+        cache_key = file_io._build_cache_key()
+        self.assertTrue(cache_key.startswith("my-bearer-token:"),
+                        f"Cache key should start with bearer token, got: {cache_key}")
+        self.assertIn(str(self.identifier), cache_key)
+
+    def test_different_ak_same_table_token_isolation(self):
+        """Test that two RESTTokenFileIO instances with different AKs on the same table
+        do not share cached tokens."""
+        from pypaimon.api.auth.dlf_provider import DLFAuthProvider
+        from pypaimon.api.token_loader import DLFToken
+
+        # Clear class-level token cache before test
+        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._TOKEN_LOCKS.clear()
+
+        identifier = Identifier.from_string("db.same_table")
+        future_expiry = int(time.time() * 1000) + 7_200_000  # 2 hours from now
+
+        # Create file_io_1 with AK "read-ak"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io_1 = RESTTokenFileIO(
+                identifier, self.warehouse_path,
+                Options({
+                    CatalogOptions.URI.key(): "http://test-uri",
+                    CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                    CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+                    CatalogOptions.DLF_ACCESS_KEY_ID.key(): "read-ak",
+                    CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "read-sk",
+                })
+            )
+
+        mock_api_1 = MagicMock()
+        mock_dlf_1 = MagicMock(spec=DLFAuthProvider)
+        mock_dlf_1.get_token.return_value = DLFToken("read-ak", "read-sk", None)
+        mock_api_1.rest_auth_function.auth_provider = mock_dlf_1
+        file_io_1.api_instance = mock_api_1
+
+        read_token = RESTToken({"fs.oss.accessKeyId": "read-data-ak"}, future_expiry)
+        file_io_1.token = read_token
+        cache_key_1 = file_io_1._build_cache_key()
+        file_io_1._set_cached_token(cache_key_1, read_token)
+
+        # Create file_io_2 with AK "write-ak"
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io_2 = RESTTokenFileIO(
+                identifier, self.warehouse_path,
+                Options({
+                    CatalogOptions.URI.key(): "http://test-uri",
+                    CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                    CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+                    CatalogOptions.DLF_ACCESS_KEY_ID.key(): "write-ak",
+                    CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "write-sk",
+                })
+            )
+
+        mock_api_2 = MagicMock()
+        mock_dlf_2 = MagicMock(spec=DLFAuthProvider)
+        mock_dlf_2.get_token.return_value = DLFToken("write-ak", "write-sk", None)
+        mock_api_2.rest_auth_function.auth_provider = mock_dlf_2
+        file_io_2.api_instance = mock_api_2
+
+        cache_key_2 = file_io_2._build_cache_key()
+
+        # Cache keys should be different
+        self.assertNotEqual(cache_key_1, cache_key_2,
+                            "Different AKs on the same table should produce different cache keys")
+
+        # file_io_2 should NOT get file_io_1's cached token
+        cached_for_2 = file_io_2._get_cached_token(cache_key_2)
+        self.assertIsNone(cached_for_2,
+                          "file_io_2 should not see file_io_1's cached token")
+
+    def test_same_ak_same_table_token_reuse(self):
+        """Test that two RESTTokenFileIO instances with the same AK on the same table
+        can share cached tokens."""
+        from pypaimon.api.auth.dlf_provider import DLFAuthProvider
+        from pypaimon.api.token_loader import DLFToken
+
+        # Clear class-level token cache before test
+        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._TOKEN_LOCKS.clear()
+
+        identifier = Identifier.from_string("db.same_table")
+        future_expiry = int(time.time() * 1000) + 7_200_000
+
+        def make_file_io():
+            with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+                fio = RESTTokenFileIO(
+                    identifier, self.warehouse_path,
+                    Options({
+                        CatalogOptions.URI.key(): "http://test-uri",
+                        CatalogOptions.TOKEN_PROVIDER.key(): "dlf",
+                        CatalogOptions.DLF_REGION.key(): "cn-hangzhou",
+                        CatalogOptions.DLF_ACCESS_KEY_ID.key(): "same-ak",
+                        CatalogOptions.DLF_ACCESS_KEY_SECRET.key(): "same-sk",
+                    })
+                )
+            mock_api = MagicMock()
+            mock_dlf = MagicMock(spec=DLFAuthProvider)
+            mock_dlf.get_token.return_value = DLFToken("same-ak", "same-sk", None)
+            mock_api.rest_auth_function.auth_provider = mock_dlf
+            fio.api_instance = mock_api
+            return fio
+
+        file_io_1 = make_file_io()
+        file_io_2 = make_file_io()
+
+        # Cache keys should be the same
+        self.assertEqual(file_io_1._build_cache_key(), file_io_2._build_cache_key(),
+                         "Same AK on the same table should produce the same cache key")
+
+        # Set token via file_io_1
+        shared_token = RESTToken({"fs.oss.accessKeyId": "shared-data-ak"}, future_expiry)
+        file_io_1._set_cached_token(file_io_1._build_cache_key(), shared_token)
+
+        # file_io_2 should see the same token
+        cached = file_io_2._get_cached_token(file_io_2._build_cache_key())
+        self.assertIsNotNone(cached, "file_io_2 should see file_io_1's cached token")
+        self.assertEqual(cached.token.get("fs.oss.accessKeyId"), "shared-data-ak")
 
     def test_refresh_token_strips_system_table_suffix(self):
         """refresh_token() strips $snapshots suffix before requesting token."""
@@ -365,7 +485,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
         mock_response = MagicMock()
         mock_response.token = {'ak': 'test-ak'}
-        mock_response.expires_at_millis = int(time.time() * 1000) + 7200_000
+        mock_response.expires_at_millis = int(time.time() * 1000) + 7_200_000
 
         mock_api = MagicMock()
         mock_api.load_table_token.return_value = mock_response
@@ -373,7 +493,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
         file_io.refresh_token()
 
-        # Verify load_table_token was called with base table identifier (no $snapshots)
         called_identifier = mock_api.load_table_token.call_args[0][0]
         self.assertEqual(called_identifier.get_database_name(), "db")
         self.assertEqual(called_identifier.get_object_name(), "my_table")
@@ -386,7 +505,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
         mock_response = MagicMock()
         mock_response.token = {'ak': 'test-ak'}
-        mock_response.expires_at_millis = int(time.time() * 1000) + 7200_000
+        mock_response.expires_at_millis = int(time.time() * 1000) + 7_200_000
 
         mock_api = MagicMock()
         mock_api.load_table_token.return_value = mock_response
@@ -396,43 +515,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
         called_identifier = mock_api.load_table_token.call_args[0][0]
         self.assertEqual(called_identifier.get_object_name(), "my_table")
-
-    def test_different_instances_do_not_share_token(self):
-        """Two instances with same identifier get independent tokens (no class-level cache)."""
-        same_identifier = Identifier.from_string("db.shared_table")
-
-        file_io_a = RESTTokenFileIO(
-            same_identifier, self.warehouse_path, self.catalog_options)
-        file_io_b = RESTTokenFileIO(
-            same_identifier, self.warehouse_path, self.catalog_options)
-
-        token_a = RESTToken({'ak': 'ak-A'}, int(time.time() * 1000) + 7200_000)
-        token_b = RESTToken({'ak': 'ak-B'}, int(time.time() * 1000) + 7200_000)
-
-        mock_response_a = MagicMock()
-        mock_response_a.token = token_a.token
-        mock_response_a.expires_at_millis = token_a.expire_at_millis
-
-        mock_response_b = MagicMock()
-        mock_response_b.token = token_b.token
-        mock_response_b.expires_at_millis = token_b.expire_at_millis
-
-        mock_api_a = MagicMock()
-        mock_api_a.load_table_token.return_value = mock_response_a
-        file_io_a.api_instance = mock_api_a
-
-        mock_api_b = MagicMock()
-        mock_api_b.load_table_token.return_value = mock_response_b
-        file_io_b.api_instance = mock_api_b
-
-        # Refresh both
-        file_io_a.try_to_refresh_token()
-        file_io_b.try_to_refresh_token()
-
-        # Each instance should hold its own token
-        self.assertEqual(file_io_a.token.token['ak'], 'ak-A')
-        self.assertEqual(file_io_b.token.token['ak'], 'ak-B')
-        self.assertIsNot(file_io_a.token, file_io_b.token)
 
 
 if __name__ == '__main__':

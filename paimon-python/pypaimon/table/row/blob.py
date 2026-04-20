@@ -19,7 +19,7 @@
 import io
 import struct
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import BinaryIO, Optional, Union
 from urllib.parse import urlparse
 
 from pypaimon.common.uri_reader import UriReader, FileUriReader
@@ -163,6 +163,72 @@ class BlobDescriptor:
         return self.__str__()
 
 
+class OffsetInputStream(io.RawIOBase):
+
+    def __init__(self, wrapped, offset: int, length: int):
+        self._wrapped = wrapped
+        self._offset = offset
+        self._length = length
+        if offset != 0:
+            wrapped.seek(offset)
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def readinto(self, b):
+        if self._length != -1:
+            remaining = self._length - self.tell()
+            if remaining <= 0:
+                return 0
+            if len(b) > remaining:
+                b = memoryview(b)[:remaining]
+        n = self._wrapped.readinto(b)
+        return n if n is not None else 0
+
+    def read(self, size=-1):
+        if size is None:
+            size = -1
+        if self._length != -1:
+            remaining = self._length - self.tell()
+            if remaining <= 0:
+                return b''
+            if size < 0 or size > remaining:
+                size = remaining
+        if size < 0:
+            return self._wrapped.read()
+        return self._wrapped.read(size)
+
+    def seek(self, pos, whence=io.SEEK_SET):
+        if whence == io.SEEK_SET:
+            if pos < 0:
+                raise ValueError(f"Negative seek position: {pos}")
+            target = self._offset + pos
+        elif whence == io.SEEK_CUR:
+            target = self._wrapped.tell() + pos
+            target = max(target, self._offset)
+        elif whence == io.SEEK_END:
+            if self._length != -1:
+                target = self._offset + self._length + pos
+            else:
+                end = self._wrapped.seek(0, io.SEEK_END)
+                target = max(end + pos, self._offset)
+            target = max(target, self._offset)
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+        return self._wrapped.seek(target) - self._offset
+
+    def tell(self) -> int:
+        return self._wrapped.tell() - self._offset
+
+    def close(self):
+        if not self.closed:
+            self._wrapped.close()
+            super().close()
+
+
 class Blob(ABC):
 
     @abstractmethod
@@ -174,7 +240,7 @@ class Blob(ABC):
         pass
 
     @abstractmethod
-    def new_input_stream(self) -> io.BytesIO:
+    def new_input_stream(self) -> BinaryIO:
         pass
 
     @staticmethod
@@ -236,7 +302,7 @@ class BlobData(Blob):
     def to_descriptor(self) -> 'BlobDescriptor':
         raise RuntimeError("Blob data can not convert to descriptor.")
 
-    def new_input_stream(self) -> io.BytesIO:
+    def new_input_stream(self) -> BinaryIO:
         return io.BytesIO(self._data)
 
     def __eq__(self, other) -> bool:
@@ -264,18 +330,16 @@ class BlobRef(Blob):
     def to_descriptor(self) -> BlobDescriptor:
         return self._descriptor
 
-    def new_input_stream(self) -> io.BytesIO:
+    def new_input_stream(self) -> BinaryIO:
         uri = self._descriptor.uri
         offset = self._descriptor.offset
         length = self._descriptor.length
-        with self._uri_reader.new_input_stream(uri) as input_stream:
-            if offset > 0:
-                input_stream.seek(offset)
-            if length == -1:
-                data = input_stream.read()
-            else:
-                data = input_stream.read(length)
-            return io.BytesIO(data)
+        stream = self._uri_reader.new_input_stream(uri)
+        try:
+            return OffsetInputStream(stream, offset, length)
+        except Exception:
+            stream.close()
+            raise
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BlobRef):

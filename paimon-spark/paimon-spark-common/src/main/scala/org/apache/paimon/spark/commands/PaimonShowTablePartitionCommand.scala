@@ -18,13 +18,14 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
 import org.apache.spark.sql.catalyst.catalog.ExternalCatalogUtils.escapePathName
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Cast, Literal, ToPrettyString}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
 import org.apache.spark.sql.connector.catalog.{Identifier, SupportsPartitionManagement, TableCatalog}
 import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits._
@@ -87,7 +88,20 @@ case class PaimonShowTablePartitionCommand(
     val partitionValues = partitions.mkString("[", ", ", "]")
     results.put("Partition Values", s"$partitionValues")
 
-    // TODO "Partition Parameters", "Created Time", "Last Access", "Partition Statistics"
+    // Partition Parameters and Partition Statistics
+    val metadata = partitionTable.loadPartitionMetadata(row)
+    if (!metadata.isEmpty) {
+      val metadataMap = metadata.asScala
+      results.put(
+        "Partition Parameters",
+        s"{${metadataMap.map { case (k, v) => s"$k=$v" }.mkString(", ")}}")
+
+      val fileSizeInBytes =
+        metadataMap.getOrElse(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES, "0").toLong
+      val recordCount =
+        metadataMap.getOrElse(PartitionStatistics.FIELD_RECORD_COUNT, "0").toLong
+      results.put("Partition Statistics", s"$recordCount rows, $fileSizeInBytes bytes")
+    }
 
     results
       .map {

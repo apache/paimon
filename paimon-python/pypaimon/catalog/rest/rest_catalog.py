@@ -19,14 +19,18 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
+from pypaimon.catalog.catalog_exception import IllegalArgumentError
+from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
+                                         ForbiddenException, BadRequestException)
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_exception import (
     TableNotExistException, DatabaseAlreadyExistException,
     TableAlreadyExistException, DatabaseNotExistException,
-    TableNoPermissionException, DatabaseNoPermissionException
+    TableNoPermissionException, DatabaseNoPermissionException,
+    FunctionNotExistException, FunctionAlreadyExistException,
+    DefinitionAlreadyExistException, DefinitionNotExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
@@ -364,6 +368,105 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def list_functions(self, database_name: str) -> List[str]:
+        try:
+            return self.rest_api.list_functions(database_name)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+
+    def get_function(self, identifier: Union[str, Identifier]) -> 'Function':
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            response = self.rest_api.get_function(identifier)
+            return response.to_function(identifier)
+        except NoSuchResourceException as e:
+            raise FunctionNotExistException(identifier) from e
+
+    def create_function(self, identifier: Union[str, Identifier],
+                        function: 'Function', ignore_if_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.create_function(identifier, function)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
+        except AlreadyExistsException as e:
+            if ignore_if_exists:
+                return
+            raise FunctionAlreadyExistException(identifier) from e
+
+    def drop_function(self, identifier: Union[str, Identifier],
+                      ignore_if_not_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.drop_function(identifier)
+        except NoSuchResourceException as e:
+            if ignore_if_not_exists:
+                return
+            raise FunctionNotExistException(identifier) from e
+
+    def alter_function(self, identifier: Union[str, Identifier],
+                       changes: List['FunctionChange'],
+                       ignore_if_not_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.alter_function(identifier, changes)
+        except AlreadyExistsException as e:
+            raise DefinitionAlreadyExistException(identifier, e.resource_name) from e
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_DEFINITION:
+                raise DefinitionNotExistException(identifier, e.resource_name) from e
+            if not ignore_if_not_exists:
+                raise FunctionNotExistException(identifier) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
+
+    def list_functions_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            function_name_pattern: Optional[str] = None,
+    ) -> PagedList[str]:
+        try:
+            return self.rest_api.list_functions_paged(
+                database_name, max_results, page_token, function_name_pattern)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+
+    def list_functions_paged_globally(
+            self,
+            database_name_pattern: Optional[str] = None,
+            function_name_pattern: Optional[str] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[Identifier]:
+        result = self.rest_api.list_functions_paged_globally(
+            database_name_pattern, function_name_pattern, max_results, page_token)
+        functions = result.elements if result.elements else []
+        return PagedList(functions, result.next_page_token)
+
+    def list_function_details_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            function_name_pattern: Optional[str] = None,
+    ) -> PagedList['Function']:
+        try:
+            result = self.rest_api.list_function_details_paged(
+                database_name, max_results, page_token, function_name_pattern)
+            functions = [
+                resp.to_function(Identifier.create(database_name, resp.name))
+                for resp in result.elements
+            ]
+            return PagedList(functions, result.next_page_token)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         try:

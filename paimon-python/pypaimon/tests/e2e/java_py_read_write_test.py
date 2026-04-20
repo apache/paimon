@@ -393,6 +393,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
         self._test_read_btree_index_large()
         self._test_read_btree_index_null()
+        self._test_index_manifest_inherited_after_write()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -452,6 +453,13 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         self.assertEqual(expected, actual)
 
+        # read is_not_null index (full scan across all data blocks)
+        read_builder.with_filter(predicate_builder.is_not_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        self.assertEqual(len(actual), 2000)
+
     def _test_read_btree_index_null(self):
         table = self.catalog.get_table('default.test_btree_index_null')
 
@@ -484,6 +492,29 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         self.assertEqual(expected, actual)
 
+    def _test_index_manifest_inherited_after_write(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+
+        snapshot_before = table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot_before.index_manifest,
+                             "Index manifest should exist before Python write")
+
+        write_builder = table.new_batch_write_builder()
+        write = write_builder.new_write()
+        commit = write_builder.new_commit()
+        data = pa.table({'k': ['k4'], 'v': ['v4']})
+        write.write_arrow(data)
+        commit.commit(write.prepare_commit())
+        write.close()
+        commit.close()
+
+        snapshot_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snapshot_after.id, snapshot_before.id)
+        self.assertIsNotNone(
+            snapshot_after.index_manifest,
+            "index_manifest lost after Python data write - indexes become invisible"
+        )
+
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):
         table = self.catalog.get_table(
@@ -496,3 +527,170 @@ class JavaPyReadWriteTest(unittest.TestCase):
             table_read.to_arrow(splits)
         self.assertIn(file_format, str(ctx.exception))
         self.assertIn("not yet supported", str(ctx.exception))
+
+    def test_read_tantivy_full_text_index(self):
+        """Test reading a Tantivy full-text index built by Java."""
+        table = self.catalog.get_table('default.test_tantivy_fulltext')
+
+        # Use FullTextSearchBuilder to search
+        builder = table.new_full_text_search_builder()
+        builder.with_text_column('content')
+        builder.with_query_text('paimon')
+        builder.with_limit(10)
+
+        result = builder.execute_local()
+        # Row 0, 2, 4 mention "paimon"
+        row_ids = sorted(list(result.results()))
+        print(f"Tantivy full-text search for 'paimon': row_ids={row_ids}")
+        self.assertEqual(row_ids, [0, 2, 4])
+
+        # Read matching rows using withGlobalIndexResult
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        self.assertEqual(ids, [0, 2, 4])
+
+        # Search for "tantivy" - only row 1
+        builder2 = table.new_full_text_search_builder()
+        builder2.with_text_column('content')
+        builder2.with_query_text('tantivy')
+        builder2.with_limit(10)
+
+        result2 = builder2.execute_local()
+        row_ids2 = sorted(list(result2.results()))
+        print(f"Tantivy full-text search for 'tantivy': row_ids={row_ids2}")
+        self.assertEqual(row_ids2, [1])
+
+        # Read matching rows
+        read_builder2 = table.new_read_builder()
+        scan2 = read_builder2.new_scan().with_global_index_result(result2)
+        plan2 = scan2.plan()
+        pa_table2 = read_builder2.new_read().to_arrow(plan2.splits())
+        self.assertEqual(pa_table2.num_rows, 1)
+        self.assertEqual(pa_table2.column('id').to_pylist(), [1])
+
+        # Search for "full-text search" - rows 1, 3
+        builder3 = table.new_full_text_search_builder()
+        builder3.with_text_column('content')
+        builder3.with_query_text('full-text search')
+        builder3.with_limit(10)
+
+        result3 = builder3.execute_local()
+        row_ids3 = sorted(list(result3.results()))
+        print(f"Tantivy full-text search for 'full-text search': row_ids={row_ids3}")
+        self.assertIn(1, row_ids3)
+        self.assertIn(3, row_ids3)
+
+        # Read matching rows
+        read_builder3 = table.new_read_builder()
+        scan3 = read_builder3.new_scan().with_global_index_result(result3)
+        plan3 = scan3.plan()
+        pa_table3 = read_builder3.new_read().to_arrow(plan3.splits())
+        pa_table3 = table_sort_by(pa_table3, 'id')
+        ids3 = pa_table3.column('id').to_pylist()
+        self.assertIn(1, ids3)
+        self.assertIn(3, ids3)
+
+    def test_read_lumina_vector_index(self):
+        """Test reading a Lumina vector index built by Java."""
+        table = self.catalog.get_table('default.test_lumina_vector')
+
+        # Use VectorSearchBuilder to search
+        # Java wrote 6 vectors: [1,0,0,0], [0.9,0.1,0,0], [0,1,0,0],
+        #                        [0,0,1,0], [0,0,0,1], [0.95,0.05,0,0]
+        # Query with [1,0,0,0] - nearest by L2 should be row 0, 5, 1
+        builder = table.new_vector_search_builder()
+        builder.with_vector_column('embedding')
+        builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
+        builder.with_limit(3)
+
+        result = builder.execute_local()
+        row_ids = sorted(list(result.results()))
+        print(f"Lumina vector search for [1,0,0,0]: row_ids={row_ids}")
+        self.assertIn(0, row_ids)  # exact match
+        self.assertEqual(len(row_ids), 3)
+
+        # Read matching rows using withGlobalIndexResult
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        print(f"Lumina vector search matched rows: ids={ids}")
+        self.assertIn(0, ids)
+
+    def test_read_blob_after_alter_and_compact(self):
+        table = self.catalog.get_table('default.blob_alter_compact_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+        self.assertEqual(result.num_rows, 200)
+
+    def test_compact_conflict_shard_update(self):
+        """
+        1. Java writes 5 base files (testCompactConflictWriteBase)
+        2. pypaimon ShardTableUpdator scans table, prepares evolution
+        3. Java runs compact (testCompactConflictRunCompact)
+        4. pypaimon commits stale evolution -> conflict detected, raises RuntimeError
+        """
+        import subprocess
+
+        table = self.catalog.get_table('default.compact_conflict_test')
+
+        # Step 2: pypaimon shard update - scan and prepare commit
+        wb = table.new_batch_write_builder()
+        update = wb.new_update()
+        update.with_read_projection(['f0'])
+        update.with_update_type(['f2'])
+        upd = update.new_shard_updator(shard_num=0, total_shard_count=3)
+        print(f"Shard 0 row_ranges: {[(r[1].from_, r[1].to) for r in upd.row_ranges]}")
+
+        reader = upd.arrow_reader()
+        import pyarrow as pa
+        rows_read = 0
+        for batch in iter(reader.read_next_batch, None):
+            n = batch.num_rows
+            rows_read += n
+            upd.update_by_arrow_batch(
+                pa.RecordBatch.from_pydict(
+                    {'f2': [f'evo_{i}' for i in range(n)]},
+                    schema=pa.schema([('f2', pa.string())])
+                )
+            )
+        print(f"Shard update read {rows_read} rows")
+        stale_commit_msgs = upd.prepare_commit()
+
+        # Step 3: Java compact (compact happening between scan and commit)
+        project_root = os.path.join(self.tempdir, '..', '..', '..', '..')
+        result = subprocess.run(
+            ['mvn', 'test',
+             '-pl', 'paimon-core',
+             '-Dtest=org.apache.paimon.JavaPyE2ETest#testCompactConflictRunCompact',
+             '-Drun.e2e.tests=true',
+             '-Dsurefire.failIfNoSpecifiedTests=false',
+             '-q'],
+            cwd=os.path.abspath(project_root),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=120
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"Java compact failed:\n{result.stdout}\n{result.stderr}")
+        print("Java compact completed")
+
+        # Step 4: pypaimon commits stale evolution -> conflict detected
+        tc = wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            tc.commit(stale_commit_msgs)
+        self.assertIn("conflicts", str(ctx.exception))
+        tc.close()
+        print(f"Conflict detected as expected: {ctx.exception}")

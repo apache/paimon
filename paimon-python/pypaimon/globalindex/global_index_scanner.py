@@ -35,13 +35,11 @@ class GlobalIndexScanner:
 
     def __init__(
         self,
-        options: dict,
         fields: list,
         file_io,
         index_path: str,
         index_files: Collection['IndexFileMeta']
     ):
-        self._options = options
         self._evaluator = self._create_evaluator(fields, file_io, index_path, index_files)
 
     def _create_evaluator(self, fields, file_io, index_path, index_files):
@@ -89,7 +87,6 @@ class GlobalIndexScanner:
             if len(index_files) == 0:
                 return None
             return GlobalIndexScanner(
-                options=table.table_schema.options,
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path=table.path_factory().global_index_path_factory().index_path(),
@@ -122,7 +119,6 @@ class GlobalIndexScanner:
         if len(scanned_index_files) == 0:
             return None
         return GlobalIndexScanner(
-            options=table.table_schema.options,
             fields=table.fields,
             file_io=table.file_io,
             index_path=table.path_factory().global_index_path_factory().index_path(),

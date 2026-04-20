@@ -42,6 +42,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
@@ -68,6 +69,7 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -108,7 +110,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 @ThreadSafe
 public class SchemaManager implements Serializable {
 
-    private static final String SCHEMA_PREFIX = "schema-";
+    public static final String SCHEMA_PREFIX = "schema-";
 
     private final FileIO fileIO;
     private final Path tableRoot;
@@ -311,6 +313,7 @@ public class SchemaManager implements Serializable {
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
         String newComment = oldTableSchema.comment();
+        List<String> newPrimaryKeys = oldTableSchema.primaryKeys();
         for (SchemaChange change : changes) {
             if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
@@ -402,6 +405,7 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
+                assertNotRenamingBlobColumn(newFields, rename.fieldNames());
                 new NestedColumnModifier(rename.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -549,6 +553,12 @@ public class SchemaManager implements Serializable {
                                     update.newDefaultValue());
                         },
                         lazyIdentifier);
+            } else if (change instanceof SchemaChange.DropPrimaryKey) {
+                if (hasSnapshots.get()) {
+                    throw new UnsupportedOperationException(
+                            "Cannot drop primary keys on a non-empty table.");
+                }
+                newPrimaryKeys = Collections.emptyList();
             } else {
                 throw new UnsupportedOperationException("Unsupported change: " + change.getClass());
             }
@@ -561,8 +571,7 @@ public class SchemaManager implements Serializable {
                         newFields,
                         oldTableSchema.partitionKeys(),
                         applyNotNestedColumnRename(
-                                oldTableSchema.primaryKeys(),
-                                Iterables.filter(changes, RenameColumn.class)),
+                                newPrimaryKeys, Iterables.filter(changes, RenameColumn.class)),
                         applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
@@ -898,6 +907,19 @@ public class SchemaManager implements Serializable {
         if (schema.primaryKeys().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format("Cannot %s primary key", operation));
+        }
+    }
+
+    private static void assertNotRenamingBlobColumn(List<DataField> fields, String[] fieldNames) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        for (DataField field : fields) {
+            if (field.name().equals(fieldName) && field.type().is(DataTypeRoot.BLOB)) {
+                throw new UnsupportedOperationException(
+                        String.format("Cannot rename BLOB column: [%s]", fieldName));
+            }
         }
     }
 

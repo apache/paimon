@@ -344,13 +344,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private void initRow(GenericRow row, InternalRow value) {
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(value);
-            if (!nullables[i]) {
-                if (field != null) {
-                    row.setField(i, field);
-                } else {
-                    throw new IllegalArgumentException("Field " + i + " can not be null");
-                }
+            if (!nullables[i] && field == null) {
+                throw new IllegalArgumentException("Field " + i + " can not be null");
             }
+            row.setField(i, field);
         }
     }
 
@@ -496,6 +493,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             RowType targetType = readType != null ? readType : rowType;
             Map<Integer, FieldsComparator> projectedSeqComparators = new HashMap<>();
             Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
+            Set<Integer> projectedSequenceGroupPartialDelete = sequenceGroupPartialDelete;
 
             if (readType != null) {
                 // Build index mapping from table schema to read schema
@@ -547,6 +545,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         projectedAggregators.put(newIndex, fieldAggregators.get(oldIndex).get());
                     }
                 }
+
+                projectedSequenceGroupPartialDelete =
+                        sequenceGroupPartialDelete.stream()
+                                .filter(indexMap::containsKey)
+                                .map(indexMap::get)
+                                .collect(Collectors.toSet());
             } else {
                 // Use original mappings
                 this.fieldSeqComparators.forEach(
@@ -563,7 +567,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     projectedAggregators,
                     !fieldSeqComparators.isEmpty(),
                     removeRecordOnDelete,
-                    sequenceGroupPartialDelete,
+                    projectedSequenceGroupPartialDelete,
                     ArrayUtils.toPrimitiveBoolean(
                             fieldTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new)));
         }

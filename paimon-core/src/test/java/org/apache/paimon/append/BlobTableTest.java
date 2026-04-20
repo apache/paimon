@@ -19,6 +19,8 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
@@ -33,10 +35,14 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
@@ -45,6 +51,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -510,6 +517,238 @@ public class BlobTableTest extends TableTestBase {
                     assertThat(row.getBlob(1).toData()).isEqualTo(blobBytes);
                 });
         assertThat(projectedCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    void testReadBlobAfterAlterTableAndCompaction() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        // Step 1: write data with schemaId=0
+        commitDefault(writeDataDefault(100, 1));
+
+        // Step 2: ALTER TABLE SET an unrelated option -> schemaId becomes 1
+        catalog.alterTable(
+                identifier(), SchemaChange.setOption("snapshot.num-retained.min", "5"), false);
+
+        // Step 3: write more data with schemaId=1
+        commitDefault(writeDataDefault(100, 1));
+
+        // Step 4: compact blob table using DataEvolutionCompactCoordinator
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        // Step 5: read after compaction
+        readDefault(row -> assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes));
+    }
+
+    @Test
+    void testReadBlobAfterAddColumnAndCompaction() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    1, BinaryString.fromString("batch1"), new BlobData(blobBytes)));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
+            }
+        }
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    2,
+                                    BinaryString.fromString("batch2"),
+                                    new BlobData(blobBytes),
+                                    BinaryString.fromString("after-add")));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
+            }
+        }
+
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        AtomicInteger batch1Count = new AtomicInteger(0);
+        AtomicInteger batch2Count = new AtomicInteger(0);
+        readDefault(
+                row -> {
+                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                    if (row.getInt(0) == 1) {
+                        batch1Count.incrementAndGet();
+                    } else if (row.getInt(0) == 2) {
+                        batch2Count.incrementAndGet();
+                    }
+                });
+        assertThat(batch1Count.get()).isEqualTo(100);
+        assertThat(batch2Count.get()).isEqualTo(100);
+    }
+
+    @Test
+    void testReadBlobAfterDropColumnAndCompaction() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.column("f3", DataTypes.STRING());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    1,
+                                    BinaryString.fromString("batch1"),
+                                    new BlobData(blobBytes),
+                                    BinaryString.fromString("before-drop")));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
+            }
+        }
+
+        catalog.alterTable(identifier(), SchemaChange.dropColumn("f3"), false);
+
+        {
+            FileStoreTable t = getTableDefault();
+            StreamWriteBuilder b = t.newStreamWriteBuilder().withCommitUser(commitUser);
+            try (StreamTableWrite w = b.newWrite()) {
+                for (int j = 0; j < 100; j++) {
+                    w.write(
+                            GenericRow.of(
+                                    2, BinaryString.fromString("batch2"), new BlobData(blobBytes)));
+                }
+                commitDefault(w.prepareCommit(false, Long.MAX_VALUE));
+            }
+        }
+
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        AtomicInteger batch1Count = new AtomicInteger(0);
+        AtomicInteger batch2Count = new AtomicInteger(0);
+        readDefault(
+                row -> {
+                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                    if (row.getInt(0) == 1) {
+                        batch1Count.incrementAndGet();
+                    } else if (row.getInt(0) == 2) {
+                        batch2Count.incrementAndGet();
+                    }
+                });
+        assertThat(batch1Count.get()).isEqualTo(100);
+        assertThat(batch2Count.get()).isEqualTo(100);
+    }
+
+    @Disabled("Reproduce: rename blob column causes read failure after compaction")
+    @Test
+    void testRenameBlobColumnReadFailure() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "100 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        // Step 1: write blob data — blob files record writeCols=["f2"]
+        commitDefault(writeDataDefault(100, 1));
+
+        // Step 2: rename blob column f2 -> f2_renamed
+        catalog.alterTable(identifier(), SchemaChange.renameColumn("f2", "f2_renamed"), false);
+
+        // Step 3: write more data — new blob files have writeCols=["f2_renamed"]
+        commitDefault(writeDataDefault(100, 1));
+
+        // Step 4: compact merges files into the same split
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.size()).isGreaterThan(0);
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        // Step 5: read fails —
+        assertThatThrownBy(() -> readDefault(row -> {}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("All files in this bunch should have the same write columns");
+    }
+
+    @Test
+    void testRenameBlobColumnShouldFail() throws Exception {
+        createTableDefault();
+        commitDefault(writeDataDefault(10, 1));
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.renameColumn("f2", "f2_renamed"),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot rename BLOB column");
     }
 
     private void createExternalStorageTable() throws Exception {

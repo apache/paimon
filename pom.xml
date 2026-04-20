@@ -99,7 +99,7 @@ under the License.
         <airlift.version>2.0.3</airlift.version>
         <lz4.version>1.10.4</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
-        <log4j.version>2.25.3</log4j.version>
+        <log4j.version>2.25.4</log4j.version>
         <junit4.version>4.13.2</junit4.version>
         <junit5.version>5.8.1</junit5.version>
         <spotless.version>2.13.0</spotless.version>
@@ -512,6 +512,31 @@ under the License.
             <activation>
                 <jdk>11</jdk>
             </activation>
+        </profile>
+
+        <profile>
+            <!-- JDK 9+ supports the ignore-source-errors flag for javadoc -->
+            <id>javadoc-jdk9+</id>
+            <activation>
+                <jdk>[9,)</jdk>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-javadoc-plugin</artifactId>
+                            <configuration>
+                                <release>8</release>
+                                <additionalJOptions combine.children="append">
+                                    <!-- Suppress the error that is accepted by JDK 8 but not by JDK 11. -->
+                                    <additionalJOption>--ignore-source-errors</additionalJOption>
+                                </additionalJOptions>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
         </profile>
 
         <profile>
@@ -1046,12 +1071,10 @@ under the License.
                     <configuration>
                         <quiet>true</quiet>
                         <detectOfflineLinks>false</detectOfflineLinks>
-                        <release>8</release>
+                        <source>8</source>
                         <failOnError>false</failOnError>
                         <additionalJOptions>
                             <additionalJOption>-Xdoclint:none</additionalJOption>
-                            <!-- Suppress the error that is accepted by JDK 8 but not by JDK 11. -->
-                            <additionalJOption>--ignore-source-errors</additionalJOption>
                         </additionalJOptions>
                     </configuration>
                 </plugin>

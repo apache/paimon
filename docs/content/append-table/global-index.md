@@ -211,4 +211,25 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 ```
 {{< /tab >}}
 
+{{< tab "Python SDK" >}}
+```python
+table = catalog.get_table('db.my_table')
+
+# Step 1: Build full-text search
+builder = table.new_full_text_search_builder()
+builder.with_text_column('content')
+builder.with_query_text('paimon lake format')
+builder.with_limit(10)
+result = builder.execute_local()
+
+# Step 2: Read matching rows using the search result
+read_builder = table.new_read_builder()
+scan = read_builder.new_scan().with_global_index_result(result)
+plan = scan.plan()
+table_read = read_builder.new_read()
+pa_table = table_read.to_arrow(plan.splits())
+print(pa_table)
+```
+{{< /tab >}}
+
 {{< /tabs >}}

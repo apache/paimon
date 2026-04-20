@@ -211,6 +211,7 @@ class DataFileBatchReader(RecordBatchReader):
             idx = self.system_fields[SpecialFields.ROW_ID.name]
             # Create a new array that fills with computed row IDs
             arrays[idx] = pa.array(range(self.first_row_id, self.first_row_id + record_batch.num_rows), type=pa.int64())
+            self.first_row_id += record_batch.num_rows
 
         # Handle _SEQUENCE_NUMBER field
         if SpecialFields.SEQUENCE_NUMBER.name in self.system_fields.keys():

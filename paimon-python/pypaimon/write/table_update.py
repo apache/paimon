@@ -171,7 +171,9 @@ class ShardTableUpdator:
         self.dict = defaultdict(list)
 
         scanner = self.table.new_read_builder().new_scan()
-        splits = scanner.plan().splits()
+        plan = scanner.plan()
+        self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
         self.splits = splits
 
@@ -197,7 +199,7 @@ class ShardTableUpdator:
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []
         for (partition, files) in self.dict.items():
-            commit_messages.append(CommitMessage(partition, 0, files))
+            commit_messages.append(CommitMessage(partition, 0, files, self.snapshot_id))
         return commit_messages
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):

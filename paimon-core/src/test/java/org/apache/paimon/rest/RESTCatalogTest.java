@@ -90,6 +90,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -97,7 +98,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
@@ -275,6 +275,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         catalog.alterDatabase(
                                 database,
                                 Lists.newArrayList(PropertyChange.setProperty("key1", "value1")),
+                                false));
+    }
+
+    @Test
+    void testApiWhenViewNoPermission() throws Exception {
+        Identifier identifier = Identifier.create("test_view_db", "no_permission_view");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        View view = createView(identifier);
+        catalog.createView(identifier, view, false);
+        revokeViewPermission(identifier);
+        assertThrows(Catalog.ViewNoPermissionException.class, () -> catalog.getView(identifier));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class, () -> catalog.dropView(identifier, false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.renameView(
+                                identifier,
+                                Identifier.create("test_view_db", "no_permission_view2"),
+                                false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(
+                                        ViewChange.addDialect(
+                                                "flink_1", "SELECT * FROM FLINK_TABLE_1")),
                                 false));
     }
 
@@ -3931,6 +3959,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
+
+    protected abstract void revokeViewPermission(Identifier identifier);
 
     protected abstract void authTableColumns(Identifier identifier, List<String> columns);
 

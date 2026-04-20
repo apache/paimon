@@ -65,7 +65,8 @@ class TableUpdateByRowId:
 
         read_builder = self.table.new_read_builder()
         scan = read_builder.new_scan()
-        splits = scan.plan().splits()
+        plan = scan.plan()
+        splits = plan.splits()
 
         for split in splits:
             for file in split.files:
@@ -77,7 +78,7 @@ class TableUpdateByRowId:
 
         total_row_count = sum(first_row_id_to_row_count_map.values())
 
-        snapshot_id = self.table.snapshot_manager().get_latest_snapshot().id
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         return (snapshot_id,
                 sorted(list(set(first_row_ids))),
                 first_row_id_to_partition_map,
@@ -293,7 +294,9 @@ class TableUpdateByRowId:
         merged_data = self._merge_update_with_original(original_data, data, column_names, first_row_id)
 
         # Create a file store write for this partition
+        # Disable rolling to ensure one output file per first_row_id group,
         file_store_write = FileStoreWrite(self.table, self.commit_user)
+        file_store_write.disable_rolling()
 
         # Set write columns to only update specific columns
         write_cols = column_names
@@ -313,7 +316,6 @@ class TableUpdateByRowId:
         for msg in commit_messages:
             msg.check_from_snapshot = self.snapshot_id
             for file in msg.new_files:
-                # Assign the same first_row_id as the original file
                 file.first_row_id = first_row_id
                 file.write_cols = write_cols
 

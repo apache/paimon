@@ -28,6 +28,7 @@ from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.schema.schema import Schema
 from pypaimon.tag.tag import Tag
 from pypaimon.tag.tag_manager import TagManager
+from pypaimon.sql.sql_context import SQLContext
 
 __all__ = [
     "PaimonVirtualFileSystem",
@@ -35,4 +36,5 @@ __all__ = [
     "Schema",
     "Tag",
     "TagManager",
+    "SQLContext",
 ]
