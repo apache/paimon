@@ -279,30 +279,12 @@ ALTER TABLE blob_table SET ('blob-as-descriptor' = 'false');
 SELECT image FROM blob_table;
 ```
 
-### External-Storage Descriptor Fields
-
-If you want Paimon to accept raw BLOB input, write the data to an external location, and store only descriptor bytes inline, configure the target field(s) like this:
-
-```sql
-'blob-descriptor-field' = 'image',
-'blob-external-storage-field' = 'image',
-'blob-external-storage-path' = 's3://my-bucket/paimon-external-blobs/'
-```
-
-For these configured fields:
-
-- Paimon writes the raw blob data to `blob-external-storage-path`
-- Paimon stores serialized `BlobDescriptor` bytes inline in normal data files
-- the field remains descriptor-based when reading and updating
-- orphan file cleanup is not applied to the external storage path
-
 ### MERGE INTO Support
 
 For Data Evolution writes in Flink and Spark:
 
 - raw-data BLOB columns are still rejected in partial-column `MERGE INTO` updates
 - descriptor-based BLOB columns are allowed
-- fields configured in `blob-external-storage-field` are also allowed because they are descriptor-based fields
 
 ## Java API Usage
 
