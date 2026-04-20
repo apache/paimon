@@ -62,6 +62,9 @@ public enum FileType {
     private static final String CHANGELOG_DIR = "changelog";
     private static final String GLOBAL_INDEX_INFIX = "global-index-";
 
+    // keep in sync with Path.createTempPath(): ".{name}.{UUID}.tmp"
+    private static final String TEMP_FILE_SUFFIX = ".tmp";
+
     /** Returns {@code true} if this file type is any kind of index. */
     public boolean isIndex() {
         return this == BUCKET_INDEX || this == GLOBAL_INDEX || this == FILE_INDEX;
@@ -74,6 +77,10 @@ public enum FileType {
      */
     public static FileType classify(Path filePath) {
         String name = filePath.getName();
+
+        // Strip temporary file wrapper produced by Path.createTempPath():
+        // format is ".{originalName}.{UUID}.tmp"
+        name = unwrapTempFileName(name);
 
         // meta file prefixes: snapshot-, schema-, stat-, tag-, consumer-, service-
         if (name.startsWith(SNAPSHOT_PREFIX)
@@ -122,5 +129,27 @@ public enum FileType {
 
         // default: DATA
         return DATA;
+    }
+
+    /**
+     * Unwrap a temporary file name produced by {@link Path#createTempPath()}.
+     *
+     * <p>The format is {@code .{originalName}.{UUID}.tmp}. If the name matches this pattern, the
+     * original file name is extracted and returned. Otherwise the name is returned as-is.
+     */
+    static String unwrapTempFileName(String name) {
+        // format: .{originalName}.{UUID}.tmp
+        // suffix ".{UUID}.tmp" is fixed 41 chars: 1(dot) + 36(UUID) + 4(.tmp)
+        // minimum total: 1(leading dot) + 1(name) + 41(suffix) = 43
+        if (name.length() < 43 || name.charAt(0) != '.' || !name.endsWith(TEMP_FILE_SUFFIX)) {
+            return name;
+        }
+
+        int dotBeforeUuid = name.length() - 41;
+        if (name.charAt(dotBeforeUuid) != '.') {
+            return name;
+        }
+
+        return name.substring(1, dotBeforeUuid);
     }
 }
