@@ -22,6 +22,8 @@ import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileType}. */
@@ -239,5 +241,110 @@ public class FileTypeTest {
                         FileType.classify(
                                 new Path(branchRoot + "/index/btree-global-index-a1b2c3d4.index")))
                 .isEqualTo(FileType.GLOBAL_INDEX);
+    }
+
+    // ===== Temporary file paths (from Path.createTempPath()) =====
+
+    @Test
+    public void testTempMetaFiles() {
+        String uuid = UUID.randomUUID().toString();
+
+        // snapshot tmp: .snapshot-1.{UUID}.tmp
+        assertThat(
+                        FileType.classify(
+                                new Path(TABLE_ROOT + "/snapshot/.snapshot-1." + uuid + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // schema tmp
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/schema/.schema-0." + uuid + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // tag tmp
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/tag/.tag-myTag." + uuid + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // consumer tmp
+        assertThat(
+                        FileType.classify(
+                                new Path(
+                                        TABLE_ROOT
+                                                + "/consumer/.consumer-myGroup."
+                                                + uuid
+                                                + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // service tmp
+        assertThat(
+                        FileType.classify(
+                                new Path(
+                                        TABLE_ROOT
+                                                + "/service/.service-primary-key-lookup."
+                                                + uuid
+                                                + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // hint file tmp: .EARLIEST.{UUID}.tmp
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/snapshot/.EARLIEST." + uuid + ".tmp")))
+                .isEqualTo(FileType.META);
+        assertThat(FileType.classify(new Path(TABLE_ROOT + "/snapshot/.LATEST." + uuid + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // _SUCCESS tmp
+        assertThat(
+                        FileType.classify(
+                                new Path(
+                                        TABLE_ROOT
+                                                + "/dt=2024-01-01/bucket-0/._SUCCESS."
+                                                + uuid
+                                                + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // changelog metadata tmp
+        assertThat(
+                        FileType.classify(
+                                new Path(TABLE_ROOT + "/changelog/.changelog-1." + uuid + ".tmp")))
+                .isEqualTo(FileType.META);
+
+        // statistics tmp
+        assertThat(
+                        FileType.classify(
+                                new Path(
+                                        TABLE_ROOT
+                                                + "/statistics/.stat-a1b2c3d4-0."
+                                                + uuid
+                                                + ".tmp")))
+                .isEqualTo(FileType.META);
+    }
+
+    @Test
+    public void testUnwrapTempFileName() {
+        String uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+
+        // valid temp file names
+        assertThat(FileType.unwrapTempFileName(".snapshot-1." + uuid + ".tmp"))
+                .isEqualTo("snapshot-1");
+        assertThat(FileType.unwrapTempFileName(".schema-0." + uuid + ".tmp")).isEqualTo("schema-0");
+        assertThat(FileType.unwrapTempFileName(".EARLIEST." + uuid + ".tmp")).isEqualTo("EARLIEST");
+        assertThat(FileType.unwrapTempFileName("._SUCCESS." + uuid + ".tmp")).isEqualTo("_SUCCESS");
+
+        // not a temp file: no leading dot
+        assertThat(FileType.unwrapTempFileName("snapshot-1." + uuid + ".tmp"))
+                .isEqualTo("snapshot-1." + uuid + ".tmp");
+
+        // not a temp file: no .tmp suffix
+        assertThat(FileType.unwrapTempFileName(".snapshot-1." + uuid))
+                .isEqualTo(".snapshot-1." + uuid);
+
+        // not a temp file: invalid UUID
+        assertThat(FileType.unwrapTempFileName(".snapshot-1.not-a-valid-uuid-string-here.tmp"))
+                .isEqualTo(".snapshot-1.not-a-valid-uuid-string-here.tmp");
+
+        // not a temp file: too short
+        assertThat(FileType.unwrapTempFileName(".x.tmp")).isEqualTo(".x.tmp");
+
+        // regular file names should pass through unchanged
+        assertThat(FileType.unwrapTempFileName("snapshot-1")).isEqualTo("snapshot-1");
+        assertThat(FileType.unwrapTempFileName("data-a1b2c3d4-0.orc"))
+                .isEqualTo("data-a1b2c3d4-0.orc");
     }
 }
