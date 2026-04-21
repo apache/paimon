@@ -104,7 +104,7 @@ class PaimonV2Write(
       case Some(_) if !overwriteDynamic => ", overwriteTable=true"
       case _ => ""
     }
-    s"PaimonWrite(table=${table.fullName()}$overwriteDynamicStr$overwritePartitionsStr)"
+    s"PaimonWrite(table=${BaseTable.tableNameWithCatalog(table)}$overwriteDynamicStr$overwritePartitionsStr)"
   }
 
   override def description(): String = toString

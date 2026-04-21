@@ -44,8 +44,9 @@ import java.util.function.LongConsumer;
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
+    @Nullable private final String catalogName;
     @Nullable private final Identifier identifier;
     @Nullable private final String uuid;
     @Nullable private final CatalogLoader catalogLoader;
@@ -56,6 +57,7 @@ public class CatalogEnvironment implements Serializable {
     private final boolean supportsPartitionModification;
 
     public CatalogEnvironment(
+            @Nullable String catalogName,
             @Nullable Identifier identifier,
             @Nullable String uuid,
             @Nullable CatalogLoader catalogLoader,
@@ -64,6 +66,7 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement,
             boolean supportsPartitionModification) {
+        this.catalogName = catalogName;
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
@@ -75,7 +78,12 @@ public class CatalogEnvironment implements Serializable {
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, null, false, false);
+        return new CatalogEnvironment(null, null, null, null, null, null, null, false, false);
+    }
+
+    @Nullable
+    public String catalogName() {
+        return catalogName;
     }
 
     @Nullable
@@ -198,6 +206,7 @@ public class CatalogEnvironment implements Serializable {
 
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
+                catalogName,
                 identifier,
                 uuid,
                 catalogLoader,

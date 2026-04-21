@@ -93,7 +93,7 @@ public class CatalogFactoryTest {
         conf.set("my_key", "my_value");
         CatalogContext context =
                 CatalogContext.create(
-                        new Options(), conf, new TestFileIOLoader(), new TestFileIOLoader());
+                        new Options(), conf, new TestFileIOLoader(), new TestFileIOLoader(), null);
         context = InstantiationUtil.clone(context);
         assertThat(context.hadoopConf().get("my_key")).isEqualTo(conf.get("my_key"));
     }

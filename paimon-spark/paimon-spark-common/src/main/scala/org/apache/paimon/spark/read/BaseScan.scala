@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, SparkTypeUtils}
+import org.apache.paimon.spark.BaseTable
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
@@ -185,7 +186,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     } else {
       ""
     }
-    s"${getClass.getSimpleName}: [${table.name}]" +
+    s"${getClass.getSimpleName}: [${BaseTable.tableNameWithCatalog(table)}]" +
       pushedPartitionFiltersStr +
       pushedRuntimePartitionFiltersStr +
       pushedDataFiltersStr +

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.connector.catalog.TableCapability
@@ -37,7 +37,7 @@ abstract class BaseTable
 
   override def capabilities(): JSet[TableCapability] = JCollections.emptySet[TableCapability]()
 
-  override def name: String = table.fullName
+  override def name: String = BaseTable.tableNameWithCatalog(table)
 
   override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
 
@@ -48,6 +48,20 @@ abstract class BaseTable
   override def properties: JMap[String, String] = table.options()
 
   override def toString: String = {
-    s"${table.getClass.getSimpleName}[${table.fullName()}]"
+    s"${table.getClass.getSimpleName}[$name]"
+  }
+}
+
+object BaseTable {
+
+  /** Returns the full table name with catalog prefix if available. */
+  def tableNameWithCatalog(table: Table): String = {
+    val fullName = table.fullName
+    table match {
+      case t: FileStoreTable =>
+        Option(t.catalogEnvironment().catalogName())
+          .fold(fullName)(catalog => s"$catalog.$fullName")
+      case _ => fullName
+    }
   }
 }

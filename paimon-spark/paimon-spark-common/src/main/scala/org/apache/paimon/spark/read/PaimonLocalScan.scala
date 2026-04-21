@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.read
 
 import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.spark.BaseTable
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -39,6 +40,6 @@ case class PaimonLocalScan(
     } else {
       ""
     }
-    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
+    s"PaimonLocalScan: [${BaseTable.tableNameWithCatalog(table)}]" + pushedPartitionFiltersStr
   }
 }

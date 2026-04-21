@@ -93,7 +93,8 @@ public class FlinkGenericCatalogFactory implements CatalogFactory {
         FlinkCatalog paimon =
                 new FlinkCatalog(
                         org.apache.paimon.catalog.CatalogFactory.createCatalog(
-                                CatalogContext.create(options, new FlinkFileIOLoader()), cl),
+                                CatalogContext.create(options, new FlinkFileIOLoader(), null, name),
+                                cl),
                         name,
                         options.get(DEFAULT_DATABASE),
                         options);
