@@ -25,16 +25,10 @@ import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
-import org.apache.paimon.deletionvectors.DeletionFileRecordIterator;
-import org.apache.paimon.deletionvectors.DeletionVectorJudger;
 import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
-import org.apache.paimon.io.DeletionFileIteratorRecords;
-import org.apache.paimon.io.VectorizedIteratorRecords;
-import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.reader.VectorizedRecordIterator;
-import org.apache.paimon.utils.IntArrayList;
+import org.apache.paimon.io.VectorizedBundleRecords;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
@@ -83,22 +77,13 @@ public class ArrowBundleWriter implements BundleFormatWriter {
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
             add(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
-            return;
-        } else if (bundleRecords instanceof VectorizedIteratorRecords) {
-            add(((VectorizedIteratorRecords) bundleRecords).vectorizedIterator().batch(), null);
-            return;
-        } else if (bundleRecords instanceof DeletionFileIteratorRecords) {
-            DeletionFileRecordIterator iterator =
-                    ((DeletionFileIteratorRecords) bundleRecords).deletionFileIterator();
-            FileRecordIterator<InternalRow> recordIterator = iterator.iterator();
-            if (recordIterator instanceof VectorizedRecordIterator) {
-                add(((VectorizedRecordIterator) recordIterator).batch(), iterator.deletionVector());
-                return;
+        } else if (bundleRecords instanceof VectorizedBundleRecords) {
+            VectorizedBundleRecords records = (VectorizedBundleRecords) bundleRecords;
+            add(records.batch(), records.selected());
+        } else {
+            for (InternalRow row : bundleRecords) {
+                addElement(row);
             }
-        }
-
-        for (InternalRow row : bundleRecords) {
-            addElement(row);
         }
     }
 
@@ -121,40 +106,19 @@ public class ArrowBundleWriter implements BundleFormatWriter {
         }
     }
 
-    public void add(
-            VectorizedColumnBatch batch, @Nullable DeletionVectorJudger deletionVectorJudger) {
+    public void add(VectorizedColumnBatch batch, @Nullable int[] selected) {
         if (!arrowFormatWriter.empty()) {
             flush();
         }
 
         int batchSize = arrowFormatWriter.formatWriter().getBatchSize();
         ColumnVector[] columns = batch.columns;
-
-        int[] pickedInColumn = null;
-        int totalNumRows;
-
-        if (deletionVectorJudger != null) {
-            int originNumRows = batch.getNumRows();
-            IntArrayList picked = new IntArrayList(originNumRows);
-            for (int i = 0; i < originNumRows; i++) {
-                if (!deletionVectorJudger.isDeleted(i)) {
-                    picked.add(i);
-                }
-            }
-            if (picked.size() == originNumRows) {
-                totalNumRows = originNumRows;
-            } else {
-                pickedInColumn = picked.toArray();
-                totalNumRows = pickedInColumn.length;
-            }
-        } else {
-            totalNumRows = batch.getNumRows();
-        }
+        int totalNumRows = selected != null ? selected.length : batch.getNumRows();
 
         int startIndex = 0;
         while (startIndex < totalNumRows) {
             int batchRows = Math.min(batchSize, totalNumRows - startIndex);
-            arrowFormatWriter.write(columns, pickedInColumn, startIndex, batchRows);
+            arrowFormatWriter.write(columns, selected, startIndex, batchRows);
             startIndex += batchRows;
             if (startIndex < totalNumRows) {
                 flush();

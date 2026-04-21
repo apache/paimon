@@ -27,7 +27,6 @@ import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
-import org.apache.paimon.deletionvectors.DeletionVectorJudger;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -40,9 +39,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -105,23 +102,8 @@ public class ArrowBundleWriterTest {
                 new VectorizedColumnBatch(new ColumnVector[] {intVector, longVector});
         batch.setNumRows(4);
 
-        Set<Long> deleted = new HashSet<>();
-        deleted.add(1L);
-        deleted.add(3L);
-        DeletionVectorJudger judger =
-                new DeletionVectorJudger() {
-                    @Override
-                    public boolean isDeleted(long position) {
-                        return deleted.contains(position);
-                    }
-
-                    @Override
-                    public long getCardinality() {
-                        return deleted.size();
-                    }
-                };
-
-        writer.add(batch, judger);
+        // pick rows 0 and 2 (skip 1 and 3)
+        writer.add(batch, new int[] {0, 2});
         writer.close();
 
         assertThat(nativeWriter.snapshots).hasSize(1);
@@ -151,20 +133,8 @@ public class ArrowBundleWriterTest {
         VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {intVector});
         batch.setNumRows(3);
 
-        DeletionVectorJudger judger =
-                new DeletionVectorJudger() {
-                    @Override
-                    public boolean isDeleted(long position) {
-                        return true;
-                    }
-
-                    @Override
-                    public long getCardinality() {
-                        return 3;
-                    }
-                };
-
-        writer.add(batch, judger);
+        // all deleted -> empty picked array
+        writer.add(batch, new int[] {});
         writer.close();
 
         assertThat(nativeWriter.snapshots).isEmpty();
@@ -190,20 +160,8 @@ public class ArrowBundleWriterTest {
         VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {intVector});
         batch.setNumRows(3);
 
-        DeletionVectorJudger judger =
-                new DeletionVectorJudger() {
-                    @Override
-                    public boolean isDeleted(long position) {
-                        return false;
-                    }
-
-                    @Override
-                    public long getCardinality() {
-                        return 0;
-                    }
-                };
-
-        writer.add(batch, judger);
+        // none deleted -> pick all rows
+        writer.add(batch, new int[] {0, 1, 2});
         writer.close();
 
         assertThat(nativeWriter.snapshots).hasSize(1);
@@ -249,8 +207,7 @@ public class ArrowBundleWriterTest {
     @Test
     public void testAddBatchLargerThanWriterBatchSizeWithDeletion() throws IOException {
         RowType rowType = RowType.of(DataTypes.INT());
-        // batchSize = 2, input has 6 rows, delete rows 1, 3, 5 -> remaining [0,2,4] -> values
-        // [1,3,5]
+        // batchSize = 2, input has 6 rows, pick rows 0,2,4 -> values [1,3,5]
         ArrowFormatCWriter cWriter = new ArrowFormatCWriter(rowType, 2, true);
         ArrowFormatWriter formatWriter = cWriter.formatWriter();
         VectorSchemaRoot vsr = formatWriter.getVectorSchemaRoot();
@@ -268,20 +225,7 @@ public class ArrowBundleWriterTest {
         VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {intVector});
         batch.setNumRows(6);
 
-        DeletionVectorJudger judger =
-                new DeletionVectorJudger() {
-                    @Override
-                    public boolean isDeleted(long position) {
-                        return position % 2 == 1;
-                    }
-
-                    @Override
-                    public long getCardinality() {
-                        return 3;
-                    }
-                };
-
-        writer.add(batch, judger);
+        writer.add(batch, new int[] {0, 2, 4});
         writer.close();
 
         // 3 remaining rows, batchSize=2 -> 2 batches: 2 + 1
@@ -384,20 +328,7 @@ public class ArrowBundleWriterTest {
 
         ArrowBundleWriter writer = new ArrowBundleWriter(outputStream, cWriter, nativeWriter);
 
-        DeletionVectorJudger judger =
-                new DeletionVectorJudger() {
-                    @Override
-                    public boolean isDeleted(long position) {
-                        return position % 2 == 1;
-                    }
-
-                    @Override
-                    public long getCardinality() {
-                        return 2;
-                    }
-                };
-
-        // batch 1: [10, 20, 30, 40], delete index 1,3 -> remaining [10, 30]
+        // batch 1: [10, 20, 30, 40], pick index 0,2 -> remaining [10, 30]
         HeapIntVector iv1 = new HeapIntVector(4);
         iv1.setInt(0, 10);
         iv1.setInt(1, 20);
@@ -405,9 +336,9 @@ public class ArrowBundleWriterTest {
         iv1.setInt(3, 40);
         VectorizedColumnBatch b1 = new VectorizedColumnBatch(new ColumnVector[] {iv1});
         b1.setNumRows(4);
-        writer.add(b1, judger);
+        writer.add(b1, new int[] {0, 2});
 
-        // batch 2: [50, 60, 70, 80], delete index 1,3 -> remaining [50, 70]
+        // batch 2: [50, 60, 70, 80], pick index 0,2 -> remaining [50, 70]
         HeapIntVector iv2 = new HeapIntVector(4);
         iv2.setInt(0, 50);
         iv2.setInt(1, 60);
@@ -415,7 +346,7 @@ public class ArrowBundleWriterTest {
         iv2.setInt(3, 80);
         VectorizedColumnBatch b2 = new VectorizedColumnBatch(new ColumnVector[] {iv2});
         b2.setNumRows(4);
-        writer.add(b2, judger);
+        writer.add(b2, new int[] {0, 2});
 
         writer.close();
 
