@@ -65,9 +65,7 @@ public class ScalarIndexedFieldsVisitorTest {
         Predicate andPredicate =
                 PredicateBuilder.and(BUILDER.equal(0, 10), BUILDER.between(2, 90, 100));
         Predicate orPredicate =
-                PredicateBuilder.or(
-                        BUILDER.in(0, Arrays.asList(1, 2, 3)),
-                        BUILDER.isNull(2));
+                PredicateBuilder.or(BUILDER.in(0, Arrays.asList(1, 2, 3)), BUILDER.isNull(2));
 
         assertThat(andPredicate.visit(VISITOR)).isTrue();
         assertThat(orPredicate.visit(VISITOR)).isTrue();

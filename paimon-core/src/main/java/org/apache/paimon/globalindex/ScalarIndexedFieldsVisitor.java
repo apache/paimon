@@ -45,9 +45,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 
-/**
- * A visitor to test whether a predicate is fully covered by scalar index.
- */
+/** A visitor to test whether a predicate is fully covered by scalar index. */
 public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
 
     private static final String BTREE_INDEX_TYPE = "btree";
@@ -58,8 +56,7 @@ public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
         this.scalarIndexedFields = scalarIndexedFields;
     }
 
-    public static boolean allFieldsIndexed(
-            Table table, @Nullable Predicate predicate) {
+    public static boolean allFieldsIndexed(Table table, @Nullable Predicate predicate) {
         if (!(table instanceof FileStoreTable)) {
             return false;
         }
@@ -71,8 +68,8 @@ public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
         }
 
         Set<String> indexedFields =
-                storeTable.store().newIndexFileHandler().scan(tryTravelOrLatest(storeTable), entryFilter())
-                        .stream()
+                storeTable.store().newIndexFileHandler()
+                        .scan(tryTravelOrLatest(storeTable), entryFilter()).stream()
                         .map(IndexManifestEntry::indexFile)
                         .map(indexFile -> indexFile.globalIndexMeta())
                         .filter(Objects::nonNull)
