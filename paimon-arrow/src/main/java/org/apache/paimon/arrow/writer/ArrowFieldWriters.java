@@ -105,7 +105,7 @@ public class ArrowFieldWriters {
             for (int i = 0; i < batchRows; i++) {
                 int row = getRowNumber(startIndex, i, pickedInColumn);
                 if (columnVector.isNullAt(row)) {
-                    varCharVector.setNull(row);
+                    varCharVector.setNull(i);
                 } else {
                     byte[] value = ((BytesColumnVector) columnVector).getBytes(row).getBytes();
                     varCharVector.setSafe(i, value);
@@ -154,7 +154,7 @@ public class ArrowFieldWriters {
             for (int i = 0; i < batchRows; i++) {
                 int row = getRowNumber(startIndex, i, pickedInColumn);
                 if (columnVector.isNullAt(row)) {
-                    bitVector.setNull(row);
+                    bitVector.setNull(i);
                 } else {
                     int value = ((BooleanColumnVector) columnVector).getBoolean(row) ? 1 : 0;
                     bitVector.setSafe(i, value);
@@ -473,7 +473,7 @@ public class ArrowFieldWriters {
                 if (columnVector.isNullAt(row)) {
                     timeMilliVector.setNull(i);
                 } else {
-                    int value = ((IntColumnVector) columnVector).getInt(i);
+                    int value = ((IntColumnVector) columnVector).getInt(row);
                     timeMilliVector.setSafe(i, value);
                 }
             }

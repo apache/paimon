@@ -27,4 +27,7 @@ public interface DeletionVectorJudger {
      * @return true if the row is marked as deleted, false otherwise.
      */
     boolean isDeleted(long position);
+
+    /** @return the number of distinct integers added to the DeletionVector. */
+    long getCardinality();
 }
