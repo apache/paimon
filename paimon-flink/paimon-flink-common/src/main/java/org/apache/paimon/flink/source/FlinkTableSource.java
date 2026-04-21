@@ -26,6 +26,7 @@ import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.lookup.DynamicPartitionLoader;
 import org.apache.paimon.flink.lookup.PartitionLoader;
 import org.apache.paimon.flink.lookup.StaticPartitionLoader;
+import org.apache.paimon.globalindex.ScalarIndexedFieldsVisitor;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -115,6 +116,9 @@ public abstract class FlinkTableSource
         List<ResolvedExpression> unConsumedFilters = new ArrayList<>();
         List<ResolvedExpression> consumedFilters = new ArrayList<>();
         List<Predicate> converted = new ArrayList<>();
+        // Check non-only-partition filters for indexed count star pushdown
+        List<Predicate> nonPartitionFilters = new ArrayList<>();
+        boolean hasUnconvertedFilter = false;
         PredicateVisitor<Boolean> onlyPartFieldsVisitor =
                 new PartitionPredicateVisitor(partitionKeys);
 
@@ -123,10 +127,14 @@ public abstract class FlinkTableSource
 
             if (!predicateOptional.isPresent()) {
                 unConsumedFilters.add(filter);
+                hasUnconvertedFilter = true;
             } else {
                 Predicate p = predicateOptional.get();
                 if (isUnbounded() || !p.visit(onlyPartFieldsVisitor)) {
                     unConsumedFilters.add(filter);
+                    if (!isUnbounded()) {
+                        nonPartitionFilters.add(p);
+                    }
                 } else {
                     consumedFilters.add(filter);
                 }
@@ -134,6 +142,16 @@ public abstract class FlinkTableSource
             }
         }
         predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
+
+        if (!isUnbounded()
+                && !hasUnconvertedFilter
+                && !nonPartitionFilters.isEmpty()
+                && ScalarIndexedFieldsVisitor.allFieldsIndexed(
+                        table, PredicateBuilder.and(nonPartitionFilters))) {
+            unConsumedFilters.clear();
+            consumedFilters = new ArrayList<>(filters);
+        }
+
         LOG.info("Consumed filters: {} of {}", consumedFilters, filters);
 
         return Result.of(filters, unConsumedFilters);
