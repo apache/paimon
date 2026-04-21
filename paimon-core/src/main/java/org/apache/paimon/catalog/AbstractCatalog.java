@@ -417,7 +417,7 @@ public abstract class AbstractCatalog implements Catalog {
         } catch (TableNotExistException ignored) {
         }
 
-        copyTableDefaultOptions(schema.options());
+        copyTableDefaultOptions(schema);
 
         switch (Options.fromMap(schema.options()).get(TYPE)) {
             case TABLE:
@@ -699,8 +699,14 @@ public abstract class AbstractCatalog implements Catalog {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 
-    private void copyTableDefaultOptions(Map<String, String> options) {
-        tableDefaultOptions.forEach(options::putIfAbsent);
+    private void copyTableDefaultOptions(Schema schema) {
+        tableDefaultOptions.forEach(
+                (key, value) -> {
+                    if (schema.partitionKeys().isEmpty() && CoreOptions.isPartitionOption(key)) {
+                        return;
+                    }
+                    schema.options().putIfAbsent(key, value);
+                });
     }
 
     private void validateCustomTablePath(Map<String, String> options) {

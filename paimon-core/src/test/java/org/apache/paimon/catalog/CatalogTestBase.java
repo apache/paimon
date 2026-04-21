@@ -2159,4 +2159,24 @@ public abstract class CatalogTestBase {
                 .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
         catalog.dropTable(identifier, false);
     }
+
+    @Test
+    void testTableDefaultPartitionOptionsOnNonPartitionedTable() throws Exception {
+        Catalog root =
+                catalog instanceof DelegateCatalog ? DelegateCatalog.rootCatalog(catalog) : catalog;
+        if (!(root instanceof AbstractCatalog)) {
+            return;
+        }
+        ((AbstractCatalog) root).tableDefaultOptions.put("partition.expiration-time", "7d");
+
+        catalog.createDatabase("test_db_default", false);
+        Identifier identifier = Identifier.create("test_db_default", "non_partitioned");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .build();
+        assertThatCode(() -> catalog.createTable(identifier, schema, false))
+                .doesNotThrowAnyException();
+    }
 }
