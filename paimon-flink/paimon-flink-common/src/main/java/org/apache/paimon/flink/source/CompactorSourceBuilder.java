@@ -25,6 +25,7 @@ import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.CompactBucketsTable;
@@ -138,6 +139,26 @@ public class CompactorSourceBuilder {
                             rowData -> {
                                 BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
                                 return partitionInfo.get(partition) <= historyMilli;
+                            });
+            dataStream = new DataStreamSource<>(filterStream);
+        }
+        CoreOptions coreOptions = table.coreOptions();
+        if (coreOptions.compactionSkipExpiredPartitions()
+                && coreOptions.partitionExpireTime() != null
+                && CoreOptions.PartitionExpireStrategy.VALUES_TIME
+                        .toString()
+                        .equals(coreOptions.partitionExpireStrategy())) {
+            RowType partitionType = table.schema().logicalPartitionType();
+            Duration expireTime = coreOptions.partitionExpireTime();
+            PartitionValuesTimeExpireStrategy expireStrategy =
+                    new PartitionValuesTimeExpireStrategy(coreOptions, partitionType);
+            SingleOutputStreamOperator<RowData> filterStream =
+                    dataStream.filter(
+                            rowData -> {
+                                LocalDateTime expireDateTime =
+                                        LocalDateTime.now().minus(expireTime);
+                                BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
+                                return !expireStrategy.isExpired(expireDateTime, partition);
                             });
             dataStream = new DataStreamSource<>(filterStream);
         }

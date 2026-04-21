@@ -62,6 +62,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -924,6 +926,127 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         }
 
         assertThat(value).isEqualTo(30000);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSkipExpiredPartitions() throws Exception {
+        // Use a date far in the past (expired) and today's date (not expired)
+        String expiredDt =
+                LocalDate.now().minusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String activeDt = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "7 d");
+        tableOptions.put(
+                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(),
+                CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString());
+        tableOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("dt", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // Write two batches to each partition so each has multiple files
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(1, 100, 15, BinaryString.fromString(activeDt)));
+
+        writeData(
+                rowData(2, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(2, 100, 15, BinaryString.fromString(activeDt)));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--table_conf",
+                        CoreOptions.COMPACTION_SKIP_EXPIRED_PARTITIONS.key() + "=true");
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            String dt = split.partition().getString(0).toString();
+            if (dt.equals(activeDt)) {
+                // active partition should be compacted into 1 file
+                assertThat(split.dataFiles().size()).isEqualTo(1);
+            } else {
+                // expired partition should be skipped, still has 2 files
+                assertThat(split.dataFiles().size()).isEqualTo(2);
+            }
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testNotSkipExpiredPartitionsByDefault() throws Exception {
+        String expiredDt =
+                LocalDate.now().minusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String activeDt = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "7 d");
+        tableOptions.put(
+                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(),
+                CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString());
+        tableOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+        // COMPACTION_SKIP_EXPIRED_PARTITIONS is not set, default is false
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("dt", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(1, 100, 15, BinaryString.fromString(activeDt)));
+
+        writeData(
+                rowData(2, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(2, 100, 15, BinaryString.fromString(activeDt)));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName);
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        // both expired and active partitions should be compacted into 1 file
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            assertThat(split.dataFiles().size()).isEqualTo(1);
+        }
     }
 
     private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {

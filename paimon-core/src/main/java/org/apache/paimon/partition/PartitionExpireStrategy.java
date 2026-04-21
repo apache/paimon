@@ -29,6 +29,7 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -37,7 +38,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Strategy for partition expiration. */
-public abstract class PartitionExpireStrategy {
+public abstract class PartitionExpireStrategy implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     protected final List<String> partitionKeys;
     protected final String partitionDefaultName;
