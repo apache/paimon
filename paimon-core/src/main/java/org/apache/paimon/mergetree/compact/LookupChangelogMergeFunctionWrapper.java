@@ -88,6 +88,14 @@ public class LookupChangelogMergeFunctionWrapper<T>
         this.lookupStrategy = lookupStrategy;
         this.deletionVectorsMaintainer = deletionVectorsMaintainer;
         this.comparator = createSequenceComparator(userDefinedSeqComparator);
+        // Only set sequence comparator when user-defined sequence field is configured
+        // to preserve original behavior (pick by level) when sequence.field is not set.
+        // Note: We use the same comparator for both insertInto and pickHighLevel.
+        // The comparator's semantics (ascending/descending) are already handled correctly
+        // by UserDefinedSeqComparator based on sequence.field.sort-order configuration.
+        if (userDefinedSeqComparator != null) {
+            this.mergeFunction.setSequenceComparator(this.comparator);
+        }
     }
 
     @Override
