@@ -702,7 +702,8 @@ public abstract class AbstractCatalog implements Catalog {
     private void copyTableDefaultOptions(Schema schema) {
         tableDefaultOptions.forEach(
                 (key, value) -> {
-                    if (schema.partitionKeys().isEmpty() && CoreOptions.isPartitionOption(key)) {
+                    if (schema.partitionKeys().isEmpty()
+                            && CoreOptions.requiresPartitionedTable(key)) {
                         return;
                     }
                     schema.options().putIfAbsent(key, value);

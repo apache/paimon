@@ -69,8 +69,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
-    public static boolean isPartitionOption(String key) {
-        return key.startsWith("partition.");
+    public static boolean requiresPartitionedTable(String key) {
+        return PARTITION_EXPIRATION_TIME.key().equals(key);
     }
 
     public static final String FIELDS_PREFIX = "fields";

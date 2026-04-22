@@ -517,7 +517,7 @@ public class RESTCatalog implements Catalog {
             tableDefaultOptions.forEach(
                     (key, value) -> {
                         if (schema.partitionKeys().isEmpty()
-                                && CoreOptions.isPartitionOption(key)) {
+                                && CoreOptions.requiresPartitionedTable(key)) {
                             return;
                         }
                         schema.options().putIfAbsent(key, value);
