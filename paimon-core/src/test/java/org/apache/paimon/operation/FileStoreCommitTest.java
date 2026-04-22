@@ -33,6 +33,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -1337,11 +1339,24 @@ public class FileStoreCommitTest {
         store.commit(msg1);
         long baseSnapshotId = store.snapshotManager().latestSnapshotId();
 
-        // Simulate a compaction between base and latest: compaction replaces A+B with AB
-        // Compaction produces DELETE A, DELETE B, ADD AB — net change after merge is zero new files
-        // This should NOT be treated as a concurrent write conflict
+        // Simulate a compaction between base and latest: compaction replaces A+B with AB.
+        // This should not be treated as a concurrent write conflict.
+        CommitMessageImpl compactedFiles =
+                store.writeDataFiles(partition, 0, Collections.singletonList("AB.parquet"));
         ManifestCommittable compactCommittable = new ManifestCommittable(50L);
+        compactCommittable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        msg1.totalBuckets(),
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                msg1.newFilesIncrement().newFiles(),
+                                compactedFiles.newFilesIncrement().newFiles(),
+                                Collections.emptyList())));
         store.newCommit().commit(compactCommittable, false);
+        Snapshot compactSnapshot = store.snapshotManager().latestSnapshot();
+        assertThat(compactSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
 
         // Overwrite with baseSnapshotId; no actual new data files were added
         FileStoreCommitImpl commit = store.newCommit();
@@ -1357,6 +1372,13 @@ public class FileStoreCommitTest {
                         Collections.emptyMap(),
                         baseSnapshotId);
         assertThat(snapshots).isGreaterThan(0);
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        List<String> visibleFiles =
+                store.newScan().plan().files().stream()
+                        .map(e -> e.file().fileName())
+                        .collect(Collectors.toList());
+        assertThat(visibleFiles).containsExactlyInAnyOrder("X.parquet", "Y.parquet");
         commit.close();
     }
 

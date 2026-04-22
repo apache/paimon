@@ -801,6 +801,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             overwriteSnapshot = snapshotManager.snapshot(baseSnapshotId);
         }
 
+        // When baseSnapshotId is provided, detect concurrent writes between the base snapshot and
+        // the latest snapshot. Conflict detection operates at partition granularity rather than
+        // per-file or per-bucket: an overwrite-partition operation replaces all data in the target
+        // partition(s). If a concurrent writer appends to the same partition while the overwrite is
+        // in flight, allowing the overwrite to succeed would retain data outside the overwrite's
+        // scope, violating overwrite-partition semantics.
         if (baseSnapshotId != null && !options.sortCompactSkipOverwriteConflictDetection()) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             if (latestSnapshot != null && latestSnapshot.id() > baseSnapshotId) {
@@ -809,30 +815,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .map(ManifestEntry::partition)
                                 .distinct()
                                 .collect(Collectors.toList());
-                List<SimpleFileEntry> incrementalChanges =
-                        scanner.readIncrementalChanges(
-                                snapshotManager.snapshot(baseSnapshotId),
-                                latestSnapshot,
-                                changedPartitions);
-                Collection<SimpleFileEntry> mergedIncremental =
-                        FileEntry.mergeEntries(incrementalChanges);
-                boolean hasNetNewAdds =
-                        mergedIncremental.stream()
-                                .anyMatch(
-                                        e ->
-                                                e.kind() == FileKind.ADD
-                                                        && (partitionFilter == null
-                                                                || partitionFilter.test(
-                                                                        e.partition())));
-                if (hasNetNewAdds) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "Sort compact conflict detected for table %s: new data was written to "
-                                            + "the overwritten partitions between snapshot %d and %d. "
-                                            + "Please retry the sort compact or ensure no concurrent "
-                                            + "writes to these partitions.",
-                                    tableName, baseSnapshotId, latestSnapshot.id()));
-                }
+                overwriteSnapshot =
+                        validateOverwriteBaseSnapshot(
+                                baseSnapshotId, latestSnapshot, changedPartitions, partitionFilter);
             }
         }
 
@@ -856,6 +841,44 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 false,
                 true,
                 null);
+    }
+
+    private Snapshot validateOverwriteBaseSnapshot(
+            long baseSnapshotId,
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            @Nullable PartitionPredicate partitionFilter) {
+        List<SimpleFileEntry> incrementalChanges = new ArrayList<>();
+        boolean hasCompaction = false;
+        for (long snapshotId = baseSnapshotId + 1; snapshotId <= latestSnapshot.id(); snapshotId++) {
+            Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+            if (snapshot.commitKind() == CommitKind.COMPACT) {
+                hasCompaction = true;
+                continue;
+            }
+            if (snapshot.commitKind() != CommitKind.APPEND
+                    && snapshot.commitKind() != CommitKind.OVERWRITE) {
+                continue;
+            }
+            incrementalChanges.addAll(scanner.readIncrementalChanges(snapshot, changedPartitions));
+        }
+        Collection<SimpleFileEntry> mergedIncremental = FileEntry.mergeEntries(incrementalChanges);
+        boolean hasConflictingChanges =
+                mergedIncremental.stream()
+                        .anyMatch(
+                                e ->
+                                        partitionFilter == null
+                                                || partitionFilter.test(e.partition()));
+        if (hasConflictingChanges) {
+            throw new RuntimeException(
+                    String.format(
+                            "Sort compact conflict detected for table %s: data was modified in "
+                                    + "the overwritten partitions between snapshot %d and %d. "
+                                    + "Please retry the sort compact or ensure no concurrent "
+                                    + "writes to these partitions.",
+                            tableName, baseSnapshotId, latestSnapshot.id()));
+        }
+        return hasCompaction ? latestSnapshot : snapshotManager.snapshot(baseSnapshotId);
     }
 
     @VisibleForTesting
