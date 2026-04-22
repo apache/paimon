@@ -58,7 +58,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
         return ComparatorCodeGenerator.gen(
                 "RecordComparator",
                 RowType.builder().fields(inputTypes).build(),
-                getSortSpec(sortFields, ascendingOrders));
+                getAscendingSortSpec(sortFields, ascendingOrders));
     }
 
     @Override
@@ -76,7 +76,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
         return builder.build();
     }
 
-    private SortSpec getSortSpec(int[] sortFields, boolean[] ascendingOrders) {
+    private SortSpec getAscendingSortSpec(int[] sortFields, boolean[] ascendingOrders) {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         for (int i = 0; i < sortFields.length; i++) {
             builder.addField(sortFields[i], ascendingOrders[i], false);
