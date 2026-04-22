@@ -24,10 +24,12 @@ import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.arrow.writer.ArrowFieldWriters;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -187,6 +189,15 @@ public class ArrowFormatWriter implements AutoCloseable {
         return true;
     }
 
+    public void write(
+            ColumnVector[] columns, @Nullable int[] pickedInColumn, int startIndex, int batchRows) {
+        Preconditions.checkState(rowId == 0, "rowId must be 0 before writing columns.");
+        for (int i = 0; i < columns.length; i++) {
+            fieldWriters[i].write(columns[i], pickedInColumn, startIndex, batchRows);
+        }
+        rowId = batchRows;
+    }
+
     public long memoryUsed() {
         vectorSchemaRoot.setRowCount(rowId);
         long memoryUsed = 0;
@@ -211,6 +222,14 @@ public class ArrowFormatWriter implements AutoCloseable {
     public void close() {
         vectorSchemaRoot.close();
         allocator.close();
+    }
+
+    public int getBatchSize() {
+        return batchSize;
+    }
+
+    public ArrowFieldWriter[] getFieldWriters() {
+        return fieldWriters;
     }
 
     public VectorSchemaRoot getVectorSchemaRoot() {
