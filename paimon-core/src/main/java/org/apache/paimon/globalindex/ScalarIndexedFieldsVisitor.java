@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.Between;
 import org.apache.paimon.predicate.CompoundFunction;
@@ -32,17 +33,21 @@ import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 
 /** A visitor to test whether a predicate is fully covered by scalar index. */
@@ -56,7 +61,10 @@ public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
         this.scalarIndexedFields = scalarIndexedFields;
     }
 
-    public static boolean allFieldsIndexed(Table table, @Nullable Predicate predicate) {
+    public static boolean allFieldsIndexed(
+            Table table,
+            @Nullable Predicate predicate,
+            @Nullable PartitionPredicate partitionPredicate) {
         if (!(table instanceof FileStoreTable)) {
             return false;
         }
@@ -67,9 +75,22 @@ public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
             return false;
         }
 
+        // We should split the PartitionPredicate to filter index entries, or the result may be
+        // wrong. For example, if we have two partitions `dt=1`(indexed) and `dt=2`(unindexed),
+        // the where condition `id=10 AND dt=2` should not be consumed. Because the index evaluation
+        // during the plan phase will decide not to use the index.
+        Pair<Optional<PartitionPredicate>, List<Predicate>> splitPredicates =
+                splitPartitionPredicatesAndDataPredicates(
+                        predicate, table.rowType(), table.partitionKeys());
+        PartitionPredicate effectivePartPredicate =
+                partitionPredicate != null
+                        ? partitionPredicate
+                        : splitPredicates.getLeft().orElse(null);
+
         Set<String> indexedFields =
                 storeTable.store().newIndexFileHandler()
-                        .scan(tryTravelOrLatest(storeTable), entryFilter()).stream()
+                        .scan(tryTravelOrLatest(storeTable), entryFilter(effectivePartPredicate))
+                        .stream()
                         .map(IndexManifestEntry::indexFile)
                         .map(indexFile -> indexFile.globalIndexMeta())
                         .filter(Objects::nonNull)
@@ -82,11 +103,16 @@ public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
             return false;
         }
 
-        return predicate.visit(new ScalarIndexedFieldsVisitor(indexedFields));
+        return PredicateBuilder.and(splitPredicates.getRight())
+                .visit(new ScalarIndexedFieldsVisitor(indexedFields));
     }
 
-    private static org.apache.paimon.utils.Filter<IndexManifestEntry> entryFilter() {
+    private static org.apache.paimon.utils.Filter<IndexManifestEntry> entryFilter(
+            PartitionPredicate partitionPredicate) {
         return entry -> {
+            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
+                return false;
+            }
             GlobalIndexMeta globalIndexMeta = entry.indexFile().globalIndexMeta();
             return globalIndexMeta != null
                     && BTREE_INDEX_TYPE.equals(entry.indexFile().indexType());

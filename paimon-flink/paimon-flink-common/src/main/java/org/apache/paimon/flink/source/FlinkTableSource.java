@@ -116,8 +116,6 @@ public abstract class FlinkTableSource
         List<ResolvedExpression> unConsumedFilters = new ArrayList<>();
         List<ResolvedExpression> consumedFilters = new ArrayList<>();
         List<Predicate> converted = new ArrayList<>();
-        // Check non-only-partition filters for indexed count star pushdown
-        List<Predicate> nonPartitionFilters = new ArrayList<>();
         boolean hasUnconvertedFilter = false;
         PredicateVisitor<Boolean> onlyPartFieldsVisitor =
                 new PartitionPredicateVisitor(partitionKeys);
@@ -132,9 +130,6 @@ public abstract class FlinkTableSource
                 Predicate p = predicateOptional.get();
                 if (isUnbounded() || !p.visit(onlyPartFieldsVisitor)) {
                     unConsumedFilters.add(filter);
-                    if (!isUnbounded()) {
-                        nonPartitionFilters.add(p);
-                    }
                 } else {
                     consumedFilters.add(filter);
                 }
@@ -143,11 +138,11 @@ public abstract class FlinkTableSource
         }
         predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
 
+        // If all predicates are covered by global index, they can be consumed.
         if (!isUnbounded()
                 && !hasUnconvertedFilter
-                && !nonPartitionFilters.isEmpty()
                 && ScalarIndexedFieldsVisitor.allFieldsIndexed(
-                        table, PredicateBuilder.and(nonPartitionFilters))) {
+                        table, predicate, partitionPredicate)) {
             unConsumedFilters.clear();
             consumedFilters = new ArrayList<>(filters);
         }
