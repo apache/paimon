@@ -351,8 +351,8 @@ public class SortCompactActionForAppendTableITCase extends ActionITCaseBase {
         commit(writeOnce(getTable(), 0, 1));
 
         Assertions.assertThatThrownBy(action::executeBuilt)
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Sort compact conflict detected");
+                .hasRootCauseInstanceOf(RuntimeException.class)
+                .hasStackTraceContaining("Sort compact conflict detected");
     }
 
     private void zorder(List<String> columns) throws Exception {
