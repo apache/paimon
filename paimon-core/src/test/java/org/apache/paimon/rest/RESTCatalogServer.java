@@ -1473,9 +1473,7 @@ public class RESTCatalogServer {
                     Identifier identifier = requestBody.getIdentifier();
                     Schema schema = requestBody.getSchema();
                     TableMetadata tableMetadata;
-                    if (isFormatTable(schema)) {
-                        tableMetadata = createFormatTable(identifier, schema);
-                    } else if (isObjectTable(schema)) {
+                    if (isObjectTable(schema)) {
                         tableMetadata = createObjectTable(identifier, schema);
                     } else {
                         catalog.createTable(identifier, schema, false);
@@ -2720,10 +2718,6 @@ public class RESTCatalogServer {
                         options,
                         schema.comment());
         return new TableMetadata(tableSchema, isExternal, uuid);
-    }
-
-    private TableMetadata createFormatTable(Identifier identifier, Schema schema) {
-        return createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), true);
     }
 
     private TableMetadata createObjectTable(Identifier identifier, Schema schema) {
