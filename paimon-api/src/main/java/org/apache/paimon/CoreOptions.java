@@ -69,15 +69,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
-    private static final Set<String> PARTITION_OPTION_KEYS = new HashSet<>();
-
-    private static <T> ConfigOption<T> partitionOption(ConfigOption<T> option) {
-        PARTITION_OPTION_KEYS.add(option.key());
-        return option;
-    }
-
     public static boolean isPartitionOption(String key) {
-        return PARTITION_OPTION_KEYS.contains(key);
+        return key.startsWith("partition.");
     }
 
     public static final String FIELDS_PREFIX = "fields";
@@ -488,22 +481,20 @@ public class CoreOptions implements Serializable {
                             "Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.");
 
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
-            partitionOption(
-                    key("partition.default-name")
-                            .stringType()
-                            .defaultValue("__DEFAULT_PARTITION__")
-                            .withDescription(
-                                    "The default partition name in case the dynamic partition"
-                                            + " column value is null/empty string."));
+            key("partition.default-name")
+                    .stringType()
+                    .defaultValue("__DEFAULT_PARTITION__")
+                    .withDescription(
+                            "The default partition name in case the dynamic partition"
+                                    + " column value is null/empty string.");
 
     public static final ConfigOption<Boolean> PARTITION_GENERATE_LEGACY_NAME =
-            partitionOption(
-                    key("partition.legacy-name")
-                            .booleanType()
-                            .defaultValue(true)
-                            .withDescription(
-                                    "The legacy partition name is using `toString` fpr all types. If false, using "
-                                            + "cast to string for all types."));
+            key("partition.legacy-name")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "The legacy partition name is using `toString` fpr all types. If false, using "
+                                    + "cast to string for all types.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
             key("snapshot.num-retained.min")
@@ -1137,115 +1128,106 @@ public class CoreOptions implements Serializable {
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
     public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
-            partitionOption(
-                    key("partition.expiration-strategy")
-                            .stringType()
-                            .defaultValue("values-time")
-                            .withDescription(
-                                    Description.builder()
-                                            .text(
-                                                    "The strategy determines how to extract the partition time and compare it with the current time.")
-                                            .list(
-                                                    text(
-                                                            "\"values-time\": This strategy compares the time extracted from the partition value with the current time."),
-                                                    text(
-                                                            "\"update-time\": This strategy compares the last update time of the partition with the current time."))
-                                            .build()));
+            key("partition.expiration-strategy")
+                    .stringType()
+                    .defaultValue("values-time")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The strategy determines how to extract the partition time and compare it with the current time.")
+                                    .list(
+                                            text(
+                                                    "\"values-time\": This strategy compares the time extracted from the partition value with the current time."),
+                                            text(
+                                                    "\"update-time\": This strategy compares the last update time of the partition with the current time."))
+                                    .build());
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
-            partitionOption(
-                    key("partition.expiration-time")
-                            .durationType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    "The expiration interval of a partition. A partition will be expired if"
-                                            + " it's lifetime is over this value. Partition time is extracted from"
-                                            + " the partition value."));
+            key("partition.expiration-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The expiration interval of a partition. A partition will be expired if"
+                                    + " it's lifetime is over this value. Partition time is extracted from"
+                                    + " the partition value.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_CHECK_INTERVAL =
-            partitionOption(
-                    key("partition.expiration-check-interval")
-                            .durationType()
-                            .defaultValue(Duration.ofHours(1))
-                            .withDescription("The check interval of partition expiration."));
+            key("partition.expiration-check-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("The check interval of partition expiration.");
 
     public static final ConfigOption<Integer> PARTITION_EXPIRATION_MAX_NUM =
-            partitionOption(
-                    key("partition.expiration-max-num")
-                            .intType()
-                            .defaultValue(100)
-                            .withDescription("The default deleted num of partition expiration."));
+            key("partition.expiration-max-num")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The default deleted num of partition expiration.");
 
     public static final ConfigOption<Integer> PARTITION_EXPIRATION_BATCH_SIZE =
-            partitionOption(
-                    key("partition.expiration-batch-size")
-                            .intType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    "The batch size of partition expiration. "
-                                            + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
-                                            + "Use this parameter to divide partition expiration process and mitigate memory pressure."));
+            key("partition.expiration-batch-size")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The batch size of partition expiration. "
+                                    + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
+                                    + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
-            partitionOption(
-                    key("partition.timestamp-formatter")
-                            .stringType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    Description.builder()
-                                            .text(
-                                                    "The formatter to format timestamp from string. It can be used"
-                                                            + " with 'partition.timestamp-pattern' to create a formatter"
-                                                            + " using the specified value.")
-                                            .list(
-                                                    text(
-                                                            "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'."),
-                                                    text(
-                                                            "Supports multiple partition fields like '$year-$month-$day $hour:00:00'."),
-                                                    text(
-                                                            "The timestamp-formatter is compatible with Java's DateTimeFormatter."))
-                                            .build()));
+            key("partition.timestamp-formatter")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The formatter to format timestamp from string. It can be used"
+                                                    + " with 'partition.timestamp-pattern' to create a formatter"
+                                                    + " using the specified value.")
+                                    .list(
+                                            text(
+                                                    "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'."),
+                                            text(
+                                                    "Supports multiple partition fields like '$year-$month-$day $hour:00:00'."),
+                                            text(
+                                                    "The timestamp-formatter is compatible with Java's DateTimeFormatter."))
+                                    .build());
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_PATTERN =
-            partitionOption(
-                    key("partition.timestamp-pattern")
-                            .stringType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    Description.builder()
-                                            .text(
-                                                    "You can specify a pattern to get a timestamp from partitions. "
-                                                            + "The formatter pattern is defined by 'partition.timestamp-formatter'.")
-                                            .list(
-                                                    text("By default, read from the first field."),
-                                                    text(
-                                                            "If the timestamp in the partition is a single field called 'dt', you can use '$dt'."),
-                                                    text(
-                                                            "If it is spread across multiple fields for year, month, day, and hour,"
-                                                                    + " you can use '$year-$month-$day $hour:00:00'."),
-                                                    text(
-                                                            "If the timestamp is in fields dt and hour, you can use '$dt "
-                                                                    + "$hour:00:00'."))
-                                            .build()));
+            key("partition.timestamp-pattern")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "You can specify a pattern to get a timestamp from partitions. "
+                                                    + "The formatter pattern is defined by 'partition.timestamp-formatter'.")
+                                    .list(
+                                            text("By default, read from the first field."),
+                                            text(
+                                                    "If the timestamp in the partition is a single field called 'dt', you can use '$dt'."),
+                                            text(
+                                                    "If it is spread across multiple fields for year, month, day, and hour,"
+                                                            + " you can use '$year-$month-$day $hour:00:00'."),
+                                            text(
+                                                    "If the timestamp is in fields dt and hour, you can use '$dt "
+                                                            + "$hour:00:00'."))
+                                    .build());
 
     public static final ConfigOption<Boolean> PARTITION_TIMESTAMP_FORMAT_STRICT =
-            partitionOption(
-                    key("partition.timestamp-format.strict")
-                            .booleanType()
-                            .defaultValue(false)
-                            .withDescription(
-                                    "When enabled, if a partition value does not match the "
-                                            + "'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration, "
-                                            + "an error will be thrown during writing. "
-                                            + "This helps prevent dirty partition directories caused by incorrectly specified partition fields."));
+            key("partition.timestamp-format.strict")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When enabled, if a partition value does not match the "
+                                    + "'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration, "
+                                    + "an error will be thrown during writing. "
+                                    + "This helps prevent dirty partition directories caused by incorrectly specified partition fields.");
 
     public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
-            partitionOption(
-                    ConfigOptions.key("partition.end-input-to-done")
-                            .booleanType()
-                            .defaultValue(false)
-                            .withDescription(
-                                    "Whether mark the done status to indicate that the data is ready when end input."));
+            ConfigOptions.key("partition.end-input-to-done")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether mark the done status to indicate that the data is ready when end input.");
 
     public static final ConfigOption<Boolean> SCAN_PLAN_SORT_PARTITION =
             key("scan.plan-sort-partition")
@@ -1608,78 +1590,71 @@ public class CoreOptions implements Serializable {
                                     + "Callback class should parse the parameter by itself.");
 
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION =
-            partitionOption(
-                    key("partition.mark-done-action")
-                            .stringType()
-                            .defaultValue("success-file")
-                            .withDescription(
-                                    Description.builder()
-                                            .text(
-                                                    "Action to mark a partition done is to notify the downstream application that the partition"
-                                                            + " has finished writing, the partition is ready to be read.")
-                                            .linebreak()
-                                            .text(
-                                                    "1. 'success-file': add '_success' file to directory.")
-                                            .linebreak()
-                                            .text(
-                                                    "2. 'done-partition': add 'xxx.done' partition to metastore.")
-                                            .linebreak()
-                                            .text(
-                                                    "3. 'mark-event': mark partition event to metastore.")
-                                            .linebreak()
-                                            .text(
-                                                    "4. 'http-report': report partition mark done to remote http server.")
-                                            .linebreak()
-                                            .text(
-                                                    "5. 'custom': use policy class to create a mark-partition policy.")
-                                            .linebreak()
-                                            .text(
-                                                    "Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.")
-                                            .build()));
+            key("partition.mark-done-action")
+                    .stringType()
+                    .defaultValue("success-file")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Action to mark a partition done is to notify the downstream application that the partition"
+                                                    + " has finished writing, the partition is ready to be read.")
+                                    .linebreak()
+                                    .text("1. 'success-file': add '_success' file to directory.")
+                                    .linebreak()
+                                    .text(
+                                            "2. 'done-partition': add 'xxx.done' partition to metastore.")
+                                    .linebreak()
+                                    .text("3. 'mark-event': mark partition event to metastore.")
+                                    .linebreak()
+                                    .text(
+                                            "4. 'http-report': report partition mark done to remote http server.")
+                                    .linebreak()
+                                    .text(
+                                            "5. 'custom': use policy class to create a mark-partition policy.")
+                                    .linebreak()
+                                    .text(
+                                            "Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.")
+                                    .build());
 
     public static final ConfigOption<String> PARTITION_MARK_DONE_CUSTOM_CLASS =
-            partitionOption(
-                    key("partition.mark-done-action.custom.class")
-                            .stringType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    "The partition mark done class for implement"
-                                            + " PartitionMarkDoneAction interface. Only work in custom mark-done-action."));
+            key("partition.mark-done-action.custom.class")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The partition mark done class for implement"
+                                    + " PartitionMarkDoneAction interface. Only work in custom mark-done-action.");
 
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_URL =
-            partitionOption(
-                    key("partition.mark-done-action.http.url")
-                            .stringType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    "Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action."));
+            key("partition.mark-done-action.http.url")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<String> PARTITION_MARK_DONE_ACTION_PARAMS =
-            partitionOption(
-                    key("partition.mark-done-action.http.params")
-                            .stringType()
-                            .noDefaultValue()
-                            .withDescription(
-                                    "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action."));
+            key("partition.mark-done-action.http.params")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.");
 
     public static final ConfigOption<PartitionSinkStrategy> PARTITION_SINK_STRATEGY =
-            partitionOption(
-                    key("partition.sink-strategy")
-                            .enumType(PartitionSinkStrategy.class)
-                            .defaultValue(PartitionSinkStrategy.NONE)
-                            .withDescription(
-                                    Description.builder()
-                                            .text(
-                                                    "This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance."
-                                                            + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
-                                            .list(
-                                                    text(
-                                                            "none: Rebalanced or Forward partitioning, this is the default behavior,"
-                                                                    + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
-                                                    text(
-                                                            "hash: Hash the partitions value,"
-                                                                    + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
-                                            .build()));
+            key("partition.sink-strategy")
+                    .enumType(PartitionSinkStrategy.class)
+                    .defaultValue(PartitionSinkStrategy.NONE)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance."
+                                                    + " Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.")
+                                    .list(
+                                            text(
+                                                    "none: Rebalanced or Forward partitioning, this is the default behavior,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
+                                            text(
+                                                    "hash: Hash the partitions value,"
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
+                                    .build());
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
@@ -2022,13 +1997,12 @@ public class CoreOptions implements Serializable {
                             "Enable data file thin mode to avoid duplicate columns storage.");
 
     public static final ConfigOption<Duration> PARTITION_IDLE_TIME_TO_REPORT_STATISTIC =
-            partitionOption(
-                    key("partition.idle-time-to-report-statistic")
-                            .durationType()
-                            .defaultValue(Duration.ofMillis(0))
-                            .withDescription(
-                                    "Set a time duration when a partition has no new data after this time duration, "
-                                            + "start to report the partition statistics to hms."));
+            key("partition.idle-time-to-report-statistic")
+                    .durationType()
+                    .defaultValue(Duration.ofMillis(0))
+                    .withDescription(
+                            "Set a time duration when a partition has no new data after this time duration, "
+                                    + "start to report the partition statistics to hms.");
 
     public static final ConfigOption<Boolean> QUERY_AUTH_ENABLED =
             key("query-auth.enabled")

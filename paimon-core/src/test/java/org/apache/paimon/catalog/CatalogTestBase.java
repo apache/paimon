@@ -2179,4 +2179,27 @@ public abstract class CatalogTestBase {
         assertThatCode(() -> catalog.createTable(identifier, schema, false))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    void testTableDefaultPartitionOptionsOnPartitionedTable() throws Exception {
+        Catalog root =
+                catalog instanceof DelegateCatalog ? DelegateCatalog.rootCatalog(catalog) : catalog;
+        if (!(root instanceof AbstractCatalog)) {
+            return;
+        }
+        ((AbstractCatalog) root).tableDefaultOptions.put("partition.expiration-time", "7d");
+
+        catalog.createDatabase("test_db_default_partitioned", false);
+        Identifier identifier = Identifier.create("test_db_default_partitioned", "partitioned");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        assertThat(catalog.getTable(identifier).options())
+                .containsEntry("partition.expiration-time", "7d");
+    }
 }
