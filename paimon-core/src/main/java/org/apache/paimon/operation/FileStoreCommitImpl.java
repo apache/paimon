@@ -892,7 +892,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable PartitionPredicate partitionFilter) {
         List<SimpleFileEntry> incrementalChanges = new ArrayList<>();
         boolean hasCompaction = false;
-        for (long snapshotId = baseSnapshotId + 1; snapshotId <= latestSnapshot.id(); snapshotId++) {
+        for (long snapshotId = baseSnapshotId + 1;
+                snapshotId <= latestSnapshot.id();
+                snapshotId++) {
             Snapshot snapshot = snapshotManager.snapshot(snapshotId);
             if (snapshot.commitKind() == CommitKind.COMPACT) {
                 hasCompaction = true;
