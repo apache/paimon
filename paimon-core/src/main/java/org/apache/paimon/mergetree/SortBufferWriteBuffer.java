@@ -50,6 +50,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -94,22 +95,14 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         // build per-field ascending orders:
         // key fields -> ascending, uds fields -> based on config, sequence number -> ascending
-        boolean[] ascendingOrders = new boolean[sortFieldArray.length];
         int keyFieldCount = keyType.getFieldCount();
-        int udsFieldCount =
-                userDefinedSeqComparator != null
-                        ? userDefinedSeqComparator.compareFields().length
-                        : 0;
         boolean udsAscending =
                 userDefinedSeqComparator == null || userDefinedSeqComparator.isAscendingOrder();
-        for (int i = 0; i < sortFieldArray.length; i++) {
-            if (i < keyFieldCount) {
-                ascendingOrders[i] = true;
-            } else if (i < keyFieldCount + udsFieldCount) {
-                ascendingOrders[i] = udsAscending;
-            } else {
-                ascendingOrders[i] = true;
-            }
+        boolean[] ascendingOrders = new boolean[sortFieldArray.length];
+        Arrays.fill(ascendingOrders, true);
+        if (!udsAscending) {
+            int udsFieldCount = userDefinedSeqComparator.compareFields().length;
+            Arrays.fill(ascendingOrders, keyFieldCount, keyFieldCount + udsFieldCount, false);
         }
 
         // row type
@@ -118,8 +111,12 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         fieldTypes.add(new TinyIntType(false));
         fieldTypes.addAll(valueType.getFieldTypes());
 
+        // When UDS is descending, NormalizedKey only covers key fields to ensure
+        // keyFullyDetermines=false, so RecordComparator handles UDS ordering correctly.
+        int[] normalizedKeyFields =
+                udsAscending ? sortFieldArray : IntStream.range(0, keyFieldCount).toArray();
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray);
+                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, normalizedKeyFields);
         RecordComparator keyComparator =
                 CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, ascendingOrders);
 
