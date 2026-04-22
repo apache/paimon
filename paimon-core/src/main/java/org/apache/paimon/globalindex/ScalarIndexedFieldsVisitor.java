@@ -71,6 +71,10 @@ public class ScalarIndexedFieldsVisitor implements PredicateVisitor<Boolean> {
 
         FileStoreTable storeTable = (FileStoreTable) table;
 
+        if (!storeTable.coreOptions().dataEvolutionEnabled()) {
+            return false;
+        }
+
         if (predicate == null || !storeTable.coreOptions().globalIndexEnabled()) {
             return false;
         }
