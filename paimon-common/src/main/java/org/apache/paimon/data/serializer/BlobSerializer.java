@@ -135,7 +135,8 @@ public class BlobSerializer extends SerializerSingleton<Blob> {
     private static class ThrowingUriReader implements UriReader {
 
         @Override
-        public org.apache.paimon.fs.SeekableInputStream newInputStream(String uri) throws IOException {
+        public org.apache.paimon.fs.SeekableInputStream newInputStream(String uri)
+                throws IOException {
             throw new IOException(
                     "BlobRef deserialized by BlobSerializer does not carry a UriReader. "
                             + "Use toDescriptor() instead. Descriptor URI: "
