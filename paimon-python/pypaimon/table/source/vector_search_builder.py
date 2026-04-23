@@ -63,11 +63,10 @@ class VectorSearchBuilder(ABC):
         # type: (Predicate) -> VectorSearchBuilder
         """Partition predicate used to prune index manifest entries.
 
-        IMPORTANT: the predicate MUST be built against the partition-only
-        field set (``PredicateBuilder(table.partition_keys_fields)``) so that
-        each leaf's ``index`` matches a position in the partition row. Passing
-        a predicate built against the full row type will read the wrong column
-        at ``predicate.test(entry.partition)`` time.
+        The predicate should be built against the full table row
+        (``PredicateBuilder(table.fields)``); the builder will re-index its
+        leaves against the partition-only row type before applying it to
+        ``entry.partition``.
         """
         pass
 
@@ -122,25 +121,49 @@ class VectorSearchBuilderImpl(VectorSearchBuilder):
 
     def with_filter(self, predicate):
         # type: (Predicate) -> VectorSearchBuilder
-        # NOTE: unlike Java VectorSearchBuilderImpl.withFilter, this does NOT
-        # auto-split partition-only conjuncts into the partition filter. The
-        # user's predicate is built against the full row type, but pypaimon's
-        # Predicate carries positional ``index`` values — reusing a full-row
-        # predicate against a partition-only row would read the wrong column.
-        # Callers that want partition pruning should explicitly call
-        # with_partition_filter with a partition-scoped Predicate.
         if predicate is None:
             return self
         if self._filter is None:
             self._filter = predicate
         else:
             self._filter = PredicateBuilder.and_predicates([self._filter, predicate])
+        # Mirror Java VectorSearchBuilderImpl.withFilter: extract any
+        # partition-only conjuncts and apply them as a partition filter for
+        # index manifest pruning. ``_extract_partition_predicate`` re-indexes
+        # leaf indices from full-row positions to partition-row positions so
+        # ``predicate.test(entry.partition)`` sees the right column.
+        extracted = self._extract_partition_predicate(predicate)
+        if extracted is not None:
+            if self._partition_filter is None:
+                self._partition_filter = extracted
+            else:
+                self._partition_filter = PredicateBuilder.and_predicates(
+                    [self._partition_filter, extracted])
         return self
 
     def with_partition_filter(self, partition_filter):
         # type: (Predicate) -> VectorSearchBuilder
-        self._partition_filter = partition_filter
+        if partition_filter is None:
+            self._partition_filter = None
+            return self
+        self._partition_filter = self._extract_partition_predicate(partition_filter)
         return self
+
+    def _extract_partition_predicate(self, predicate):
+        """Return a partition-row-indexed predicate containing only conjuncts
+        that reference partition keys exclusively, or ``None`` if the table is
+        non-partitioned or no conjunct qualifies.
+
+        Input ``predicate`` is expected to be indexed against the full table
+        row (the normal ``PredicateBuilder(table.fields)`` case).
+        """
+        partition_keys = list(self._table.partition_keys or [])
+        if not partition_keys:
+            return None
+        from pypaimon.read.push_down_utils import trim_and_transform_predicate
+        all_field_names = [f.name for f in self._table.fields]
+        return trim_and_transform_predicate(
+            predicate, all_field_names, partition_keys)
 
     def new_vector_search_scan(self):
         # type: () -> VectorSearchScan

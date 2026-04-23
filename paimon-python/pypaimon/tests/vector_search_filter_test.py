@@ -254,5 +254,158 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual([0, 5], local_cardinalities)
 
 
+class _StubPartitionedTable(_StubTable):
+    """FileStoreTable stand-in with partition keys."""
+
+    def __init__(self, fields, partition_fields, entries):
+        super().__init__(fields=fields, entries=entries)
+        self.partition_keys = [f.name for f in partition_fields]
+        self.partition_keys_fields = partition_fields
+
+
+class VectorSearchPartitionedFilterTest(unittest.TestCase):
+    """Covers the partition-pruning path: users build a full-row Predicate via
+    PredicateBuilder(table.fields), and with_filter must re-index the
+    partition-only conjuncts so Predicate.test(entry.partition) reads the
+    correct column from a partition-only GenericRow."""
+
+    def setUp(self):
+        from pypaimon.schema.data_types import DataField, AtomicType
+        # Layout: pt (partition, id=0), id (id=1), embedding (id=2).
+        self.pt_field = DataField(id=0, name="pt",
+                                  type=AtomicType("INT"), description="")
+        self.id_field = DataField(id=1, name="id",
+                                  type=AtomicType("INT"), description="")
+        self.embedding_field = DataField(id=2, name="embedding",
+                                         type=AtomicType("FLOAT"),
+                                         description="")
+
+        # Partition rows: pt=1 and pt=2.
+        from pypaimon.table.row.generic_row import GenericRow
+        partition_pt1 = GenericRow([1], [self.pt_field])
+        partition_pt2 = GenericRow([2], [self.pt_field])
+
+        # pt=1 has vector [0,4] + btree [0,4]; pt=2 has vector [5,9] + btree [5,9].
+        self.entries = [
+            _entry(partition_pt1, field_id=2, index_type="lumina-vector-ann",
+                   file_name="vec-pt1.index",
+                   row_range_start=0, row_range_end=4),
+            _entry(partition_pt1, field_id=1, index_type="btree",
+                   file_name="id-pt1.index",
+                   row_range_start=0, row_range_end=4),
+            _entry(partition_pt2, field_id=2, index_type="lumina-vector-ann",
+                   file_name="vec-pt2.index",
+                   row_range_start=5, row_range_end=9),
+            _entry(partition_pt2, field_id=1, index_type="btree",
+                   file_name="id-pt2.index",
+                   row_range_start=5, row_range_end=9),
+        ]
+
+        self.table = _StubPartitionedTable(
+            fields=[self.pt_field, self.id_field, self.embedding_field],
+            partition_fields=[self.pt_field],
+            entries=self.entries)
+
+        def _scan(snapshot, entry_filter=None):
+            if entry_filter is None:
+                return list(self.entries)
+            return [e for e in self.entries if entry_filter(e)]
+
+        self._scan_patch = mock.patch(
+            "pypaimon.index.index_file_handler.IndexFileHandler.scan",
+            autospec=True, side_effect=lambda self_, s, f=None: _scan(s, f))
+        self._scan_patch.start()
+        self._snapshot_patch = mock.patch(
+            "pypaimon.snapshot.snapshot_manager.SnapshotManager.get_latest_snapshot",
+            return_value=object())
+        self._snapshot_patch.start()
+        self._travel_patch = mock.patch(
+            "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
+            return_value=object())
+        self._travel_patch.start()
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_with_filter_prunes_wrong_partition_using_full_row_predicate(self):
+        # Build a normal full-row predicate: pt == 2.
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        pb = PredicateBuilder(self.table.fields)
+        filter_pred = pb.equal("pt", 2)
+
+        builder = (VectorSearchBuilderImpl(self.table)
+                   .with_vector_column("embedding")
+                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                   .with_limit(3)
+                   .with_filter(filter_pred))
+
+        # with_filter should have extracted + re-indexed the partition-only
+        # conjunct. The extracted predicate's leaves reference `pt` with
+        # index 0 in the partition row (not 0 in the full row — same here by
+        # coincidence, but semantics must be partition-scoped).
+        self.assertIsNotNone(builder._partition_filter)
+        self.assertEqual(builder._partition_filter.field, "pt")
+        self.assertEqual(builder._partition_filter.index, 0)
+
+        splits = builder.new_vector_search_scan().scan().splits()
+
+        # Only pt=2 entries should pass partition pruning — one vector split
+        # on [5,9]. No scalar files attach because the filter only references
+        # `pt`, not `id`, so the id-btree is out of scope.
+        self.assertEqual(1, len(splits))
+        s = splits[0]
+        self.assertEqual((5, 9), (s.row_range_start, s.row_range_end))
+        self.assertEqual(["vec-pt2.index"],
+                         [f.file_name for f in s.vector_index_files])
+        self.assertEqual([], s.scalar_index_files)
+
+    def test_with_partition_filter_accepts_full_row_predicate(self):
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        pb = PredicateBuilder(self.table.fields)
+
+        builder = (VectorSearchBuilderImpl(self.table)
+                   .with_vector_column("embedding")
+                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                   .with_limit(3)
+                   .with_partition_filter(pb.equal("pt", 1)))
+
+        splits = builder.new_vector_search_scan().scan().splits()
+
+        # Only pt=1 entries should survive.
+        self.assertEqual(1, len(splits))
+        s = splits[0]
+        self.assertEqual((0, 4), (s.row_range_start, s.row_range_end))
+        self.assertEqual(["vec-pt1.index"],
+                         [f.file_name for f in s.vector_index_files])
+
+    def test_mixed_filter_keeps_only_partition_conjunct_for_pruning(self):
+        # Filter: pt == 1 AND id >= 3. Partition-pruning should apply only
+        # to pt == 1; id >= 3 stays in the scalar pre-filter path.
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        pb = PredicateBuilder(self.table.fields)
+        mixed = PredicateBuilder.and_predicates(
+            [pb.equal("pt", 1), pb.greater_or_equal("id", 3)])
+
+        builder = (VectorSearchBuilderImpl(self.table)
+                   .with_vector_column("embedding")
+                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                   .with_limit(3)
+                   .with_filter(mixed))
+
+        # Partition filter contains only the pt conjunct.
+        pf = builder._partition_filter
+        self.assertIsNotNone(pf)
+        self.assertEqual(pf.field, "pt")
+        self.assertEqual(pf.index, 0)
+
+        splits = builder.new_vector_search_scan().scan().splits()
+        self.assertEqual(1, len(splits))
+        s = splits[0]
+        self.assertEqual((0, 4), (s.row_range_start, s.row_range_end))
+        # id btree on pt=1 must come along so the read step can apply id>=3.
+        self.assertEqual(["id-pt1.index"],
+                         [f.file_name for f in s.scalar_index_files])
+
+
 if __name__ == "__main__":
     unittest.main()
