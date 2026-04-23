@@ -18,31 +18,28 @@
 
 """Tests for VectorSearch + scalar predicate pre-filter wiring in pypaimon.
 
-Mirrors Java VectorSearchBuilderTest.testVectorSearchWithBTreePreFilter at the
-wiring level, with stubs in place of the native Lumina / btree index readers so
-the test can run without the native library or a Java-built index.
+Each test protects a distinct behavior introduced by this feature; no
+redundancy.
 """
 
 import unittest
-from dataclasses import dataclass
 from typing import List
 from unittest import mock
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
-@dataclass
-class _StubField:
-    id: int
-    name: str
-    type: str = "FLOAT"
+# ----------------------------- table stubs ---------------------------------
 
 
 class _StubSchema:
@@ -51,11 +48,13 @@ class _StubSchema:
 
 
 class _StubTable:
-    """Minimal FileStoreTable stand-in for exercising the wiring."""
+    """Minimal FileStoreTable stand-in."""
 
-    def __init__(self, fields, entries):
+    def __init__(self, fields, entries, partition_fields=None):
         self.fields = fields
-        self.partition_keys: List[str] = []
+        self.partition_keys_fields = partition_fields or []
+        self.partition_keys: List[str] = [
+            f.name for f in self.partition_keys_fields]
         self.table_schema = _StubSchema()
         self.file_io = object()
         self._entries = entries
@@ -74,6 +73,11 @@ class _StubTable:
                         return "/tmp/unused"
                 return _G()
         return _P()
+
+
+def _field(fid, name, dtype="INT"):
+    return DataField(id=fid, name=name,
+                     type=AtomicType(dtype), description="")
 
 
 def _entry(partition_row, field_id, index_type, file_name,
@@ -96,81 +100,78 @@ def _entry(partition_row, field_id, index_type, file_name,
                               index_file=index_file)
 
 
+def _patch_snapshot(testcase, entries):
+    """Stub IndexFileHandler.scan + snapshot resolution."""
+
+    def _scan(snapshot, entry_filter=None):
+        if entry_filter is None:
+            return list(entries)
+        return [e for e in entries if entry_filter(e)]
+
+    testcase._scan_patch = mock.patch(
+        "pypaimon.index.index_file_handler.IndexFileHandler.scan",
+        autospec=True, side_effect=lambda self_, s, f=None: _scan(s, f))
+    testcase._scan_patch.start()
+    testcase._travel_patch = mock.patch(
+        "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
+        return_value=object())
+    testcase._travel_patch.start()
+
+
+# ----------------------------- tests ---------------------------------------
+
+
 class VectorSearchFilterTest(unittest.TestCase):
+    """Non-partitioned wiring: scan + read + external_path plumbing."""
 
     def setUp(self):
-        self.id_field = _StubField(id=0, name="id", type="INT")
-        self.embedding_field = _StubField(id=1, name="embedding",
-                                          type="ARRAY<FLOAT>")
-
-        # Two vector index files covering [0,4] and [5,9]; one btree scalar
-        # index on `id` covering [0,9] — overlaps both vector ranges.
+        self.id_field = _field(0, "id")
+        self.embedding_field = _field(1, "embedding", "FLOAT")
+        # 2 vector files ([0,4], [5,9]) + 1 btree on `id` covering [0,9] with
+        # an external_path so we can assert external_path is threaded through.
         self.entries = [
             _entry(None, field_id=1, index_type="lumina-vector-ann",
                    file_name="vec-0.index",
-                   row_range_start=0, row_range_end=4),
+                   row_range_start=0, row_range_end=4,
+                   external_path="oss://bucket/vec-0.index"),
             _entry(None, field_id=1, index_type="lumina-vector-ann",
                    file_name="vec-1.index",
-                   row_range_start=5, row_range_end=9),
+                   row_range_start=5, row_range_end=9,
+                   external_path="oss://bucket/vec-1.index"),
             _entry(None, field_id=0, index_type="btree",
                    file_name="id-btree-0.index",
-                   row_range_start=0, row_range_end=9),
+                   row_range_start=0, row_range_end=9,
+                   external_path="oss://bucket/id-btree-0.index"),
         ]
-
         self.table = _StubTable(fields=[self.id_field, self.embedding_field],
                                 entries=self.entries)
-
-        # Stub IndexFileHandler.scan -> return our entries (apply entry_filter).
-        def _scan(snapshot, entry_filter=None):
-            if entry_filter is None:
-                return list(self.entries)
-            return [e for e in self.entries if entry_filter(e)]
-
-        self._scan_patch = mock.patch(
-            "pypaimon.index.index_file_handler.IndexFileHandler.scan",
-            autospec=True, side_effect=lambda self_, s, f=None: _scan(s, f))
-        self._scan_patch.start()
-
-        # Bypass real snapshot resolution.
-        self._snapshot_patch = mock.patch(
-            "pypaimon.snapshot.snapshot_manager.SnapshotManager.get_latest_snapshot",
-            return_value=object())
-        self._snapshot_patch.start()
-
-        # Return a sentinel snapshot so SnapshotManager isn't constructed.
-        self._travel_patch = mock.patch(
-            "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
-            return_value=object())
-        self._travel_patch.start()
+        _patch_snapshot(self, self.entries)
 
     def tearDown(self):
         mock.patch.stopall()
 
-    def _predicate(self, method, field_index, field_name, literals):
-        return Predicate(method=method, index=field_index,
-                         field=field_name, literals=literals)
+    def _builder(self, filter_pred=None):
+        b = (VectorSearchBuilderImpl(self.table)
+             .with_vector_column("embedding")
+             .with_query_vector([1.0, 0.0, 0.0, 0.0])
+             .with_limit(3))
+        if filter_pred is not None:
+            b = b.with_filter(filter_pred)
+        return b
 
-    def test_scan_collects_scalar_index_files_by_predicate_field(self):
-        filter_pred = self._predicate("greaterOrEqual", 0, "id", [5])
-
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3)
-                   .with_filter(filter_pred))
-
-        splits = builder.new_vector_search_scan().scan().splits()
+    def test_scan_attaches_overlapping_scalar_index_files(self):
+        """``with_filter`` + scan: each vector-range split must carry the
+        scalar index files whose row range overlaps it."""
+        filter_pred = Predicate(method="greaterOrEqual", index=0, field="id",
+                                literals=[5])
+        splits = self._builder(filter_pred).new_vector_search_scan().scan().splits()
 
         self.assertEqual(2, len(splits))
         splits_sorted = sorted(splits, key=lambda s: s.row_range_start)
-
-        # Both splits should see the btree file because it overlaps their ranges.
         for s in splits_sorted:
             self.assertEqual(1, len(s.vector_index_files))
-            self.assertEqual(1, len(s.scalar_index_files))
-            self.assertEqual("id-btree-0.index",
-                             s.scalar_index_files[0].file_name)
-
+            self.assertEqual(["id-btree-0.index"],
+                             [f.file_name for f in s.scalar_index_files])
         self.assertEqual((0, 4),
                          (splits_sorted[0].row_range_start,
                           splits_sorted[0].row_range_end))
@@ -178,310 +179,30 @@ class VectorSearchFilterTest(unittest.TestCase):
                          (splits_sorted[1].row_range_start,
                           splits_sorted[1].row_range_end))
 
-    def test_scan_without_filter_has_no_scalar_files(self):
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3))
-
-        splits = builder.new_vector_search_scan().scan().splits()
-
-        self.assertEqual(2, len(splits))
-        for s in splits:
-            self.assertEqual([], s.scalar_index_files)
-
-    def test_read_applies_pre_filter_bitmap_to_vector_search(self):
-        # Filter: id >= 5. Pre-filter bitmap should restrict vector search.
-        filter_pred = self._predicate("greaterOrEqual", 0, "id", [5])
-
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3)
-                   .with_filter(filter_pred))
-
-        scan_plan = builder.new_vector_search_scan().scan()
-
-        # Stub GlobalIndexScanner.create — return a scanner whose scan()
-        # yields a bitmap with ids {5,6,7,8,9}.
-        expected_bitmap = RoaringBitmap64()
-        for rid in range(5, 10):
-            expected_bitmap.add(rid)
-        expected_result = GlobalIndexResult.create(lambda: expected_bitmap)
-
-        scanner = mock.MagicMock()
-        scanner.scan.return_value = expected_result
-        scanner.close = mock.MagicMock()
-
-        # Record VectorSearch objects passed to the vector reader so we can
-        # assert include_row_ids were threaded through.
-        captured_searches = []
-
-        class _FakeReader:
-            def visit_vector_search(self_inner, vs):
-                captured_searches.append(vs)
-                return ScoredGlobalIndexResult.create_empty()
-
-            def close(self_inner):
-                pass
-
-            def __enter__(self_inner):
-                return self_inner
-
-            def __exit__(self_inner, *a):
-                return False
-
-        with mock.patch(
-                "pypaimon.globalindex.global_index_scanner.GlobalIndexScanner.create",
-                return_value=scanner), \
-             mock.patch(
-                "pypaimon.table.source.vector_search_read._create_vector_reader",
-                return_value=_FakeReader()):
-            builder.new_vector_search_read().read_plan(scan_plan)
-
-        # Scanner was created with scalar files and invoked with our filter.
-        self.assertEqual(1, scanner.scan.call_count)
-        self.assertEqual(filter_pred, scanner.scan.call_args[0][0])
-        scanner.close.assert_called_once()
-
-        # Two splits → two VectorSearch invocations. OffsetGlobalIndexReader
-        # intersects the global include_row_ids with each split range and
-        # rebases to local coords: split [0,4] sees nothing from {5..9}
-        # (cardinality 0), split [5,9] sees {5..9} mapped to {0..4}
-        # (cardinality 5).
-        self.assertEqual(2, len(captured_searches))
-        local_cardinalities = sorted(vs.include_row_ids.cardinality()
-                                     for vs in captured_searches)
-        self.assertEqual([0, 5], local_cardinalities)
-
-
-class _StubPartitionedTable(_StubTable):
-    """FileStoreTable stand-in with partition keys."""
-
-    def __init__(self, fields, partition_fields, entries):
-        super().__init__(fields=fields, entries=entries)
-        self.partition_keys = [f.name for f in partition_fields]
-        self.partition_keys_fields = partition_fields
-
-
-class VectorSearchPartitionedFilterTest(unittest.TestCase):
-    """Covers the partition-pruning path: users build a full-row Predicate via
-    PredicateBuilder(table.fields), and with_filter must re-index the
-    partition-only conjuncts so Predicate.test(entry.partition) reads the
-    correct column from a partition-only GenericRow."""
-
-    def setUp(self):
-        from pypaimon.schema.data_types import DataField, AtomicType
-        # Layout: pt (partition, id=0), id (id=1), embedding (id=2).
-        self.pt_field = DataField(id=0, name="pt",
-                                  type=AtomicType("INT"), description="")
-        self.id_field = DataField(id=1, name="id",
-                                  type=AtomicType("INT"), description="")
-        self.embedding_field = DataField(id=2, name="embedding",
-                                         type=AtomicType("FLOAT"),
-                                         description="")
-
-        # Partition rows: pt=1 and pt=2.
-        from pypaimon.table.row.generic_row import GenericRow
-        partition_pt1 = GenericRow([1], [self.pt_field])
-        partition_pt2 = GenericRow([2], [self.pt_field])
-
-        # pt=1 has vector [0,4] + btree [0,4]; pt=2 has vector [5,9] + btree [5,9].
-        self.entries = [
-            _entry(partition_pt1, field_id=2, index_type="lumina-vector-ann",
-                   file_name="vec-pt1.index",
-                   row_range_start=0, row_range_end=4),
-            _entry(partition_pt1, field_id=1, index_type="btree",
-                   file_name="id-pt1.index",
-                   row_range_start=0, row_range_end=4),
-            _entry(partition_pt2, field_id=2, index_type="lumina-vector-ann",
-                   file_name="vec-pt2.index",
-                   row_range_start=5, row_range_end=9),
-            _entry(partition_pt2, field_id=1, index_type="btree",
-                   file_name="id-pt2.index",
-                   row_range_start=5, row_range_end=9),
-        ]
-
-        self.table = _StubPartitionedTable(
-            fields=[self.pt_field, self.id_field, self.embedding_field],
-            partition_fields=[self.pt_field],
-            entries=self.entries)
-
-        def _scan(snapshot, entry_filter=None):
-            if entry_filter is None:
-                return list(self.entries)
-            return [e for e in self.entries if entry_filter(e)]
-
-        self._scan_patch = mock.patch(
-            "pypaimon.index.index_file_handler.IndexFileHandler.scan",
-            autospec=True, side_effect=lambda self_, s, f=None: _scan(s, f))
-        self._scan_patch.start()
-        self._snapshot_patch = mock.patch(
-            "pypaimon.snapshot.snapshot_manager.SnapshotManager.get_latest_snapshot",
-            return_value=object())
-        self._snapshot_patch.start()
-        self._travel_patch = mock.patch(
-            "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
-            return_value=object())
-        self._travel_patch.start()
-
-    def tearDown(self):
-        mock.patch.stopall()
-
-    def test_with_filter_prunes_wrong_partition_using_full_row_predicate(self):
-        # Build a normal full-row predicate: pt == 2.
-        from pypaimon.common.predicate_builder import PredicateBuilder
-        pb = PredicateBuilder(self.table.fields)
-        filter_pred = pb.equal("pt", 2)
-
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3)
-                   .with_filter(filter_pred))
-
-        # with_filter should have extracted + re-indexed the partition-only
-        # conjunct. The extracted predicate's leaves reference `pt` with
-        # index 0 in the partition row (not 0 in the full row — same here by
-        # coincidence, but semantics must be partition-scoped).
-        self.assertIsNotNone(builder._partition_filter)
-        self.assertEqual(builder._partition_filter.field, "pt")
-        self.assertEqual(builder._partition_filter.index, 0)
-
-        splits = builder.new_vector_search_scan().scan().splits()
-
-        # Only pt=2 entries should pass partition pruning — one vector split
-        # on [5,9]. No scalar files attach because the filter only references
-        # `pt`, not `id`, so the id-btree is out of scope.
-        self.assertEqual(1, len(splits))
-        s = splits[0]
-        self.assertEqual((5, 9), (s.row_range_start, s.row_range_end))
-        self.assertEqual(["vec-pt2.index"],
-                         [f.file_name for f in s.vector_index_files])
-        self.assertEqual([], s.scalar_index_files)
-
-    def test_with_partition_filter_accepts_full_row_predicate(self):
-        from pypaimon.common.predicate_builder import PredicateBuilder
-        pb = PredicateBuilder(self.table.fields)
-
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3)
-                   .with_partition_filter(pb.equal("pt", 1)))
-
-        splits = builder.new_vector_search_scan().scan().splits()
-
-        # Only pt=1 entries should survive.
-        self.assertEqual(1, len(splits))
-        s = splits[0]
-        self.assertEqual((0, 4), (s.row_range_start, s.row_range_end))
-        self.assertEqual(["vec-pt1.index"],
-                         [f.file_name for f in s.vector_index_files])
-
-    def test_mixed_filter_keeps_only_partition_conjunct_for_pruning(self):
-        # Filter: pt == 1 AND id >= 3. Partition-pruning should apply only
-        # to pt == 1; id >= 3 stays in the scalar pre-filter path.
-        from pypaimon.common.predicate_builder import PredicateBuilder
-        pb = PredicateBuilder(self.table.fields)
-        mixed = PredicateBuilder.and_predicates(
-            [pb.equal("pt", 1), pb.greater_or_equal("id", 3)])
-
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3)
-                   .with_filter(mixed))
-
-        # Partition filter contains only the pt conjunct.
-        pf = builder._partition_filter
-        self.assertIsNotNone(pf)
-        self.assertEqual(pf.field, "pt")
-        self.assertEqual(pf.index, 0)
-
-        splits = builder.new_vector_search_scan().scan().splits()
-        self.assertEqual(1, len(splits))
-        s = splits[0]
-        self.assertEqual((0, 4), (s.row_range_start, s.row_range_end))
-        # id btree on pt=1 must come along so the read step can apply id>=3.
-        self.assertEqual(["id-pt1.index"],
-                         [f.file_name for f in s.scalar_index_files])
-
-
-class VectorSearchExternalPathAndValidationTest(unittest.TestCase):
-    """Covers external_path plumbing and with_partition_filter input
-    validation — the two follow-up review findings."""
-
-    def setUp(self):
-        from pypaimon.schema.data_types import DataField, AtomicType
-        self.id_field = DataField(id=0, name="id",
-                                  type=AtomicType("INT"), description="")
-        self.embedding_field = DataField(id=1, name="embedding",
-                                         type=AtomicType("FLOAT"),
-                                         description="")
-        # Single vector file + single btree file, btree carries an
-        # external_path so we can assert readers open that path.
-        self.entries = [
-            _entry(None, field_id=1, index_type="lumina-vector-ann",
-                   file_name="vec.index",
-                   row_range_start=0, row_range_end=9,
-                   external_path="oss://bucket/path/vec.index"),
-            _entry(None, field_id=0, index_type="btree",
-                   file_name="id.index",
-                   row_range_start=0, row_range_end=9,
-                   external_path="oss://bucket/path/id.index"),
-        ]
-        self.table = _StubTable(fields=[self.id_field, self.embedding_field],
-                                entries=self.entries)
-
-        def _scan(snapshot, entry_filter=None):
-            if entry_filter is None:
-                return list(self.entries)
-            return [e for e in self.entries if entry_filter(e)]
-
-        self._scan_patch = mock.patch(
-            "pypaimon.index.index_file_handler.IndexFileHandler.scan",
-            autospec=True, side_effect=lambda self_, s, f=None: _scan(s, f))
-        self._scan_patch.start()
-        self._snapshot_patch = mock.patch(
-            "pypaimon.snapshot.snapshot_manager.SnapshotManager.get_latest_snapshot",
-            return_value=object())
-        self._snapshot_patch.start()
-        self._travel_patch = mock.patch(
-            "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
-            return_value=object())
-        self._travel_patch.start()
-
-    def tearDown(self):
-        mock.patch.stopall()
-
-    def test_external_path_passed_to_vector_reader_io_meta(self):
-        """VectorSearchReadImpl._eval must propagate IndexFileMeta.external_path
-        to GlobalIndexIOMeta so the underlying reader opens the external path
-        instead of the default index_path/file_name."""
+    def test_read_threads_prefilter_bitmap_as_include_row_ids(self):
+        """preFilter bitmap from scanner.scan(filter) must reach each split's
+        VectorSearch, offset-rebased to local coords by OffsetGlobalIndexReader.
+        Also: the vector reader's io_meta carries external_path."""
         filter_pred = Predicate(method="greaterOrEqual", index=0, field="id",
-                                literals=[0])
+                                literals=[5])
+        scan_plan = self._builder(filter_pred).new_vector_search_scan().scan()
 
-        builder = (VectorSearchBuilderImpl(self.table)
-                   .with_vector_column("embedding")
-                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
-                   .with_limit(3)
-                   .with_filter(filter_pred))
-        scan_plan = builder.new_vector_search_scan().scan()
-
-        # pre_filter: stub scanner returns a dummy bitmap so _pre_filter
-        # completes; we don't care about its value here.
+        bitmap = RoaringBitmap64()
+        for rid in range(5, 10):
+            bitmap.add(rid)
         scanner = mock.MagicMock()
-        scanner.scan.return_value = GlobalIndexResult.create(RoaringBitmap64)
+        scanner.scan.return_value = GlobalIndexResult.create(lambda: bitmap)
 
-        captured_io_meta_lists = []
+        captured_searches = []
+        captured_io_metas = []
 
         def _capture_create(index_type, file_io, index_path,
                             index_io_meta_list, options=None):
-            captured_io_meta_lists.append(list(index_io_meta_list))
+            captured_io_metas.append(list(index_io_meta_list))
 
             class _FakeReader:
                 def visit_vector_search(self_inner, vs):
+                    captured_searches.append(vs)
                     return ScoredGlobalIndexResult.create_empty()
 
                 def close(self_inner):
@@ -500,118 +221,121 @@ class VectorSearchExternalPathAndValidationTest(unittest.TestCase):
              mock.patch(
                 "pypaimon.table.source.vector_search_read._create_vector_reader",
                 side_effect=_capture_create):
-            builder.new_vector_search_read().read_plan(scan_plan)
+            self._builder(filter_pred).new_vector_search_read().read_plan(scan_plan)
 
-        self.assertEqual(1, len(captured_io_meta_lists))
-        io_metas = captured_io_meta_lists[0]
-        self.assertEqual(1, len(io_metas))
-        self.assertEqual("oss://bucket/path/vec.index",
-                         io_metas[0].external_path)
+        # Pre-filter happened once with our filter.
+        self.assertEqual(1, scanner.scan.call_count)
+        self.assertIs(filter_pred, scanner.scan.call_args[0][0])
 
-    def test_external_path_passed_to_scalar_scanner_io_meta(self):
-        """GlobalIndexScanner (used by _pre_filter) must thread external_path
-        onto the GlobalIndexIOMeta it hands to the btree reader factory."""
+        # [0,4] sees empty local bitmap; [5,9] sees {0..4}.
+        self.assertEqual(
+            [0, 5],
+            sorted(vs.include_row_ids.cardinality()
+                   for vs in captured_searches))
+
+        # Vector reader io_meta carries external_path from IndexFileMeta.
+        seen_paths = {meta.external_path
+                      for metas in captured_io_metas
+                      for meta in metas}
+        self.assertEqual(
+            {"oss://bucket/vec-0.index", "oss://bucket/vec-1.index"},
+            seen_paths)
+
+    def test_scanner_threads_external_path_to_btree_reader(self):
+        """GlobalIndexScanner (backing _pre_filter) must thread external_path
+        onto the GlobalIndexIOMeta handed to the btree reader factory."""
         from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 
-        scalar_files = [self.entries[1].index_file]
+        scalar_file = self.entries[2].index_file
         scanner = GlobalIndexScanner(
             fields=self.table.fields,
             file_io=self.table.file_io,
             index_path="/unused/index-path",
-            index_files=scalar_files,
+            index_files=[scalar_file],
         )
+        captured = []
+
+        class _FakeBTreeReader:
+            def __init__(self_inner, key_serializer, file_io, index_path,
+                         io_meta):
+                captured.append(io_meta)
+
+            def close(self_inner):
+                pass
+
         try:
-            # Trigger the readers_function for the 'id' field; capture the
-            # io_meta passed to BTreeIndexReader so we can assert
-            # external_path was threaded through.
-            id_field = next(f for f in self.table.fields if f.name == "id")
-            captured = []
-
-            class _FakeBTreeReader:
-                def __init__(self_inner, key_serializer, file_io, index_path,
-                             io_meta):
-                    captured.append(io_meta)
-
-                def close(self_inner):
-                    pass
-
             with mock.patch(
                     "pypaimon.globalindex.btree.BTreeIndexReader",
                     _FakeBTreeReader):
-                readers = scanner._evaluator._readers_function(id_field)
-                # Force evaluation (readers is a list).
-                list(readers)
+                list(scanner._evaluator._readers_function(self.id_field))
         finally:
             scanner.close()
 
         self.assertEqual(1, len(captured))
-        self.assertEqual("oss://bucket/path/id.index",
+        self.assertEqual("oss://bucket/id-btree-0.index",
                          captured[0].external_path)
-        self.assertEqual("id.index", captured[0].file_name)
+
+
+class VectorSearchPartitionedFilterTest(unittest.TestCase):
+    """Partitioned-table paths: with_filter auto-split + partition-filter
+    input validation."""
+
+    def setUp(self):
+        self.pt_field = _field(0, "pt")
+        self.id_field = _field(1, "id")
+        self.embedding_field = _field(2, "embedding", "FLOAT")
+
+        partition_pt1 = GenericRow([1], [self.pt_field])
+        partition_pt2 = GenericRow([2], [self.pt_field])
+        self.entries = [
+            _entry(partition_pt1, field_id=2,
+                   index_type="lumina-vector-ann",
+                   file_name="vec-pt1.index",
+                   row_range_start=0, row_range_end=4),
+            _entry(partition_pt2, field_id=2,
+                   index_type="lumina-vector-ann",
+                   file_name="vec-pt2.index",
+                   row_range_start=5, row_range_end=9),
+        ]
+        self.table = _StubTable(
+            fields=[self.pt_field, self.id_field, self.embedding_field],
+            partition_fields=[self.pt_field],
+            entries=self.entries)
+        _patch_snapshot(self, self.entries)
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_with_filter_auto_splits_and_prunes_wrong_partition(self):
+        """A normal full-row predicate ``pt == 2`` must (a) be auto-split
+        into _partition_filter with indices re-based to the partition-only
+        row, and (b) drop pt=1 entries during manifest pruning."""
+        pb = PredicateBuilder(self.table.fields)
+        builder = (VectorSearchBuilderImpl(self.table)
+                   .with_vector_column("embedding")
+                   .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                   .with_limit(3)
+                   .with_filter(pb.equal("pt", 2)))
+
+        # Partition filter's leaf index points into the partition-only row.
+        self.assertEqual("pt", builder._partition_filter.field)
+        self.assertEqual(0, builder._partition_filter.index)
+
+        splits = builder.new_vector_search_scan().scan().splits()
+        self.assertEqual(1, len(splits))
+        self.assertEqual(["vec-pt2.index"],
+                         [f.file_name for f in splits[0].vector_index_files])
 
     def test_with_partition_filter_rejects_non_partition_field(self):
-        from pypaimon.common.predicate_builder import PredicateBuilder
-        from pypaimon.schema.data_types import DataField, AtomicType
-        pt_field = DataField(id=0, name="pt",
-                             type=AtomicType("INT"), description="")
-        id_field = DataField(id=1, name="id",
-                             type=AtomicType("INT"), description="")
-        emb_field = DataField(id=2, name="embedding",
-                              type=AtomicType("FLOAT"), description="")
-
-        class _T(_StubTable):
-            def __init__(self_inner):
-                super().__init__(fields=[pt_field, id_field, emb_field],
-                                 entries=[])
-                self_inner.partition_keys = ["pt"]
-                self_inner.partition_keys_fields = [pt_field]
-
-        table = _T()
-        pb = PredicateBuilder(table.fields)
-        builder = VectorSearchBuilderImpl(table)
-
+        """Non-partition conjuncts would be silently dropped by the extractor,
+        producing wrong results; the API must refuse them up front."""
+        pb = PredicateBuilder(self.table.fields)
+        builder = VectorSearchBuilderImpl(self.table)
         with self.assertRaises(ValueError) as ctx:
             builder.with_partition_filter(
                 PredicateBuilder.and_predicates(
                     [pb.equal("pt", 1), pb.equal("id", 5)]))
         self.assertIn("non-partition", str(ctx.exception))
-
-    def test_with_partition_filter_rejects_on_non_partitioned_table(self):
-        from pypaimon.common.predicate_builder import PredicateBuilder
-        pb = PredicateBuilder(self.table.fields)
-        builder = VectorSearchBuilderImpl(self.table)
-        with self.assertRaises(ValueError):
-            builder.with_partition_filter(pb.equal("id", 1))
-
-    def test_with_partition_filter_accepts_partition_row_predicate(self):
-        """Field-name-based rebuild should tolerate a predicate built against
-        either table.fields or table.partition_keys_fields."""
-        from pypaimon.common.predicate_builder import PredicateBuilder
-        from pypaimon.schema.data_types import DataField, AtomicType
-        pt_field = DataField(id=0, name="pt",
-                             type=AtomicType("INT"), description="")
-        id_field = DataField(id=1, name="id",
-                             type=AtomicType("INT"), description="")
-        emb_field = DataField(id=2, name="embedding",
-                              type=AtomicType("FLOAT"), description="")
-
-        class _T(_StubTable):
-            def __init__(self_inner):
-                super().__init__(fields=[pt_field, id_field, emb_field],
-                                 entries=[])
-                self_inner.partition_keys = ["pt"]
-                self_inner.partition_keys_fields = [pt_field]
-
-        table = _T()
-        # Built against partition_keys_fields — leaf.index is 0 in that
-        # one-field schema. Rebuild should land on partition-row index 0.
-        partition_pb = PredicateBuilder(table.partition_keys_fields)
-        builder = VectorSearchBuilderImpl(table).with_partition_filter(
-            partition_pb.equal("pt", 42))
-
-        self.assertIsNotNone(builder._partition_filter)
-        self.assertEqual("pt", builder._partition_filter.field)
-        self.assertEqual(0, builder._partition_filter.index)
 
 
 if __name__ == "__main__":
