@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
@@ -53,9 +52,10 @@ public class FlinkRowWrapper implements InternalRow {
         this(row, null);
     }
 
-    public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
+    public FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row, UriReaderFactory uriReaderFactory) {
         this.row = row;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
     }
 
     @Override

@@ -35,6 +35,7 @@ import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.BlobDescriptorUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -246,10 +247,11 @@ public class FlinkSinkBuilder {
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext) {
+        final UriReaderFactory uriReaderFactory = new UriReaderFactory(catalogContext);
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
-                                        r -> new FlinkRowWrapper(r, catalogContext))
+                                        r -> new FlinkRowWrapper(r, uriReaderFactory))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
