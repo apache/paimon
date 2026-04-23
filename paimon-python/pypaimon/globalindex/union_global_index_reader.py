@@ -18,8 +18,7 @@
 
 """A GlobalIndexReader that unions results from multiple underlying readers.
 
-Mirrors Java ``org.apache.paimon.globalindex.UnionGlobalIndexReader``. Each
-visit_* call is dispatched to every underlying reader and the results are
+Each visit_* call is dispatched to every underlying reader and the results are
 OR-combined into a single ``GlobalIndexResult``. Readers returning ``None``
 ("cannot answer") are skipped; an empty bitmap DOES contribute to the union
 and is NOT a short-circuit signal.
