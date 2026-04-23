@@ -60,6 +60,11 @@ class GlobalIndexIOMeta:
     file_name: str
     file_size: int
     metadata: Optional[bytes] = None
+    # Optional full path, mirrors Java IndexFileMeta.externalPath(). When set,
+    # readers should open this path directly instead of joining the caller's
+    # index_path with file_name (Java FileStorePathFactory#toPath prefers
+    # externalPath over indexPath/fileName).
+    external_path: Optional[str] = None
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GlobalIndexIOMeta):
@@ -67,8 +72,9 @@ class GlobalIndexIOMeta:
         return (
             self.file_name == other.file_name and
             self.file_size == other.file_size and
-            self.metadata == other.metadata
+            self.metadata == other.metadata and
+            self.external_path == other.external_path
         )
 
     def __hash__(self) -> int:
-        return hash((self.file_name, self.file_size))
+        return hash((self.file_name, self.file_size, self.external_path))

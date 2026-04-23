@@ -627,6 +627,51 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Lumina vector search matched rows: ids={ids}")
         self.assertIn(0, ids)
 
+    def test_read_lumina_vector_with_btree_filter(self):
+        """Vector search + btree scalar pre-filter, using a table that Java
+        populated with both a Lumina vector index on `embedding` and a BTree
+        global index on `id` (JavaPyLuminaE2ETest.testLuminaVectorWithBTreeIndexWrite)."""
+        from pypaimon.common.predicate_builder import PredicateBuilder
+
+        table = self.catalog.get_table('default.test_lumina_vector_btree_filter')
+
+        # Baseline search — same 6 vectors as test_read_lumina_vector_index,
+        # no filter, top 6 covers the whole table.
+        baseline = (table.new_vector_search_builder()
+                    .with_vector_column('embedding')
+                    .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                    .with_limit(6)
+                    .execute_local())
+        baseline_ids = sorted(list(baseline.results()))
+        print(f"Baseline vector search ids={baseline_ids}")
+        self.assertEqual(baseline_ids, [0, 1, 2, 3, 4, 5])
+
+        # Filtered search — id >= 3 should restrict vector search to rows
+        # {3,4,5}, so top_k results must be a subset of that.
+        pb = PredicateBuilder(table.fields)
+        filter_pred = pb.greater_or_equal('id', 3)
+        filtered = (table.new_vector_search_builder()
+                    .with_vector_column('embedding')
+                    .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                    .with_limit(6)
+                    .with_filter(filter_pred)
+                    .execute_local())
+        filtered_ids = sorted(list(filtered.results()))
+        print(f"Filtered (id >= 3) vector search ids={filtered_ids}")
+        self.assertEqual(filtered_ids, [3, 4, 5])
+
+        # Narrower filter — id in {5} — only row 5 should survive.
+        filter_eq = pb.equal('id', 5)
+        eq_result = (table.new_vector_search_builder()
+                     .with_vector_column('embedding')
+                     .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                     .with_limit(6)
+                     .with_filter(filter_eq)
+                     .execute_local())
+        eq_ids = sorted(list(eq_result.results()))
+        print(f"Filtered (id == 5) vector search ids={eq_ids}")
+        self.assertEqual(eq_ids, [5])
+
     def test_read_blob_after_alter_and_compact(self):
         table = self.catalog.get_table('default.blob_alter_compact_test')
         read_builder = table.new_read_builder()

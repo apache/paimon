@@ -64,7 +64,8 @@ class GlobalIndexScanner:
             io_meta = GlobalIndexIOMeta(
                 file_name=index_file.file_name,
                 file_size=index_file.file_size,
-                metadata=global_index_meta.index_meta
+                metadata=global_index_meta.index_meta,
+                external_path=index_file.external_path,
             )
             index_metas[field_id][index_type][range_key].append(io_meta)
 
@@ -141,22 +142,63 @@ class GlobalIndexScanner:
 
 
 def _create_readers(file_io, index_path, index_type_metas, field):
-    """Create readers for a specific field from the index metadata."""
+    """Create readers for a specific field, dispatched by index_type.
+
+    Unknown indexTypes raise — a silent skip would make
+    ``VectorSearchReadImpl._pre_filter`` return ``None`` and the vector search
+    would then return unfiltered results that violate the user predicate.
+    """
     if index_type_metas is None:
         return []
 
+    from pypaimon.globalindex.offset_global_index_reader import (
+        OffsetGlobalIndexReader,
+    )
+    from pypaimon.globalindex.union_global_index_reader import (
+        UnionGlobalIndexReader,
+    )
+
     readers = []
     for index_type, range_metas in index_type_metas.items():
-        if index_type == 'btree':
-            from pypaimon.globalindex.btree import BTreeIndexReader
-            from pypaimon.globalindex.btree.key_serializer import create_serializer
-            for range_key, io_metas in range_metas.items():
-                for metadata in io_metas:
-                    reader = BTreeIndexReader(
-                        key_serializer=create_serializer(field.type),
-                        file_io=file_io,
-                        index_path=index_path,
-                        io_meta=metadata
-                    )
-                    readers.append(reader)
+        offset_readers = []
+        for range_key, io_metas in range_metas.items():
+            inner_readers = _create_inner_readers(
+                index_type, file_io, index_path, field, io_metas)
+            for inner in inner_readers:
+                offset_readers.append(
+                    OffsetGlobalIndexReader(
+                        inner, range_key.from_, range_key.to))
+        if offset_readers:
+            readers.append(UnionGlobalIndexReader(offset_readers))
     return readers
+
+
+def _create_inner_readers(index_type, file_io, index_path, field, io_metas):
+    """Build per-file (or per-shard) readers for a single indexType/range."""
+    if index_type == 'btree':
+        from pypaimon.globalindex.btree import BTreeIndexReader
+        from pypaimon.globalindex.btree.key_serializer import create_serializer
+        key_serializer = create_serializer(field.type)
+        return [
+            BTreeIndexReader(
+                key_serializer=key_serializer,
+                file_io=file_io,
+                index_path=index_path,
+                io_meta=io_meta,
+            )
+            for io_meta in io_metas
+        ]
+
+    from pypaimon.globalindex.tantivy import (
+        TANTIVY_FULLTEXT_IDENTIFIER,
+        TantivyFullTextGlobalIndexReader,
+    )
+    if index_type == TANTIVY_FULLTEXT_IDENTIFIER:
+        # Tantivy expects one file per shard; create one reader per io_meta.
+        return [
+            TantivyFullTextGlobalIndexReader(file_io, index_path, [io_meta])
+            for io_meta in io_metas
+        ]
+
+    raise ValueError(
+        "Unsupported global-index type in scanner: '%s'" % index_type)

@@ -86,7 +86,10 @@ class BTreeIndexReader(GlobalIndexReader):
             self.max_key = None
         
         self.has_nulls = index_meta.has_nulls
-        self.input_stream = file_io.new_input_stream(index_path + "/" + io_meta.file_name)
+        file_path = (io_meta.external_path
+                     if io_meta.external_path
+                     else index_path + "/" + io_meta.file_name)
+        self.input_stream = file_io.new_input_stream(file_path)
         
         # Lazy-loaded null bitmap
         self._null_bitmap: Optional[RoaringBitmap64] = None
