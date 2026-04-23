@@ -38,8 +38,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
     public GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
             List<DataType> inputTypes, int[] sortFields) {
         return new SortCodeGenerator(
-                        RowType.builder().fields(inputTypes).build(),
-                        getSortSpec(sortFields, true))
+                        RowType.builder().fields(inputTypes).build(), getSortSpec(sortFields, true))
                 .generateNormalizedKeyComputer("NormalizedKeyComputer");
     }
 
