@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.serializer.BlobSerializer;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -203,7 +204,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     @Override
     public void writeBlob(int pos, Blob blob) {
-        byte[] bytes = blob.toData();
+        byte[] bytes = BlobSerializer.INSTANCE.serializeInternalBytes(blob);
         writeBinary(pos, bytes, 0, bytes.length);
     }
 

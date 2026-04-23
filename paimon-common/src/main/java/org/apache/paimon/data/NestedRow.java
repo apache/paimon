@@ -18,6 +18,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.serializer.BlobSerializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
@@ -291,7 +292,7 @@ public final class NestedRow extends BinarySection implements InternalRow, DataS
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
+        return BlobSerializer.INSTANCE.deserializeInternalBytes(getBinary(pos));
     }
 
     @Override

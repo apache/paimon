@@ -20,15 +20,24 @@ package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobStream;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.utils.UriReader;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 /** Type serializer for {@code Blob}. */
 public class BlobSerializer extends SerializerSingleton<Blob> {
 
     private static final long serialVersionUID = 1L;
+    private static final byte[] MAGIC = new byte[] {'B', 'L', 'O', 'B', 'S', 'E', 'R', '1'};
+    private static final byte KIND_DATA = 0;
+    private static final byte KIND_REF = 1;
+    private static final UriReader THROWING_URI_READER = new ThrowingUriReader();
 
     public static final BlobSerializer INSTANCE = new BlobSerializer();
 
@@ -39,12 +48,98 @@ public class BlobSerializer extends SerializerSingleton<Blob> {
 
     @Override
     public void serialize(Blob blob, DataOutputView target) throws IOException {
-        BinarySerializer.INSTANCE.serialize(blob.toData(), target);
+        BinarySerializer.INSTANCE.serialize(serializeBody(blob), target);
     }
 
     @Override
     public Blob deserialize(DataInputView source) throws IOException {
         byte[] bytes = BinarySerializer.INSTANCE.deserialize(source);
-        return new BlobData(bytes);
+        return deserializeBody(bytes);
+    }
+
+    public byte[] serializeInternalBytes(Blob blob) {
+        try {
+            return serializeToBytes(blob);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize blob.", e);
+        }
+    }
+
+    public Blob deserializeInternalBytes(byte[] bytes) {
+        try {
+            return deserializeFromBytes(bytes);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to deserialize blob.", e);
+        }
+    }
+
+    private byte[] serializeBody(Blob blob) throws IOException {
+        byte[] payload;
+        byte kind;
+
+        if (blob instanceof BlobData) {
+            payload = ((BlobData) blob).toData();
+            kind = KIND_DATA;
+        } else if (blob instanceof BlobRef) {
+            payload = blob.toDescriptor().serialize();
+            kind = KIND_REF;
+        } else if (blob instanceof BlobStream) {
+            throw new UnsupportedOperationException("BlobSerializer does not support BlobStream.");
+        } else {
+            throw new UnsupportedOperationException(
+                    "BlobSerializer only supports BlobData and BlobRef, but found "
+                            + blob.getClass().getSimpleName()
+                            + ".");
+        }
+
+        byte[] result = new byte[MAGIC.length + 1 + payload.length];
+        System.arraycopy(MAGIC, 0, result, 0, MAGIC.length);
+        result[MAGIC.length] = kind;
+        System.arraycopy(payload, 0, result, MAGIC.length + 1, payload.length);
+        return result;
+    }
+
+    private Blob deserializeBody(byte[] bytes) throws IOException {
+        if (!hasMagic(bytes)) {
+            // Backward compatibility for blobs serialized before BlobSerializer became
+            // descriptor-aware.
+            return new BlobData(bytes);
+        }
+
+        byte kind = bytes[MAGIC.length];
+        byte[] payload = Arrays.copyOfRange(bytes, MAGIC.length + 1, bytes.length);
+        switch (kind) {
+            case KIND_DATA:
+                return new BlobData(payload);
+            case KIND_REF:
+                return Blob.fromDescriptor(
+                        THROWING_URI_READER, BlobDescriptor.deserialize(payload));
+            default:
+                throw new IOException("Unknown blob serializer kind: " + kind);
+        }
+    }
+
+    private boolean hasMagic(byte[] bytes) {
+        if (bytes.length < MAGIC.length + 1) {
+            return false;
+        }
+
+        for (int i = 0; i < MAGIC.length; i++) {
+            if (bytes[i] != MAGIC[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static class ThrowingUriReader implements UriReader {
+
+        @Override
+        public org.apache.paimon.fs.SeekableInputStream newInputStream(String uri) throws IOException {
+            throw new IOException(
+                    "BlobRef deserialized by BlobSerializer does not carry a UriReader. "
+                            + "Use toDescriptor() instead. Descriptor URI: "
+                            + uri);
+        }
     }
 }

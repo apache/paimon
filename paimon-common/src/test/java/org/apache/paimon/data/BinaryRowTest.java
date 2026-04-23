@@ -56,6 +56,7 @@ import static org.apache.paimon.data.BinaryString.fromBytes;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.data.MapDataUtil.convertToJavaMap;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test of {@link BinaryRow} and {@link BinaryRowWriter}. */
 public class BinaryRowTest {
@@ -1010,5 +1011,28 @@ public class BinaryRowTest {
         assertThat(blob0).isInstanceOf(BlobData.class);
         assertThat(blob0.toData()).isEqualTo(new byte[] {1, 3, 1});
         assertThat(row.isNullAt(1)).isTrue();
+    }
+
+    @Test
+    public void testBlobRefDoesNotMaterializeOnBinaryWrite() {
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        BlobDescriptor descriptor = new BlobDescriptor("file:/tmp/blob.bin", 5L, 11L);
+        Blob blob =
+                Blob.fromDescriptor(
+                        uri -> {
+                            throw new AssertionError("Binary writer should not read blob bytes.");
+                        },
+                        descriptor);
+
+        writer.writeBlob(0, blob);
+        writer.complete();
+
+        Blob deserialized = row.getBlob(0);
+        assertThat(deserialized).isInstanceOf(BlobRef.class);
+        assertThat(deserialized.toDescriptor()).isEqualTo(descriptor);
+        assertThatThrownBy(deserialized::toData)
+                .hasRootCauseInstanceOf(IOException.class)
+                .hasMessageContaining("does not carry a UriReader");
     }
 }
