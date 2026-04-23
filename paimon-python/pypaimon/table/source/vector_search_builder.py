@@ -115,8 +115,7 @@ class VectorSearchBuilderImpl(VectorSearchBuilder):
             self._filter = predicate
         else:
             self._filter = PredicateBuilder.and_predicates([self._filter, predicate])
-        # Mirror Java VectorSearchBuilderImpl.withFilter: split out the
-        # partition-only conjuncts and store them as _partition_filter for
+        # split out the partition-only conjuncts and store them as _partition_filter for
         # manifest pruning. Non-partition conjuncts remain in self._filter;
         # the silent drop of non-partition conjuncts *in the extracted copy*
         # is intentional — nothing is lost overall.

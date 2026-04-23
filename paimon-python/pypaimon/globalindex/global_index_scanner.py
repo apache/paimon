@@ -144,11 +144,6 @@ class GlobalIndexScanner:
 def _create_readers(file_io, index_path, index_type_metas, field):
     """Create readers for a specific field, dispatched by index_type.
 
-    Mirrors Java GlobalIndexScanner#createReaders which loads a
-    GlobalIndexerFactory per indexType. Every supported indexType has its
-    per-file readers wrapped in OffsetGlobalIndexReader(range.from_, range.to)
-    and then grouped into a UnionGlobalIndexReader per (field, indexType).
-
     Unknown indexTypes raise — a silent skip would make
     ``VectorSearchReadImpl._pre_filter`` return ``None`` and the vector search
     would then return unfiltered results that violate the user predicate.
