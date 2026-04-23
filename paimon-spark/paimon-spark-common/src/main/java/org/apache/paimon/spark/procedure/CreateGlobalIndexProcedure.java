@@ -106,10 +106,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
         LOG.info("Starting to build index for table " + tableIdent + " WHERE: " + finalWhere);
 
-        return modifyPaimonTable(
+        return modifySparkTable(
                 tableIdent,
-                t -> {
+                sparkTable -> {
                     try {
+                        org.apache.paimon.table.Table t = sparkTable.getTable();
                         checkArgument(
                                 t instanceof FileStoreTable,
                                 "Only FileStoreTable supports global index creation.");
@@ -125,7 +126,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 "Column '%s' does not exist in table '%s'.",
                                 column,
                                 tableIdent);
-                        DataSourceV2Relation relation = createRelation(tableIdent);
+                        DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                         PartitionPredicate partitionPredicate =
                                 SparkProcedureUtils.convertToPartitionPredicate(
                                         finalWhere,
