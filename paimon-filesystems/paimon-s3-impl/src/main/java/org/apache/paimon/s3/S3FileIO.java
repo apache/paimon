@@ -25,6 +25,9 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FSDataOutputStreamBuilder;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.slf4j.Logger;
@@ -33,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -83,6 +87,33 @@ public class S3FileIO extends HadoopCompliantFileIO {
         }
         return new S3TwoPhaseOutputStream(
                 new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, path);
+    }
+
+    /**
+     * Write content atomically using S3 conditional writes via Hadoop 3.4+ native API.
+     *
+     * @param path the target file path
+     * @param content the content to write
+     * @return true if write succeeded, false if file already exists
+     * @throws IOException on I/O errors
+     */
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3AFileSystem fs = (S3AFileSystem) getFileSystem(hadoopPath);
+
+        byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+
+        FSDataOutputStreamBuilder builder = fs.createFile(hadoopPath);
+        builder.must("fs.option.create.conditional.overwrite", true);
+
+        try (FSDataOutputStream out = builder.create().overwrite(false).build()) {
+            out.write(contentBytes);
+            return true;
+        } catch (FileAlreadyExistsException e) {
+            LOG.debug("Conditional write failed, file already exists: {}", path);
+            return false;
+        }
     }
 
     // add additional config entries from the IO config to the Hadoop config
