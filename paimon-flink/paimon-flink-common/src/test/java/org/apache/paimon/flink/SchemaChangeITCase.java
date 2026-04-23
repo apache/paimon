@@ -1054,7 +1054,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testSequenceFieldSortOrderWithIntKeys() {
         // When both primary key and sequence field are INT types, their NormalizedKey
         // would fit within 18 bytes (5+5=10). This test verifies that UDS descending
-        // still works correctly because NormalizedKey only covers key fields in that case.
+        // still works correctly because NormalizedKey only covers key fields in this case.
         sql(
                 "CREATE TABLE T_INT_MERGE (a INT PRIMARY KEY NOT ENFORCED, b INT)"
                         + " WITH ("
