@@ -39,7 +39,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
             List<DataType> inputTypes, int[] sortFields) {
         return new SortCodeGenerator(
                         RowType.builder().fields(inputTypes).build(),
-                        getAscendingSortSpec(sortFields, true))
+                        getSortSpec(sortFields, true))
                 .generateNormalizedKeyComputer("NormalizedKeyComputer");
     }
 
@@ -48,7 +48,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
             List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders) {
         return new SortCodeGenerator(
                         RowType.builder().fields(inputTypes).build(),
-                        getAscendingSortSpec(sortFields, ascendingOrders))
+                        getSortSpec(sortFields, ascendingOrders))
                 .generateNormalizedKeyComputer("NormalizedKeyComputer");
     }
 
@@ -58,7 +58,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
         return ComparatorCodeGenerator.gen(
                 "RecordComparator",
                 RowType.builder().fields(inputTypes).build(),
-                getAscendingSortSpec(sortFields, isAscendingOrder));
+                getSortSpec(sortFields, isAscendingOrder));
     }
 
     @Override
@@ -67,7 +67,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
         return ComparatorCodeGenerator.gen(
                 "RecordComparator",
                 RowType.builder().fields(inputTypes).build(),
-                getAscendingSortSpec(sortFields, ascendingOrders));
+                getSortSpec(sortFields, ascendingOrders));
     }
 
     @Override
@@ -77,7 +77,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
                 .generateRecordEqualiser("RecordEqualiser");
     }
 
-    private SortSpec getAscendingSortSpec(int[] sortFields, boolean isAscendingOrder) {
+    private SortSpec getSortSpec(int[] sortFields, boolean isAscendingOrder) {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         for (int sortField : sortFields) {
             builder.addField(sortField, isAscendingOrder, false);
@@ -85,7 +85,7 @@ public class CodeGeneratorImpl implements CodeGenerator {
         return builder.build();
     }
 
-    private SortSpec getAscendingSortSpec(int[] sortFields, boolean[] ascendingOrders) {
+    private SortSpec getSortSpec(int[] sortFields, boolean[] ascendingOrders) {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         for (int i = 0; i < sortFields.length; i++) {
             builder.addField(sortFields[i], ascendingOrders[i], false);
