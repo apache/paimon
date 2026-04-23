@@ -153,6 +153,52 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       ctx.identifier(1).getText)
   }
 
+  /** Create an ALTER TABLE ARCHIVE logical command. */
+  override def visitAlterTableArchive(ctx: AlterTableArchiveContext): AlterTableArchiveCommand =
+    withOrigin(ctx) {
+      val tableIdent = typedVisit[Seq[String]](ctx.multipartIdentifier)
+      val partitionSpecCtx = ctx.partitionSpec()
+      val partitionSpec = partitionSpecCtx.partitionKeyValue().asScala.map { kv =>
+        val key = kv.identifier().getText
+        val value = extractConstantValue(kv.constant())
+        key -> value
+      }.toMap
+
+      val archiveClauseCtx = ctx.archiveClause()
+      val operation: ArchiveOperation = {
+        if (archiveClauseCtx.archiveStandard() != null) {
+          ArchiveStandard
+        } else if (archiveClauseCtx.archiveCold() != null) {
+          ArchiveCold
+        } else if (archiveClauseCtx.restoreArchive() != null) {
+          val restoreCtx = archiveClauseCtx.restoreArchive()
+          val durationOpt = Option(restoreCtx.durationSpec()).map { durationCtx =>
+            val number = durationCtx.number().getText.toLong
+            val timeUnit = durationCtx.timeUnit().getText
+            TimeUtils.parseDuration(number, timeUnit)
+          }
+          RestoreArchive(durationOpt)
+        } else if (archiveClauseCtx.unarchive() != null) {
+          Unarchive
+        } else {
+          throw new IllegalArgumentException("Unknown archive operation")
+        }
+      }
+
+      AlterTableArchiveCommand(tableIdent, partitionSpec, operation)
+    }
+
+  private def extractConstantValue(ctx: ConstantContext): String = {
+    // Get the text and remove quotes if it's a string literal
+    val text = ctx.getText
+    if (text.length >= 2 && ((text.startsWith("'") && text.endsWith("'")) ||
+        (text.startsWith("\"") && text.endsWith("\"")))) {
+      text.substring(1, text.length - 1)
+    } else {
+      text
+    }
+  }
+
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
   private def toSeq[T](list: java.util.List[T]) = toBuffer(list)
