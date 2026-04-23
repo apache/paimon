@@ -276,6 +276,189 @@ class VectorSearchFilterTest(unittest.TestCase):
                          captured[0].external_path)
 
 
+class VectorSearchMultiShardScalarTest(unittest.TestCase):
+    """Scalar pre-filter across multiple btree shards of the same field.
+
+    Exercises the real GlobalIndexScanner reader-construction path (with
+    OffsetGlobalIndexReader + UnionGlobalIndexReader wrapping) so that:
+      - Local row ids from each shard are rebased to the global row-id space
+        before being unioned.
+      - An empty first shard does NOT short-circuit subsequent shards.
+    """
+
+    def test_hit_only_in_later_shard_returns_global_row_id(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        id_field = _field(0, "id")
+        emb_field = _field(1, "embedding", "FLOAT")
+
+        # Two btree shards: [0,4] and [5,9]. Predicate: id == 7, which only
+        # exists in shard [5,9] at local row id 2 (= 7 - 5).
+        shard_a = _entry(None, field_id=0, index_type="btree",
+                         file_name="id-0.index",
+                         row_range_start=0, row_range_end=4).index_file
+        shard_b = _entry(None, field_id=0, index_type="btree",
+                         file_name="id-1.index",
+                         row_range_start=5, row_range_end=9).index_file
+        table = _StubTable(fields=[id_field, emb_field], entries=[])
+
+        # Stub BTreeIndexReader: shard_a returns empty, shard_b returns {2}
+        # (local row id). After Offset wrapping the scanner should emit {7}.
+        class _StubBTreeReader(GlobalIndexReader):
+            def __init__(self_inner, key_serializer, file_io, index_path,
+                         io_meta):
+                self_inner._file = io_meta.file_name
+
+            def visit_equal(self_inner, field_ref, literal):
+                bm = RoaringBitmap64()
+                if self_inner._file == "id-1.index":
+                    bm.add(2)  # local offset inside [5,9]
+                return GlobalIndexResult.create(lambda b=bm: b)
+
+            def close(self_inner):
+                pass
+
+        with mock.patch("pypaimon.globalindex.btree.BTreeIndexReader",
+                        _StubBTreeReader):
+            scanner = GlobalIndexScanner(
+                fields=table.fields,
+                file_io=table.file_io,
+                index_path="/unused",
+                index_files=[shard_a, shard_b],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="equal", index=0, field="id",
+                              literals=[7]))
+            finally:
+                scanner.close()
+
+        self.assertIsNotNone(result)
+        hits = sorted(list(result.results()))
+        # Must be the GLOBAL row id (7 = 5 + 2), not the local (2).
+        # Must not be empty despite shard_a being empty (no short-circuit).
+        self.assertEqual([7], hits)
+
+    def test_tantivy_fulltext_index_is_dispatched_by_scanner(self):
+        """Non-btree scalar global indexes (tantivy-fulltext, etc.) must be
+        instantiated by GlobalIndexScanner — previously only 'btree' was
+        handled and everything else was silently dropped, making text-column
+        pre-filter a no-op."""
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        name_field = _field(0, "name", "STRING")
+        emb_field = _field(1, "embedding", "FLOAT")
+        tantivy_shard = _entry(
+            None, field_id=0, index_type="tantivy-fulltext",
+            file_name="name-ft.index",
+            row_range_start=0, row_range_end=9,
+            external_path="oss://bucket/name-ft.index").index_file
+        table = _StubTable(fields=[name_field, emb_field], entries=[])
+
+        captured_ctor_args = []
+        visit_calls = []
+
+        class _StubTantivyReader:
+            def __init__(self_inner, file_io, index_path, io_metas):
+                captured_ctor_args.append(
+                    (file_io, index_path, list(io_metas)))
+
+            def visit_equal(self_inner, field_ref, literal):
+                visit_calls.append(("equal", literal))
+                bm = RoaringBitmap64()
+                bm.add(4)
+                return GlobalIndexResult.create(lambda b=bm: b)
+
+            def close(self_inner):
+                pass
+
+        with mock.patch(
+                "pypaimon.globalindex.tantivy.TantivyFullTextGlobalIndexReader",
+                _StubTantivyReader):
+            scanner = GlobalIndexScanner(
+                fields=table.fields,
+                file_io=table.file_io,
+                index_path="/unused",
+                index_files=[tantivy_shard],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="equal", index=0, field="name",
+                              literals=["x"]))
+            finally:
+                scanner.close()
+
+        # Tantivy reader was instantiated (it would NOT be before this fix).
+        self.assertEqual(1, len(captured_ctor_args))
+        _, _, io_metas = captured_ctor_args[0]
+        self.assertEqual("oss://bucket/name-ft.index",
+                         io_metas[0].external_path)
+        # visit_equal was dispatched all the way through evaluator → union →
+        # offset → stub tantivy reader.
+        self.assertEqual([("equal", "x")], visit_calls)
+        # Row id 4 is inside [0,9] so offset rebase is a no-op.
+        self.assertEqual([4], sorted(list(result.results())))
+
+    def test_like_predicate_is_dispatched_to_reader(self):
+        """Evaluator must dispatch ``like`` to reader.visit_like — otherwise
+        the pre-filter is silently skipped and vector search returns rows
+        that violate the predicate."""
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        name_field = _field(0, "name", "STRING")
+        emb_field = _field(1, "embedding", "FLOAT")
+        shard = _entry(None, field_id=0, index_type="btree",
+                       file_name="name-0.index",
+                       row_range_start=0, row_range_end=9).index_file
+        table = _StubTable(fields=[name_field, emb_field], entries=[])
+
+        observed_calls = []
+
+        class _StubBTreeReader(GlobalIndexReader):
+            def __init__(self_inner, key_serializer, file_io, index_path,
+                         io_meta):
+                pass
+
+            def visit_like(self_inner, field_ref, literal):
+                observed_calls.append(("like", literal))
+                bm = RoaringBitmap64()
+                bm.add(3)  # local, will be offset-rebased to 3 (range starts at 0)
+                return GlobalIndexResult.create(lambda b=bm: b)
+
+            def close(self_inner):
+                pass
+
+        with mock.patch("pypaimon.globalindex.btree.BTreeIndexReader",
+                        _StubBTreeReader):
+            scanner = GlobalIndexScanner(
+                fields=table.fields,
+                file_io=table.file_io,
+                index_path="/unused",
+                index_files=[shard],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="like", index=0, field="name",
+                              literals=["abc%"]))
+            finally:
+                scanner.close()
+
+        self.assertEqual([("like", "abc%")], observed_calls)
+        self.assertIsNotNone(result)
+        self.assertEqual([3], sorted(list(result.results())))
+
+
 class VectorSearchPartitionedFilterTest(unittest.TestCase):
     """Partitioned-table paths: with_filter auto-split + partition-filter
     input validation."""

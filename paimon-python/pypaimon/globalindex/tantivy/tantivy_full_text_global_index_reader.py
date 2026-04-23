@@ -168,8 +168,10 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         import tantivy
 
-        # Open the archive stream
-        file_path = os.path.join(self._index_path, self._io_meta.file_name)
+        # Open the archive stream (prefer external_path if the manifest set it).
+        file_path = (self._io_meta.external_path
+                     if self._io_meta.external_path
+                     else os.path.join(self._index_path, self._io_meta.file_name))
         stream = self._file_io.new_input_stream(file_path)
         try:
             # Parse archive header to get file layout
