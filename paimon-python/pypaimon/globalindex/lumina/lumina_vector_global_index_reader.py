@@ -121,7 +121,9 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         searcher_options.update(self._index_meta.options)
         self._search_options = searcher_options
 
-        file_path = os.path.join(self._index_path, self._io_meta.file_name)
+        file_path = (self._io_meta.external_path
+                     if self._io_meta.external_path
+                     else os.path.join(self._index_path, self._io_meta.file_name))
         stream = self._file_io.new_input_stream(file_path)
         try:
             self._searcher = LuminaSearcher(searcher_options)

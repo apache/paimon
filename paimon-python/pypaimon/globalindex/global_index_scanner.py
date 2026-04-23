@@ -64,7 +64,8 @@ class GlobalIndexScanner:
             io_meta = GlobalIndexIOMeta(
                 file_name=index_file.file_name,
                 file_size=index_file.file_size,
-                metadata=global_index_meta.index_meta
+                metadata=global_index_meta.index_meta,
+                external_path=index_file.external_path,
             )
             index_metas[field_id][index_type][range_key].append(io_meta)
 

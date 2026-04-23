@@ -112,7 +112,8 @@ class VectorSearchReadImpl(VectorSearchRead):
                 GlobalIndexIOMeta(
                     file_name=index_file.file_name,
                     file_size=index_file.file_size,
-                    metadata=meta.index_meta
+                    metadata=meta.index_meta,
+                    external_path=index_file.external_path,
                 )
             )
 
