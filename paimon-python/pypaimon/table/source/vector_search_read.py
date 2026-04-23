@@ -70,8 +70,7 @@ class VectorSearchReadImpl(VectorSearchRead):
 
     def _pre_filter(self, splits):
         # type: (list) -> Optional[RoaringBitmap64]
-        """Evaluate the scalar filter against scalar global indexes to produce
-        a row-id bitmap. Mirrors Java VectorReadImpl.preFilter."""
+        """Evaluate the scalar filter against scalar global indexes to produce a row-id bitmap."""
         if self._filter is None:
             return None
 

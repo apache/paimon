@@ -49,25 +49,13 @@ class VectorSearchBuilder(ABC):
     @abstractmethod
     def with_filter(self, predicate):
         # type: (Predicate) -> VectorSearchBuilder
-        """Scalar predicate used to pre-filter rows before vector search.
-
-        The predicate is ANDed with any predicate set by previous calls. Any
-        field referenced by the predicate that has a matching global scalar
-        index (e.g. btree) will be used to produce a row-id bitmap which is
-        passed to the vector index as include_row_ids.
-        """
+        """Scalar predicate used to pre-filter rows before vector search."""
         pass
 
     @abstractmethod
     def with_partition_filter(self, partition_filter):
         # type: (Predicate) -> VectorSearchBuilder
-        """Partition predicate used to prune index manifest entries.
-
-        The predicate should be built against the full table row
-        (``PredicateBuilder(table.fields)``); the builder will re-index its
-        leaves against the partition-only row type before applying it to
-        ``entry.partition``.
-        """
+        """Partition predicate used to prune index manifest entries."""
         pass
 
     @abstractmethod
@@ -127,11 +115,6 @@ class VectorSearchBuilderImpl(VectorSearchBuilder):
             self._filter = predicate
         else:
             self._filter = PredicateBuilder.and_predicates([self._filter, predicate])
-        # Mirror Java VectorSearchBuilderImpl.withFilter: extract any
-        # partition-only conjuncts and apply them as a partition filter for
-        # index manifest pruning. ``_extract_partition_predicate`` re-indexes
-        # leaf indices from full-row positions to partition-row positions so
-        # ``predicate.test(entry.partition)`` sees the right column.
         extracted = self._extract_partition_predicate(predicate)
         if extracted is not None:
             if self._partition_filter is None:
@@ -150,13 +133,6 @@ class VectorSearchBuilderImpl(VectorSearchBuilder):
         return self
 
     def _extract_partition_predicate(self, predicate):
-        """Return a partition-row-indexed predicate containing only conjuncts
-        that reference partition keys exclusively, or ``None`` if the table is
-        non-partitioned or no conjunct qualifies.
-
-        Input ``predicate`` is expected to be indexed against the full table
-        row (the normal ``PredicateBuilder(table.fields)`` case).
-        """
         partition_keys = list(self._table.partition_keys or [])
         if not partition_keys:
             return None
