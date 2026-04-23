@@ -381,6 +381,12 @@ under the License.
             <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
         </tr>
         <tr>
+            <td><h5>compaction.small-file-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.7</td>
+            <td>Double</td>
+            <td>The ratio of target file size. Files whose size is smaller than target-file-size * compaction.small-file-ratio will be picked for compaction rewriting. This avoids compacting the same file repeatedly due to compression inaccuracy causing output files to be slightly smaller than the target size.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.total-size-threshold</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
