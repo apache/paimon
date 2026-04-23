@@ -1051,6 +1051,25 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSequenceFieldSortOrderWithIntKeys() {
+        // When both primary key and sequence field are INT types, their NormalizedKey
+        // would fit within 18 bytes (5+5=10). This test verifies that UDS descending
+        // still works correctly because NormalizedKey only covers key fields in that case.
+        sql(
+                "CREATE TABLE T_INT_MERGE (a INT PRIMARY KEY NOT ENFORCED, b INT)"
+                        + " WITH ("
+                        + "'sequence.field'='b', "
+                        + "'sequence.field.sort-order'='descending', "
+                        + "'bucket'='1')");
+
+        // Insert multiple rows with the same key to trigger write-side merge
+        sql("INSERT INTO T_INT_MERGE VALUES (1, 10), (1, 30), (1, 20)");
+
+        // With descending sort order, the smallest sequence value (b=10) should win
+        assertThat(sql("select * from T_INT_MERGE").toString()).isEqualTo("[+I[1, 10]]");
+    }
+
+    @Test
     public void testAlterTableMetadataComment() {
         sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");

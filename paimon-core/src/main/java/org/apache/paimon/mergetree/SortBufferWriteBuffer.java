@@ -111,12 +111,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         fieldTypes.add(new TinyIntType(false));
         fieldTypes.addAll(valueType.getFieldTypes());
 
-        // When UDS is descending, NormalizedKey only covers key fields to ensure
-        // keyFullyDetermines=false, so RecordComparator handles UDS ordering correctly.
-        int[] normalizedKeyFields =
-                udsAscending ? sortFieldArray : IntStream.range(0, keyFieldCount).toArray();
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, normalizedKeyFields);
+                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray, ascendingOrders);
         RecordComparator keyComparator =
                 CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, ascendingOrders);
 

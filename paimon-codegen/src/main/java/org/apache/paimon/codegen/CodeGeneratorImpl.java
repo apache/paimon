@@ -44,6 +44,15 @@ public class CodeGeneratorImpl implements CodeGenerator {
     }
 
     @Override
+    public GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders) {
+        return new SortCodeGenerator(
+                        RowType.builder().fields(inputTypes).build(),
+                        getAscendingSortSpec(sortFields, ascendingOrders))
+                .generateNormalizedKeyComputer("NormalizedKeyComputer");
+    }
+
+    @Override
     public GeneratedClass<RecordComparator> generateRecordComparator(
             List<DataType> inputTypes, int[] sortFields, boolean isAscendingOrder) {
         return ComparatorCodeGenerator.gen(
