@@ -18,7 +18,7 @@
 
 """Split of vector search."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -31,3 +31,4 @@ class VectorSearchSplit:
     row_range_start: int
     row_range_end: int
     vector_index_files: List[IndexFileMeta]
+    scalar_index_files: List[IndexFileMeta] = field(default_factory=list)
