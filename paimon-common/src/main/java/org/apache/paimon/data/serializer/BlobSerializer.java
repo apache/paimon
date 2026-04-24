@@ -28,14 +28,11 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.utils.UriReader;
 
 import java.io.IOException;
-import java.util.Arrays;
 
 /** Type serializer for {@code Blob}. */
 public class BlobSerializer extends SerializerSingleton<Blob> {
 
     private static final long serialVersionUID = 1L;
-    private static final byte KIND_DATA = 0;
-    private static final byte KIND_REF = 1;
     private static final UriReader THROWING_URI_READER = new ThrowingUriReader();
 
     public static final BlobSerializer INSTANCE = new BlobSerializer();
@@ -73,15 +70,10 @@ public class BlobSerializer extends SerializerSingleton<Blob> {
     }
 
     private byte[] serializeBody(Blob blob) throws IOException {
-        byte[] payload;
-        byte kind;
-
         if (blob instanceof BlobData) {
-            payload = ((BlobData) blob).toData();
-            kind = KIND_DATA;
+            return ((BlobData) blob).toData();
         } else if (blob instanceof BlobRef) {
-            payload = blob.toDescriptor().serialize();
-            kind = KIND_REF;
+            return blob.toDescriptor().serialize();
         } else if (blob instanceof BlobStream) {
             throw new UnsupportedOperationException("BlobSerializer does not support BlobStream.");
         } else {
@@ -90,29 +82,13 @@ public class BlobSerializer extends SerializerSingleton<Blob> {
                             + blob.getClass().getSimpleName()
                             + ".");
         }
-
-        byte[] result = new byte[1 + payload.length];
-        result[0] = kind;
-        System.arraycopy(payload, 0, result, 1, payload.length);
-        return result;
     }
 
     private Blob deserializeBody(byte[] bytes) throws IOException {
-        if (bytes.length == 0) {
-            throw new IOException("Blob serializer payload is empty.");
+        if (BlobDescriptor.isBlobDescriptor(bytes)) {
+            return Blob.fromDescriptor(THROWING_URI_READER, BlobDescriptor.deserialize(bytes));
         }
-
-        byte kind = bytes[0];
-        byte[] payload = Arrays.copyOfRange(bytes, 1, bytes.length);
-        switch (kind) {
-            case KIND_DATA:
-                return new BlobData(payload);
-            case KIND_REF:
-                return Blob.fromDescriptor(
-                        THROWING_URI_READER, BlobDescriptor.deserialize(payload));
-            default:
-                throw new IOException("Unknown blob serializer kind: " + kind);
-        }
+        return new BlobData(bytes);
     }
 
     private static class ThrowingUriReader implements UriReader {
