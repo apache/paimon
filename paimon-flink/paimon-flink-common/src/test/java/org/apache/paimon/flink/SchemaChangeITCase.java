@@ -1031,6 +1031,45 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSequenceFieldSortOrderWithWriteSideMerge() {
+        // When multiple rows with the same primary key are written in a single INSERT,
+        // they are merged on the write side by SortBufferWriteBuffer.
+        // This test verifies that sequence.field.sort-order=descending is correctly
+        // applied during write-side merge (not just merge-on-read).
+        sql(
+                "CREATE TABLE T_WRITE_MERGE (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT)"
+                        + " WITH ("
+                        + "'sequence.field'='c', "
+                        + "'sequence.field.sort-order'='descending', "
+                        + "'bucket'='1')");
+
+        // Insert multiple rows with the same key in a single statement to trigger write-side merge
+        sql("INSERT INTO T_WRITE_MERGE VALUES ('a', 'b', 1), ('a', 'd', 3), ('a', 'e', 2)");
+
+        // With descending sort order, the smallest sequence value (c=1) should win
+        assertThat(sql("select * from T_WRITE_MERGE").toString()).isEqualTo("[+I[a, b, 1]]");
+    }
+
+    @Test
+    public void testSequenceFieldSortOrderWithIntKeys() {
+        // When both primary key and sequence field are INT types, their NormalizedKey
+        // would fit within 18 bytes (5+5=10). This test verifies that UDS descending
+        // still works correctly because NormalizedKey only covers key fields in this case.
+        sql(
+                "CREATE TABLE T_INT_MERGE (a INT PRIMARY KEY NOT ENFORCED, b INT)"
+                        + " WITH ("
+                        + "'sequence.field'='b', "
+                        + "'sequence.field.sort-order'='descending', "
+                        + "'bucket'='1')");
+
+        // Insert multiple rows with the same key to trigger write-side merge
+        sql("INSERT INTO T_INT_MERGE VALUES (1, 10), (1, 30), (1, 20)");
+
+        // With descending sort order, the smallest sequence value (b=10) should win
+        assertThat(sql("select * from T_INT_MERGE").toString()).isEqualTo("[+I[1, 10]]");
+    }
+
+    @Test
     public void testAlterTableMetadataComment() {
         sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");
