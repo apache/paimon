@@ -20,9 +20,6 @@ package org.apache.paimon.arrow.vector;
 
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -95,36 +92,6 @@ public class OneElementFieldVectorGeneratorTest {
                         i ->
                                 Assertions.assertThat(i.getTimestamp(0, 6))
                                         .isEqualTo(genericRow.getTimestamp(0, 6)));
-            }
-        }
-    }
-
-    @Test
-    public void testBlobRef() {
-        try (RootAllocator rootAllocator = new RootAllocator()) {
-            DataField dataField = new DataField(0, "ref", DataTypes.BLOB_REF());
-            BlobReference reference = new BlobReference("default.upstream", 7, 42L);
-            BlobRef value = Blob.fromReference(reference);
-
-            OneElementFieldVectorGenerator generator =
-                    new OneElementFieldVectorGenerator(rootAllocator, dataField, value);
-            try (FieldVector fieldVector = generator.get(3)) {
-                Assertions.assertThat(fieldVector.getValueCount()).isEqualTo(3);
-
-                // Read back via ArrowBatchReader — BLOB_REF comes back as binary bytes
-                ArrowBatchReader reader =
-                        new ArrowBatchReader(new RowType(Arrays.asList(dataField)), true);
-                Iterable<InternalRow> it =
-                        reader.readBatch(new VectorSchemaRoot(Arrays.asList(fieldVector)));
-                it.forEach(
-                        row -> {
-                            byte[] bytes = row.getBinary(0);
-                            BlobReference readRef = BlobReference.deserialize(bytes);
-                            Assertions.assertThat(readRef.tableName())
-                                    .isEqualTo("default.upstream");
-                            Assertions.assertThat(readRef.fieldId()).isEqualTo(7);
-                            Assertions.assertThat(readRef.rowId()).isEqualTo(42L);
-                        });
             }
         }
     }

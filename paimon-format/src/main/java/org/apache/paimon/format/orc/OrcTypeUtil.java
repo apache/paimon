@@ -68,7 +68,6 @@ public class OrcTypeUtil {
                 return TypeDescription.createBoolean()
                         .setAttribute(PAIMON_ORC_FIELD_ID_KEY, String.valueOf(fieldId));
             case BLOB:
-            case BLOB_REF:
                 return TypeDescription.createBinary()
                         .setAttribute(PAIMON_ORC_FIELD_ID_KEY, String.valueOf(fieldId));
             case VARBINARY:

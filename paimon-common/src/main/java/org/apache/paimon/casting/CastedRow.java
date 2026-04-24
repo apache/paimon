@@ -20,7 +20,6 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -142,11 +141,6 @@ public class CastedRow implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        return castMapping[pos].getFieldOrNull(row);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
         return castMapping[pos].getFieldOrNull(row);
     }
 

@@ -20,8 +20,7 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -137,12 +136,7 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        throw new UnsupportedOperationException("ColumnarArray does not support BlobRef.");
+        return BlobUtils.fromBytes(getBinary(pos), null, null);
     }
 
     @Override

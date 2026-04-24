@@ -27,7 +27,6 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -202,50 +201,6 @@ public interface RecordReader<T> extends Closeable {
             @Override
             public void close() throws IOException {
                 thisReader.close();
-            }
-        };
-    }
-
-    default RecordReader<T> applyLimit(@Nullable Integer limit) {
-        if (limit == null) {
-            return this;
-        }
-        RecordReader<T> reader = this;
-        return new RecordReader<T>() {
-            private final AtomicLong recordCount = new AtomicLong(0);
-
-            @Override
-            public RecordIterator<T> readBatch() throws IOException {
-                if (recordCount.get() >= limit) {
-                    return null;
-                }
-                RecordIterator<T> iterator = reader.readBatch();
-                if (iterator == null) {
-                    return null;
-                }
-                return new RecordIterator<T>() {
-                    @Override
-                    public T next() throws IOException {
-                        if (recordCount.get() >= limit) {
-                            return null;
-                        }
-                        T next = iterator.next();
-                        if (next != null) {
-                            recordCount.incrementAndGet();
-                        }
-                        return next;
-                    }
-
-                    @Override
-                    public void releaseBatch() {
-                        iterator.releaseBatch();
-                    }
-                };
-            }
-
-            @Override
-            public void close() throws IOException {
-                reader.close();
             }
         };
     }

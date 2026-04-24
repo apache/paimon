@@ -41,7 +41,6 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
-import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -458,7 +457,7 @@ public class SparkCatalog extends SparkBaseCatalog
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         List<String> blobFields = CoreOptions.blobField(properties);
-        List<String> blobRefFields = CoreOptions.blobRefField(properties);
+        List<String> blobViewFields = CoreOptions.blobViewField(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -492,16 +491,11 @@ public class SparkCatalog extends SparkBaseCatalog
         for (StructField field : schema.fields()) {
             String name = field.name();
             DataType type;
-            if (blobFields.contains(name)) {
+            if (blobFields.contains(name) || blobViewFields.contains(name)) {
                 checkArgument(
                         field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                         "The type of blob field must be binary");
                 type = new BlobType();
-            } else if (blobRefFields.contains(name)) {
-                checkArgument(
-                        field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
-                        "The type of blob ref field must be binary");
-                type = new BlobRefType();
             } else {
                 type = toPaimonType(field.dataType()).copy(field.nullable());
             }

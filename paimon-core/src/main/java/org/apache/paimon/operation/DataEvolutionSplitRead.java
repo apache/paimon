@@ -95,7 +95,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final Function<Long, TableSchema> schemaFetcher;
     private final CoreOptions coreOptions;
 
-    protected Integer limit;
     protected RowType readRowType;
 
     public DataEvolutionSplitRead(
@@ -137,12 +136,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
         // TODO: Support File index push down (all conditions) and Predicate push down (only if no
         // column merge)
-        return this;
-    }
-
-    @Override
-    public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
-        this.limit = limit;
         return this;
     }
 
@@ -205,7 +198,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        return ConcatRecordReader.create(suppliers).applyLimit(limit);
+        return ConcatRecordReader.create(suppliers);
     }
 
     private RecordReader<InternalRow> createReader(IndexedSplit indexedSplit) throws IOException {

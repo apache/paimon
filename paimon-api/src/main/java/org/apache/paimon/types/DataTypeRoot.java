@@ -104,8 +104,6 @@ public enum DataTypeRoot {
 
     BLOB(DataTypeFamily.PREDEFINED),
 
-    BLOB_REF(DataTypeFamily.PREDEFINED),
-
     ARRAY(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 
     VECTOR(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),

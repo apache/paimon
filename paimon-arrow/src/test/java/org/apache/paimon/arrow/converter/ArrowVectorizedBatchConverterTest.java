@@ -20,21 +20,18 @@ package org.apache.paimon.arrow.converter;
 
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
-import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarVec;
 import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
-import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.data.columnar.heap.HeapFloatVector;
 import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.junit.jupiter.api.Test;
@@ -129,78 +126,6 @@ public class ArrowVectorizedBatchConverterTest {
             assertThat(row1).containsExactly(1.0f, 2.0f);
 
             vsr.close();
-        }
-    }
-
-    @Test
-    public void testBlobRefColumnWriteAndReadBack() {
-        RowType rowType = RowType.of(DataTypes.BLOB_REF());
-        try (RootAllocator allocator = new RootAllocator()) {
-            VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
-            ArrowFieldWriter[] fieldWriters = ArrowUtils.createArrowFieldWriters(vsr, rowType);
-
-            // Prepare serialized BlobReference bytes
-            BlobReference ref0 = new BlobReference("default.upstream", 7, 100L);
-            BlobReference ref1 = new BlobReference("default.upstream", 8, 200L);
-            byte[] bytes0 = ref0.serialize();
-            byte[] bytes1 = ref1.serialize();
-
-            int rows = 3; // row 0 = ref0, row 1 = null, row 2 = ref1
-            HeapBytesVector bytesVector = new HeapBytesVector(rows);
-            bytesVector.appendByteArray(bytes0, 0, bytes0.length);
-            bytesVector.appendByteArray(new byte[0], 0, 0); // placeholder for null
-            bytesVector.appendByteArray(bytes1, 0, bytes1.length);
-            bytesVector.setNullAt(1);
-
-            VectorizedColumnBatch batch =
-                    new VectorizedColumnBatch(new ColumnVector[] {bytesVector});
-            batch.setNumRows(rows);
-
-            ArrowVectorizedBatchConverter converter =
-                    new ArrowVectorizedBatchConverter(vsr, fieldWriters);
-            converter.reset(
-                    new VectorizedRecordIterator() {
-                        @Override
-                        public VectorizedColumnBatch batch() {
-                            return batch;
-                        }
-
-                        @Override
-                        public InternalRow next() {
-                            return null;
-                        }
-
-                        @Override
-                        public void releaseBatch() {}
-                    });
-            converter.next(rows);
-
-            // Verify the Arrow vector contains the correct binary data
-            VarBinaryVector arrowVector = (VarBinaryVector) vsr.getVector(0);
-            assertThat(arrowVector.isNull(0)).isFalse();
-            assertThat(arrowVector.isNull(1)).isTrue();
-            assertThat(arrowVector.isNull(2)).isFalse();
-
-            // Read back and verify the bytes can be deserialized to BlobReference
-            BlobReference readRef0 = BlobReference.deserialize(arrowVector.getObject(0));
-            assertThat(readRef0.tableName()).isEqualTo("default.upstream");
-            assertThat(readRef0.fieldId()).isEqualTo(7);
-            assertThat(readRef0.rowId()).isEqualTo(100L);
-
-            BlobReference readRef2 = BlobReference.deserialize(arrowVector.getObject(2));
-            assertThat(readRef2.tableName()).isEqualTo("default.upstream");
-            assertThat(readRef2.fieldId()).isEqualTo(8);
-            assertThat(readRef2.rowId()).isEqualTo(200L);
-
-            // Also verify the Arrow2Paimon round-trip
-            Arrow2PaimonVectorConverter paimonConverter =
-                    Arrow2PaimonVectorConverter.construct(DataTypes.BLOB_REF());
-            ColumnVector paimonVector = paimonConverter.convertVector(arrowVector);
-            assertThat(paimonVector.isNullAt(0)).isFalse();
-            assertThat(paimonVector.isNullAt(1)).isTrue();
-            assertThat(paimonVector.isNullAt(2)).isFalse();
-
-            converter.close();
         }
     }
 

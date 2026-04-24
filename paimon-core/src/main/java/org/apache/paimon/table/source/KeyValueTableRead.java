@@ -64,8 +64,15 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
             Supplier<RawFileSplitRead> batchRawReadSupplier,
+            TableSchema schema) {
+        this(mergeReadSupplier, batchRawReadSupplier, schema, null, null);
+    }
+
+    public KeyValueTableRead(
+            Supplier<MergeFileSplitRead> mergeReadSupplier,
+            Supplier<RawFileSplitRead> batchRawReadSupplier,
             TableSchema schema,
-            CatalogContext catalogContext,
+            @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory) {
         super(schema, catalogContext, readFactory);
         this.readProviders =
@@ -142,6 +149,22 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         initialized().forEach(r -> r.withIOManager(ioManager));
         this.ioManager = ioManager;
         return this;
+    }
+
+    @Override
+    protected void configurePrescanRead(InnerTableRead prescanRead) {
+        if (forceKeepDelete) {
+            prescanRead.forceKeepDelete();
+        }
+        if (topN != null) {
+            prescanRead.withTopN(topN);
+        }
+        if (limit != null) {
+            prescanRead.withLimit(limit);
+        }
+        if (ioManager != null) {
+            prescanRead.withIOManager(ioManager);
+        }
     }
 
     @Override

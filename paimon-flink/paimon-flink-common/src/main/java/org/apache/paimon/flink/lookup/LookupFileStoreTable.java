@@ -64,9 +64,7 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
                 return wrapped.newRead();
             case COMPACT_DELTA_MONITOR:
                 return new LookupCompactDiffRead(
-                        ((KeyValueFileStore) wrapped.store()).newRead(),
-                        wrapped.schema(),
-                        wrapped.catalogEnvironment().catalogContext());
+                        ((KeyValueFileStore) wrapped.store()).newRead(), wrapped.schema());
             default:
                 throw new UnsupportedOperationException(
                         "Unknown lookup stream scan mode: " + lookupScanMode.name());

@@ -21,9 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -73,8 +70,7 @@ public class SparkRow implements InternalRow, Serializable {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
-        this.uriReaderFactory =
-                catalogContext == null ? null : new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -164,12 +160,6 @@ public class SparkRow implements InternalRow, Serializable {
     @Override
     public Blob getBlob(int i) {
         return BlobUtils.fromBytes(row.getAs(i), uriReaderFactory, null);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int i) {
-        byte[] bytes = row.getAs(i);
-        return new BlobRef(BlobReference.deserialize(bytes));
     }
 
     @Override
@@ -341,12 +331,7 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int i) {
-            return new BlobData(getAs(i));
-        }
-
-        @Override
-        public BlobRef getBlobRef(int i) {
-            throw new UnsupportedOperationException("PaimonArray does not support BlobRef.");
+            return BlobUtils.fromBytes(getAs(i), null, null);
         }
 
         @Override

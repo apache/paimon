@@ -164,11 +164,6 @@ public final class BinaryVector extends BinarySection implements InternalVector,
     }
 
     @Override
-    public BlobRef getBlobRef(int pos) {
-        throw new UnsupportedOperationException("BinaryVector does not support BlobRef.");
-    }
-
-    @Override
     public InternalArray getArray(int pos) {
         throw new UnsupportedOperationException("BinaryVector does not support nested Array.");
     }

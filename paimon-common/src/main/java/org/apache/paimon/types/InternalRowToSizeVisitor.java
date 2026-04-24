@@ -229,18 +229,8 @@ public class InternalRowToSizeVisitor
             if (row.isNullAt(index)) {
                 return NULL_SIZE;
             } else {
-                return row.getBlob(index).toData().length;
+                return Math.toIntExact(row.getVariant(index).sizeInBytes());
             }
-        };
-    }
-
-    @Override
-    public BiFunction<DataGetters, Integer, Integer> visit(BlobRefType blobRefType) {
-        return (row, index) -> {
-            if (row.isNullAt(index)) {
-                return NULL_SIZE;
-            }
-            return row.getBlobRef(index).reference().serialize().length;
         };
     }
 

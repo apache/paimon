@@ -16,13 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.data;
+package org.apache.paimon.flink.function;
 
-import java.io.Serializable;
+import org.apache.paimon.data.BlobViewStruct;
 
-/** Resolves a {@link BlobRef} by setting its reader and descriptor in place. */
-@FunctionalInterface
-public interface BlobReferenceResolver extends Serializable {
+import org.apache.flink.table.functions.ScalarFunction;
 
-    void resolve(BlobRef blobRef);
+/** Flink scalar function that constructs a serialized {@link BlobViewStruct}. */
+public class BlobViewFunction extends ScalarFunction {
+
+    public byte[] eval(String tableName, int fieldId, long rowId) {
+        if (tableName == null) {
+            return null;
+        }
+        return new BlobViewStruct(tableName, fieldId, rowId).serialize();
+    }
 }

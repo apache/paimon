@@ -22,7 +22,6 @@ import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -275,11 +274,6 @@ public class SimpleStatsEvolution {
 
         @Override
         public Blob getBlob(int pos) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public BlobRef getBlobRef(int pos) {
             throw new UnsupportedOperationException();
         }
 

@@ -48,10 +48,7 @@ object SparkInternalRow {
     var i: Int = 0
     val blobFields = new mutable.HashSet[Int]()
     while (i < rowType.getFieldCount) {
-      if (
-        rowType.getTypeAt(i).getTypeRoot.equals(DataTypeRoot.BLOB) ||
-        rowType.getTypeAt(i).getTypeRoot.equals(DataTypeRoot.BLOB_REF)
-      ) {
+      if (rowType.getTypeAt(i).getTypeRoot.equals(DataTypeRoot.BLOB)) {
         blobFields.add(i)
       }
       i += 1

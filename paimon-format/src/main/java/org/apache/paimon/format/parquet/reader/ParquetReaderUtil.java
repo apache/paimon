@@ -101,7 +101,6 @@ public class ParquetReaderUtil {
             case VARCHAR:
             case VARBINARY:
             case BLOB:
-            case BLOB_REF:
                 return new HeapBytesVector(batchSize);
             case BINARY:
                 return new HeapBytesVector(batchSize);
@@ -179,8 +178,7 @@ public class ParquetReaderUtil {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return new ParquetTimestampVector(writableVector);
             case BLOB:
-            case BLOB_REF:
-                // Physical representation is bytes; higher-level Row#getBlob() materializes them.
+                // Physical representation is bytes; higher-level Row#getBlob() handles descriptor.
                 return writableVector;
             case ARRAY:
                 return new CastedArrayColumnVector(

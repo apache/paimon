@@ -23,14 +23,14 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link BlobReference}. */
-public class BlobReferenceTest {
+/** Test for {@link BlobViewStruct}. */
+public class BlobViewStructTest {
 
     @Test
     public void testSerializeAndDeserialize() {
-        BlobReference reference = new BlobReference("default.source", 7, 5L);
+        BlobViewStruct viewStruct = new BlobViewStruct("default.source", 7, 5L);
 
-        BlobReference deserialized = BlobReference.deserialize(reference.serialize());
+        BlobViewStruct deserialized = BlobViewStruct.deserialize(viewStruct.serialize());
 
         assertThat(deserialized.tableName()).isEqualTo("default.source");
         assertThat(deserialized.fieldId()).isEqualTo(7);
@@ -39,20 +39,20 @@ public class BlobReferenceTest {
 
     @Test
     public void testRejectUnexpectedVersion() {
-        BlobReference reference = new BlobReference("default.source", 7, 5L);
-        byte[] bytes = reference.serialize();
+        BlobViewStruct viewStruct = new BlobViewStruct("default.source", 7, 5L);
+        byte[] bytes = viewStruct.serialize();
         bytes[0] = 3;
 
-        assertThatThrownBy(() -> BlobReference.deserialize(bytes))
+        assertThatThrownBy(() -> BlobViewStruct.deserialize(bytes))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Expecting BlobReference version to be 1");
+                .hasMessageContaining("Expecting BlobViewStruct version to be 1");
     }
 
     @Test
     public void testEquality() {
-        BlobReference a = new BlobReference("default.source", 7, 5L);
-        BlobReference b = new BlobReference("default.source", 7, 5L);
-        BlobReference c = new BlobReference("default.source", 8, 5L);
+        BlobViewStruct a = new BlobViewStruct("default.source", 7, 5L);
+        BlobViewStruct b = new BlobViewStruct("default.source", 7, 5L);
+        BlobViewStruct c = new BlobViewStruct("default.source", 8, 5L);
 
         assertThat(a).isEqualTo(b);
         assertThat(a.hashCode()).isEqualTo(b.hashCode());
@@ -60,12 +60,13 @@ public class BlobReferenceTest {
     }
 
     @Test
-    public void testIsBlobReference() {
-        BlobReference reference = new BlobReference("default.source", 7, 5L);
-        byte[] bytes = reference.serialize();
+    public void testDecodeBlobView() {
+        BlobViewStruct viewStruct = new BlobViewStruct("default.source", 7, 5L);
+        byte[] bytes = viewStruct.serialize();
 
-        assertThat(BlobReference.isBlobReference(bytes)).isTrue();
-        assertThat(BlobReference.isBlobReference(null)).isFalse();
-        assertThat(BlobReference.isBlobReference(new byte[] {1, 2, 3})).isFalse();
+        assertThat(BlobViewStruct.isBlobViewStruct(bytes)).isTrue();
+        assertThat(BlobViewStruct.isBlobViewStruct(null)).isFalse();
+        assertThat(BlobViewStruct.isBlobViewStruct(new byte[] {1, 2, 3})).isFalse();
+        assertThat(BlobUtils.fromBytes(bytes, null, null)).isEqualTo(Blob.fromView(viewStruct));
     }
 }

@@ -500,6 +500,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                     + "Only descriptor-based BLOB columns (configured via '"
                                     + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
                                     + "' or '"
+                                    + CoreOptions.BLOB_VIEW_FIELD.key()
+                                    + "' or '"
                                     + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
                                     + "') can be updated.");
                 }

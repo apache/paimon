@@ -350,12 +350,6 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
     }
 
     @Override
-    public BlobRef getBlobRef(int pos) {
-        byte[] bytes = getBinary(pos);
-        return new BlobRef(BlobReference.deserialize(bytes));
-    }
-
-    @Override
     public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));

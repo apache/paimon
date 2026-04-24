@@ -203,7 +203,10 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     @Override
     public void writeBlob(int pos, Blob blob) {
-        byte[] bytes = blob.toData();
+        byte[] bytes =
+                blob instanceof BlobView
+                        ? ((BlobView) blob).viewStruct().serialize()
+                        : blob.toData();
         writeBinary(pos, bytes, 0, bytes.length);
     }
 

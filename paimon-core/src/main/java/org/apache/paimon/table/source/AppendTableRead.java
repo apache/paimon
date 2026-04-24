@@ -53,8 +53,14 @@ public final class AppendTableRead extends AbstractDataTableRead {
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
+            TableSchema schema) {
+        this(providerFactories, schema, null, null);
+    }
+
+    public AppendTableRead(
+            List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema,
-            CatalogContext catalogContext,
+            @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory) {
         super(schema, catalogContext, readFactory);
         this.readProviders =
@@ -111,9 +117,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
 
     @Override
     protected void configurePrescanRead(InnerTableRead prescanRead) {
-        if (predicate != null) {
-            prescanRead.withFilter(predicate);
-        }
         if (topN != null) {
             prescanRead.withTopN(topN);
         }

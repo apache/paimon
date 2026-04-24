@@ -25,7 +25,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.schema.PrimitiveType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -106,16 +105,5 @@ public class ParquetSchemaConverterTest {
         MessageType messageType = convertToParquetMessageType(ALL_TYPES);
         RowType rowType = convertToPaimonRowType(messageType);
         assertThat(ALL_TYPES).isEqualTo(rowType);
-    }
-
-    @Test
-    public void testBlobRefSchemaConvertToBinary() {
-        MessageType messageType =
-                convertToParquetMessageType(
-                        new RowType(
-                                Arrays.asList(new DataField(0, "blob_ref", DataTypes.BLOB_REF()))));
-
-        assertThat(messageType.getType("blob_ref").asPrimitiveType().getPrimitiveTypeName())
-                .isEqualTo(PrimitiveType.PrimitiveTypeName.BINARY);
     }
 }

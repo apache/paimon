@@ -146,10 +146,6 @@ public interface InternalRow extends DataGetters {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return Timestamp.class;
-            case BLOB:
-                return Blob.class;
-            case BLOB_REF:
-                return BlobRef.class;
             case ARRAY:
                 return InternalArray.class;
             case MULTISET:
@@ -233,9 +229,6 @@ public interface InternalRow extends DataGetters {
                 break;
             case BLOB:
                 fieldGetter = row -> row.getBlob(fieldPos);
-                break;
-            case BLOB_REF:
-                fieldGetter = row -> row.getBlobRef(fieldPos);
                 break;
             default:
                 String msg =

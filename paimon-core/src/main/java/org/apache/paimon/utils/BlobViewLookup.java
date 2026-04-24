@@ -26,9 +26,9 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReference;
-import org.apache.paimon.data.BlobReferenceResolver;
+import org.apache.paimon.data.BlobView;
+import org.apache.paimon.data.BlobViewResolver;
+import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
@@ -42,6 +42,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionService;
@@ -51,47 +52,43 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /**
- * Batch-preloads {@link BlobDescriptor}s for a set of {@link BlobReference}s by scanning the
- * upstream tables in row-range chunks. The preloaded descriptors are lightweight (uri + offset +
- * length) so memory stays small even for large numbers of references.
+ * Batch-preloads {@link BlobDescriptor}s for a set of {@link BlobViewStruct}s by scanning the
+ * upstream tables in row-range chunks.
  */
-public class BlobReferenceLookup {
+public class BlobViewLookup {
 
     private static final int PRELOAD_DESCRIPTOR_THREAD_NUM = 100;
     private static final long MIN_ROW_PER_TASK = 100L;
     private static final ExecutorService PRELOAD_DESCRIPTOR_EXECUTOR =
             ThreadPoolUtils.createCachedThreadPool(
-                    PRELOAD_DESCRIPTOR_THREAD_NUM, "blob-reference-preload");
+                    PRELOAD_DESCRIPTOR_THREAD_NUM, "blob-view-preload");
 
-    /**
-     * Creates a resolver that resolves {@link BlobRef}s using a preloaded descriptor cache. All
-     * given references are batch-scanned from the upstream tables upfront.
-     */
-    public static BlobReferenceResolver createResolver(
-            CatalogContext catalogContext, List<BlobReference> references) {
-        return createResolver(catalogContext, references, CatalogFactory::createCatalog);
+    public static BlobViewResolver createResolver(
+            CatalogContext catalogContext, List<BlobViewStruct> viewStructs) {
+        return createResolver(catalogContext, viewStructs, CatalogFactory::createCatalog);
     }
 
     @VisibleForTesting
-    static BlobReferenceResolver createResolver(
+    static BlobViewResolver createResolver(
             CatalogContext catalogContext,
-            List<BlobReference> references,
+            List<BlobViewStruct> viewStructs,
             CatalogLoader catalogLoader) {
-        Map<BlobReference, BlobDescriptor> cached =
-                preloadDescriptors(catalogContext, references, catalogLoader);
+        Map<BlobViewStruct, BlobDescriptor> cached =
+                preloadDescriptors(catalogContext, viewStructs, catalogLoader);
         Map<String, UriReader> cache = new HashMap<>();
-        return blobRef -> {
-            BlobDescriptor descriptor = cached.get(blobRef.reference());
+        return blobView -> {
+            BlobViewStruct viewStruct = blobView.viewStruct();
+            BlobDescriptor descriptor = cached.get(viewStruct);
             if (descriptor == null) {
                 throw new IllegalStateException(
-                        "BlobReference not found in preloaded cache: "
-                                + blobRef.reference()
+                        "BlobViewStruct not found in preloaded cache: "
+                                + viewStruct
                                 + ". Cache keys: "
                                 + cached.keySet());
             }
             UriReader uriReader =
                     cache.computeIfAbsent(
-                            blobRef.reference().tableName(),
+                            viewStruct.tableName(),
                             tableName -> {
                                 try (Catalog catalog = catalogLoader.create(catalogContext)) {
                                     return UriReader.fromFile(
@@ -101,19 +98,19 @@ public class BlobReferenceLookup {
                                     throw new RuntimeException(e);
                                 }
                             });
-            blobRef.resolve(uriReader, descriptor);
+            blobView.resolve(uriReader, descriptor);
         };
     }
 
-    private static Map<BlobReference, BlobDescriptor> preloadDescriptors(
+    private static Map<BlobViewStruct, BlobDescriptor> preloadDescriptors(
             CatalogContext catalogContext,
-            List<BlobReference> references,
+            List<BlobViewStruct> viewStructs,
             CatalogLoader catalogLoader) {
-        if (references.isEmpty()) {
+        if (viewStructs.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        Map<String, TableReferences> grouped = groupReferencesByTable(references);
+        Map<String, TableReferences> grouped = groupReferencesByTable(viewStructs);
         try {
             return loadReferencedDescriptors(
                     catalogContext, grouped.values(), PRELOAD_DESCRIPTOR_EXECUTOR, catalogLoader);
@@ -146,15 +143,15 @@ public class BlobReferenceLookup {
     }
 
     private static Map<String, TableReferences> groupReferencesByTable(
-            Collection<BlobReference> references) {
+            Collection<BlobViewStruct> viewStructs) {
         Map<String, TableReferences> grouped = new HashMap<>();
-        for (BlobReference reference : references) {
-            grouped.computeIfAbsent(reference.tableName(), TableReferences::new).add(reference);
+        for (BlobViewStruct viewStruct : viewStructs) {
+            grouped.computeIfAbsent(viewStruct.tableName(), TableReferences::new).add(viewStruct);
         }
         return grouped;
     }
 
-    private static Map<BlobReference, BlobDescriptor> loadReferencedDescriptors(
+    private static Map<BlobViewStruct, BlobDescriptor> loadReferencedDescriptors(
             CatalogContext catalogContext,
             Collection<TableReferences> grouped,
             ExecutorService executor,
@@ -166,9 +163,9 @@ public class BlobReferenceLookup {
         }
         long targetRowsPerTask = targetRowsPerTask(plans);
 
-        CompletionService<Map<BlobReference, BlobDescriptor>> completionService =
+        CompletionService<Map<BlobViewStruct, BlobDescriptor>> completionService =
                 new ExecutorCompletionService<>(executor);
-        List<Future<Map<BlobReference, BlobDescriptor>>> futures = new ArrayList<>();
+        List<Future<Map<BlobViewStruct, BlobDescriptor>>> futures = new ArrayList<>();
         ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
         for (TableReadPlan plan : plans) {
             for (List<Range> rangeChunk : splitRowRanges(plan.rowRanges, targetRowsPerTask)) {
@@ -195,13 +192,13 @@ public class BlobReferenceLookup {
             }
         }
 
-        Map<BlobReference, BlobDescriptor> resolved = new HashMap<>();
+        Map<BlobViewStruct, BlobDescriptor> resolved = new HashMap<>();
         try {
             for (int i = 0; i < futures.size(); i++) {
                 resolved.putAll(completionService.take().get());
             }
         } catch (Exception e) {
-            for (Future<Map<BlobReference, BlobDescriptor>> future : futures) {
+            for (Future<Map<BlobViewStruct, BlobDescriptor>> future : futures) {
                 future.cancel(true);
             }
             throw e;
@@ -210,14 +207,12 @@ public class BlobReferenceLookup {
     }
 
     private static TableReadPlan createTableReadPlan(
-            CatalogContext catalogContext,
-            TableReferences tableReferences,
-            CatalogLoader catalogLoader)
+            CatalogContext catalogContext, TableReferences tableReferences, CatalogLoader catalogLoader)
             throws Exception {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
             List<FieldRead> fields = new ArrayList<>(tableReferences.referencesByField.size());
             Table table = catalog.getTable(Identifier.fromString(tableReferences.tableName));
-            for (Map.Entry<Integer, List<BlobReference>> entry :
+            for (Map.Entry<Integer, List<BlobViewStruct>> entry :
                     tableReferences.referencesByField.entrySet()) {
                 int fieldId = entry.getKey();
                 if (!table.rowType().containsField(fieldId)) {
@@ -249,7 +244,7 @@ public class BlobReferenceLookup {
         }
     }
 
-    private static Map<BlobReference, BlobDescriptor> loadTableDescriptorChunk(
+    private static Map<BlobViewStruct, BlobDescriptor> loadTableDescriptorChunk(
             CatalogContext catalogContext,
             String tableName,
             List<FieldRead> fields,
@@ -258,7 +253,7 @@ public class BlobReferenceLookup {
             CatalogLoader catalogLoader)
             throws Exception {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
-            Map<BlobReference, BlobDescriptor> resolved = new HashMap<>();
+            Map<BlobViewStruct, BlobDescriptor> resolved = new HashMap<>();
             Table table =
                     catalog.getTable(Identifier.fromString(tableName))
                             .copy(
@@ -267,6 +262,7 @@ public class BlobReferenceLookup {
 
             ReadBuilder readBuilder =
                     table.newReadBuilder().withReadType(readType).withRowRanges(rowRanges);
+            Iterator<Long> rowIdIterator = rowIds(rowRanges).iterator();
 
             try (RecordReader<InternalRow> reader =
                     readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
@@ -275,12 +271,16 @@ public class BlobReferenceLookup {
                     try {
                         InternalRow row;
                         while ((row = batch.next()) != null) {
-                            long rowId = row.getLong(fields.size());
+                            if (!rowIdIterator.hasNext()) {
+                                throw new IllegalStateException(
+                                        "Read more rows than requested row ranges.");
+                            }
+                            long rowId = rowIdIterator.next();
                             for (int i = 0; i < fields.size(); i++) {
                                 Blob blob = row.getBlob(i);
                                 if (blob != null) {
                                     resolved.put(
-                                            new BlobReference(
+                                            new BlobViewStruct(
                                                     tableName, fields.get(i).fieldId, rowId),
                                             blob.toDescriptor());
                                 }
@@ -294,6 +294,16 @@ public class BlobReferenceLookup {
 
             return resolved;
         }
+    }
+
+    private static List<Long> rowIds(List<Range> rowRanges) {
+        List<Long> rowIds = new ArrayList<>();
+        for (Range rowRange : rowRanges) {
+            for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
+                rowIds.add(rowId);
+            }
+        }
+        return rowIds;
     }
 
     private static List<List<Range>> splitRowRanges(List<Range> rowRanges, long targetRowsPerTask) {
@@ -361,18 +371,18 @@ public class BlobReferenceLookup {
 
     private static class TableReferences {
         private final String tableName;
-        private final Map<Integer, List<BlobReference>> referencesByField = new HashMap<>();
+        private final Map<Integer, List<BlobViewStruct>> referencesByField = new HashMap<>();
         private final List<Long> rowIds = new ArrayList<>();
 
         private TableReferences(String tableName) {
             this.tableName = tableName;
         }
 
-        private void add(BlobReference reference) {
+        private void add(BlobViewStruct viewStruct) {
             referencesByField
-                    .computeIfAbsent(reference.fieldId(), unused -> new ArrayList<>())
-                    .add(reference);
-            rowIds.add(reference.rowId());
+                    .computeIfAbsent(viewStruct.fieldId(), unused -> new ArrayList<>())
+                    .add(viewStruct);
+            rowIds.add(viewStruct.rowId());
         }
     }
 
@@ -403,5 +413,5 @@ public class BlobReferenceLookup {
         }
     }
 
-    private BlobReferenceLookup() {}
+    private BlobViewLookup() {}
 }

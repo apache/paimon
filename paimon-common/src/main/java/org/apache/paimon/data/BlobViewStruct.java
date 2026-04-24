@@ -26,37 +26,24 @@ import java.util.Objects;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 /**
- * Serialized metadata for a {@code BLOB_REF} field.
+ * Serialized metadata for a BLOB view field.
  *
- * <p>A blob reference only stores the coordinates needed to locate the original blob value in the
+ * <p>A blob view only stores the coordinates needed to locate the original blob value in the
  * upstream table: {@code tableName}, {@code fieldId} and {@code rowId}. The actual blob data is
  * resolved at read time by scanning the upstream table.
- *
- * <p>Serialization layout (Little Endian):
- *
- * <pre>
- * | Offset       | Field         | Type    | Size |
- * |--------------|---------------|---------|------|
- * | 0            | version       | byte    | 1    |
- * | 1            | magicNumber   | long    | 8    |
- * | 9            | tableNameLen  | int     | 4    |
- * | 13           | tableNameBytes| byte[N] | N    |
- * | 13 + N       | fieldId       | int     | 4    |
- * | 17 + N       | rowId         | long    | 8    |
- * </pre>
  */
-public class BlobReference implements Serializable {
+public class BlobViewStruct implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final long MAGIC = 0x424C4F4252454631L; // "BLOBREF1"
+    private static final long MAGIC = 0x424C4F4256494557L; // "BLOBVIEW"
     private static final byte CURRENT_VERSION = 1;
 
     private final String tableName;
     private final int fieldId;
     private final long rowId;
 
-    public BlobReference(String tableName, int fieldId, long rowId) {
+    public BlobViewStruct(String tableName, int fieldId, long rowId) {
         this.tableName = tableName;
         this.fieldId = fieldId;
         this.rowId = rowId;
@@ -88,13 +75,13 @@ public class BlobReference implements Serializable {
         return buffer.array();
     }
 
-    public static BlobReference deserialize(byte[] bytes) {
+    public static BlobViewStruct deserialize(byte[] bytes) {
         ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         byte version = buffer.get();
 
         if (version != CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting BlobReference version to be "
+                    "Expecting BlobViewStruct version to be "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
@@ -104,7 +91,7 @@ public class BlobReference implements Serializable {
         long magic = buffer.getLong();
         if (magic != MAGIC) {
             throw new IllegalArgumentException(
-                    "Invalid BlobReference: missing magic header. Expected magic: "
+                    "Invalid BlobViewStruct: missing magic header. Expected magic: "
                             + MAGIC
                             + ", but found: "
                             + magic);
@@ -115,10 +102,10 @@ public class BlobReference implements Serializable {
 
         int fieldId = buffer.getInt();
         long rowId = buffer.getLong();
-        return new BlobReference(new String(tableBytes, UTF_8), fieldId, rowId);
+        return new BlobViewStruct(new String(tableBytes, UTF_8), fieldId, rowId);
     }
 
-    public static boolean isBlobReference(byte[] bytes) {
+    public static boolean isBlobViewStruct(byte[] bytes) {
         if (bytes == null || bytes.length < 9) {
             return false;
         }
@@ -132,7 +119,7 @@ public class BlobReference implements Serializable {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        BlobReference that = (BlobReference) o;
+        BlobViewStruct that = (BlobViewStruct) o;
         return fieldId == that.fieldId
                 && rowId == that.rowId
                 && Objects.equals(tableName, that.tableName);
@@ -145,7 +132,7 @@ public class BlobReference implements Serializable {
 
     @Override
     public String toString() {
-        return "BlobReference{table="
+        return "BlobViewStruct{table="
                 + tableName
                 + ", fieldId="
                 + fieldId

@@ -247,12 +247,7 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        throw new UnsupportedOperationException("BinaryArray does not support BlobRef.");
+        return BlobUtils.fromBytes(getBinary(pos), null, null);
     }
 
     @Override

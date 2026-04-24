@@ -157,10 +157,6 @@ public interface BinaryWriter {
             case BLOB:
                 writer.writeBlob(pos, (Blob) o);
                 break;
-            case BLOB_REF:
-                byte[] refBytes = ((BlobRef) o).reference().serialize();
-                writer.writeBinary(pos, refBytes, 0, refBytes.length);
-                break;
             default:
                 throw new UnsupportedOperationException("Not support type: " + type);
         }
@@ -245,11 +241,6 @@ public interface BinaryWriter {
                 return (writer, pos, value) -> writer.writeVariant(pos, (Variant) value);
             case BLOB:
                 return (writer, pos, value) -> writer.writeBlob(pos, (Blob) value);
-            case BLOB_REF:
-                return (writer, pos, value) -> {
-                    byte[] bytes = ((BlobRef) value).reference().serialize();
-                    writer.writeBinary(pos, bytes, 0, bytes.length);
-                };
             default:
                 String msg =
                         String.format(

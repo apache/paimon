@@ -44,6 +44,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -146,18 +147,16 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
+        Supplier<org.apache.paimon.operation.MergeFileSplitRead> mergeReadSupplier =
+                () -> store().newRead();
+        Supplier<org.apache.paimon.operation.RawFileSplitRead> batchRawReadSupplier =
+                () -> store().newBatchRawFileRead();
         return new KeyValueTableRead(
-                () -> store().newRead(),
-                () -> store().newBatchRawFileRead(),
+                mergeReadSupplier,
+                batchRawReadSupplier,
                 schema(),
-                catalogEnvironment().catalogContext(),
-                () ->
-                        new KeyValueTableRead(
-                                () -> store().newRead(),
-                                () -> store().newBatchRawFileRead(),
-                                schema(),
-                                null,
-                                null));
+                catalogEnvironment.catalogContext(),
+                () -> new KeyValueTableRead(mergeReadSupplier, batchRawReadSupplier, schema()));
     }
 
     @Override

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.function;
 
-import org.apache.paimon.data.BlobReference;
+import org.apache.paimon.data.BlobViewStruct;
 
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
 import org.apache.spark.sql.types.DataType;
@@ -27,8 +27,8 @@ import org.apache.spark.unsafe.types.UTF8String;
 
 import java.io.Serializable;
 
-/** Spark scalar function that constructs a serialized {@link BlobReference}. */
-public class BlobReferenceSparkFunction implements ScalarFunction<byte[]>, Serializable {
+/** Spark scalar function that constructs a serialized {@link BlobViewStruct}. */
+public class BlobViewSparkFunction implements ScalarFunction<byte[]>, Serializable {
 
     @Override
     public DataType[] inputTypes() {
@@ -44,11 +44,11 @@ public class BlobReferenceSparkFunction implements ScalarFunction<byte[]>, Seria
         if (tableName == null) {
             return null;
         }
-        return new BlobReference(tableName.toString(), fieldId, rowId).serialize();
+        return new BlobViewStruct(tableName.toString(), fieldId, rowId).serialize();
     }
 
     @Override
     public String name() {
-        return "blob_reference";
+        return "blob_view";
     }
 }

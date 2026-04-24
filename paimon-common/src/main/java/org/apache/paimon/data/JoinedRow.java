@@ -244,15 +244,6 @@ public class JoinedRow implements InternalRow {
     }
 
     @Override
-    public BlobRef getBlobRef(int pos) {
-        if (pos < row1.getFieldCount()) {
-            return row1.getBlobRef(pos);
-        } else {
-            return row2.getBlobRef(pos - row1.getFieldCount());
-        }
-    }
-
-    @Override
     public InternalArray getArray(int pos) {
         if (pos < row1.getFieldCount()) {
             return row1.getArray(pos);

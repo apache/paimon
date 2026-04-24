@@ -20,8 +20,8 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReferenceResolver;
+import org.apache.paimon.data.BlobView;
+import org.apache.paimon.data.BlobViewResolver;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -33,20 +33,17 @@ import org.apache.paimon.types.RowKind;
 
 import java.util.Set;
 
-/**
- * {@link InternalRow} wrapper that resolves UnresolvedBlob to real {@link Blob} via a {@link
- * BlobReferenceResolver} when {@link #getBlob(int)} is called.
- */
-class BlobRefResolvingRow implements InternalRow {
+/** {@link InternalRow} wrapper that resolves {@link BlobView} when {@link #getBlob(int)} is called. */
+class BlobViewResolvingRow implements InternalRow {
 
     private final InternalRow wrapped;
-    private final Set<Integer> blobRefFields;
-    private final BlobReferenceResolver resolver;
+    private final Set<Integer> blobViewFields;
+    private final BlobViewResolver resolver;
 
-    BlobRefResolvingRow(
-            InternalRow wrapped, Set<Integer> blobRefFields, BlobReferenceResolver resolver) {
+    BlobViewResolvingRow(
+            InternalRow wrapped, Set<Integer> blobViewFields, BlobViewResolver resolver) {
         this.wrapped = wrapped;
-        this.blobRefFields = blobRefFields;
+        this.blobViewFields = blobViewFields;
         this.resolver = resolver;
     }
 
@@ -132,16 +129,14 @@ class BlobRefResolvingRow implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        return wrapped.getBlob(pos);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        BlobRef blobRef = wrapped.getBlobRef(pos);
-        if (blobRefFields.contains(pos) && !blobRef.isResolved()) {
-            resolver.resolve(blobRef);
+        Blob blob = wrapped.getBlob(pos);
+        if (blobViewFields.contains(pos) && blob instanceof BlobView) {
+            BlobView blobView = (BlobView) blob;
+            if (!blobView.isResolved()) {
+                resolver.resolve(blobView);
+            }
         }
-        return blobRef;
+        return blob;
     }
 
     @Override

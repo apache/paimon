@@ -22,7 +22,6 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
-import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -233,11 +232,6 @@ public class HiveTypeUtils {
 
         @Override
         public TypeInfo visit(BlobType blobType) {
-            return TypeInfoFactory.binaryTypeInfo;
-        }
-
-        @Override
-        public TypeInfo visit(BlobRefType blobRefType) {
             return TypeInfoFactory.binaryTypeInfo;
         }
 

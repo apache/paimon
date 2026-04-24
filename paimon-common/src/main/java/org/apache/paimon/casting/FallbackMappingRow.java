@@ -20,7 +20,6 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -166,14 +165,6 @@ public class FallbackMappingRow implements InternalRow {
             return fallbackRow.getBlob(mappings[pos]);
         }
         return main.getBlob(pos);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        if (mappings[pos] != -1 && main.isNullAt(pos)) {
-            return fallbackRow.getBlobRef(mappings[pos]);
-        }
-        return main.getBlobRef(pos);
     }
 
     @Override

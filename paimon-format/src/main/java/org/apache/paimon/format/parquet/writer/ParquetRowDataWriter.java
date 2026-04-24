@@ -21,7 +21,7 @@ package org.apache.paimon.format.parquet.writer;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -109,8 +109,6 @@ public class ParquetRowDataWriter {
                     return new BinaryWriter();
                 case BLOB:
                     return new BlobDescriptorWriter();
-                case BLOB_REF:
-                    return new BlobReferenceWriter();
                 case DECIMAL:
                     DecimalType decimalType = (DecimalType) t;
                     return createDecimalWriter(decimalType.getPrecision(), decimalType.getScale());
@@ -319,7 +317,7 @@ public class ParquetRowDataWriter {
         }
     }
 
-    /** Writes BLOB as serialized {@link BlobDescriptor} bytes for descriptor-stored fields. */
+    /** Writes inline BLOB bytes as serialized descriptor or view struct. */
     private class BlobDescriptorWriter implements FieldWriter {
 
         @Override
@@ -335,29 +333,13 @@ public class ParquetRowDataWriter {
 
         private void writeBlob(Blob blob) {
             try {
-                BlobDescriptor descriptor = blob.toDescriptor();
-                recordConsumer.addBinary(Binary.fromReusedByteArray(descriptor.serialize()));
+                recordConsumer.addBinary(Binary.fromReusedByteArray(BlobUtils.serializeBlob(blob)));
             } catch (Throwable t) {
                 throw new IllegalArgumentException(
-                        "blob-descriptor-field requires blob field value to be a "
-                                + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                        "BLOB inline fields require values to be a BlobDescriptor or "
+                                + "BlobViewStruct.",
                         t);
             }
-        }
-    }
-
-    /** Writes BLOB_REF as serialized {@link org.apache.paimon.data.BlobReference} bytes. */
-    private class BlobReferenceWriter implements FieldWriter {
-
-        @Override
-        public void write(InternalRow row, int ordinal) {
-            byte[] bytes = row.getBlobRef(ordinal).reference().serialize();
-            recordConsumer.addBinary(Binary.fromReusedByteArray(bytes));
-        }
-
-        @Override
-        public void write(InternalArray arrayData, int ordinal) {
-            throw new UnsupportedOperationException("BLOB_REF in array is not supported.");
         }
     }
 

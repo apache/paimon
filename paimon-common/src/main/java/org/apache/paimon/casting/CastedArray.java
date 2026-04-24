@@ -20,7 +20,6 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -196,11 +195,6 @@ public class CastedArray implements InternalArray {
     @Override
     public Blob getBlob(int pos) {
         return castElementGetter.getElementOrNull(array, pos);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        throw new UnsupportedOperationException("CastedArray does not support BlobRef.");
     }
 
     @Override

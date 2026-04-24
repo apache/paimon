@@ -20,7 +20,6 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
@@ -216,14 +215,6 @@ public class DefaultValueRow implements InternalRow {
             return row.getBlob(pos);
         }
         return defaultValueRow.getBlob(pos);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        if (!row.isNullAt(pos)) {
-            return row.getBlobRef(pos);
-        }
-        return defaultValueRow.getBlobRef(pos);
     }
 
     public static DefaultValueRow from(InternalRow defaultValueRow) {

@@ -106,7 +106,6 @@ public class AvroSchemaConverter {
             case BINARY:
             case VARBINARY:
             case BLOB:
-            case BLOB_REF:
                 Schema binary = SchemaBuilder.builder().bytesType();
                 return nullable ? nullableSchema(binary) : binary;
             case TIMESTAMP_WITHOUT_TIME_ZONE:

@@ -332,8 +332,6 @@ public class InternalRowUtils {
                 return dataGetters.getVariant(pos);
             case BLOB:
                 return dataGetters.getBlob(pos);
-            case BLOB_REF:
-                return dataGetters.getBlobRef(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }

@@ -25,8 +25,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReference;
+import org.apache.paimon.data.BlobView;
+import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -66,9 +66,12 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -752,12 +755,11 @@ public class BlobTableTest extends TableTestBase {
                                         SchemaChange.renameColumn("f2", "f2_renamed"),
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Cannot rename BLOB column");
+                        .hasMessageContaining("Cannot rename BLOB column");
     }
 
     @Test
-    public void testBlobRefE2E() throws Exception {
-        // 1. Create upstream table with BLOB field and write data
+    public void testBlobViewE2E() throws Exception {
         String upstreamTableName = "UpstreamBlob";
         Schema.Builder upstreamSchema = Schema.newBuilder();
         upstreamSchema.column("id", DataTypes.INT());
@@ -768,23 +770,17 @@ public class BlobTableTest extends TableTestBase {
         upstreamSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         catalog.createTable(identifier(upstreamTableName), upstreamSchema.build(), true);
 
-        FileStoreTable upstreamTable =
-                (FileStoreTable) catalog.getTable(identifier(upstreamTableName));
-
+        FileStoreTable upstreamTable = getTable(identifier(upstreamTableName));
         byte[] imageBytes1 = randomBytes();
         byte[] imageBytes2 = randomBytes();
+        writeRows(
+                upstreamTable,
+                Arrays.asList(
+                        GenericRow.of(
+                                1, BinaryString.fromString("row1"), new BlobData(imageBytes1)),
+                        GenericRow.of(
+                                2, BinaryString.fromString("row2"), new BlobData(imageBytes2))));
 
-        BatchWriteBuilder upstreamWriteBuilder = upstreamTable.newBatchWriteBuilder();
-        try (BatchTableWrite write = upstreamWriteBuilder.newWrite();
-                BatchTableCommit commit = upstreamWriteBuilder.newCommit()) {
-            write.write(
-                    GenericRow.of(1, BinaryString.fromString("row1"), new BlobData(imageBytes1)));
-            write.write(
-                    GenericRow.of(2, BinaryString.fromString("row2"), new BlobData(imageBytes2)));
-            commit.commit(write.prepareCommit());
-        }
-
-        // 2. Get field ID for the "image" blob column
         int imageFieldId =
                 upstreamTable.rowType().getFields().stream()
                         .filter(f -> f.name().equals("image"))
@@ -792,57 +788,53 @@ public class BlobTableTest extends TableTestBase {
                         .orElseThrow(() -> new RuntimeException("image field not found"))
                         .id();
 
-        // Read upstream with _ROW_ID to get actual row IDs
         RowTrackingTable upstreamRowTracking = new RowTrackingTable(upstreamTable);
-        // schema: 0=id, 1=name, 2=image, 3=_ROW_ID, 4=_SEQUENCE_NUMBER
         ReadBuilder rowIdReader =
                 upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 2, 3});
-        // maps: upstream id -> (rowId, blobData)
-        java.util.Map<Integer, Long> idToRowId = new java.util.HashMap<>();
-        java.util.Map<Integer, byte[]> idToBlob = new java.util.HashMap<>();
+        Map<Integer, Long> idToRowId = new HashMap<>();
+        Map<Integer, byte[]> idToBlob = new HashMap<>();
         rowIdReader
                 .newRead()
                 .createReader(rowIdReader.newScan().plan())
                 .forEachRemaining(
                         row -> {
                             int id = row.getInt(0);
-                            byte[] blobData = row.getBlob(1).toData();
-                            long rowId = row.getLong(2);
-                            idToRowId.put(id, rowId);
-                            idToBlob.put(id, blobData);
+                            idToRowId.put(id, row.getLong(2));
+                            idToBlob.put(id, row.getBlob(1).toData());
                         });
         assertThat(idToRowId.size()).isEqualTo(2);
 
-        // 3. Create downstream table with BLOB_REF field
-        String downstreamTableName = "DownstreamRef";
+        String downstreamTableName = "DownstreamView";
         Schema.Builder downstreamSchema = Schema.newBuilder();
         downstreamSchema.column("id", DataTypes.INT());
         downstreamSchema.column("label", DataTypes.STRING());
-        downstreamSchema.column("image_ref", DataTypes.BLOB_REF());
+        downstreamSchema.column("image", DataTypes.BLOB());
         downstreamSchema.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         downstreamSchema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         downstreamSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        downstreamSchema.option(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
         catalog.createTable(identifier(downstreamTableName), downstreamSchema.build(), true);
 
-        FileStoreTable downstreamTable =
-                (FileStoreTable) catalog.getTable(identifier(downstreamTableName));
-
-        // 4. Write blob references using actual row IDs from upstream
+        FileStoreTable downstreamTable = getTable(identifier(downstreamTableName));
         String upstreamFullName = database + "." + upstreamTableName;
-        BlobReference ref1 = new BlobReference(upstreamFullName, imageFieldId, idToRowId.get(1));
-        BlobReference ref2 = new BlobReference(upstreamFullName, imageFieldId, idToRowId.get(2));
+        writeRows(
+                downstreamTable,
+                Arrays.asList(
+                        GenericRow.of(
+                                1,
+                                BinaryString.fromString("label1"),
+                                Blob.fromView(
+                                        new BlobViewStruct(
+                                                upstreamFullName, imageFieldId, idToRowId.get(1)))),
+                        GenericRow.of(
+                                2,
+                                BinaryString.fromString("label2"),
+                                Blob.fromView(
+                                        new BlobViewStruct(
+                                                upstreamFullName,
+                                                imageFieldId,
+                                                idToRowId.get(2))))));
 
-        BatchWriteBuilder downstreamWriteBuilder = downstreamTable.newBatchWriteBuilder();
-        try (BatchTableWrite write = downstreamWriteBuilder.newWrite();
-                BatchTableCommit commit = downstreamWriteBuilder.newCommit()) {
-            write.write(
-                    GenericRow.of(1, BinaryString.fromString("label1"), Blob.fromReference(ref1)));
-            write.write(
-                    GenericRow.of(2, BinaryString.fromString("label2"), Blob.fromReference(ref2)));
-            commit.commit(write.prepareCommit());
-        }
-
-        // 5. Read downstream table — blob references should resolve from upstream
         ReadBuilder downstreamReadBuilder = downstreamTable.newReadBuilder();
         downstreamReadBuilder
                 .newRead()
@@ -850,10 +842,10 @@ public class BlobTableTest extends TableTestBase {
                 .forEachRemaining(
                         row -> {
                             int id = row.getInt(0);
-                            BlobRef blobRef = row.getBlobRef(2);
-                            assertThat(blobRef).isNotNull();
-                            assertThat(blobRef.isResolved()).isTrue();
-                            assertThat(blobRef.toData()).isEqualTo(idToBlob.get(id));
+                            Blob blob = row.getBlob(2);
+                            assertThat(blob).isInstanceOf(BlobView.class);
+                            assertThat(((BlobView) blob).isResolved()).isTrue();
+                            assertThat(blob.toData()).isEqualTo(idToBlob.get(id));
                         });
     }
 
@@ -871,6 +863,18 @@ public class BlobTableTest extends TableTestBase {
                 CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
                 tempPath.resolve("external-storage-blob-path").toString());
         catalog.createTable(identifier(), schemaBuilder.build(), true);
+    }
+
+    private void writeRows(Table table, Iterable<InternalRow> rows) throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        BatchTableWrite write = builder.newWrite();
+        BatchTableCommit commit = builder.newCommit();
+        for (InternalRow row : rows) {
+            write.write(row);
+        }
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
     }
 
     private void createThreeTypeBlobTable() throws Exception {

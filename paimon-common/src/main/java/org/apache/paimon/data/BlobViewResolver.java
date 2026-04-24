@@ -16,28 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.data
+package org.apache.paimon.data;
 
-import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
+import java.io.Serializable;
 
-import org.apache.spark.sql.catalyst.InternalRow
+/** Resolves a {@link BlobView} by setting its reader and descriptor in place. */
+public interface BlobViewResolver extends Serializable {
 
-class Spark3InternalRowWithBlob(rowType: RowType, blobFields: Set[Int], blobAsDescriptor: Boolean)
-  extends Spark3InternalRow(rowType) {
-
-  override def getBinary(ordinal: Int): Array[Byte] = {
-    if (blobFields.contains(ordinal)) {
-      if (blobAsDescriptor) {
-        row.getBlob(ordinal).toDescriptor.serialize()
-      } else {
-        row.getBlob(ordinal).toData
-      }
-    } else {
-      super.getBinary(ordinal)
-    }
-  }
-
-  override def copy: InternalRow =
-    SparkInternalRow.create(rowType, blobAsDescriptor).replace(copyInternalRow(row, rowType))
+    void resolve(BlobView blobView);
 }

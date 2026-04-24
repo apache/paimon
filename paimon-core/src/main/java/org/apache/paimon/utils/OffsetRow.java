@@ -20,7 +20,6 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -136,11 +135,6 @@ public class OffsetRow implements InternalRow {
     @Override
     public Blob getBlob(int pos) {
         return row.getBlob(offset + pos);
-    }
-
-    @Override
-    public BlobRef getBlobRef(int pos) {
-        return row.getBlobRef(offset + pos);
     }
 
     @Override

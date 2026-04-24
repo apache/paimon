@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -42,9 +41,8 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     private final SplitRead<InternalRow> fullPhaseMergeRead;
     private final SplitRead<InternalRow> incrementalDiffRead;
 
-    public LookupCompactDiffRead(
-            MergeFileSplitRead mergeRead, TableSchema schema, CatalogContext catalogContext) {
-        super(schema, catalogContext);
+    public LookupCompactDiffRead(MergeFileSplitRead mergeRead, TableSchema schema) {
+        super(schema);
         this.incrementalDiffRead = new IncrementalCompactDiffSplitRead(mergeRead);
         this.fullPhaseMergeRead =
                 SplitRead.convert(

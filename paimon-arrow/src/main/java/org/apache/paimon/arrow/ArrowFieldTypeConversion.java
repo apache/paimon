@@ -21,7 +21,6 @@ package org.apache.paimon.arrow;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
-import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -162,12 +161,6 @@ public class ArrowFieldTypeConversion {
         @Override
         public FieldType visit(BlobType blobType) {
             throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public FieldType visit(BlobRefType blobRefType) {
-            return new FieldType(
-                    blobRefType.isNullable(), Types.MinorType.VARBINARY.getType(), null);
         }
 
         private TimeUnit getTimeUnit(int precision) {

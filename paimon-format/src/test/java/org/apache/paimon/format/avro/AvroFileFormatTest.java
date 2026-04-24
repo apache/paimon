@@ -18,9 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
@@ -79,7 +76,6 @@ public class AvroFileFormatTest {
         dataFields.add(new DataField(index++, "varchar_type", DataTypes.VARCHAR(20)));
         dataFields.add(new DataField(index++, "binary_type", DataTypes.BINARY(20)));
         dataFields.add(new DataField(index++, "varbinary_type", DataTypes.VARBINARY(20)));
-        dataFields.add(new DataField(index++, "blob_ref_type", DataTypes.BLOB_REF()));
         dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(3)));
         dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
         dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
@@ -212,31 +208,6 @@ public class AvroFileFormatTest {
         try (PositionOutputStream out = localFileIO.newOutputStream(file, false)) {
             assertThatThrownBy(() -> format.createWriterFactory(rowType).create(out, "unsupported"))
                     .hasMessageContaining("Unrecognized codec: unsupported");
-        }
-    }
-
-    @Test
-    void testBlobRefRoundTrip() throws IOException {
-        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "blob_ref", DataTypes.BLOB_REF()));
-        BlobReference reference = new BlobReference("default.t", 7, 11L);
-        BlobRef blob = Blob.fromReference(reference);
-
-        FileFormat format = new AvroFileFormat(new FormatContext(new Options(), 1024, 1024));
-        LocalFileIO fileIO = LocalFileIO.create();
-        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
-
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
-            FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
-            writer.addElement(GenericRow.of(blob));
-            writer.close();
-        }
-
-        try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType, rowType, new ArrayList<>())
-                        .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
-            InternalRow row = reader.readBatch().next();
-            assertThat(row.getBlobRef(0).reference()).isEqualTo(reference);
         }
     }
 }

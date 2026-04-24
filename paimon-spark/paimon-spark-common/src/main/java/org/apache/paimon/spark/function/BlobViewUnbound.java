@@ -25,38 +25,38 @@ import org.apache.spark.sql.types.LongType;
 import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.StructType;
 
-/** Function unbound to {@link BlobReferenceSparkFunction}. */
-public class BlobReferenceUnbound implements UnboundFunction {
+/** Function unbound to {@link BlobViewSparkFunction}. */
+public class BlobViewUnbound implements UnboundFunction {
 
     @Override
     public BoundFunction bind(StructType inputType) {
         if (inputType.fields().length != 3) {
             throw new UnsupportedOperationException(
-                    "Function 'blob_reference' requires 3 arguments (tableName STRING, fieldId INT, rowId BIGINT), but found "
+                    "Function 'blob_view' requires 3 arguments (tableName STRING, fieldId INT, rowId BIGINT), but found "
                             + inputType.fields().length);
         }
         if (!(inputType.fields()[0].dataType() instanceof StringType)) {
             throw new UnsupportedOperationException(
-                    "The first argument of 'blob_reference' must be STRING type.");
+                    "The first argument of 'blob_view' must be STRING type.");
         }
         if (!(inputType.fields()[1].dataType() instanceof IntegerType)) {
             throw new UnsupportedOperationException(
-                    "The second argument of 'blob_reference' must be INT type.");
+                    "The second argument of 'blob_view' must be INT type.");
         }
         if (!(inputType.fields()[2].dataType() instanceof LongType)) {
             throw new UnsupportedOperationException(
-                    "The third argument of 'blob_reference' must be BIGINT type.");
+                    "The third argument of 'blob_view' must be BIGINT type.");
         }
-        return new BlobReferenceSparkFunction();
+        return new BlobViewSparkFunction();
     }
 
     @Override
     public String description() {
-        return "Construct a serialized BlobReference from tableName, fieldId and rowId";
+        return "Construct a serialized BlobViewStruct from tableName, fieldId and rowId";
     }
 
     @Override
     public String name() {
-        return "blob_reference";
+        return "blob_view";
     }
 }

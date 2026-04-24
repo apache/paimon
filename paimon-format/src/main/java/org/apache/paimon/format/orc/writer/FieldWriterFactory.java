@@ -19,7 +19,7 @@
 package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -28,7 +28,6 @@ import org.apache.paimon.data.LocalZoneTimestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
-import org.apache.paimon.types.BlobRefType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -252,26 +251,15 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             BytesColumnVector vector = (BytesColumnVector) column;
             Blob blob = getters.getBlob(columnId);
             try {
-                BlobDescriptor descriptor = blob.toDescriptor();
-                byte[] bytes = descriptor.serialize();
+                byte[] bytes = BlobUtils.serializeBlob(blob);
                 vector.setVal(rowId, bytes, 0, bytes.length);
                 return bytes.length;
             } catch (Throwable t) {
                 throw new IllegalArgumentException(
-                        "blob-descriptor-field requires blob field value to be a "
-                                + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                        "BLOB inline fields require values to be a BlobDescriptor or "
+                                + "BlobViewStruct.",
                         t);
             }
-        };
-    }
-
-    @Override
-    public FieldWriter visit(BlobRefType blobRefType) {
-        return (rowId, column, getters, columnId) -> {
-            BytesColumnVector vector = (BytesColumnVector) column;
-            byte[] bytes = getters.getBlobRef(columnId).reference().serialize();
-            vector.setVal(rowId, bytes, 0, bytes.length);
-            return bytes.length;
         };
     }
 

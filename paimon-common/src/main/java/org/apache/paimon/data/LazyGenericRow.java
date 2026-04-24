@@ -154,11 +154,6 @@ public class LazyGenericRow implements InternalRow {
     }
 
     @Override
-    public BlobRef getBlobRef(int pos) {
-        return (BlobRef) getField(pos);
-    }
-
-    @Override
     public InternalArray getArray(int pos) {
         return (InternalArray) getField(pos);
     }

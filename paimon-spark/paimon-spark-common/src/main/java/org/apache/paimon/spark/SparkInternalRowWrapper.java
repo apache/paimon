@@ -21,9 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobRef;
-import org.apache.paimon.data.BlobReference;
 import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -251,16 +248,6 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     }
 
     @Override
-    public BlobRef getBlobRef(int pos) {
-        int actualPos = getActualFieldPosition(pos);
-        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
-            return null;
-        }
-        byte[] bytes = internalRow.getBinary(actualPos);
-        return new BlobRef(BlobReference.deserialize(bytes));
-    }
-
-    @Override
     public InternalArray getArray(int pos) {
         int actualPos = getActualFieldPosition(pos);
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
@@ -438,12 +425,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int pos) {
-            return new BlobData(arrayData.getBinary(pos));
-        }
-
-        @Override
-        public BlobRef getBlobRef(int pos) {
-            throw new UnsupportedOperationException("SparkInternalArray does not support BlobRef.");
+            return BlobUtils.fromBytes(arrayData.getBinary(pos), null, null);
         }
 
         @Override

@@ -331,7 +331,6 @@ public final class DataTypeJsonParser {
         LEGACY,
         VARIANT,
         BLOB,
-        BLOB_REF,
         NOT
     }
 
@@ -550,8 +549,6 @@ public final class DataTypeJsonParser {
                     return new VariantType();
                 case BLOB:
                     return new BlobType();
-                case BLOB_REF:
-                    return new BlobRefType();
                 case VECTOR:
                     return parseVectorType();
                 default:

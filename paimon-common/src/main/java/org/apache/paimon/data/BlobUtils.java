@@ -27,21 +27,31 @@ import javax.annotation.Nullable;
 /** Utilities for decoding and encoding blob-related bytes. */
 public class BlobUtils {
 
-    /**
-     * Decodes blob bytes for BLOB type fields. For BLOB_REF type, use {@link
-     * DataGetters#getBlobRef(int)} instead.
-     */
     public static Blob fromBytes(
             byte[] bytes, @Nullable UriReaderFactory uriReaderFactory, @Nullable FileIO fileIO) {
+        return fromBytes(bytes, uriReaderFactory == null ? null : uriReaderFactory::create, fileIO);
+    }
+
+    public static Blob fromBytesWithReader(
+            byte[] bytes, @Nullable UriReader uriReader, @Nullable FileIO fileIO) {
+        return fromBytes(bytes, uri -> uriReader, fileIO);
+    }
+
+    private static Blob fromBytes(
+            byte[] bytes, @Nullable UriReaderCreator uriReaderCreator, @Nullable FileIO fileIO) {
         if (bytes == null) {
             return null;
+        }
+
+        if (BlobViewStruct.isBlobViewStruct(bytes)) {
+            return Blob.fromView(BlobViewStruct.deserialize(bytes));
         }
 
         if (BlobDescriptor.isBlobDescriptor(bytes)) {
             BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
             UriReader reader =
-                    uriReaderFactory != null
-                            ? uriReaderFactory.create(descriptor.uri())
+                    uriReaderCreator != null
+                            ? uriReaderCreator.create(descriptor.uri())
                             : UriReader.fromFile(fileIO);
             return Blob.fromDescriptor(reader, descriptor);
         }
@@ -49,8 +59,16 @@ public class BlobUtils {
         return new BlobData(bytes);
     }
 
-    public static byte[] serializeBlobReference(BlobRef blobRef) {
-        return blobRef.reference().serialize();
+    public static byte[] serializeBlob(Blob blob) {
+        if (blob instanceof BlobView) {
+            return ((BlobView) blob).viewStruct().serialize();
+        }
+        return blob.toDescriptor().serialize();
+    }
+
+    private interface UriReaderCreator {
+
+        UriReader create(String uri);
     }
 
     private BlobUtils() {}

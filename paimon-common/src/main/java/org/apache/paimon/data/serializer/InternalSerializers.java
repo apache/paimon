@@ -92,8 +92,6 @@ public final class InternalSerializers {
                 return VariantSerializer.INSTANCE;
             case BLOB:
                 return BlobSerializer.INSTANCE;
-            case BLOB_REF:
-                return BlobRefSerializer.INSTANCE;
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type '" + type + "' to get internal serializer");
