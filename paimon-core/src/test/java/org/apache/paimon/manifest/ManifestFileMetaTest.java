@@ -18,12 +18,14 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ManifestFileMerger;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -84,9 +86,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         createData(numLastBits, input, expected);
 
         // no trigger Full Compaction
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "9223372036854775807B");
         List<ManifestFileMeta> actual =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, Long.MAX_VALUE, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
         assertThat(actual).hasSameSizeAs(expected);
 
         // these two manifest files are merged from the input
@@ -118,14 +127,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         ManifestFile failingManifestFile =
                 createManifestFile(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
         try {
+            Options testOptions = new Options();
+            testOptions.set("manifest.target-file-size", "500B");
+            testOptions.set("manifest.merge-min-count", "3");
+            testOptions.set(
+                    "manifest.full-compaction-threshold-size", fullCompactionThreshold + "B");
             ManifestFileMerger.merge(
                     input,
                     failingManifestFile,
-                    500,
-                    3,
-                    fullCompactionThreshold,
                     getPartitionType(),
-                    null);
+                    CoreOptions.fromMap(testOptions.toMap()));
         } catch (Throwable e) {
             assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             // old files should be kept untouched, while new files should be cleaned up
@@ -156,9 +167,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // delta with delete apply partition 1,2
         addDeltaManifests(input, true);
         // trigger full compaction
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
 
         // 1st Manifest don't need to Merge
         assertSameContent(input.get(0), merged.get(0), manifestFile);
@@ -173,9 +191,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // base
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
 
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
 
         assertEquivalentEntries(input, merged);
         assertThat(merged).hasSameElementsAs(input);
@@ -186,9 +211,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         ManifestFileMeta delta = makeManifest(makeEntry(true, "A", 1), makeEntry(false, "A", 1));
         input1.add(delta);
 
+        Options testOptions1 = new Options();
+        testOptions1.set("manifest.target-file-size", "500B");
+        testOptions1.set("manifest.merge-min-count", "3");
+        testOptions1.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged1 =
                 ManifestFileMerger.merge(
-                        input1, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input1,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions1.toMap()));
 
         assertThat(base).hasSameElementsAs(merged1);
         assertEquivalentEntries(input1, merged1);
@@ -198,9 +230,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     public void testMergeWithoutBase() {
         List<ManifestFileMeta> input = new ArrayList<>();
         addDeltaManifests(input, true);
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
         assertEquivalentEntries(input, merged);
     }
 
@@ -225,9 +264,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(makeEntry(true, "F")));
         input.add(makeManifest(makeEntry(true, "G")));
 
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
         assertEquivalentEntries(input, merged);
     }
 
@@ -489,9 +535,16 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(makeEntry(true, "F")));
         input.add(makeManifest(makeEntry(true, "G")));
 
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", threshold + "B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, threshold, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
         assertEquivalentEntries(
                 input.stream()
                         .filter(f -> !baseFiles.contains(f.fileName()))

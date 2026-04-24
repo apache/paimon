@@ -1,0 +1,131 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.operation;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.utils.Preconditions;
+
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+/**
+ * A {@code ManifestSortedRun} is a list of {@link ManifestFileMeta}s sorted by a single partition
+ * field (the configured manifest sort field). The intervals {@code [partitionStats.minValues[k],
+ * partitionStats.maxValues[k]]} of these manifests do not overlap on field {@code k}, where {@code
+ * k} is the configured sort field index.
+ */
+public class ManifestSortedRun {
+
+    private int level;
+    private final List<ManifestFileMeta> files;
+    private final long totalSize;
+
+    private ManifestSortedRun(List<ManifestFileMeta> files) {
+        this.level = -1;
+        this.files = Collections.unmodifiableList(files);
+        long size = 0L;
+        for (ManifestFileMeta file : files) {
+            size += file.fileSize();
+        }
+        this.totalSize = size;
+    }
+
+    public static ManifestSortedRun empty() {
+        return new ManifestSortedRun(Collections.emptyList());
+    }
+
+    public static ManifestSortedRun fromSingle(ManifestFileMeta file) {
+        return new ManifestSortedRun(Collections.singletonList(file));
+    }
+
+    /**
+     * Build a {@code ManifestSortedRun} from an already-sorted list. The caller MUST guarantee that
+     * {@code sortedFiles} is sorted ascending on the configured sort field's min value, and that
+     * intervals do not overlap on that field.
+     */
+    public static ManifestSortedRun fromSorted(List<ManifestFileMeta> sortedFiles) {
+        return new ManifestSortedRun(sortedFiles);
+    }
+
+    public List<ManifestFileMeta> files() {
+        return files;
+    }
+
+    public boolean isEmpty() {
+        return files.isEmpty();
+    }
+
+    public boolean nonEmpty() {
+        return !isEmpty();
+    }
+
+    public long totalSize() {
+        return totalSize;
+    }
+
+    public int level() {
+        return level;
+    }
+
+    public void setLevel(int level) {
+        this.level = level;
+    }
+
+    /**
+     * Validate that this run is monotonically non-overlapping on the sort field at {@code
+     * sortFieldIndex}. Used in tests and as an assertion in development.
+     */
+    public void validate(int sortFieldIndex, Comparator<BinaryRow> partitionComparator) {
+        for (int i = 1; i < files.size(); i++) {
+            BinaryRow prevMax = files.get(i - 1).partitionStats().maxValues();
+            BinaryRow currMin = files.get(i).partitionStats().minValues();
+            Preconditions.checkState(
+                    partitionComparator.compare(prevMax, currMin) <= 0,
+                    "ManifestSortedRun is not sorted on field %s; prev.max > curr.min",
+                    sortFieldIndex);
+        }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof ManifestSortedRun)) {
+            return false;
+        }
+        ManifestSortedRun that = (ManifestSortedRun) o;
+        return level == that.level && files.equals(that.files);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(level, files);
+    }
+
+    @Override
+    public String toString() {
+        return "ManifestSortedRun{level="
+                + level
+                + ", files=["
+                + files.stream().map(ManifestFileMeta::fileName).collect(Collectors.joining(", "))
+                + "]}";
+    }
+}
