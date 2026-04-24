@@ -50,4 +50,16 @@ public class RESTFileSystemCatalog extends FileSystemCatalog {
             super.createTable(identifier, schema, ignoreIfExists);
         }
     }
+
+    @Override
+    public void createFormatTable(Identifier identifier, Schema schema) {
+        try {
+            runWithLock(
+                    identifier, () -> uncheck(() -> fileIO.mkdirs(getTableLocation(identifier))));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 }
