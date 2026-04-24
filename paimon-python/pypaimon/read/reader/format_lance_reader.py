@@ -16,7 +16,7 @@
 #  limitations under the License.
 ################################################################################
 
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Tuple
 
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
@@ -33,7 +33,9 @@ class FormatLanceReader(RecordBatchReader):
     """
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 push_down_predicate: Any, batch_size: int = 1024):
+                 push_down_predicate: Any,
+                 shard_range: Optional[Tuple[int, int]] = None,
+                 batch_size: int = 1024):
         """Initialize Lance reader."""
         import lance
 
@@ -44,7 +46,10 @@ class FormatLanceReader(RecordBatchReader):
             file_path_for_lance,
             storage_options=storage_options,
             columns=columns_for_lance)
-        reader_results = lance_reader.read_all()
+        if shard_range is not None:
+            reader_results = lance_reader.read_range(shard_range[0], shard_range[1] - shard_range[0])
+        else:
+            reader_results = lance_reader.read_all()
 
         # Convert to PyArrow table
         pa_table = reader_results.to_table()
