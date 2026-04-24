@@ -469,6 +469,30 @@ public class CoreOptions implements Serializable {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLE =
+            key("manifest-sort.enable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to invoke manifest sort rewrite right after manifest merge"
+                                    + " during commit. The sort rewrite implementation is provided"
+                                    + " by an external module (e.g. morax) and discovered via"
+                                    + " ServiceLoader. When no implementation is registered on the"
+                                    + " classpath, this flag has no effect (manifest sort is"
+                                    + " silently skipped).");
+
+    public static final ConfigOption<String> MANIFEST_SORT_PARTITION_FIELD =
+            key("manifest-sort.partition-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Partition field name to sort manifest entries by. Validated by"
+                                    + " schema validation; resolved to a 0-based index by the"
+                                    + " caller (an external sort rewrite implementation). For"
+                                    + " single-partition tables, optional (defaults to the only"
+                                    + " partition field). For multi-partition tables, REQUIRED"
+                                    + " when 'manifest-sort.enable' is true.");
+
     public static final ConfigOption<String> UPSERT_KEY =
             key("upsert-key")
                     .stringType()
@@ -2562,6 +2586,15 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
+    }
+
+    public boolean manifestSortEnable() {
+        return options.get(MANIFEST_SORT_ENABLE);
+    }
+
+    @Nullable
+    public String manifestSortPartitionField() {
+        return options.get(MANIFEST_SORT_PARTITION_FIELD);
     }
 
     public String partitionDefaultName() {

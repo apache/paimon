@@ -18,7 +18,9 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.ManifestFileMerger;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -49,9 +51,16 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> input = createBaseManifestFileMetas(false);
         addDeltaManifests(input, false);
 
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
         assertEquivalentEntries(input, merged);
 
         // the first one is not deleted, it should not be merged
@@ -89,9 +98,16 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(makeEntry(true, "F", null)));
         input.add(makeManifest(makeEntry(true, "G", null)));
 
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", threshold + "B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, threshold, 3, 200, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
         assertEquivalentEntries(
                 input.stream()
                         .filter(f -> !baseFiles.contains(f.fileName()))

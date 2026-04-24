@@ -54,6 +54,7 @@ import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
@@ -958,13 +959,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // try to merge old manifest files to create base manifest list
             mergeAfterManifests =
                     ManifestFileMerger.merge(
-                            mergeBeforeManifests,
-                            manifestFile,
-                            options.manifestTargetSize().getBytes(),
-                            options.manifestMergeMinCount(),
-                            options.manifestFullCompactionThresholdSize().getBytes(),
-                            partitionType,
-                            options.scanManifestParallelism());
+                            mergeBeforeManifests, manifestFile, partitionType, options);
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -1185,15 +1180,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestFileMeta> mergeAfterManifests;
 
         // the fist trial
+        Options tempOptions = options.toConfiguration();
+        tempOptions.set("manifest.merge-min-count", "1");
+        tempOptions.set("manifest.full-compaction-threshold-size", "1B");
         mergeAfterManifests =
                 ManifestFileMerger.merge(
                         mergeBeforeManifests,
                         manifestFile,
-                        options.manifestTargetSize().getBytes(),
-                        1,
-                        1,
                         partitionType,
-                        options.scanManifestParallelism());
+                        CoreOptions.fromMap(tempOptions.toMap()));
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
