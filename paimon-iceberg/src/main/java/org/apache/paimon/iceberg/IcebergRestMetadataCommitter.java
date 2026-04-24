@@ -162,8 +162,12 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 } else {
                     LOG.info(
                             "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
-                            metadata.currentSnapshot().snapshotId(),
-                            newMetadata.currentSnapshot().snapshotId());
+                            metadata.currentSnapshot() != null
+                                    ? metadata.currentSnapshot().snapshotId()
+                                    : "No snapshot",
+                            newMetadata.currentSnapshot() != null
+                                    ? newMetadata.currentSnapshot().snapshotId()
+                                    : "No snapshot");
                     updatdeBuilder = updatesForIncorrectBase(newMetadata);
                 }
             }
