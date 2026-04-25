@@ -514,14 +514,7 @@ public class RESTCatalog implements Catalog {
             checkNotSystemTable(identifier, "createTable");
             validateCreateTable(schema, dataTokenEnabled);
             createExternalTablePathIfNotExist(schema);
-            tableDefaultOptions.forEach(
-                    (key, value) -> {
-                        if (schema.partitionKeys().isEmpty()
-                                && CoreOptions.requiresPartitionedTable(key)) {
-                            return;
-                        }
-                        schema.options().putIfAbsent(key, value);
-                    });
+            tableDefaultOptions.forEach(schema.options()::putIfAbsent);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {

@@ -204,16 +204,6 @@ public class SchemaValidation {
                             CoreOptions.STREAMING_READ_APPEND_OVERWRITE.key()));
         }
 
-        if (schema.partitionKeys().isEmpty()) {
-            for (String key : schema.options().keySet()) {
-                if (!CoreOptions.requiresPartitionedTable(key)) {
-                    continue;
-                }
-                throw new IllegalArgumentException(
-                        String.format("Can not set '%s' for non-partitioned table.", key));
-            }
-        }
-
         String recordLevelTimeField = options.recordLevelTimeField();
         if (recordLevelTimeField != null) {
             Optional<DataField> field =
