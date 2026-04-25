@@ -336,7 +336,8 @@ public class ParquetRowDataWriter {
                 recordConsumer.addBinary(Binary.fromReusedByteArray(BlobUtils.serializeBlob(blob)));
             } catch (Throwable t) {
                 throw new IllegalArgumentException(
-                        "BLOB inline fields require values to be a BlobDescriptor or "
+                        "BLOB inline fields configured by blob-descriptor-field or "
+                                + "blob-view-field require values to be a BlobDescriptor or "
                                 + "BlobViewStruct.",
                         t);
             }
