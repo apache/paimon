@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -399,6 +400,12 @@ public class DedicatedFormatRollingFileWriter
         for (InternalRow row : bundle) {
             write(row);
         }
+    }
+
+    @Override
+    public void appendFile(FileIO fileIO, Path sourcePath, long recordCount) {
+        throw new UnsupportedOperationException(
+                getClass().getSimpleName() + " does not support appendFile");
     }
 
     /**
