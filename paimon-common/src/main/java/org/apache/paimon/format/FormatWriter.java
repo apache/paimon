@@ -60,7 +60,7 @@ public interface FormatWriter extends Closeable {
      *
      * @throws UnsupportedOperationException if the format does not support appending files.
      */
-    default void appendFile(FileIO fileIO, Path sourcePath) throws IOException {
+    default void appendFile(FileIO fileIO, Path sourcePath, long fileLength) throws IOException {
         throw new UnsupportedOperationException(
                 getClass().getSimpleName() + " does not support appendFile");
     }

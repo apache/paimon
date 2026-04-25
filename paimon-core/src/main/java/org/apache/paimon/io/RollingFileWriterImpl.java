@@ -119,14 +119,14 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     }
 
     @Override
-    public void appendFile(FileIO fileIO, Path sourcePath, long sourceRecordCount)
+    public void appendFile(FileIO fileIO, Path sourcePath, long fileLength, long sourceRecordCount)
             throws IOException {
         try {
             if (currentWriter == null) {
                 openCurrentWriter();
             }
 
-            currentWriter.appendFile(fileIO, sourcePath, sourceRecordCount);
+            currentWriter.appendFile(fileIO, sourcePath, fileLength, sourceRecordCount);
             recordCount += sourceRecordCount;
 
             if (rollingFile(true)) {

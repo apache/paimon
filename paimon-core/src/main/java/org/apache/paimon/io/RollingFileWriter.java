@@ -46,7 +46,8 @@ public interface RollingFileWriter<T, R> extends FileWriter<T, List<R>> {
 
     void writeBundle(BundleRecords records) throws IOException;
 
-    void appendFile(FileIO fileIO, Path sourcePath, long recordCount) throws IOException;
+    void appendFile(FileIO fileIO, Path sourcePath, long fileLength, long recordCount)
+            throws IOException;
 
     @VisibleForTesting
     static FileWriterContext createFileWriterContext(

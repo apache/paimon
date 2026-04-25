@@ -89,9 +89,10 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     }
 
     @Override
-    public void appendFile(FileIO sourceFileIO, Path sourcePath, long sourceRecordCount)
+    public void appendFile(
+            FileIO sourceFileIO, Path sourcePath, long fileLength, long sourceRecordCount)
             throws IOException {
-        super.appendFile(sourceFileIO, sourcePath, sourceRecordCount);
+        super.appendFile(sourceFileIO, sourcePath, fileLength, sourceRecordCount);
         seqNumCounter.add(sourceRecordCount);
     }
 

@@ -220,7 +220,8 @@ public class RollingFileWriterTest {
                         Long.MAX_VALUE);
 
         for (int f = 0; f < 3; f++) {
-            writer.appendFile(fileIO, sourcePaths[f], recordsPerFile);
+            long fileLength = fileIO.getFileSize(sourcePaths[f]);
+            writer.appendFile(fileIO, sourcePaths[f], fileLength, recordsPerFile);
         }
         writer.close();
 

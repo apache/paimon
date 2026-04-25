@@ -59,9 +59,8 @@ public class ParquetBulkWriter implements FormatWriter {
     }
 
     @Override
-    public void appendFile(FileIO fileIO, Path sourcePath) throws IOException {
-        long fileLen = fileIO.getFileSize(sourcePath);
-        ParquetInputFile inputFile = ParquetInputFile.fromPath(fileIO, sourcePath, fileLen);
+    public void appendFile(FileIO fileIO, Path sourcePath, long fileLength) throws IOException {
+        ParquetInputFile inputFile = ParquetInputFile.fromPath(fileIO, sourcePath, fileLength);
         try (ParquetFileReader reader =
                 new ParquetFileReader(inputFile, ParquetReadOptions.builder().build(), null)) {
             reader.appendTo(parquetWriter.getFileWriter());

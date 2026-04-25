@@ -403,7 +403,7 @@ public class DedicatedFormatRollingFileWriter
     }
 
     @Override
-    public void appendFile(FileIO fileIO, Path sourcePath, long recordCount) {
+    public void appendFile(FileIO fileIO, Path sourcePath, long fileLength, long recordCount) {
         throw new UnsupportedOperationException(
                 getClass().getSimpleName() + " does not support appendFile");
     }
