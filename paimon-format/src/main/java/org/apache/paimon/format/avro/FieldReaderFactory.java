@@ -20,7 +20,6 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
-import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -266,7 +265,8 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
         private BlobBytesReader(UriReader uriReader) {
             if (uriReader == null) {
-                throw new IllegalArgumentException("UriReader must not be null for BlobBytesReader.");
+                throw new IllegalArgumentException(
+                        "UriReader must not be null for BlobBytesReader.");
             }
             this.uriReader = uriReader;
         }
