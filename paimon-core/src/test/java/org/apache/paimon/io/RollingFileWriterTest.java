@@ -41,6 +41,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -138,5 +139,94 @@ public class RollingFileWriterTest {
         DataFileMeta file = rollingFileWriter.result().get(0);
         assertThat(file.valueStatsCols()).isNull();
         assertThat(file.valueStats().minValues().getFieldCount()).isEqualTo(SCHEMA.getFieldCount());
+    }
+
+    @Test
+    public void testAppendFile() throws IOException {
+        LocalFileIO fileIO = LocalFileIO.create();
+        FileFormat fileFormat = FileFormat.fromIdentifier("parquet", new Options());
+        DataFilePathFactory sourcePathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/source"),
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+
+        // write 3 small source files
+        Path[] sourcePaths = new Path[3];
+        int recordsPerFile = 100;
+        for (int f = 0; f < 3; f++) {
+            Path path = sourcePathFactory.newPath();
+            sourcePaths[f] = path;
+            RowDataFileWriter sourceWriter =
+                    new RowDataFileWriter(
+                            fileIO,
+                            RollingFileWriter.createFileWriterContext(
+                                    fileFormat,
+                                    SCHEMA,
+                                    SimpleColStatsCollector.createFullStatsFactories(
+                                            SCHEMA.getFieldCount()),
+                                    CoreOptions.FILE_COMPRESSION.defaultValue()),
+                            path,
+                            SCHEMA,
+                            0L,
+                            () -> new LongCounter(0),
+                            new FileIndexOptions(),
+                            FileSource.COMPACT,
+                            true,
+                            false,
+                            false,
+                            null);
+            for (int i = 0; i < recordsPerFile; i++) {
+                sourceWriter.write(GenericRow.of(f * recordsPerFile + i));
+            }
+            sourceWriter.close();
+        }
+
+        // use a large target size so all appended files go into one output file
+        DataFilePathFactory outputPathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/output"),
+                        CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+        RollingFileWriterImpl<InternalRow, DataFileMeta> writer =
+                new RollingFileWriterImpl<>(
+                        () ->
+                                new RowDataFileWriter(
+                                        fileIO,
+                                        RollingFileWriter.createFileWriterContext(
+                                                fileFormat,
+                                                SCHEMA,
+                                                SimpleColStatsCollector.createFullStatsFactories(
+                                                        SCHEMA.getFieldCount()),
+                                                CoreOptions.FILE_COMPRESSION.defaultValue()),
+                                        outputPathFactory.newPath(),
+                                        SCHEMA,
+                                        0L,
+                                        () -> new LongCounter(0),
+                                        new FileIndexOptions(),
+                                        FileSource.COMPACT,
+                                        true,
+                                        false,
+                                        false,
+                                        null),
+                        Long.MAX_VALUE);
+
+        for (int f = 0; f < 3; f++) {
+            writer.appendFile(fileIO, sourcePaths[f], recordsPerFile);
+        }
+        writer.close();
+
+        List<DataFileMeta> results = writer.result();
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).rowCount()).isEqualTo(recordsPerFile * 3);
+        assertThat(writer.recordCount()).isEqualTo(recordsPerFile * 3);
     }
 }

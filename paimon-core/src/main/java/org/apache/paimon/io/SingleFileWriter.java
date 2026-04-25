@@ -158,6 +158,22 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         return recordCount;
     }
 
+    public void appendFile(FileIO sourceFileIO, Path sourcePath, long sourceRecordCount)
+            throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        try {
+            writer.appendFile(sourceFileIO, sourcePath);
+            recordCount += sourceRecordCount;
+        } catch (Throwable e) {
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
+            abort();
+            throw e;
+        }
+    }
+
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
         return writer.reachTargetSize(suggestedCheck, targetSize);
     }

@@ -59,6 +59,7 @@ public class ParquetWriter<T> implements Closeable {
     public static final int MAX_PADDING_SIZE_DEFAULT = 8 * 1024 * 1024; // 8MB
 
     private final InternalParquetRecordWriter<T> writer;
+    private final ParquetFileWriter fileWriter;
     private final CompressionCodecFactory codecFactory;
 
     ParquetWriter(
@@ -98,6 +99,7 @@ public class ParquetWriter<T> implements Closeable {
                         encodingProps);
         fileWriter.start();
 
+        this.fileWriter = fileWriter;
         this.codecFactory = codecFactory;
         CompressionCodecFactory.BytesInputCompressor compressor =
                 codecFactory.getCompressor(compressionCodecName);
@@ -169,6 +171,10 @@ public class ParquetWriter<T> implements Closeable {
     /** @return the total size of data written to the file and buffered in memory */
     public long getDataSize() {
         return writer.getDataSize();
+    }
+
+    public ParquetFileWriter getFileWriter() {
+        return fileWriter;
     }
 
     /**

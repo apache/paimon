@@ -20,7 +20,12 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.parquet.ParquetInputFile;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 
+import org.apache.parquet.ParquetReadOptions;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 
@@ -51,6 +56,16 @@ public class ParquetBulkWriter implements FormatWriter {
     @Override
     public void addElement(InternalRow datum) throws IOException {
         parquetWriter.write(datum);
+    }
+
+    @Override
+    public void appendFile(FileIO fileIO, Path sourcePath) throws IOException {
+        long fileLen = fileIO.getFileSize(sourcePath);
+        ParquetInputFile inputFile = ParquetInputFile.fromPath(fileIO, sourcePath, fileLen);
+        try (ParquetFileReader reader =
+                new ParquetFileReader(inputFile, ParquetReadOptions.builder().build(), null)) {
+            reader.appendTo(parquetWriter.getFileWriter());
+        }
     }
 
     @Override

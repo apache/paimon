@@ -19,6 +19,8 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -101,6 +103,31 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
 
             currentWriter.writeBundle(bundle);
             recordCount += bundle.rowCount();
+
+            if (rollingFile(true)) {
+                closeCurrentWriter();
+            }
+        } catch (Throwable e) {
+            LOG.warn(
+                    "Exception occurs when writing file "
+                            + (currentWriter == null ? null : currentWriter.path())
+                            + ". Cleaning up.",
+                    e);
+            abort();
+            throw e;
+        }
+    }
+
+    @Override
+    public void appendFile(FileIO fileIO, Path sourcePath, long sourceRecordCount)
+            throws IOException {
+        try {
+            if (currentWriter == null) {
+                openCurrentWriter();
+            }
+
+            currentWriter.appendFile(fileIO, sourcePath, sourceRecordCount);
+            recordCount += sourceRecordCount;
 
             if (rollingFile(true)) {
                 closeCurrentWriter();

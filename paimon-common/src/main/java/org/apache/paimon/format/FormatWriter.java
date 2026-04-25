@@ -19,6 +19,8 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 
 import javax.annotation.Nullable;
 
@@ -51,6 +53,17 @@ public interface FormatWriter extends Closeable {
      * @throws IOException Thrown if calculating the length fails.
      */
     boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException;
+
+    /**
+     * Append raw data from a source file without deserialization. For example, Parquet can append
+     * row groups directly.
+     *
+     * @throws UnsupportedOperationException if the format does not support appending files.
+     */
+    default void appendFile(FileIO fileIO, Path sourcePath) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getSimpleName() + " does not support appendFile");
+    }
 
     /**
      * Returns format-specific writer metadata that can be used to extract statistics without

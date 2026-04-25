@@ -22,6 +22,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.format.avro.AvroFileFormat;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
@@ -43,6 +45,8 @@ public interface RollingFileWriter<T, R> extends FileWriter<T, List<R>> {
     int CHECK_ROLLING_RECORD_CNT = 1000;
 
     void writeBundle(BundleRecords records) throws IOException;
+
+    void appendFile(FileIO fileIO, Path sourcePath, long recordCount) throws IOException;
 
     @VisibleForTesting
     static FileWriterContext createFileWriterContext(
