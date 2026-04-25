@@ -26,7 +26,6 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.BlobViewResolver;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.InternalRow;
@@ -207,7 +206,9 @@ public class BlobViewLookup {
     }
 
     private static TableReadPlan createTableReadPlan(
-            CatalogContext catalogContext, TableReferences tableReferences, CatalogLoader catalogLoader)
+            CatalogContext catalogContext,
+            TableReferences tableReferences,
+            CatalogLoader catalogLoader)
             throws Exception {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
             List<FieldRead> fields = new ArrayList<>(tableReferences.referencesByField.size());

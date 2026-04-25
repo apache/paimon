@@ -755,7 +755,7 @@ public class BlobTableTest extends TableTestBase {
                                         SchemaChange.renameColumn("f2", "f2_renamed"),
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class)
-                        .hasMessageContaining("Cannot rename BLOB column");
+                .hasMessageContaining("Cannot rename BLOB column");
     }
 
     @Test

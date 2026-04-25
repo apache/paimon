@@ -33,7 +33,9 @@ import org.apache.paimon.types.RowKind;
 
 import java.util.Set;
 
-/** {@link InternalRow} wrapper that resolves {@link BlobView} when {@link #getBlob(int)} is called. */
+/**
+ * {@link InternalRow} wrapper that resolves {@link BlobView} when {@link #getBlob(int)} is called.
+ */
 class BlobViewResolvingRow implements InternalRow {
 
     private final InternalRow wrapped;
