@@ -48,7 +48,7 @@ def _truncate_max(value, length):
         truncated = value[:length]
         for i in range(len(truncated) - 1, -1, -1):
             next_cp = ord(truncated[i]) + 1
-            if next_cp != 0 and next_cp <= 0x10FFFF:
+            if next_cp <= 0x10FFFF:
                 return truncated[:i] + chr(next_cp)
         return None
     return value
