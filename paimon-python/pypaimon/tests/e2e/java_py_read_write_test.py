@@ -775,7 +775,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Write (f0, f1) columns
         write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
+        table_write = write_builder.new_write().with_write_type(['f0', 'f1'])
         table_commit = write_builder.new_commit()
         data0 = pa.Table.from_pydict({
             'f0': list(range(5)),
