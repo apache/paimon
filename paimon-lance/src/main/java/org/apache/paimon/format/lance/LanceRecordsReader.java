@@ -143,10 +143,11 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
     private static class RangePositionGenerator implements PositionGenerator {
         private final List<Range> ranges;
         private int currentRangeIndex = 0;
-        private int currentPosition = -1;
+        private int currentPosition;
 
         public RangePositionGenerator(List<Range> ranges) {
             this.ranges = ranges;
+            this.currentPosition = ranges.get(0).getStart() - 1;
         }
 
         @Override
