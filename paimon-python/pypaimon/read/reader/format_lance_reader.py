@@ -44,18 +44,24 @@ class FormatLanceReader(RecordBatchReader):
 
         file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
 
-        lance_reader = lance.file.LanceFileReader(
-            file_path_for_lance,
-            storage_options=storage_options)
-        pa_table = lance_reader.read_all().to_table()
-
-        file_schema_names = set(pa_table.schema.names)
+        # Read file metadata (footer only) to get actual schema
+        file_schema_names = set(
+            lance.file.LanceFileReader(
+                file_path_for_lance, storage_options=storage_options
+            ).metadata().schema.names
+        )
         self.existing_fields = [f.name for f in read_fields
                                 if f.name in file_schema_names]
         self.missing_fields = [f.name for f in read_fields
                                if f.name not in file_schema_names]
-        if self.existing_fields and len(self.existing_fields) < len(pa_table.schema):
-            pa_table = pa_table.select(self.existing_fields)
+
+        # Read data with column pruning
+        columns_for_lance = self.existing_fields if self.existing_fields else None
+        lance_reader = lance.file.LanceFileReader(
+            file_path_for_lance,
+            storage_options=storage_options,
+            columns=columns_for_lance)
+        pa_table = lance_reader.read_all().to_table()
 
         # Precompute output schema for missing fields
         if self.missing_fields:
