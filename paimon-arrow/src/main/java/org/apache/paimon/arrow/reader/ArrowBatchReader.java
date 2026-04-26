@@ -66,23 +66,31 @@ public class ArrowBatchReader {
         this.caseSensitive = caseSensitive;
     }
 
+    /** A {@link ColumnVector} that always returns null for any position. */
+    private static final ColumnVector NULL_COLUMN_VECTOR = i -> true;
+
     public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
         int[] mapping = new int[projectedRowType.getFieldCount()];
         Schema arrowSchema = vsr.getSchema();
         List<DataField> dataFields = projectedRowType.getFields();
         for (int i = 0; i < dataFields.size(); ++i) {
+            String fieldName = dataFields.get(i).name();
             try {
-                String fieldName = dataFields.get(i).name();
                 Field field = arrowSchema.findField(toLowerCaseIfNeed(fieldName, caseSensitive));
-                int idx = arrowSchema.getFields().indexOf(field);
-                mapping[i] = idx;
+                mapping[i] = arrowSchema.getFields().indexOf(field);
             } catch (IllegalArgumentException e) {
-                throw new RuntimeException(e);
+                // Field does not exist in the Arrow schema (e.g., virtual system fields
+                // like _ROW_ID, _SEQUENCE_NUMBER). Mark as missing; will use null vector.
+                mapping[i] = -1;
             }
         }
 
         for (int i = 0; i < batch.columns.length; i++) {
-            batch.columns[i] = convertors[i].convertVector(vsr.getVector(mapping[i]));
+            if (mapping[i] >= 0) {
+                batch.columns[i] = convertors[i].convertVector(vsr.getVector(mapping[i]));
+            } else {
+                batch.columns[i] = NULL_COLUMN_VECTOR;
+            }
         }
 
         int rowCount = vsr.getRowCount();

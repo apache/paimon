@@ -39,13 +39,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** File reade for lance. */
+/** File reader for lance. */
 public class LanceRecordsReader implements FileRecordReader<InternalRow> {
 
     private final ArrowBatchReader arrowBatchReader;
     private final Path filePath;
     private final LanceReader reader;
     private final PositionGenerator positionGenerator;
+
+    // Hold the current VectorSchemaRoot to keep Arrow memory alive until the next batch
+    // is loaded or the reader is closed. This avoids SIGSEGV when rows collected from
+    // the batch are accessed after releaseBatch() is called.
+    @Nullable private VectorSchemaRoot currentVsr;
 
     public LanceRecordsReader(
             Path path,
@@ -77,7 +82,9 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
         try {
+            closePreviousBatch();
             VectorSchemaRoot vsr = reader.readBatch();
+            this.currentVsr = vsr;
             Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
             return new FileRecordIterator<InternalRow>() {
                 @Override
@@ -103,7 +110,9 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
 
                 @Override
                 public void releaseBatch() {
-                    vsr.close();
+                    // Do not close vsr here. Arrow memory is kept alive until the next
+                    // batch is loaded or the reader is closed, so that ColumnarRow
+                    // references remain valid after releaseBatch().
                 }
             };
         } catch (EOFException e) {
@@ -111,8 +120,16 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
         }
     }
 
+    private void closePreviousBatch() {
+        if (currentVsr != null) {
+            currentVsr.close();
+            currentVsr = null;
+        }
+    }
+
     @Override
     public void close() throws IOException {
+        closePreviousBatch();
         this.reader.close();
     }
 

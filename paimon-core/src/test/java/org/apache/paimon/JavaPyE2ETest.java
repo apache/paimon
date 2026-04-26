@@ -33,6 +33,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -51,6 +52,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -986,6 +988,90 @@ public class JavaPyE2ETest {
         Identifier id = identifier("compact_conflict_test");
         doDataEvolutionCompact((FileStoreTable) catalog.getTable(id));
         LOG.info("compact_conflict_test: compact done, 5 files merged into 1 (1000 rows)");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testDataEvolutionWrite() throws Exception {
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            Identifier identifier = identifier("data_evolution_test_" + format);
+            catalog.dropTable(identifier, true);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("f0", DataTypes.INT())
+                            .column("f1", DataTypes.STRING())
+                            .column("f2", DataTypes.STRING())
+                            .option(ROW_TRACKING_ENABLED.key(), "true")
+                            .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                            .option(CoreOptions.FILE_FORMAT.key(), format)
+                            .build();
+            catalog.createTable(identifier, schema, false);
+
+            RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+            RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+            // Write (f0, f1) columns
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType0)) {
+                for (int i = 0; i < 5; i++) {
+                    write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+                }
+                builder.newCommit().commit(write.prepareCommit());
+            }
+
+            // Write (f2) column with setFirstRowId
+            table = (FileStoreTable) catalog.getTable(identifier);
+            long rowId = table.snapshotManager().latestSnapshot().nextRowId() - 5;
+            builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1)) {
+                for (int i = 0; i < 5; i++) {
+                    write.write(GenericRow.of(BinaryString.fromString("b" + i)));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                setFirstRowId(messages, rowId);
+                builder.newCommit().commit(messages);
+            }
+
+            LOG.info("data_evolution_test_{}: written 5 rows with partial columns", format);
+        }
+    }
+
+    /** Read data evolution tables written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadDataEvolutionTable() throws Exception {
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            Identifier identifier = identifier("data_evolution_test_py_" + format);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = new ArrayList<>(readBuilder.newScan().plan().splits());
+            TableRead read = readBuilder.newRead();
+            List<String> res =
+                    getResult(
+                            read,
+                            splits,
+                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            assertThat(res).hasSize(5);
+            LOG.info("data_evolution_test_py_{}: read {} rows", format, res.size());
+        }
+    }
+
+    private void setFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        messages.forEach(
+                c -> {
+                    CommitMessageImpl impl = (CommitMessageImpl) c;
+                    List<DataFileMeta> newFiles =
+                            new ArrayList<>(impl.newFilesIncrement().newFiles());
+                    impl.newFilesIncrement().newFiles().clear();
+                    impl.newFilesIncrement()
+                            .newFiles()
+                            .addAll(
+                                    newFiles.stream()
+                                            .map(f -> f.assignFirstRowId(firstRowId))
+                                            .collect(Collectors.toList()));
+                });
     }
 
     private void doDataEvolutionCompact(FileStoreTable table) throws Exception {
