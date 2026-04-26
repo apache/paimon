@@ -147,6 +147,36 @@ under the License.
             <td>Sync all table properties to the catalog metastore (e.g. Hive metastore, JDBC catalog store)</td>
         </tr>
         <tr>
+            <td><h5>local-cache.block-size</h5></td>
+            <td style="word-wrap: break-word;">1 mb</td>
+            <td>MemorySize</td>
+            <td>Block size for local cache.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Directory for local block cache on disk. If not configured, memory cache is used instead.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable local block cache for file reads. If local-cache.dir is configured, disk cache is used; otherwise memory cache is used.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.max-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of the local block cache. Unlimited by default.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.whitelist</h5></td>
+            <td style="word-wrap: break-word;">"meta,global-index"</td>
+            <td>String</td>
+            <td>Comma-separated list of file types to cache. Supported values: meta, global-index, bucket-index, data, file-index.</td>
+        </tr>
+        <tr>
             <td><h5>table.type</h5></td>
             <td style="word-wrap: break-word;">managed</td>
             <td><p>Enum</p></td>

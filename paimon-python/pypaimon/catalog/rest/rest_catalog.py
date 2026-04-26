@@ -41,6 +41,7 @@ from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
+from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -614,7 +615,8 @@ class RESTCatalog(Catalog):
         )
 
     def file_io_from_options(self, table_path: str) -> FileIO:
-        return FileIO.get(table_path, self.context.options)
+        return CachingFileIO.wrap_with_caching_if_needed(
+            FileIO.get(table_path, self.context.options), self.context.options)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
         """

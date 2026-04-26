@@ -25,6 +25,7 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -90,7 +91,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected AbstractCatalog(FileIO fileIO, CatalogContext context) {
-        this.fileIO = fileIO;
+        this.fileIO = CachingFileIO.wrapWithCachingIfNeeded(fileIO, context);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
         this.context = context;
     }

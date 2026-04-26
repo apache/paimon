@@ -35,6 +35,7 @@ import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
+import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -1192,9 +1193,11 @@ public class RESTCatalog implements Catalog {
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {
-        return dataTokenEnabled
-                ? new RESTTokenFileIO(context, api, identifier, path)
-                : fileIOFromOptions(path);
+        return CachingFileIO.wrapWithCachingIfNeeded(
+                dataTokenEnabled
+                        ? new RESTTokenFileIO(context, api, identifier, path)
+                        : fileIOFromOptions(path),
+                context);
     }
 
     private FileIO fileIOFromOptions(Path path) {

@@ -388,6 +388,50 @@ class CoreOptions:
         )
     )
 
+    LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("local-cache.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable local block cache for file reads. "
+            "If local-cache.dir is configured, disk cache is used; otherwise memory cache is used."
+        )
+    )
+
+    LOCAL_CACHE_DIR: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory for local block cache on disk. "
+            "If not configured, memory cache is used instead."
+        )
+    )
+
+    LOCAL_CACHE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("local-cache.max-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Maximum total size of the local block cache. Unlimited by default.")
+    )
+
+    LOCAL_CACHE_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("local-cache.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description("Block size for local cache.")
+    )
+
+    LOCAL_CACHE_WHITELIST: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.whitelist")
+        .string_type()
+        .default_value("meta,global-index")
+        .with_description(
+            "Comma-separated list of file types to cache. "
+            "Supported values: meta, global-index, bucket-index, data, file-index."
+        )
+    )
+
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
@@ -626,6 +670,21 @@ class CoreOptions:
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def local_cache_enabled(self) -> bool:
+        return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)
+
+    def local_cache_dir(self) -> Optional[str]:
+        return self.options.get(CoreOptions.LOCAL_CACHE_DIR)
+
+    def local_cache_max_size(self) -> Optional[MemorySize]:
+        return self.options.get(CoreOptions.LOCAL_CACHE_MAX_SIZE)
+
+    def local_cache_block_size(self) -> MemorySize:
+        return self.options.get(CoreOptions.LOCAL_CACHE_BLOCK_SIZE)
+
+    def local_cache_whitelist(self) -> str:
+        return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
