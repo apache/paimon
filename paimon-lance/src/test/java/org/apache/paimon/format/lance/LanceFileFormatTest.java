@@ -69,6 +69,7 @@ public class LanceFileFormatTest {
                         .field("isActive", DataTypes.BOOLEAN())
                         .field("bytes", DataTypes.BYTES())
                         .field("timestamp", DataTypes.TIMESTAMP())
+                        .field("timestamp_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
                         .field("date", DataTypes.DATE())
                         .field("decimal", DataTypes.DECIMAL(10, 2))
                         .field("array", DataTypes.ARRAY(DataTypes.INT()))
