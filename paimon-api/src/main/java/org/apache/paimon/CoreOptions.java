@@ -710,6 +710,41 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size for caching.");
 
+    public static final ConfigOption<Boolean> FILE_CACHE_ENABLED =
+            key("file-cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to enable local disk block cache for file reads.");
+
+    public static final ConfigOption<String> FILE_CACHE_DIR =
+            key("file-cache.dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Directory for file block cache. "
+                                    + "Defaults to a 'paimon-file-cache' subdirectory under the system temp directory.");
+
+    public static final ConfigOption<MemorySize> FILE_CACHE_MAX_SIZE =
+            key("file-cache.max-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximum total size of the local disk block cache. Unlimited by default.");
+
+    public static final ConfigOption<MemorySize> FILE_CACHE_BLOCK_SIZE =
+            key("file-cache.block-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(1))
+                    .withDescription("Block size for local disk cache.");
+
+    public static final ConfigOption<String> FILE_CACHE_WHITELIST =
+            key("file-cache.whitelist")
+                    .stringType()
+                    .defaultValue("meta,global-index")
+                    .withDescription(
+                            "Comma-separated list of file types to cache. "
+                                    + "Supported values: meta, global-index, bucket-index, data, file-index.");
+
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
             key("target-file-size")
                     .memoryType()
@@ -2885,6 +2920,28 @@ public class CoreOptions implements Serializable {
 
     public int cachePageSize() {
         return (int) options.get(CACHE_PAGE_SIZE).getBytes();
+    }
+
+    public boolean fileCacheEnabled() {
+        return options.get(FILE_CACHE_ENABLED);
+    }
+
+    @Nullable
+    public String fileCacheDir() {
+        return options.get(FILE_CACHE_DIR);
+    }
+
+    @Nullable
+    public MemorySize fileCacheMaxSize() {
+        return options.get(FILE_CACHE_MAX_SIZE);
+    }
+
+    public MemorySize fileCacheBlockSize() {
+        return options.get(FILE_CACHE_BLOCK_SIZE);
+    }
+
+    public String fileCacheWhitelist() {
+        return options.get(FILE_CACHE_WHITELIST);
     }
 
     public MemorySize lookupCacheMaxMemory() {
