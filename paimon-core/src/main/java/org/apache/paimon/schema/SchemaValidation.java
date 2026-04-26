@@ -204,13 +204,6 @@ public class SchemaValidation {
                             CoreOptions.STREAMING_READ_APPEND_OVERWRITE.key()));
         }
 
-        if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
-            if (schema.partitionKeys().isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Can not set 'partition.expiration-time' for non-partitioned table.");
-            }
-        }
-
         String recordLevelTimeField = options.recordLevelTimeField();
         if (recordLevelTimeField != null) {
             Optional<DataField> field =
