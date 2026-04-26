@@ -76,7 +76,7 @@ public class ArrowBatchReader {
         Schema arrowSchema = vsr.getSchema();
         Set<String> arrowFieldNames = new HashSet<>();
         for (Field f : arrowSchema.getFields()) {
-            arrowFieldNames.add(f.getName());
+            arrowFieldNames.add(toLowerCaseIfNeed(f.getName(), caseSensitive));
         }
         List<DataField> dataFields = projectedRowType.getFields();
         for (int i = 0; i < dataFields.size(); ++i) {
