@@ -50,6 +50,7 @@ class FormatLanceReader(RecordBatchReader):
         self.missing_fields = [f.name for f in read_fields
                                if SpecialFields.is_system_field(f.name)]
 
+        # existing_fields is never empty in practice (upstream always includes data fields)
         columns_for_lance = self.existing_fields if self.existing_fields else None
         lance_reader = lance.file.LanceFileReader(
             file_path_for_lance,

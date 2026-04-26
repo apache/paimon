@@ -82,8 +82,10 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
         try {
-            closePreviousBatch();
             VectorSchemaRoot vsr = reader.readBatch();
+            // Hold reference to prevent GC of off-heap Arrow memory (SIGSEGV fix).
+            // Do NOT close the previous VSR here — ArrowReader reuses the same
+            // VectorSchemaRoot across batches, closing it would release shared buffers.
             this.currentVsr = vsr;
             Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
             return new FileRecordIterator<InternalRow>() {
@@ -120,16 +122,9 @@ public class LanceRecordsReader implements FileRecordReader<InternalRow> {
         }
     }
 
-    private void closePreviousBatch() {
-        if (currentVsr != null) {
-            currentVsr.close();
-            currentVsr = null;
-        }
-    }
-
     @Override
     public void close() throws IOException {
-        closePreviousBatch();
+        this.currentVsr = null;
         this.reader.close();
     }
 

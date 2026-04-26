@@ -30,10 +30,10 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
@@ -74,18 +74,15 @@ public class ArrowBatchReader {
     public Iterable<InternalRow> readBatch(VectorSchemaRoot vsr) {
         int[] mapping = new int[projectedRowType.getFieldCount()];
         Schema arrowSchema = vsr.getSchema();
-        Set<String> arrowFieldNames = new HashSet<>();
-        for (Field f : arrowSchema.getFields()) {
-            arrowFieldNames.add(toLowerCaseIfNeed(f.getName(), caseSensitive));
+        Map<String, Integer> arrowFieldIndex = new HashMap<>();
+        List<Field> arrowFields = arrowSchema.getFields();
+        for (int j = 0; j < arrowFields.size(); j++) {
+            arrowFieldIndex.put(toLowerCaseIfNeed(arrowFields.get(j).getName(), caseSensitive), j);
         }
         List<DataField> dataFields = projectedRowType.getFields();
         for (int i = 0; i < dataFields.size(); ++i) {
             String fieldName = toLowerCaseIfNeed(dataFields.get(i).name(), caseSensitive);
-            if (arrowFieldNames.contains(fieldName)) {
-                mapping[i] = arrowSchema.getFields().indexOf(arrowSchema.findField(fieldName));
-            } else {
-                mapping[i] = -1;
-            }
+            mapping[i] = arrowFieldIndex.getOrDefault(fieldName, -1);
         }
 
         for (int i = 0; i < batch.columns.length; i++) {
