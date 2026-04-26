@@ -312,11 +312,23 @@ class DataWriter(ABC):
         )
 
     @staticmethod
+    def _parse_truncate_length(mode: str):
+        upper = mode.upper()
+        if upper in ("NONE", "COUNTS", "FULL"):
+            return upper, None
+        if upper.startswith("TRUNCATE(") and upper.endswith(")"):
+            length = int(upper[9:-1])
+            if length <= 0:
+                raise ValueError(f"Truncate length must be > 0, got: {mode}")
+            return "TRUNCATE", length
+        raise ValueError(f"Unsupported metadata.stats-mode: {mode}")
+
+    @staticmethod
     def _get_column_stats(record_batch: pa.RecordBatch, column_name: str,
                           mode: str = "truncate(16)") -> Dict:
-        upper_mode = mode.upper()
+        parsed_mode, truncate_length = DataWriter._parse_truncate_length(mode)
 
-        if upper_mode == "NONE":
+        if parsed_mode == "NONE":
             return {
                 "min_values": None,
                 "max_values": None,
@@ -325,7 +337,7 @@ class DataWriter(ABC):
 
         column_array = record_batch.column(column_name)
 
-        if upper_mode == "COUNTS":
+        if parsed_mode == "COUNTS":
             return {
                 "min_values": None,
                 "max_values": None,
@@ -353,10 +365,11 @@ class DataWriter(ABC):
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
 
-        if upper_mode.startswith("TRUNCATE(") and upper_mode.endswith(")"):
-            truncate_length = int(upper_mode[9:-1])
+        if truncate_length is not None:
             min_values = _truncate_min(min_values, truncate_length)
             max_values = _truncate_max(max_values, truncate_length)
+            if max_values is None:
+                min_values = None
 
         return {
             "min_values": min_values,

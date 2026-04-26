@@ -477,7 +477,7 @@ class CoreOptions:
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
 
     def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) != "none"
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default).upper() != "NONE"
 
     def metadata_stats_mode(self, default=None):
         return self.options.get(CoreOptions.METADATA_STATS_MODE, default)
