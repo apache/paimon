@@ -361,10 +361,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         metrics.deletedDataFiles = 0;
         metrics.deletedRecords = 0;
         metrics.deletedFilesSize = 0;
-        metrics.totalRecords =
-                paimonSnapshot.totalRecordCount() == null
-                        ? metrics.addedRecords
-                        : paimonSnapshot.totalRecordCount();
+        metrics.totalRecords = metrics.addedRecords;
         metrics.totalFilesSize = metrics.addedFilesSize;
         long totalDeleteFiles = dvFileEntries.stream().filter(IcebergManifestEntry::isLive).count();
         long totalPositionDeleteRecords =
@@ -648,28 +645,22 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         metrics.changedPartitionCount = modifiedPartitionsSet.size();
 
         IcebergSnapshot baseSnapshot = baseMetadata.currentSnapshot();
-        Long snapshotTotalRecords = snapshot.totalRecordCount();
+
         Long previousTotalRecordsValue =
                 getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_RECORDS);
         long previousTotalRecords =
                 previousTotalRecordsValue != null
                         ? previousTotalRecordsValue
                         : computeLiveRowCount(baseDataManifestFileMetas);
-        if (snapshotTotalRecords != null) {
-            metrics.totalRecords = snapshotTotalRecords;
-        } else {
-            metrics.totalRecords =
-                    Math.max(
-                            0,
-                            previousTotalRecords + metrics.addedRecords - metrics.deletedRecords);
-        }
+        metrics.totalRecords =
+                Math.max(0, previousTotalRecords + metrics.addedRecords - metrics.deletedRecords);
 
         Long previousTotalDataFilesValue =
                 getSummaryLong(baseSnapshot, SNAPSHOT_SUMMARY_TOTAL_DATA_FILES);
         long previousTotalDataFiles =
                 previousTotalDataFilesValue != null
                         ? previousTotalDataFilesValue
-                        : computeLiveDataFileCount(baseDataManifestFileMetas);
+                        : computeLiveFileCount(baseDataManifestFileMetas);
         metrics.totalDataFiles =
                 Math.max(
                         0,
@@ -686,7 +677,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         0,
                         previousTotalFilesSize + metrics.addedFilesSize - metrics.deletedFilesSize);
 
-        metrics.totalDeleteFiles = computeLiveDeleteFileCount(newDVManifestFileMetas);
+        metrics.totalDeleteFiles = computeLiveFileCount(newDVManifestFileMetas);
         metrics.totalPositionDeletes = computeLiveRowCount(newDVManifestFileMetas);
         metrics.totalEqualityDeletes = 0;
 
@@ -1413,7 +1404,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return summary;
     }
 
-    private long computeLiveDataFileCount(List<IcebergManifestFileMeta> manifestMetas) {
+    private long computeLiveFileCount(List<IcebergManifestFileMeta> manifestMetas) {
         return manifestMetas.stream()
                 .mapToLong(
                         meta ->
@@ -1430,16 +1421,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 meta.addedRowsCount()
                                         + meta.existingRowsCount()
                                         - meta.deletedRowsCount())
-                .sum();
-    }
-
-    private long computeLiveDeleteFileCount(List<IcebergManifestFileMeta> manifestMetas) {
-        return manifestMetas.stream()
-                .mapToLong(
-                        meta ->
-                                meta.addedFilesCount()
-                                        + meta.existingFilesCount()
-                                        - meta.deletedFilesCount())
                 .sum();
     }
 
