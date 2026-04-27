@@ -19,9 +19,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.fs.OffsetSeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.UriReader;
 
 import javax.annotation.Nullable;
@@ -42,8 +40,7 @@ public class BlobView implements Blob, Serializable {
     private static final long serialVersionUID = 1L;
 
     private final BlobViewStruct viewStruct;
-    @Nullable private UriReader uriReader;
-    @Nullable private BlobDescriptor descriptor;
+    @Nullable private transient BlobRef resolvedBlob;
 
     public BlobView(BlobViewStruct viewStruct) {
         this.viewStruct = viewStruct;
@@ -54,39 +51,32 @@ public class BlobView implements Blob, Serializable {
     }
 
     public boolean isResolved() {
-        return uriReader != null && descriptor != null;
+        return resolvedBlob != null;
     }
 
     /** Resolves this blob view in place by setting the reader and descriptor. */
     public void resolve(UriReader reader, BlobDescriptor desc) {
-        this.uriReader = reader;
-        this.descriptor = desc;
+        this.resolvedBlob = new BlobRef(reader, desc);
     }
 
     @Override
     public byte[] toData() {
-        try {
-            return IOUtils.readFully(newInputStream(), true);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return resolvedBlob().toData();
     }
 
     @Override
     public BlobDescriptor toDescriptor() {
-        if (descriptor != null) {
-            return descriptor;
-        }
-        throw new IllegalStateException("BlobView is not resolved.");
+        return resolvedBlob().toDescriptor();
     }
 
     @Override
     public SeekableInputStream newInputStream() throws IOException {
-        if (uriReader != null && descriptor != null) {
-            return new OffsetSeekableInputStream(
-                    uriReader.newInputStream(descriptor.uri()),
-                    descriptor.offset(),
-                    descriptor.length());
+        return resolvedBlob().newInputStream();
+    }
+
+    private BlobRef resolvedBlob() {
+        if (resolvedBlob != null) {
+            return resolvedBlob;
         }
         throw new IllegalStateException("BlobView is not resolved.");
     }
