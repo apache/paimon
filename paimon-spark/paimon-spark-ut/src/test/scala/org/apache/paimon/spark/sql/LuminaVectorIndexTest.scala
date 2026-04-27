@@ -26,6 +26,7 @@ import scala.collection.JavaConverters._
 class LuminaVectorIndexTest extends PaimonSparkTestBase {
 
   private val indexType = "lumina"
+  private val legacyIndexType = "lumina-vector-ann"
   private val defaultOptions = "lumina.index.dimension=3"
 
   // ========== Index Creation Tests ==========
@@ -65,6 +66,44 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
       assert(indexEntries.nonEmpty)
       val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100L)
+    }
+  }
+
+  test("create lumina vector index - legacy index type") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      val values = (0 until 10)
+        .map(
+          i => s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)))")
+        .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output = spark
+        .sql(
+          s"CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => '$legacyIndexType', options => '$defaultOptions')")
+        .collect()
+        .head
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val indexEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == legacyIndexType)
+
+      assert(indexEntries.nonEmpty)
+      val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
+      assert(totalRowCount == 10L)
     }
   }
 

@@ -126,14 +126,13 @@ class VectorReaderFactoryTest(unittest.TestCase):
 
     def test_lumina_reader_accepts_new_and_legacy_identifiers(self):
         from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
-            LUMINA_IDENTIFIER,
-            LUMINA_VECTOR_ANN_IDENTIFIER,
+            LUMINA_IDENTIFIERS,
             LuminaVectorGlobalIndexReader,
         )
         from pypaimon.table.source.vector_search_read import _create_vector_reader
 
         io_meta = GlobalIndexIOMeta(file_name="vec.index", file_size=1)
-        for index_type in (LUMINA_IDENTIFIER, LUMINA_VECTOR_ANN_IDENTIFIER):
+        for index_type in LUMINA_IDENTIFIERS:
             reader = _create_vector_reader(
                 index_type, object(), "/tmp/unused", [io_meta], {})
             try:
@@ -151,11 +150,11 @@ class VectorSearchFilterTest(unittest.TestCase):
         # 2 vector files ([0,4], [5,9]) + 1 btree on `id` covering [0,9] with
         # an external_path so we can assert external_path is threaded through.
         self.entries = [
-            _entry(None, field_id=1, index_type="lumina",
+            _entry(None, field_id=1, index_type="lumina-vector-ann",
                    file_name="vec-0.index",
                    row_range_start=0, row_range_end=4,
                    external_path="oss://bucket/vec-0.index"),
-            _entry(None, field_id=1, index_type="lumina",
+            _entry(None, field_id=1, index_type="lumina-vector-ann",
                    file_name="vec-1.index",
                    row_range_start=5, row_range_end=9,
                    external_path="oss://bucket/vec-1.index"),
@@ -216,9 +215,11 @@ class VectorSearchFilterTest(unittest.TestCase):
 
         captured_searches = []
         captured_io_metas = []
+        captured_index_types = []
 
         def _capture_create(index_type, file_io, index_path,
                             index_io_meta_list, options=None):
+            captured_index_types.append(index_type)
             captured_io_metas.append(list(index_io_meta_list))
 
             class _FakeReader:
@@ -261,6 +262,8 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(
             {"oss://bucket/vec-0.index", "oss://bucket/vec-1.index"},
             seen_paths)
+        self.assertEqual(["lumina-vector-ann", "lumina-vector-ann"],
+                         captured_index_types)
 
     def test_scanner_threads_external_path_to_btree_reader(self):
         """GlobalIndexScanner (backing _pre_filter) must thread external_path
