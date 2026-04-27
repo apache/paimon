@@ -32,7 +32,7 @@ import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnreso
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, UnresolvedWith}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
@@ -40,6 +40,7 @@ import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table,
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.SparkFormatTable
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
@@ -100,6 +101,19 @@ class Spark4Shim extends SparkShim {
     val columns = CatalogV2Util.structTypeToV2Columns(schema)
     tableCatalog.createTable(ident, columns, partitions, properties)
   }
+
+  override def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      newTable: Table): DataSourceV2Relation =
+    relation.copy(table = newTable)
+
+  override def copyTableSpecLocation(spec: TableSpec, location: Option[String]): TableSpec =
+    spec.copy(location = location)
+
+  override def copyTableSpecProperties(
+      spec: TableSpec,
+      properties: Map[String, String]): TableSpec =
+    spec.copy(properties = properties)
 
   override def createCTERelationRef(
       cteId: Long,

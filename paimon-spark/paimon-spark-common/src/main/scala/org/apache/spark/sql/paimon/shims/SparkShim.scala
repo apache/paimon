@@ -27,11 +27,12 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith}
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -64,6 +65,27 @@ trait SparkShim {
       schema: StructType,
       partitions: Array[Transform],
       properties: JMap[String, String]): Table
+
+  /**
+   * Returns a `DataSourceV2Relation` like `relation` but with `table` replaced. Spark 4.1 added
+   * `Option[TimeTravelSpec]` as the 6th field of `DataSourceV2Relation`, so a `relation.copy(table
+   * = ...)` call compiled against 4.1.1 emits a `copy$default$6` reference that crashes with
+   * `NoSuchMethodError` on Spark 4.0 runtime. Routing through this factory lets each per-version
+   * SparkShim implementation generate the matching copy bytecode.
+   */
+  def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      newTable: Table): DataSourceV2Relation
+
+  /**
+   * Returns a `TableSpec` like `spec` but with `location` replaced. Spark 4.1 widened `TableSpec`
+   * from 8 to 9 fields (added `Seq[Constraint]`), so a `spec.copy(location = ...)` call compiled
+   * against 4.1.1 emits a `copy$default$9` reference that crashes on Spark 4.0 runtime.
+   */
+  def copyTableSpecLocation(spec: TableSpec, location: Option[String]): TableSpec
+
+  /** Same arity-mismatch problem as `copyTableSpecLocation`, but for `properties`. */
+  def copyTableSpecProperties(spec: TableSpec, properties: Map[String, String]): TableSpec
 
   def createCTERelationRef(
       cteId: Long,
