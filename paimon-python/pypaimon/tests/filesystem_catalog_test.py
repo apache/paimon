@@ -17,7 +17,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 
@@ -88,6 +88,49 @@ class FileSystemCatalogTest(unittest.TestCase):
         self.assertEqual(table.fields[2].name, "f2")
         self.assertTrue(isinstance(table.fields[2].type, AtomicType))
         self.assertEqual(table.fields[2].type.type, "STRING")
+
+    def test_s3_filesystem_catalog_with_paimon_options(self):
+        with patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem") as s3_file_system:
+            CatalogFactory.create({
+                "warehouse": "s3://bucket/warehouse",
+                "s3.endpoint": "http://localhost:9000",
+                "s3.access-key": "access-key",
+                "s3.secret-key": "secret-key",
+                "s3.session-token": "session-token",
+                "s3.region": "us-east-1",
+                "s3.path-style-access": "true",
+            })
+
+        s3_file_system.assert_called_once()
+        kwargs = s3_file_system.call_args[1]
+        self.assertEqual(kwargs["endpoint_override"], "http://localhost:9000")
+        self.assertEqual(kwargs["access_key"], "access-key")
+        self.assertEqual(kwargs["secret_key"], "secret-key")
+        self.assertEqual(kwargs["session_token"], "session-token")
+        self.assertEqual(kwargs["region"], "us-east-1")
+        if "force_virtual_addressing" in kwargs:
+            self.assertFalse(kwargs["force_virtual_addressing"])
+
+    def test_s3_filesystem_catalog_with_legacy_options(self):
+        with patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem") as s3_file_system:
+            CatalogFactory.create({
+                "warehouse": "s3://bucket/warehouse",
+                "fs.s3.endpoint": "http://localhost:9000",
+                "fs.s3.accessKeyId": "access-key",
+                "fs.s3.accessKeySecret": "secret-key",
+                "fs.s3.securityToken": "session-token",
+                "fs.s3.region": "us-east-1",
+            })
+
+        s3_file_system.assert_called_once()
+        kwargs = s3_file_system.call_args[1]
+        self.assertEqual(kwargs["endpoint_override"], "http://localhost:9000")
+        self.assertEqual(kwargs["access_key"], "access-key")
+        self.assertEqual(kwargs["secret_key"], "secret-key")
+        self.assertEqual(kwargs["session_token"], "session-token")
+        self.assertEqual(kwargs["region"], "us-east-1")
+        if "force_virtual_addressing" in kwargs:
+            self.assertTrue(kwargs["force_virtual_addressing"])
 
     def test_alter_table(self):
         catalog = CatalogFactory.create({
