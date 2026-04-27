@@ -17,11 +17,15 @@
 ################################################################################
 
 from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
-    LuminaVectorGlobalIndexReader,
+    LUMINA_IDENTIFIER,
+    LUMINA_IDENTIFIERS,
     LUMINA_VECTOR_ANN_IDENTIFIER,
+    LuminaVectorGlobalIndexReader,
 )
 
 __all__ = [
-    'LuminaVectorGlobalIndexReader',
+    'LUMINA_IDENTIFIER',
+    'LUMINA_IDENTIFIERS',
     'LUMINA_VECTOR_ANN_IDENTIFIER',
+    'LuminaVectorGlobalIndexReader',
 ]

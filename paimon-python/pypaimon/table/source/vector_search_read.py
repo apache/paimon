@@ -141,10 +141,10 @@ class VectorSearchReadImpl(VectorSearchRead):
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):
     """Create a global index reader for vector search."""
     from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
-        LUMINA_VECTOR_ANN_IDENTIFIER,
+        LUMINA_IDENTIFIERS,
         LuminaVectorGlobalIndexReader,
     )
-    if index_type == LUMINA_VECTOR_ANN_IDENTIFIER:
+    if index_type in LUMINA_IDENTIFIERS:
         return LuminaVectorGlobalIndexReader(
             file_io, index_path, index_io_meta_list, options
         )

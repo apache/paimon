@@ -25,7 +25,7 @@ import scala.collection.JavaConverters._
 /** Tests for Lumina vector index read/write operations. */
 class LuminaVectorIndexTest extends PaimonSparkTestBase {
 
-  private val indexType = "lumina-vector-ann"
+  private val indexType = "lumina"
   private val defaultOptions = "lumina.index.dimension=3"
 
   // ========== Index Creation Tests ==========
@@ -96,13 +96,13 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
                |SELECT index_type, row_count, row_range_start, row_range_end,
                |       index_field_id, index_field_name
                |FROM `T$table_indexes`
-               |WHERE index_type = 'lumina-vector-ann'
+               |WHERE index_type = 'lumina'
                |""".stripMargin)
         .collect()
 
       assert(indexRows.nonEmpty)
       val row = indexRows.head
-      assert(row.getAs[String]("index_type") == "lumina-vector-ann")
+      assert(row.getAs[String]("index_type") == "lumina")
       assert(row.getAs[Long]("row_count") == 100L)
       assert(row.getAs[Long]("row_range_start") == 0L)
       assert(row.getAs[Long]("row_range_end") == 99L)

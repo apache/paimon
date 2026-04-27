@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Test case for Lumina vector global index via Flink procedure. */
 public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
 
-    private static final String INDEX_TYPE = "lumina-vector-ann";
+    private static final String INDEX_TYPE = "lumina";
 
     @BeforeAll
     static void checkLuminaAvailable() {

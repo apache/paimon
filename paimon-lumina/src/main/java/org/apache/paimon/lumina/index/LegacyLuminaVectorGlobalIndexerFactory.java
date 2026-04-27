@@ -18,23 +18,13 @@
 
 package org.apache.paimon.lumina.index;
 
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataField;
+/** Factory for the legacy Lumina vector index identifier. */
+public class LegacyLuminaVectorGlobalIndexerFactory extends LuminaVectorGlobalIndexerFactory {
 
-/** Factory for creating Lumina vector index. */
-public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
-
-    public static final String IDENTIFIER = "lumina";
+    public static final String IDENTIFIER = "lumina-vector-ann";
 
     @Override
     public String identifier() {
         return IDENTIFIER;
-    }
-
-    @Override
-    public GlobalIndexer create(DataField field, Options options) {
-        return new LuminaVectorGlobalIndexer(field.type(), options);
     }
 }

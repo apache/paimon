@@ -28,7 +28,7 @@ from unittest import mock
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -121,6 +121,27 @@ def _patch_snapshot(testcase, entries):
 # ----------------------------- tests ---------------------------------------
 
 
+class VectorReaderFactoryTest(unittest.TestCase):
+    """Vector reader factory compatibility."""
+
+    def test_lumina_reader_accepts_new_and_legacy_identifiers(self):
+        from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
+            LUMINA_IDENTIFIER,
+            LUMINA_VECTOR_ANN_IDENTIFIER,
+            LuminaVectorGlobalIndexReader,
+        )
+        from pypaimon.table.source.vector_search_read import _create_vector_reader
+
+        io_meta = GlobalIndexIOMeta(file_name="vec.index", file_size=1)
+        for index_type in (LUMINA_IDENTIFIER, LUMINA_VECTOR_ANN_IDENTIFIER):
+            reader = _create_vector_reader(
+                index_type, object(), "/tmp/unused", [io_meta], {})
+            try:
+                self.assertIsInstance(reader, LuminaVectorGlobalIndexReader)
+            finally:
+                reader.close()
+
+
 class VectorSearchFilterTest(unittest.TestCase):
     """Non-partitioned wiring: scan + read + external_path plumbing."""
 
@@ -130,11 +151,11 @@ class VectorSearchFilterTest(unittest.TestCase):
         # 2 vector files ([0,4], [5,9]) + 1 btree on `id` covering [0,9] with
         # an external_path so we can assert external_path is threaded through.
         self.entries = [
-            _entry(None, field_id=1, index_type="lumina-vector-ann",
+            _entry(None, field_id=1, index_type="lumina",
                    file_name="vec-0.index",
                    row_range_start=0, row_range_end=4,
                    external_path="oss://bucket/vec-0.index"),
-            _entry(None, field_id=1, index_type="lumina-vector-ann",
+            _entry(None, field_id=1, index_type="lumina",
                    file_name="vec-1.index",
                    row_range_start=5, row_range_end=9,
                    external_path="oss://bucket/vec-1.index"),
@@ -472,11 +493,11 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
         partition_pt2 = GenericRow([2], [self.pt_field])
         self.entries = [
             _entry(partition_pt1, field_id=2,
-                   index_type="lumina-vector-ann",
+                   index_type="lumina",
                    file_name="vec-pt1.index",
                    row_range_start=0, row_range_end=4),
             _entry(partition_pt2, field_id=2,
-                   index_type="lumina-vector-ann",
+                   index_type="lumina",
                    file_name="vec-pt2.index",
                    row_range_start=5, row_range_end=9),
         ]
