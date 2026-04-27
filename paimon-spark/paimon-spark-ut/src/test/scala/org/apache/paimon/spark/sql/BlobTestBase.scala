@@ -233,25 +233,63 @@ class BlobTestBase extends PaimonSparkTestBase {
             "'row-tracking.enabled'='true', " +
             "'data-evolution.enabled'='true', " +
             "'blob-field'='picture', " +
-            "'blob-as-descriptor'='true', " +
-            "'" + CoreOptions.BLOB_DESCRIPTOR_PREFIX + IsolatedDirectoryFileIO.ROOT_DIR +
-            "'='" + isolatedExternalRoot + "')")
-        sql("INSERT INTO t VALUES (1, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+            "'blob-as-descriptor'='true')")
 
-        val newDescriptorBytes =
-          sql("SELECT picture FROM t WHERE id = 1").collect()(0).get(0).asInstanceOf[Array[Byte]]
-        val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
-        val options = new Options()
-        options.set(IsolatedDirectoryFileIO.ROOT_DIR, isolatedPaimonRoot)
-        val catalogContext = CatalogContext.create(options)
-        val uriReaderFactory = new UriReaderFactory(catalogContext)
-        val blob =
-          Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), newBlobDescriptor)
-        assert(util.Arrays.equals(blobData, blob.toData))
+        // 1. directly writing raise expected errors.
+        val error = intercept[Exception] {
+          sql("INSERT INTO t VALUES (1, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+        }
+        assert(
+          exceptionContains(
+            error,
+            "Isolated file io only supports reading child of root directory") &&
+            exceptionContains(error, "paimon-isolated-root") &&
+            exceptionContains(error, "external-blob-root/external_blob"),
+          exceptionMessages(error)
+        )
+
+        // 2. inject blob-descriptor io info through dynamic params.
+        // this time writing should success.
+        val descriptorRootOption =
+          s"spark.paimon.$catalogName.$databaseName.t." +
+            CoreOptions.BLOB_DESCRIPTOR_PREFIX + IsolatedDirectoryFileIO.ROOT_DIR
+        withSparkSQLConf(descriptorRootOption -> isolatedExternalRoot) {
+          sql("INSERT INTO t VALUES (2, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+
+          val newDescriptorBytes =
+            sql("SELECT picture FROM t WHERE id = 2").collect()(0).get(0).asInstanceOf[Array[Byte]]
+          val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+          val options = new Options()
+          options.set(IsolatedDirectoryFileIO.ROOT_DIR, isolatedPaimonRoot)
+          val catalogContext = CatalogContext.create(options)
+          val uriReaderFactory = new UriReaderFactory(catalogContext)
+          val blob =
+            Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), newBlobDescriptor)
+          assert(util.Arrays.equals(blobData, blob.toData))
+        }
       }
     } finally {
       sql(s"USE paimon.$dbName0")
       sql(s"DROP DATABASE IF EXISTS $catalogName.$databaseName CASCADE")
+    }
+  }
+
+  private def exceptionContains(throwable: Throwable, message: String): Boolean = {
+    if (throwable == null) {
+      false
+    } else if (throwable.getMessage != null && throwable.getMessage.contains(message)) {
+      true
+    } else {
+      exceptionContains(throwable.getCause, message)
+    }
+  }
+
+  private def exceptionMessages(throwable: Throwable): String = {
+    if (throwable == null) {
+      ""
+    } else {
+      throwable.getClass.getName + ": " + throwable.getMessage + "\n" +
+        exceptionMessages(throwable.getCause)
     }
   }
 
