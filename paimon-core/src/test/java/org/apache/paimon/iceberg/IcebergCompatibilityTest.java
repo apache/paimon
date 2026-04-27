@@ -185,6 +185,16 @@ public class IcebergCompatibilityTest {
         // In dv mode, full compaction will remove all dv index and rewrite data files
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
 
+        FileIO fileIO = table.fileIO();
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO,
+                        new Path(
+                                table.location(),
+                                "metadata/v" + latestSnapshotId + ".metadata.json"));
+        assertThat(metadata.currentSnapshot().summary().operation()).isEqualTo("replace");
+
         write.close();
         commit.close();
     }

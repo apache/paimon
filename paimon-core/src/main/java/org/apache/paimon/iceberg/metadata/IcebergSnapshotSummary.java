@@ -38,6 +38,7 @@ public class IcebergSnapshotSummary {
 
     public static final IcebergSnapshotSummary APPEND = new IcebergSnapshotSummary("append");
     public static final IcebergSnapshotSummary OVERWRITE = new IcebergSnapshotSummary("overwrite");
+    public static final IcebergSnapshotSummary REPLACE = new IcebergSnapshotSummary("replace");
 
     private final Map<String, String> summary;
 
