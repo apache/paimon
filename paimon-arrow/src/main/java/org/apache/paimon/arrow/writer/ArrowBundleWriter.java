@@ -134,8 +134,8 @@ public class ArrowBundleWriter implements BundleFormatWriter {
     @Override
     public void close() throws IOException {
         flush();
-        System.out.println("Serialize vsr cost: " + serializeCost + "ms");
-        System.out.println("Jni cost: " + jniCost + "ms");
+        LOG.debug("Serialize vsr cost: {}ms", serializeCost);
+        LOG.debug("Jni cost: {}ms", jniCost);
         this.nativeWriter.close();
         this.arrowFormatWriter.close();
     }
