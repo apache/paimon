@@ -175,6 +175,48 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testWriteBlobViewWithBuiltInFunction() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE upstream_blob_view (id INT, name STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture')");
+        batchSql("INSERT INTO upstream_blob_view VALUES (1, 'row1', X'48656C6C6F')");
+        batchSql("INSERT INTO upstream_blob_view VALUES (2, 'row2', X'5945')");
+
+        int pictureFieldId =
+                paimonTable("upstream_blob_view").rowType().getFields().stream()
+                        .filter(field -> field.name().equals("picture"))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("picture field not found"))
+                        .id();
+        String fullTableName = tEnv.getCurrentDatabase() + ".upstream_blob_view";
+
+        tEnv.executeSql(
+                "CREATE TABLE downstream_blob_view (id INT, label STRING, image_ref BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-view-field'='image_ref')");
+
+        batchSql(
+                String.format(
+                        "INSERT INTO downstream_blob_view"
+                                + " SELECT id, name, sys.blob_view('%s', %d, _ROW_ID)"
+                                + " FROM `upstream_blob_view$row_tracking`",
+                        fullTableName, pictureFieldId));
+
+        List<Row> result = batchSql("SELECT * FROM downstream_blob_view ORDER BY id");
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getField(0)).isEqualTo(1);
+        assertThat(result.get(0).getField(1)).isEqualTo("row1");
+        assertThat((byte[]) result.get(0).getField(2))
+                .isEqualTo(new byte[] {72, 101, 108, 108, 111});
+        assertThat(result.get(1).getField(0)).isEqualTo(2);
+        assertThat(result.get(1).getField(1)).isEqualTo("row2");
+        assertThat((byte[]) result.get(1).getField(2)).isEqualTo(new byte[] {89, 69});
+    }
+
+    @Test
     public void testExternalStorageBlob() throws Exception {
         // Write raw data; descriptor mode with external storage should write to the external path.
         batchSql("INSERT INTO copy_blob_table VALUES (1, 'copy-test', X'48656C6C6F')");
