@@ -547,6 +547,49 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
+    public void testSkipCleaningWhenAllSnapshotsDeleted() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+        commit(Collections.singletonList(new TestPojo(2, 0, "a", "v2")));
+        commit(Collections.singletonList(new TestPojo(3, 0, "a", "v3")));
+
+        Path dataDir = new Path(tablePath, "part1=0/part2=a/bucket-0");
+        Set<Path> dataFilesBefore = new HashSet<>();
+        for (FileStatus status : fileIO.listStatus(dataDir)) {
+            dataFilesBefore.add(status.getPath());
+        }
+        assertThat(dataFilesBefore).isNotEmpty();
+
+        // baseline: candidates are not empty and clean works normally
+        long olderThanMillis = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2);
+        LocalOrphanFilesClean baselineClean = new LocalOrphanFilesClean(table, olderThanMillis);
+        assertThat(baselineClean.clean().getDeletedFilesPath()).isEmpty();
+
+        // simulate concurrent expiration removing all snapshots
+        SnapshotManager snapshotManager = table.snapshotManager();
+        for (long id :
+                snapshotManager.safelyGetAllSnapshots().stream()
+                        .map(Snapshot::id)
+                        .collect(Collectors.toList())) {
+            fileIO.deleteQuietly(snapshotManager.snapshotPath(id));
+        }
+        assertThat(snapshotManager.safelyGetAllSnapshots()).isEmpty();
+
+        // clean should skip deletion when usedFiles is empty
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
+        assertThat(deleted).isEmpty();
+
+        // data files should still exist
+        Set<Path> dataFilesAfter = new HashSet<>();
+        for (FileStatus status : fileIO.listStatus(dataDir)) {
+            dataFilesAfter.add(status.getPath());
+        }
+        assertThat(dataFilesAfter).isEqualTo(dataFilesBefore);
+    }
+
+    @Test
     public void testRemovingEmptyDirectories() throws Exception {
         List<List<TestPojo>> committedData = new ArrayList<>();
         Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
