@@ -44,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
 
     private static final String INDEX_TYPE = "lumina";
+    private static final String LEGACY_INDEX_TYPE = "lumina-vector-ann";
 
     @BeforeAll
     static void checkLuminaAvailable() {
@@ -86,6 +87,47 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
         assertThat(vectorEntries).isNotEmpty();
         long totalRowCount = vectorEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
         assertThat(totalRowCount).isEqualTo(100L);
+    }
+
+    @Test
+    public void testLuminaVectorIndexLegacyIdentifier() throws Catalog.TableNotExistException {
+        // Verifies that the legacy `lumina-vector-ann` identifier still resolves through SPI to
+        // LegacyLuminaVectorGlobalIndexerFactory and produces a working global index. Files are
+        // tagged with the legacy indexType in the manifest, so reads of pre-rename tables continue
+        // to dispatch to the same writer/reader as the new `lumina` identifier.
+        sql(
+                "CREATE TABLE T_LEGACY (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+
+        sql("INSERT INTO T_LEGACY VALUES " + vectorValues(0, 10, 3));
+
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_LEGACY', "
+                        + "index_column => 'v', "
+                        + "index_type => '"
+                        + LEGACY_INDEX_TYPE
+                        + "')");
+
+        FileStoreTable table = paimonTable("T_LEGACY");
+        List<IndexFileMeta> vectorEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(f -> LEGACY_INDEX_TYPE.equals(f.indexType()))
+                        .collect(Collectors.toList());
+
+        assertThat(vectorEntries).isNotEmpty();
+        long totalRowCount = vectorEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
+        assertThat(totalRowCount).isEqualTo(10L);
+        for (IndexFileMeta meta : vectorEntries) {
+            assertThat(meta.indexType()).isEqualTo(LEGACY_INDEX_TYPE);
+            assertThat(meta.globalIndexMeta()).isNotNull();
+        }
     }
 
     @Test

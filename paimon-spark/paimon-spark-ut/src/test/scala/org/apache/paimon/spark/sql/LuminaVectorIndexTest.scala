@@ -104,6 +104,15 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
       assert(indexEntries.nonEmpty)
       val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 10L)
+
+      // End-to-end read: vector_search must resolve the legacy identifier through
+      // LegacyLuminaVectorGlobalIndexerFactory and return results.
+      val result = spark
+        .sql("""
+               |SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
+               |""".stripMargin)
+        .collect()
+      assert(result.length == 5)
     }
   }
 

@@ -18,7 +18,16 @@
 
 package org.apache.paimon.lumina.index;
 
-/** Factory for the legacy Lumina vector index identifier. */
+/**
+ * Factory for the legacy Lumina vector index identifier {@code lumina-vector-ann}.
+ *
+ * <p>Retained so that tables created before the rename to {@code lumina} continue to load. New
+ * tables should use {@link LuminaVectorGlobalIndexerFactory} via the {@code lumina} identifier.
+ *
+ * @deprecated Use {@link LuminaVectorGlobalIndexerFactory} ({@code lumina}) for new tables. This
+ *     factory only exists to keep the legacy identifier resolvable through SPI.
+ */
+@Deprecated
 public class LegacyLuminaVectorGlobalIndexerFactory extends LuminaVectorGlobalIndexerFactory {
 
     public static final String IDENTIFIER = "lumina-vector-ann";
