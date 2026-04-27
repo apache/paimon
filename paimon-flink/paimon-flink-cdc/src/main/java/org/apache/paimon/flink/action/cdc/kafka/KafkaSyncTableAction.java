@@ -18,8 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
+import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+
+import org.apache.flink.streaming.api.datastream.DataStream;
 
 import java.util.Map;
 
@@ -32,5 +37,16 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> kafkaConfig) {
         super(database, table, catalogConfig, kafkaConfig, SyncJobHandler.SourceType.KAFKA);
+    }
+
+    @Override
+    protected void buildSink(
+            DataStream<RichCdcMultiplexRecord> input,
+            EventParser.Factory<RichCdcMultiplexRecord> parserFactory) {
+        boolean noShuffle =
+                Boolean.parseBoolean(
+                        tableConfig.getOrDefault(
+                                FlinkConnectorOptions.UNAWARE_BUCKET_NO_SHUFFLE.key(), "false"));
+        createCdcSinkBuilder(input, parserFactory).withNoShuffle(noShuffle).build();
     }
 }
