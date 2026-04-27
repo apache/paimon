@@ -114,6 +114,35 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .flatMap(branch -> getUsedFiles(branch).stream())
                         .collect(Collectors.toSet());
 
+        // Safety net: empty usedFiles with non-empty candidates indicates all snapshot/manifest
+        // reads were lost (e.g. to a concurrent expiration race); abort to prevent data loss.
+        // However, if there are no snapshots at all, we should allow deletion.
+        if (usedFiles.isEmpty()) {
+            boolean hasSnapshots =
+                    branches.stream()
+                            .anyMatch(
+                                    branch -> {
+                                        try {
+                                            return !safelyGetAllSnapshots(branch).isEmpty();
+                                        } catch (IOException e) {
+                                            LOG.warn(
+                                                    "Failed to check snapshots for branch {}",
+                                                    branch,
+                                                    e);
+                                            return false;
+                                        }
+                                    });
+
+            if (hasSnapshots) {
+                LOG.warn(
+                        "Collected used files is empty while {} candidates are present, "
+                                + "aborting orphan files clean to prevent data loss.",
+                        candidateDeletes.size());
+                return new CleanOrphanFilesResult(
+                        deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+            }
+        }
+
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
         candidateDeletes.stream()
