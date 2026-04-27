@@ -464,5 +464,30 @@ class FileIOTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_path_on_windows(self):
+        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+            OssOptions.OSS_IMPL.key(): 'legacy',
+        }))
+        mock_fs = MagicMock()
+        mock_fs.get_file_info.return_value = [MagicMock(type=pafs.FileType.NotFound)]
+        mock_fs.create_dir = MagicMock()
+        mock_fs.open_output_stream.return_value = MagicMock()
+        mock_fs.move = MagicMock()
+        mock_fs.copy_file = MagicMock()
+        oss_io.filesystem = mock_fs
+
+        oss_io.new_output_stream("oss://test-bucket/db.db/tbl/bucket-0/data.parquet")
+        oss_io.rename("oss://test-bucket/db.db/tbl/old.parquet",
+                      "oss://test-bucket/db.db/tbl/new.parquet")
+        oss_io.copy_file("oss://test-bucket/db.db/tbl/src.parquet",
+                         "oss://test-bucket/db.db/tbl/dst.parquet")
+
+        for call in mock_fs.create_dir.call_args_list:
+            self.assertNotIn("\\", call[0][0], f"backslash in path: {call[0][0]}")
+
+
 if __name__ == '__main__':
     unittest.main()

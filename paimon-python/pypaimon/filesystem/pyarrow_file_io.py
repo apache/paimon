@@ -21,7 +21,7 @@ import re
 import subprocess
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
@@ -235,7 +235,7 @@ class PyArrowFileIO(FileIO):
             if parent_dir and not self.exists(parent_dir):
                 self.mkdirs(parent_dir)
         else:
-            parent_dir = Path(path_str).parent
+            parent_dir = PurePosixPath(path_str).parent
             if str(parent_dir) and not self.exists(str(parent_dir)):
                 self.mkdirs(str(parent_dir))
 
@@ -326,7 +326,7 @@ class PyArrowFileIO(FileIO):
 
     def rename(self, src: str, dst: str) -> bool:
         dst_str = self.to_filesystem_path(dst)
-        dst_parent = Path(dst_str).parent
+        dst_parent = PurePosixPath(dst_str).parent
         if str(dst_parent) and not self.exists(str(dst_parent)):
             self.mkdirs(str(dst_parent))
 
@@ -342,8 +342,8 @@ class PyArrowFileIO(FileIO):
                     return False
                 # Make it compatible with HadoopFileIO: if dst is an existing directory,
                 # dst=dst/srcFileName
-                src_name = Path(src_str).name
-                dst_str = str(Path(dst_str) / src_name)
+                src_name = PurePosixPath(src_str).name
+                dst_str = str(PurePosixPath(dst_str) / src_name)
                 final_dst_info = self._get_file_info(dst_str)
                 if final_dst_info.type != pafs.FileType.NotFound:
                     return False
@@ -402,7 +402,7 @@ class PyArrowFileIO(FileIO):
 
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
-        target_parent = Path(target_str).parent
+        target_parent = PurePosixPath(target_str).parent
 
         if str(target_parent) and not self.exists(str(target_parent)):
             self.mkdirs(str(target_parent))
