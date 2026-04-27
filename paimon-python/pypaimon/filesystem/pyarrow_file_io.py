@@ -115,21 +115,24 @@ class PyArrowFileIO(FileIO):
             return {}
 
     def _get_property(self, *keys: str):
+        data = self.properties.to_map()
         for key in keys:
-            if self.properties.contains_key(key):
-                return self.properties.to_map().get(key)
+            if key in data:
+                return data[key]
         return None
+
+    @staticmethod
+    def _s3_key_variants(*names: str):
+        prefixes = ["s3.", "s3a.", "fs.s3.", "fs.s3a."]
+        for prefix in prefixes:
+            for name in names:
+                yield prefix + name
 
     def _get_s3_property(self, name: str, legacy_key: str = None):
         keys = []
         if legacy_key:
             keys.append(legacy_key)
-        keys.extend([
-            "s3." + name,
-            "s3a." + name,
-            "fs.s3." + name,
-            "fs.s3a." + name,
-        ])
+        keys.extend(self._s3_key_variants(name))
         return self._get_property(*keys)
 
     def _get_s3_boolean_property(self, name: str) -> bool:
@@ -198,42 +201,15 @@ class PyArrowFileIO(FileIO):
     def _initialize_s3_fs(self) -> FileSystem:
         access_key = self._get_property(
             S3Options.S3_ACCESS_KEY_ID.key(),
-            "s3.access-key",
-            "s3.access.key",
-            "s3a.access-key",
-            "s3a.access.key",
-            "fs.s3.access-key",
-            "fs.s3.access.key",
-            "fs.s3a.access-key",
-            "fs.s3a.access.key")
+            *self._s3_key_variants("access-key", "access.key"))
         secret_key = self._get_property(
             S3Options.S3_ACCESS_KEY_SECRET.key(),
-            "s3.secret-key",
-            "s3.secret.key",
-            "s3a.secret-key",
-            "s3a.secret.key",
-            "fs.s3.secret-key",
-            "fs.s3.secret.key",
-            "fs.s3a.secret-key",
-            "fs.s3a.secret.key")
+            *self._s3_key_variants("secret-key", "secret.key"))
         session_token = self._get_property(
             S3Options.S3_SECURITY_TOKEN.key(),
-            "s3.session-token",
-            "s3.session.token",
-            "s3.security-token",
-            "s3.security.token",
-            "s3a.session-token",
-            "s3a.session.token",
-            "s3a.security-token",
-            "s3a.security.token",
-            "fs.s3.session-token",
-            "fs.s3.session.token",
-            "fs.s3.security-token",
-            "fs.s3.security.token",
-            "fs.s3a.session-token",
-            "fs.s3a.session.token",
-            "fs.s3a.security-token",
-            "fs.s3a.security.token")
+            *self._s3_key_variants(
+                "session-token", "session.token",
+                "security-token", "security.token"))
         endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
         region = self._get_s3_property("region", S3Options.S3_REGION.key())
 
