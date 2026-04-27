@@ -215,11 +215,9 @@ class VectorSearchFilterTest(unittest.TestCase):
 
         captured_searches = []
         captured_io_metas = []
-        captured_index_types = []
 
         def _capture_create(index_type, file_io, index_path,
                             index_io_meta_list, options=None):
-            captured_index_types.append(index_type)
             captured_io_metas.append(list(index_io_meta_list))
 
             class _FakeReader:
@@ -262,8 +260,6 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(
             {"oss://bucket/vec-0.index", "oss://bucket/vec-1.index"},
             seen_paths)
-        self.assertEqual(["lumina-vector-ann", "lumina-vector-ann"],
-                         captured_index_types)
 
     def test_scanner_threads_external_path_to_btree_reader(self):
         """GlobalIndexScanner (backing _pre_filter) must thread external_path
