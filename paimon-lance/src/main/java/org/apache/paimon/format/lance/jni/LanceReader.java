@@ -25,6 +25,7 @@ import com.lancedb.lance.util.Range;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowReader;
+import org.apache.arrow.vector.types.pojo.Field;
 
 import javax.annotation.Nullable;
 
@@ -32,6 +33,8 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Wrapper for Native Lance Reader. */
 public class LanceReader {
@@ -49,7 +52,18 @@ public class LanceReader {
         this.rootAllocator = new RootAllocator();
         try {
             this.reader = LanceFileReader.open(path, storageOptions, rootAllocator);
-            this.arrowReader = reader.readAll(projectedRowType.getFieldNames(), ranges, batchSize);
+            // Filter to only read columns that exist in the file schema.
+            // Virtual columns like _ROW_ID and _SEQUENCE_NUMBER are added by the framework
+            // but do not physically exist in the file.
+            Set<String> fileFieldNames =
+                    reader.schema().getFields().stream()
+                            .map(Field::getName)
+                            .collect(Collectors.toSet());
+            List<String> existingFields =
+                    projectedRowType.getFieldNames().stream()
+                            .filter(fileFieldNames::contains)
+                            .collect(Collectors.toList());
+            this.arrowReader = reader.readAll(existingFields, ranges, batchSize);
         } catch (IOException e) {
             throw new RuntimeException("Failed to open Lance file: " + path, e);
         }

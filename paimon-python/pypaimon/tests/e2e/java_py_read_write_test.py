@@ -739,3 +739,72 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn("conflicts", str(ctx.exception))
         tc.close()
         print(f"Conflict detected as expected: {ctx.exception}")
+
+    @parameterized.expand(get_file_format_params())
+    def test_read_data_evolution_table(self, file_format):
+        """Read data evolution tables written by Java and verify merged results."""
+        table = self.catalog.get_table(f'default.data_evolution_test_{file_format}')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+        result = table_sort_by(result, 'f0')
+        self.assertEqual(result.num_rows, 5)
+        for i in range(5):
+            self.assertEqual(result.column('f0')[i].as_py(), i)
+            self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
+            self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
+
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_data_evolution_table(self, file_format):
+        """Python writes data evolution tables for Java to read."""
+        table_name = f'default.data_evolution_test_py_{file_format}'
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.utf8()),
+            ('f2', pa.utf8()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': file_format,
+        })
+        self.catalog.create_table(table_name, schema, True)
+        table = self.catalog.get_table(table_name)
+
+        # Write (f0, f1) columns
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['f0', 'f1'])
+        table_commit = write_builder.new_commit()
+        data0 = pa.Table.from_pydict({
+            'f0': list(range(5)),
+            'f1': [f'a{i}' for i in range(5)],
+        }, schema=pa.schema([('f0', pa.int32()), ('f1', pa.utf8())]))
+        table_write.write_arrow(data0)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Write (f2) column with first_row_id
+        table_write = write_builder.new_write().with_write_type(['f2'])
+        table_commit = write_builder.new_commit()
+        data1 = pa.Table.from_pydict({
+            'f2': [f'b{i}' for i in range(5)],
+        }, schema=pa.schema([('f2', pa.utf8())]))
+        table_write.write_arrow(data1)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 0
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        # Verify read-back
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'f0')
+        self.assertEqual(result.num_rows, 5)
+        for i in range(5):
+            self.assertEqual(result.column('f0')[i].as_py(), i)
+            self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
+            self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
