@@ -81,7 +81,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
               table.newBatchWriteBuilder(),
               writeType,
               firstRowIdToPartitionMap,
-              table.catalogEnvironment().catalogContext())
+              catalogContextForBlobDescriptor)
             try {
               iter.foreach(row => write.write(row))
               Iterator.apply(write.commit)
