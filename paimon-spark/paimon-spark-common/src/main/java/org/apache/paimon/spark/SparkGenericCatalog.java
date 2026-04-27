@@ -43,6 +43,8 @@ import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.PaimonCatalogUtils;
+import org.apache.spark.sql.connector.catalog.StagedTable;
+import org.apache.spark.sql.connector.catalog.StagingTableCatalog;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -246,6 +248,49 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     }
 
     @Override
+    public StagedTable stageCreate(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        if (usePaimon(properties.get(TableCatalog.PROP_PROVIDER))) {
+            return sparkCatalog.stageCreate(ident, schema, partitions, properties);
+        } else {
+            return asStagingTableCatalog().stageCreate(ident, schema, partitions, properties);
+        }
+    }
+
+    @Override
+    public StagedTable stageReplace(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException, NoSuchTableException {
+        if (usePaimon(properties.get(TableCatalog.PROP_PROVIDER))) {
+            return sparkCatalog.stageReplace(ident, schema, partitions, properties);
+        } else {
+            return asStagingTableCatalog().stageReplace(ident, schema, partitions, properties);
+        }
+    }
+
+    @Override
+    public StagedTable stageCreateOrReplace(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException {
+        if (usePaimon(properties.get(TableCatalog.PROP_PROVIDER))) {
+            return sparkCatalog.stageCreateOrReplace(ident, schema, partitions, properties);
+        } else {
+            return asStagingTableCatalog()
+                    .stageCreateOrReplace(ident, schema, partitions, properties);
+        }
+    }
+
+    @Override
     public final void initialize(String name, CaseInsensitiveStringMap options) {
         SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
         SessionState sessionState = sparkSession.sessionState();
@@ -360,6 +405,10 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     private FunctionCatalog asFunctionCatalog() {
         return (FunctionCatalog) getDelegateCatalog();
+    }
+
+    private StagingTableCatalog asStagingTableCatalog() {
+        return (StagingTableCatalog) getDelegateCatalog();
     }
 
     // ======================= Function methods ===============================

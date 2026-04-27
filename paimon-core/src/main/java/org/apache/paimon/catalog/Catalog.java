@@ -358,6 +358,25 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
+    /**
+     * Replace an existing table with a new {@link Schema}.
+     *
+     * <p>For compatible FileStore tables, it truncates visible data and appends a new schema to the
+     * schema chain, preserving old schemas and snapshots for time travel. Other table kinds may
+     * fall back to drop-and-create behavior.
+     *
+     * @param identifier path of the table to be replaced
+     * @param newSchema the new {@link Schema}
+     * @param ignoreIfNotExists if true, do nothing when the table does not exist
+     * @throws TableNotExistException if the table does not exist and {@code ignoreIfNotExists} is
+     *     false
+     */
+    default void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "Catalog " + getClass().getName() + " does not support replaceTable.");
+    }
+
     // ======================= partition methods ===============================
 
     /**

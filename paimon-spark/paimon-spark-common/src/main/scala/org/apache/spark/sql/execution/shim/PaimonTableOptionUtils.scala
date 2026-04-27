@@ -16,26 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.execution
+package org.apache.spark.sql.execution.shim
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.catalog.CatalogUtils
-import org.apache.spark.sql.catalyst.plans.logical.TableSpec
-import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.iceberg.IcebergOptions
 
-trait PaimonStrategyHelper {
+import scala.collection.JavaConverters._
 
-  def spark: SparkSession
+private[shim] object PaimonTableOptionUtils {
 
-  protected def makeQualifiedDBObjectPath(location: String): String = {
-    CatalogUtils.makeQualifiedDBObjectPath(
-      spark.sharedState.conf.get(WAREHOUSE_PATH),
-      location,
-      spark.sharedState.hadoopConf)
+  private val tableOptionKeys =
+    (CoreOptions.getOptions.asScala.map(_.key()) ++ IcebergOptions.getOptions.asScala.map(
+      _.key())).toSet
+
+  def splitTableAndWriteOptions(
+      options: Map[String, String]): (Map[String, String], Map[String, String]) = {
+    options.partition { case (key, _) => tableOptionKeys.contains(key) }
   }
-
-  protected def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
-    tableSpec.copy(location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
-  }
-
 }

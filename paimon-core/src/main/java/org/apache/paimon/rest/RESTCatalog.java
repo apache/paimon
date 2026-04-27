@@ -586,6 +586,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists) {
+        throw new UnsupportedOperationException("RESTCatalog does not support replaceTable yet.");
+    }
+
+    @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");

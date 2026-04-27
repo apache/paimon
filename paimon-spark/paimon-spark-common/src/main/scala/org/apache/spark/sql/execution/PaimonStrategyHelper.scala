@@ -22,6 +22,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.catalog.CatalogUtils
 import org.apache.spark.sql.catalyst.plans.logical.TableSpec
 import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 trait PaimonStrategyHelper {
 
@@ -34,8 +35,12 @@ trait PaimonStrategyHelper {
       spark.sharedState.hadoopConf)
   }
 
-  protected def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
-    tableSpec.copy(location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
+  protected def qualifyTableSpec(
+      tableSpec: TableSpec,
+      tableOptions: Map[String, String]): TableSpec = {
+    SparkShimLoader.shim.copyTableSpec(
+      tableSpec,
+      tableOptions,
+      tableSpec.location.map(makeQualifiedDBObjectPath))
   }
-
 }

@@ -172,6 +172,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        wrapped.replaceTable(identifier, newSchema, ignoreIfNotExists);
+    }
+
+    @Override
     public void registerTable(Identifier identifier, String path)
             throws TableAlreadyExistException {
         wrapped.registerTable(identifier, path);
