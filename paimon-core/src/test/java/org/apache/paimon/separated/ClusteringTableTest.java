@@ -933,6 +933,49 @@ class ClusteringTableTest {
         }
     }
 
+    @Test
+    public void testNoUpgradeForPkClusteringOverride() throws Exception {
+        Identifier identifier = Identifier.create("default", "no_upgrade_table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .primaryKey("a")
+                        .option(DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "1")
+                        .option(CLUSTERING_COLUMNS.key(), "b")
+                        .option(PK_CLUSTERING_OVERRIDE.key(), "true")
+                        .option("write-only", "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        Table writeOnlyTable = catalog.getTable(identifier);
+
+        // normal append commit to create initial data
+        BatchWriteBuilder appendBuilder = writeOnlyTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = appendBuilder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = appendBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(write.prepareCommit());
+        }
+
+        // overwrite commit — files should NOT be upgraded because pkClusteringOverride is true
+        BatchWriteBuilder overwriteBuilder = writeOnlyTable.newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = overwriteBuilder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = overwriteBuilder.newCommit()) {
+            write.write(GenericRow.of(3, 30));
+            write.write(GenericRow.of(4, 40));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Split> splits = writeOnlyTable.newReadBuilder().newScan().plan().splits();
+        for (Split split : splits) {
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                assertThat(file.level()).isEqualTo(0);
+            }
+        }
+    }
+
     private Table createFirstRowTableWithLowSpillThreshold() throws Exception {
         Identifier identifier = Identifier.create("default", "first_row_spill_table");
         Schema schema =
