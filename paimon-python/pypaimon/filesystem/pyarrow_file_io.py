@@ -33,6 +33,7 @@ from pyarrow._fs import FileSystem
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
@@ -113,6 +114,32 @@ class PyArrowFileIO(FileIO):
         else:
             return {}
 
+    def _get_property(self, *keys: str):
+        for key in keys:
+            if self.properties.contains_key(key):
+                return self.properties.to_map().get(key)
+        return None
+
+    def _get_s3_property(self, name: str, legacy_key: str = None):
+        keys = []
+        if legacy_key:
+            keys.append(legacy_key)
+        keys.extend([
+            "s3." + name,
+            "s3a." + name,
+            "fs.s3." + name,
+            "fs.s3a." + name,
+        ])
+        return self._get_property(*keys)
+
+    def _get_s3_boolean_property(self, name: str) -> bool:
+        value = self._get_s3_property(name)
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        return OptionsUtils.convert_to_boolean(value)
+
     def _extract_oss_bucket(self, location) -> str:
         uri = urlparse(location)
         if uri.scheme and uri.scheme != "oss":
@@ -169,7 +196,48 @@ class PyArrowFileIO(FileIO):
         return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
-        if self.properties.get(S3Options.S3_ACCESS_KEY_ID):
+        access_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_ID.key(),
+            "s3.access-key",
+            "s3.access.key",
+            "s3a.access-key",
+            "s3a.access.key",
+            "fs.s3.access-key",
+            "fs.s3.access.key",
+            "fs.s3a.access-key",
+            "fs.s3a.access.key")
+        secret_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_SECRET.key(),
+            "s3.secret-key",
+            "s3.secret.key",
+            "s3a.secret-key",
+            "s3a.secret.key",
+            "fs.s3.secret-key",
+            "fs.s3.secret.key",
+            "fs.s3a.secret-key",
+            "fs.s3a.secret.key")
+        session_token = self._get_property(
+            S3Options.S3_SECURITY_TOKEN.key(),
+            "s3.session-token",
+            "s3.session.token",
+            "s3.security-token",
+            "s3.security.token",
+            "s3a.session-token",
+            "s3a.session.token",
+            "s3a.security-token",
+            "s3a.security.token",
+            "fs.s3.session-token",
+            "fs.s3.session.token",
+            "fs.s3.security-token",
+            "fs.s3.security.token",
+            "fs.s3a.session-token",
+            "fs.s3a.session.token",
+            "fs.s3a.security-token",
+            "fs.s3a.security.token")
+        endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
+        region = self._get_s3_property("region", S3Options.S3_REGION.key())
+
+        if access_key:
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
             # Uses setdefault so that an explicit user setting is never overridden.
@@ -177,14 +245,17 @@ class PyArrowFileIO(FileIO):
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
-            "endpoint_override": self.properties.get(S3Options.S3_ENDPOINT),
-            "access_key": self.properties.get(S3Options.S3_ACCESS_KEY_ID),
-            "secret_key": self.properties.get(S3Options.S3_ACCESS_KEY_SECRET),
-            "session_token": self.properties.get(S3Options.S3_SECURITY_TOKEN),
-            "region": self.properties.get(S3Options.S3_REGION),
+            "endpoint_override": endpoint,
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "session_token": session_token,
+            "region": region,
         }
         if self._pyarrow_gte_7:
-            client_kwargs["force_virtual_addressing"] = True
+            path_style_access = (
+                self._get_s3_boolean_property("path-style-access") or
+                self._get_s3_boolean_property("path.style.access"))
+            client_kwargs["force_virtual_addressing"] = not path_style_access
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)

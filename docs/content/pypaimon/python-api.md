@@ -44,6 +44,24 @@ catalog_options = {
 catalog = CatalogFactory.create(catalog_options)
 ```
 
+For an S3 warehouse, pass S3 authentication options with the filesystem catalog options:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 's3://bucket/path/to/warehouse',
+    's3.endpoint': 'https://s3.amazonaws.com',
+    's3.access-key': 'xxx',
+    's3.secret-key': 'yyy',
+    # Optional. Required for temporary credentials.
+    's3.session-token': 'zzz',
+    # Optional. Useful for S3 compatible stores such as MinIO.
+    's3.path-style-access': 'true',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
 {{< /tab >}}
 {{< tab "rest catalog" >}}
 The sample code is as follows. The detailed meaning of option can be found in [REST]({{< ref "concepts/rest/overview" >}}).
