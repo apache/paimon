@@ -18,23 +18,22 @@
 
 package org.apache.paimon.lumina.index;
 
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataField;
+/**
+ * Factory for the legacy Lumina vector index identifier {@code lumina-vector-ann}.
+ *
+ * <p>Retained so that tables created before the rename to {@code lumina} continue to load. New
+ * tables should use {@link LuminaVectorGlobalIndexerFactory} via the {@code lumina} identifier.
+ *
+ * @deprecated Use {@link LuminaVectorGlobalIndexerFactory} ({@code lumina}) for new tables. This
+ *     factory only exists to keep the legacy identifier resolvable through SPI.
+ */
+@Deprecated
+public class LegacyLuminaVectorGlobalIndexerFactory extends LuminaVectorGlobalIndexerFactory {
 
-/** Factory for creating Lumina vector index. */
-public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
-
-    public static final String IDENTIFIER = "lumina";
+    public static final String IDENTIFIER = "lumina-vector-ann";
 
     @Override
     public String identifier() {
         return IDENTIFIER;
-    }
-
-    @Override
-    public GlobalIndexer create(DataField field, Options options) {
-        return new LuminaVectorGlobalIndexer(field.type(), options);
     }
 }

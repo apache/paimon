@@ -84,7 +84,15 @@ public class IndexFileHandlerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"HASH", "DELETION_VECTORS", "btree", "bitmap", "lumina-vector-ann"})
+    @ValueSource(
+            strings = {
+                "HASH",
+                "DELETION_VECTORS",
+                "btree",
+                "bitmap",
+                "lumina",
+                "lumina-vector-ann"
+            })
     void testExistsAndDeleteIndexFile(String indexType) throws IOException {
         String fileName = "index-" + UUID.randomUUID();
         IndexFileMeta meta =

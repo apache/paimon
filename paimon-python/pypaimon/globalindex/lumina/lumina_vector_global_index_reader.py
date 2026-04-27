@@ -28,7 +28,9 @@ import numpy as np
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 
+LUMINA_IDENTIFIER = "lumina"
 LUMINA_VECTOR_ANN_IDENTIFIER = "lumina-vector-ann"
+LUMINA_IDENTIFIERS = (LUMINA_IDENTIFIER, LUMINA_VECTOR_ANN_IDENTIFIER)
 
 MIN_SEARCH_LIST_SIZE = 16
 

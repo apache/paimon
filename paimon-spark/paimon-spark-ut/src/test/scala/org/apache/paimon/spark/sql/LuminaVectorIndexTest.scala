@@ -25,7 +25,8 @@ import scala.collection.JavaConverters._
 /** Tests for Lumina vector index read/write operations. */
 class LuminaVectorIndexTest extends PaimonSparkTestBase {
 
-  private val indexType = "lumina-vector-ann"
+  private val indexType = "lumina"
+  private val legacyIndexType = "lumina-vector-ann"
   private val defaultOptions = "lumina.index.dimension=3"
 
   // ========== Index Creation Tests ==========
@@ -68,6 +69,53 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
+  test("create lumina vector index - legacy index type") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      val values = (0 until 10)
+        .map(
+          i => s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)))")
+        .mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output = spark
+        .sql(
+          s"CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => '$legacyIndexType', options => '$defaultOptions')")
+        .collect()
+        .head
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val indexEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == legacyIndexType)
+
+      assert(indexEntries.nonEmpty)
+      val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
+      assert(totalRowCount == 10L)
+
+      // End-to-end read: vector_search must resolve the legacy identifier through
+      // LegacyLuminaVectorGlobalIndexerFactory and return results.
+      val result = spark
+        .sql("""
+               |SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
+               |""".stripMargin)
+        .collect()
+      assert(result.length == 5)
+    }
+  }
+
   test("table_indexes system table - global index metadata") {
     withTable("T") {
       spark.sql("""
@@ -96,13 +144,13 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
                |SELECT index_type, row_count, row_range_start, row_range_end,
                |       index_field_id, index_field_name
                |FROM `T$table_indexes`
-               |WHERE index_type = 'lumina-vector-ann'
+               |WHERE index_type = 'lumina'
                |""".stripMargin)
         .collect()
 
       assert(indexRows.nonEmpty)
       val row = indexRows.head
-      assert(row.getAs[String]("index_type") == "lumina-vector-ann")
+      assert(row.getAs[String]("index_type") == "lumina")
       assert(row.getAs[Long]("row_count") == 100L)
       assert(row.getAs[Long]("row_range_start") == 0L)
       assert(row.getAs[Long]("row_range_end") == 99L)

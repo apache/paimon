@@ -451,13 +451,15 @@ Schema schema = Schema.newBuilder()
 CALL sys.create_global_index(
     table => 'db.doc_embeddings',
     index_column => 'embedding',
-    index_type => 'lumina-vector-ann',
+    index_type => 'lumina',
     options => 'lumina.index.dimension=768'
 );
 
 -- Search for top-5 nearest neighbors
 SELECT * FROM vector_search('doc_embeddings', 'embedding', array(0.1f, 0.2f, ...), 5);
 ```
+
+The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
 
 **Why:** The [Global Index]({{< ref "append-table/global-index" >}}) with DiskANN provides high-performance ANN search.
 Vector data is stored in dedicated `.vector.lance` files optimized for dense vectors, while scalar columns stay in
