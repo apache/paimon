@@ -41,7 +41,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionService;
@@ -263,7 +262,6 @@ public class BlobViewLookup {
 
             ReadBuilder readBuilder =
                     table.newReadBuilder().withReadType(readType).withRowRanges(rowRanges);
-            Iterator<Long> rowIdIterator = rowIds(rowRanges).iterator();
 
             try (RecordReader<InternalRow> reader =
                     readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
@@ -272,11 +270,7 @@ public class BlobViewLookup {
                     try {
                         InternalRow row;
                         while ((row = batch.next()) != null) {
-                            if (!rowIdIterator.hasNext()) {
-                                throw new IllegalStateException(
-                                        "Read more rows than requested row ranges.");
-                            }
-                            long rowId = rowIdIterator.next();
+                            long rowId = row.getLong(fields.size());
                             for (int i = 0; i < fields.size(); i++) {
                                 Blob blob = row.getBlob(i);
                                 if (blob != null) {
@@ -295,16 +289,6 @@ public class BlobViewLookup {
 
             return resolved;
         }
-    }
-
-    private static List<Long> rowIds(List<Range> rowRanges) {
-        List<Long> rowIds = new ArrayList<>();
-        for (Range rowRange : rowRanges) {
-            for (long rowId = rowRange.from; rowId <= rowRange.to; rowId++) {
-                rowIds.add(rowId);
-            }
-        }
-        return rowIds;
     }
 
     private static List<List<Range>> splitRowRanges(List<Range> rowRanges, long targetRowsPerTask) {

@@ -837,17 +837,18 @@ public class BlobTableTest extends TableTestBase {
 
         RowTrackingTable upstreamRowTracking = new RowTrackingTable(upstreamTable);
         ReadBuilder rowIdReader =
-                upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 2, 3});
+                upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 3});
         Map<Integer, Long> idToRowId = new HashMap<>();
         Map<Integer, byte[]> idToBlob = new HashMap<>();
+        idToBlob.put(1, imageBytes1);
+        idToBlob.put(2, imageBytes2);
         rowIdReader
                 .newRead()
                 .createReader(rowIdReader.newScan().plan())
                 .forEachRemaining(
                         row -> {
                             int id = row.getInt(0);
-                            idToRowId.put(id, row.getLong(2));
-                            idToBlob.put(id, row.getBlob(1).toData());
+                            idToRowId.put(id, row.getLong(1));
                         });
         assertThat(idToRowId.size()).isEqualTo(2);
 
