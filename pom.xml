@@ -427,17 +427,20 @@ under the License.
             <modules>
                 <module>paimon-spark/paimon-spark4-common</module>
                 <module>paimon-spark/paimon-spark-4.0</module>
+                <module>paimon-spark/paimon-spark-4.1</module>
             </modules>
             <properties>
                 <target.java.version>17</target.java.version>
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
-                <scala.version>${scala213.version}</scala.version>
-                <paimon-spark-common.spark.version>4.0.2</paimon-spark-common.spark.version>
+                <!-- Spark 4.1.1 is built against Scala 2.13.17; force the same stdlib here so that
+                     `MurmurHash3.caseClassHash$default$2` and related APIs resolve at runtime. -->
+                <scala.version>2.13.17</scala.version>
+                <paimon-spark-common.spark.version>4.1.1</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
-                <test.spark.main.version>4.0</test.spark.main.version>
-                <test.spark.version>4.0.2</test.spark.version>
+                <test.spark.main.version>4.1</test.spark.main.version>
+                <test.spark.version>4.1.1</test.spark.version>
             </properties>
             <activation>
                 <property>

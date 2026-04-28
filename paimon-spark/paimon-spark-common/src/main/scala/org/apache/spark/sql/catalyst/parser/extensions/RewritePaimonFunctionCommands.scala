@@ -36,6 +36,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunc
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{TreePattern, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.{CatalogManager, CatalogPlugin, LookupCatalog}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.DataType
 
 case class RewritePaimonFunctionCommands(spark: SparkSession)
@@ -102,8 +103,9 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
   private def transformPaimonV1Function(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperatorsUp {
       case u: UnresolvedWith =>
-        u.copy(cteRelations = u.cteRelations.map(
-          t => (t._1, transformPaimonV1Function(t._2).asInstanceOf[SubqueryAlias])))
+        SparkShimLoader.shim.transformUnresolvedWithCteRelations(
+          u,
+          alias => transformPaimonV1Function(alias).asInstanceOf[SubqueryAlias])
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
           case u: UnresolvedFunction =>

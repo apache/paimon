@@ -24,16 +24,25 @@ import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensi
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.CTESubstitution
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, UnresolvedWith}
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.SparkFormatTable
+import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
+import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
 import org.apache.spark.unsafe.types.VariantVal
 
@@ -113,6 +122,46 @@ class Spark4Shim extends SparkShim {
       withSchemaEvolution)
   }
 
+  override def earlyBatchRules(): Seq[Rule[LogicalPlan]] = Seq(CTESubstitution)
+
+  override def mergeRowsKeepCopy(condition: Expression, output: Seq[Expression]): AnyRef =
+    Keep(Copy, condition, output)
+
+  override def mergeRowsKeepUpdate(condition: Expression, output: Seq[Expression]): AnyRef =
+    Keep(Update, condition, output)
+
+  override def mergeRowsKeepInsert(condition: Expression, output: Seq[Expression]): AnyRef =
+    Keep(Insert, condition, output)
+
+  override def transformUnresolvedWithCteRelations(
+      u: UnresolvedWith,
+      transform: SubqueryAlias => SubqueryAlias): UnresolvedWith = {
+    u.copy(cteRelations = u.cteRelations.map {
+      case (name, alias, depth) => (name, transform(alias), depth)
+    })
+  }
+
+  override def hasFileStreamSinkMetadata(
+      paths: Seq[String],
+      hadoopConf: Configuration,
+      sqlConf: SQLConf): Boolean = {
+    FileStreamSink.hasMetadata(paths, hadoopConf, sqlConf)
+  }
+
+  override def createPartitionedMetadataLogFileIndex(
+      sparkSession: SparkSession,
+      path: Path,
+      parameters: Map[String, String],
+      userSpecifiedSchema: Option[StructType],
+      partitionSchema: StructType): PartitioningAwareFileIndex = {
+    new Spark4Shim.PartitionedMetadataLogFileIndex(
+      sparkSession,
+      path,
+      parameters,
+      userSpecifiedSchema,
+      partitionSchema)
+  }
+
   override def toPaimonVariant(o: Object): Variant = {
     val v = o.asInstanceOf[VariantVal]
     new GenericVariant(v.getValue, v.getMetadata)
@@ -132,4 +181,21 @@ class Spark4Shim extends SparkShim {
     dataType.isInstanceOf[VariantType]
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
+}
+
+object Spark4Shim {
+
+  /** Paimon's partition-aware wrapper over Spark's `MetadataLogFileIndex`. */
+  private[shims] class PartitionedMetadataLogFileIndex(
+      sparkSession: SparkSession,
+      path: Path,
+      parameters: Map[String, String],
+      userSpecifiedSchema: Option[StructType],
+      override val partitionSchema: StructType)
+    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema) {
+
+    override def partitionSpec(): PartitionSpec = {
+      SparkFormatTable.alignPartitionSpec(super.partitionSpec(), partitionSchema)
+    }
+  }
 }

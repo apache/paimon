@@ -664,7 +664,11 @@ public class SparkCatalog extends SparkBaseCatalog
             } else if (table instanceof ObjectTable) {
                 return new SparkObjectTable((ObjectTable) table);
             } else {
-                return new SparkTable(table);
+                // Access the Scala companion object explicitly: Scala's static forwarder for
+                // `SparkTable.of` is not reliably emitted on all toolchains (observed missing in
+                // the shaded `paimon-spark-3.3_2.12` jar, producing NoSuchMethodError at spark-sql
+                // startup). Going through MODULE$ always resolves to the companion's method.
+                return SparkTable$.MODULE$.of(table);
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);

@@ -33,6 +33,11 @@ under the License.
 
     <properties>
         <spark.version>4.0.2</spark.version>
+        <!-- Spark 4.x uses SLF4J 2.x (`org.slf4j.spi.LoggingEventBuilder` is 2.x-only). Override
+             the Paimon parent pom's default `slf4j.version=1.7.32` so the classpath is uniformly
+             2.x; otherwise `log4j-slf4j2-impl` + `slf4j-api:1.7.32` mix produces
+             `NoClassDefFoundError: org/slf4j/spi/LoggingEventBuilder` at test startup. -->
+        <slf4j.version>2.0.16</slf4j.version>
     </properties>
 
     <dependencies>
@@ -53,10 +58,46 @@ under the License.
             <version>${project.version}</version>
         </dependency>
 
+        <!--
+          `paimon-spark4-common` transitively pulls in `spark-sql-api` at the version set by
+          `paimon-spark-common.spark.version` (4.1.1 under the `spark4` profile). Spark 4.1's
+          `SqlApiConf` added abstract `manageParserCaches()`, which Spark 4.0's concrete
+          anonymous subclasses (e.g. `WithTestConf$$anon$4`) don't implement. Mixing those
+          jars produces `AbstractMethodError` at parser configuration time. Pin
+          `spark-sql-api` to `${spark.version}` (4.0.2) so the test classpath is uniformly 4.0.
+        -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql-api_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <exclusions>
+                <!-- See spark-sql exclusion below: spark-connect-shims ships a stub SparkConf
+                     that shadows the real one from spark-core. -->
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
+            <exclusions>
+                <!--
+                  Spark 4.0.2 ships a tiny `spark-connect-shims` jar containing a stub
+                  `org.apache.spark.SparkConf` with only `getAll()` and a no-arg constructor
+                  (no `set` etc.). scalac resolves that stub in preference to spark-core's
+                  real `SparkConf` and fails compile with `value set is not a member of
+                  org.apache.spark.SparkConf`. The shims jar is only relevant to Spark Connect
+                  clients; excluding it leaves the full `SparkConf` from `spark-core`.
+                -->
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -82,6 +123,20 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-spark-ut_${scala.binary.version}</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-spark4-common_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>

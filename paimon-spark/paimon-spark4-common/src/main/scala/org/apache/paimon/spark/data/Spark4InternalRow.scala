@@ -21,7 +21,7 @@ package org.apache.paimon.spark.data
 import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.unsafe.types.VariantVal
+import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
 
 class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
 
@@ -29,4 +29,10 @@ class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowTy
     val v = row.getVariant(i)
     new VariantVal(v.value(), v.metadata())
   }
+
+  override def getGeography(ordinal: Int): GeographyVal =
+    throw new UnsupportedOperationException("Paimon does not support Geography type")
+
+  override def getGeometry(ordinal: Int): GeometryVal =
+    throw new UnsupportedOperationException("Paimon does not support Geometry type")
 }

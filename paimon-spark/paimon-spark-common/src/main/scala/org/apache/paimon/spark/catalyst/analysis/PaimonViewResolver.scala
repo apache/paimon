@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.view.View
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, GetColumnByOrdinal, SubstituteUnresolvedOrdinals, UnresolvedRelation, UnresolvedTableOrView}
+import org.apache.spark.sql.catalyst.analysis.{GetColumnByOrdinal, UnresolvedRelation, UnresolvedTableOrView}
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, UpCast}
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.parser.extensions.{CurrentOrigin, Origin}
@@ -32,6 +32,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan, Proje
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class PaimonViewResolver(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -64,7 +65,7 @@ case class PaimonViewResolver(spark: SparkSession)
       parseViewText(nameParts.toArray.mkString("."), view.query(SupportView.DIALECT))
 
     // Apply early analysis rules that won't re-run for plans injected during Resolution batch.
-    val earlyRules = Seq(CTESubstitution, SubstituteUnresolvedOrdinals)
+    val earlyRules = SparkShimLoader.shim.earlyBatchRules()
     val rewritten = earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan))
 
     // Spark internally replaces CharType/VarcharType with StringType during V2 table resolution,

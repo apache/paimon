@@ -48,9 +48,16 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
 
         val node1 = nodes(0)
         assert(
-          node1.isInstanceOf[AppendDataExec] &&
-            node1.toString.contains("PaimonWrite(table=test.t1"),
-          s"Expected AppendDataExec with specific paimon write, but got: $node1"
+          node1.isInstanceOf[AppendDataExec],
+          s"Expected AppendDataExec, but got: $node1"
+        )
+        // Inspect the `write` field directly. Spark 4.1 overrides
+        // `V2ExistingTableWriteExec.stringArgs` with a single-use `Iterator` held in a `val`,
+        // which gets exhausted after the first `toString` — subsequent renderings omit the write.
+        val writeDesc = node1.asInstanceOf[AppendDataExec].write.toString
+        assert(
+          writeDesc.contains("PaimonWrite(table=test.t1"),
+          s"Expected PaimonWrite, but got write: $writeDesc\nnode: $node1"
         )
 
         val node2 = nodes(1)
@@ -91,9 +98,16 @@ class V2WriteRequireDistributionTest extends PaimonSparkTestBase with AdaptiveSp
 
         val node1 = nodes(0)
         assert(
-          node1.isInstanceOf[AppendDataExec] &&
-            node1.toString.contains("PaimonWrite(table=test.t1"),
-          s"Expected AppendDataExec with specific paimon write, but got: $node1"
+          node1.isInstanceOf[AppendDataExec],
+          s"Expected AppendDataExec, but got: $node1"
+        )
+        // Inspect the `write` field directly. Spark 4.1 overrides
+        // `V2ExistingTableWriteExec.stringArgs` with a single-use `Iterator` held in a `val`,
+        // which gets exhausted after the first `toString` — subsequent renderings omit the write.
+        val writeDesc = node1.asInstanceOf[AppendDataExec].write.toString
+        assert(
+          writeDesc.contains("PaimonWrite(table=test.t1"),
+          s"Expected PaimonWrite, but got write: $writeDesc\nnode: $node1"
         )
 
         val node2 = nodes(1)
