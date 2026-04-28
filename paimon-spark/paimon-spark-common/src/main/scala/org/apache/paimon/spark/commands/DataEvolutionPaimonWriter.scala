@@ -70,6 +70,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
         "DataEvolution does not support writing partial columns with raw-data BLOB type. " +
           "Only descriptor-based BLOB columns (configured via '" +
           CoreOptions.BLOB_DESCRIPTOR_FIELD.key() + "' or '" +
+          CoreOptions.BLOB_VIEW_FIELD.key() + "' or '" +
           CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key() + "') can be updated.")
     }
 

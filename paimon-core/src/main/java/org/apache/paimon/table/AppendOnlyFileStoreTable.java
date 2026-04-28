@@ -123,7 +123,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             new AppendTableRawFileSplitReadProvider(
                                     () -> store().newRead(), config));
         }
-        return new AppendTableRead(providerFactories, schema());
+        return new AppendTableRead(
+                providerFactories,
+                schema(),
+                catalogEnvironment.catalogContext(),
+                () -> new AppendTableRead(providerFactories, schema()));
     }
 
     @Override

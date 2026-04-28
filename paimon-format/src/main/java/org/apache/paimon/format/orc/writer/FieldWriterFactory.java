@@ -19,7 +19,7 @@
 package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -251,14 +251,14 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             BytesColumnVector vector = (BytesColumnVector) column;
             Blob blob = getters.getBlob(columnId);
             try {
-                BlobDescriptor descriptor = blob.toDescriptor();
-                byte[] bytes = descriptor.serialize();
+                byte[] bytes = BlobUtils.serializeBlob(blob);
                 vector.setVal(rowId, bytes, 0, bytes.length);
                 return bytes.length;
             } catch (Throwable t) {
                 throw new IllegalArgumentException(
-                        "blob-descriptor-field requires blob field value to be a "
-                                + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                        "BLOB inline fields configured by blob-descriptor-field or "
+                                + "blob-view-field require values to be a BlobDescriptor or "
+                                + "BlobViewStruct.",
                         t);
             }
         };

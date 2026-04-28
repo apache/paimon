@@ -66,7 +66,7 @@ under the License.
             <td><h5>blob-descriptor-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Comma-separated BLOB field names to store as serialized BlobDescriptor bytes inline in data files.</td>
+            <td>Comma-separated BLOB field names, selected from blob-field, to store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
             <td><h5>blob-external-storage-field</h5></td>
@@ -85,6 +85,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-view-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated BLOB field names, selected from blob-field, to store as serialized BlobViewStruct bytes inline in data files and resolve from upstream tables at read time.</td>
         </tr>
         <tr>
             <td><h5>blob.split-by-file-size</h5></td>

@@ -65,6 +65,10 @@ public interface Blob {
         return new BlobRef(reader, descriptor);
     }
 
+    static BlobView fromView(BlobViewStruct viewStruct) {
+        return new BlobView(viewStruct);
+    }
+
     static Blob fromInputStream(Supplier<SeekableInputStream> supplier) {
         return new BlobStream(supplier);
     }

@@ -21,8 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -32,7 +31,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils$;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -246,15 +244,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
             return null;
         }
-        byte[] bytes = internalRow.getBinary(actualPos);
-        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
-        if (blobDes) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
-        } else {
-            return new BlobData(bytes);
-        }
+        return BlobUtils.fromBytes(internalRow.getBinary(actualPos), uriReaderFactory, null);
     }
 
     @Override
@@ -435,7 +425,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int pos) {
-            return new BlobData(arrayData.getBinary(pos));
+            return BlobUtils.fromBytes(arrayData.getBinary(pos), null, null);
         }
 
         @Override

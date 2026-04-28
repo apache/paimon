@@ -86,7 +86,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
 
         Set<String> fieldsInDedicatedFile =
                 SetUtils.union(
-                        fieldNamesInBlobFile(table.rowType(), options.blobDescriptorField()),
+                        fieldNamesInBlobFile(table.rowType(), options.blobInlineField()),
                         fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
 
         table = table.copy(DYNAMIC_WRITE_OPTIONS);

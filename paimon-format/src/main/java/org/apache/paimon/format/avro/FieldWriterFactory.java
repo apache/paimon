@@ -20,7 +20,7 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
@@ -83,12 +83,12 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
                     throw new IllegalArgumentException("Null blob is not allowed.");
                 }
                 try {
-                    BlobDescriptor descriptor = blob.toDescriptor();
-                    encoder.writeBytes(descriptor.serialize());
+                    encoder.writeBytes(BlobUtils.serializeBlob(blob));
                 } catch (Throwable t) {
                     throw new IllegalArgumentException(
-                            "blob-descriptor-field requires blob field value to be a "
-                                    + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                            "BLOB inline fields configured by blob-descriptor-field or "
+                                    + "blob-view-field require values to be a BlobDescriptor or "
+                                    + "BlobViewStruct.",
                             t);
                 }
             };

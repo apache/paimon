@@ -21,8 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -32,7 +31,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.data.DecimalData;
@@ -142,15 +140,7 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        byte[] bytes = row.getBinary(pos);
-        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
-        if (blobDes) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
-        } else {
-            return new BlobData(bytes);
-        }
+        return BlobUtils.fromBytes(row.getBinary(pos), uriReaderFactory, null);
     }
 
     @Override
@@ -255,7 +245,7 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public Blob getBlob(int pos) {
-            return new BlobData(array.getBinary(pos));
+            return BlobUtils.fromBytes(array.getBinary(pos), null, null);
         }
 
         @Override

@@ -20,8 +20,7 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -92,7 +91,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         if (primitive.getType() == Schema.Type.BYTES
                 && type != null
                 && type.getTypeRoot() == DataTypeRoot.BLOB) {
-            return new BlobDescriptorBytesReader(uriReader);
+            return new BlobBytesReader(uriReader);
         }
         return AvroSchemaVisitor.super.primitive(primitive, type);
     }
@@ -260,14 +259,14 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         }
     }
 
-    private static class BlobDescriptorBytesReader implements FieldReader {
+    private static class BlobBytesReader implements FieldReader {
 
         private final UriReader uriReader;
 
-        private BlobDescriptorBytesReader(UriReader uriReader) {
+        private BlobBytesReader(UriReader uriReader) {
             if (uriReader == null) {
                 throw new IllegalArgumentException(
-                        "UriReader must not be null for BlobDescriptorBytesReader.");
+                        "UriReader must not be null for BlobBytesReader.");
             }
             this.uriReader = uriReader;
         }
@@ -275,8 +274,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
             byte[] bytes = decoder.readBytes(null).array();
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
+            return BlobUtils.fromBytesWithReader(bytes, uriReader, null);
         }
 
         @Override

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
@@ -35,6 +36,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -52,7 +54,15 @@ public final class AppendTableRead extends AbstractDataTableRead {
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema) {
-        super(schema);
+        this(providerFactories, schema, null, null);
+    }
+
+    public AppendTableRead(
+            List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
+            TableSchema schema,
+            @Nullable CatalogContext catalogContext,
+            @Nullable Supplier<InnerTableRead> readFactory) {
+        super(schema, catalogContext, readFactory);
         this.readProviders =
                 providerFactories.stream()
                         .map(factory -> factory.apply(this::config))
@@ -103,6 +113,16 @@ public final class AppendTableRead extends AbstractDataTableRead {
         initialized().forEach(r -> r.withLimit(limit));
         this.limit = limit;
         return this;
+    }
+
+    @Override
+    protected void configurePrescanRead(InnerTableRead prescanRead) {
+        if (topN != null) {
+            prescanRead.withTopN(topN);
+        }
+        if (limit != null) {
+            prescanRead.withLimit(limit);
+        }
     }
 
     @Override

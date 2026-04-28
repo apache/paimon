@@ -2272,8 +2272,18 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withFallbackKeys("blob.stored-descriptor-fields")
                     .withDescription(
-                            "Comma-separated BLOB field names to store as serialized BlobDescriptor "
-                                    + "bytes inline in data files.");
+                            "Comma-separated BLOB field names, selected from blob-field, to store "
+                                    + "as serialized BlobDescriptor bytes inline in data files.");
+
+    @Immutable
+    public static final ConfigOption<String> BLOB_VIEW_FIELD =
+            key("blob-view-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated BLOB field names, selected from blob-field, to store "
+                                    + "as serialized BlobViewStruct bytes inline in data files and "
+                                    + "resolve from upstream tables at read time.");
 
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
@@ -2930,6 +2940,23 @@ public class CoreOptions implements Serializable {
     }
 
     /**
+     * Resolve blob fields that should be stored as serialized view metadata in data files.
+     *
+     * <p>If this option is set, the listed BLOB fields store {@code BlobViewStruct} bytes inline
+     * and resolve the actual blob content from upstream tables at read time.
+     */
+    public Set<String> blobViewField() {
+        return parseCommaSeparatedSet(BLOB_VIEW_FIELD);
+    }
+
+    /** Resolve blob fields that are stored inline in normal data files. */
+    public Set<String> blobInlineField() {
+        Set<String> fields = new HashSet<>(blobDescriptorField());
+        fields.addAll(blobViewField());
+        return fields;
+    }
+
+    /**
      * Resolve blob fields whose data should be written to external storage at write time. These
      * fields must be a subset of {@link #blobDescriptorField()}.
      */
@@ -2946,7 +2973,7 @@ public class CoreOptions implements Serializable {
      * subset of descriptor fields and therefore are also updatable.
      */
     public Set<String> updatableBlobFields() {
-        return blobDescriptorField();
+        return blobInlineField();
     }
 
     /**
@@ -3278,6 +3305,15 @@ public class CoreOptions implements Serializable {
 
     public static List<String> blobField(Map<String, String> options) {
         String string = options.get(BLOB_FIELD.key());
+        if (string == null) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(string.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public static List<String> blobViewField(Map<String, String> options) {
+        String string = options.get(BLOB_VIEW_FIELD.key());
         if (string == null) {
             return Collections.emptyList();
         }

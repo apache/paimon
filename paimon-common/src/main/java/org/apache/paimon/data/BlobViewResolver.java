@@ -16,20 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.function;
+package org.apache.paimon.data;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.io.Serializable;
 
-/** Paimon flink built in functions. */
-public class BuiltInFunctions {
+/** Resolves a {@link BlobView} by setting its reader and descriptor in place. */
+public interface BlobViewResolver extends Serializable {
 
-    public static final Map<String, String> FUNCTIONS =
-            new HashMap<String, String>() {
-                {
-                    put("path_to_descriptor", PathToDescriptor.class.getName());
-                    put("descriptor_to_string", DescriptorToString.class.getName());
-                    put("blob_view", BlobViewFunction.class.getName());
-                }
-            };
+    void resolve(BlobView blobView);
 }
