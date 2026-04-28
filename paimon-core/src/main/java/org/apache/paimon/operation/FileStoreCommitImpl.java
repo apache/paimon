@@ -545,6 +545,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (!options.overwriteUpgrade()) {
             return appendFiles;
         }
+        if (options.pkClusteringOverride()) {
+            return appendFiles;
+        }
         Comparator<InternalRow> keyComparator = conflictDetection.keyComparator();
         if (keyComparator == null) {
             return appendFiles;
