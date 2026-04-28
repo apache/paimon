@@ -30,6 +30,7 @@ import org.apache.paimon.spark.util.{ScanPlanHelper, SparkRowUtils}
 import org.apache.paimon.spark.write.{PaimonDataWrite, WriteTaskResult}
 import org.apache.paimon.table.{BucketMode, FileStoreTable, PostponeUtils}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
+import org.apache.paimon.utils.BlobDescriptorUtils
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -96,6 +97,10 @@ case class SparkPostponeCompactProcedure(
     val writeBuilder = realTable.newBatchWriteBuilder
     val rowType = table.rowType()
     val coreOptions = table.coreOptions()
+    val catalogContextForBlobDescriptor =
+      BlobDescriptorUtils.getCatalogContext(
+        table.catalogEnvironment().catalogContext(),
+        coreOptions.toConfiguration)
 
     def newWrite() = PaimonDataWrite(
       writeBuilder,
@@ -104,7 +109,7 @@ case class SparkPostponeCompactProcedure(
       writeRowTracking = coreOptions.dataEvolutionEnabled(),
       Option.apply(coreOptions.fullCompactionDeltaCommits()),
       None,
-      table.catalogEnvironment().catalogContext(),
+      catalogContextForBlobDescriptor,
       Some(postponePartitionBucketComputer)
     )
 

@@ -16,15 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileIOLoader;
-import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import java.io.IOException;
@@ -40,7 +34,8 @@ public class IsolatedDirectoryFileIO extends LocalFileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        root = new Path(context.options().get(ROOT_DIR));
+        String rootDir = context.options().get(ROOT_DIR);
+        root = rootDir == null ? null : new Path(rootDir);
     }
 
     @Override
@@ -102,6 +97,10 @@ public class IsolatedDirectoryFileIO extends LocalFileIO {
     private void checkPath(Path path) {
         if (path == null) {
             throw new NullPointerException("path is null");
+        }
+        if (root == null) {
+            throw new UnsupportedOperationException(
+                    "Isolated file io requires option " + ROOT_DIR + ".");
         }
         if (!path.toString().startsWith(root.toString())) {
             throw new UnsupportedOperationException(

@@ -18,12 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.{Blob, BlobDescriptor}
-import org.apache.paimon.fs.Path
+import org.apache.paimon.fs.{IsolatedDirectoryFileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
 import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.SparkConf
@@ -196,6 +197,99 @@ class BlobTestBase extends PaimonSparkTestBase {
         sql("SELECT id, name, content, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
         Seq(Row("1", "paimon", blobData, 0, 1))
       )
+    }
+  }
+
+  test("Blob: test write blob descriptor from external storage") {
+    val catalogName = "isolated_paimon"
+    val databaseName = "external_blob_db"
+    val paimonRoot = tempDBDir.getCanonicalPath + "/paimon-isolated-root"
+    val externalRoot = tempDBDir.getCanonicalPath + "/external-blob-root"
+    val isolatedPaimonRoot = "isolated://" + paimonRoot
+    val isolatedExternalRoot = "isolated://" + externalRoot
+    spark.conf.set(s"spark.sql.catalog.$catalogName", classOf[SparkCatalog].getName)
+    spark.conf.set(s"spark.sql.catalog.$catalogName.warehouse", isolatedPaimonRoot)
+    spark.conf.set(
+      s"spark.sql.catalog.$catalogName.${IsolatedDirectoryFileIO.ROOT_DIR}",
+      isolatedPaimonRoot)
+
+    try {
+      sql(s"CREATE DATABASE IF NOT EXISTS $catalogName.$databaseName")
+      sql(s"USE $catalogName.$databaseName")
+
+      val blobData = new Array[Byte](1024 * 1024)
+      RANDOM.nextBytes(blobData)
+      val blobPath = externalRoot + "/external_blob"
+      val fileIO = new LocalFileIO
+      val outputStream = fileIO.newOutputStream(new Path("file://" + blobPath), true)
+      try outputStream.write(blobData)
+      finally outputStream.close()
+
+      val isolatedPath = "isolated://" + blobPath
+
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES (" +
+            "'row-tracking.enabled'='true', " +
+            "'data-evolution.enabled'='true', " +
+            "'blob-field'='picture', " +
+            "'blob-as-descriptor'='true')")
+
+        // 1. directly writing raise expected errors.
+        val error = intercept[Exception] {
+          sql("INSERT INTO t VALUES (1, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+        }
+        assert(
+          exceptionContains(
+            error,
+            "Isolated file io only supports reading child of root directory") &&
+            exceptionContains(error, "paimon-isolated-root") &&
+            exceptionContains(error, "external-blob-root/external_blob"),
+          exceptionMessages(error)
+        )
+
+        // 2. inject blob-descriptor io info through dynamic params.
+        // this time writing should success.
+        val descriptorRootOption =
+          s"spark.paimon.$catalogName.$databaseName.t." +
+            CoreOptions.BLOB_DESCRIPTOR_PREFIX + IsolatedDirectoryFileIO.ROOT_DIR
+        withSparkSQLConf(descriptorRootOption -> isolatedExternalRoot) {
+          sql("INSERT INTO t VALUES (2, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+
+          val newDescriptorBytes =
+            sql("SELECT picture FROM t WHERE id = 2").collect()(0).get(0).asInstanceOf[Array[Byte]]
+          val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+          val options = new Options()
+          options.set(IsolatedDirectoryFileIO.ROOT_DIR, isolatedPaimonRoot)
+          val catalogContext = CatalogContext.create(options)
+          val uriReaderFactory = new UriReaderFactory(catalogContext)
+          val blob =
+            Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), newBlobDescriptor)
+          assert(util.Arrays.equals(blobData, blob.toData))
+        }
+      }
+    } finally {
+      sql(s"USE paimon.$dbName0")
+      sql(s"DROP DATABASE IF EXISTS $catalogName.$databaseName CASCADE")
+    }
+  }
+
+  private def exceptionContains(throwable: Throwable, message: String): Boolean = {
+    if (throwable == null) {
+      false
+    } else if (throwable.getMessage != null && throwable.getMessage.contains(message)) {
+      true
+    } else {
+      exceptionContains(throwable.getCause, message)
+    }
+  }
+
+  private def exceptionMessages(throwable: Throwable): String = {
+    if (throwable == null) {
+      ""
+    } else {
+      throwable.getClass.getName + ": " + throwable.getMessage + "\n" +
+        exceptionMessages(throwable.getCause)
     }
   }
 
