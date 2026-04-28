@@ -18,10 +18,13 @@
 
 package org.apache.paimon.format.vortex;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -221,6 +224,63 @@ public class VortexReaderWriterTest {
             assertEquals(BinaryString.fromString("world"), actualRows.get(1).getString(1));
             assertEquals(3, actualRows.get(2).getInt(0));
             assertEquals(BinaryString.fromString("vortex"), actualRows.get(2).getString(1));
+        }
+    }
+
+    @Test
+    public void testArrowBundleRecordsWriteDoesNotBorrowCallerBuffers(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
+
+        Options options = new Options();
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile =
+                new Path(new Path(tempDir.toUri()), "test_arrow_bundle_copy_" + UUID.randomUUID());
+
+        try (FormatWriter writer =
+                        ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                                .create(fileIO, testFile, "");
+                ArrowFormatWriter arrowWriter = new ArrowFormatWriter(rowType, 1024, true)) {
+            arrowWriter.write(GenericRow.of(1, BinaryString.fromString("hello")));
+            arrowWriter.write(GenericRow.of(2, BinaryString.fromString("world")));
+            arrowWriter.flush();
+
+            ((BundleFormatWriter) writer)
+                    .writeBundle(
+                            new ArrowBundleRecords(
+                                    arrowWriter.getVectorSchemaRoot(), rowType, true));
+
+            arrowWriter.reset();
+            arrowWriter.write(GenericRow.of(100, BinaryString.fromString("mutated")));
+            arrowWriter.flush();
+        }
+
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        try (RecordReader<InternalRow> reader =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+
+            List<InternalRow> actualRows = new ArrayList<>();
+            while (iterator.hasNext()) {
+                actualRows.add(serializer.copy(iterator.next()));
+            }
+
+            assertEquals(2, actualRows.size());
+            assertEquals(1, actualRows.get(0).getInt(0));
+            assertEquals(BinaryString.fromString("hello"), actualRows.get(0).getString(1));
+            assertEquals(2, actualRows.get(1).getInt(0));
+            assertEquals(BinaryString.fromString("world"), actualRows.get(1).getString(1));
         }
     }
 

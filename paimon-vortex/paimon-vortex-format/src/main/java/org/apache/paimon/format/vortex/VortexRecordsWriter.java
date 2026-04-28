@@ -33,13 +33,18 @@ import dev.vortex.api.VortexWriter;
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.util.TransferPair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -58,11 +63,10 @@ import java.util.function.Supplier;
  *   <li>{@link ArrowFormatWriter#reset()} is implemented as in-place {@code zeroVector}; reusing a
  *       single writer across batches would zero buffers that the native side is still reading. Each
  *       batch therefore uses a fresh {@link ArrowFormatWriter}; the previous one is moved to a
- *       pending slot and closed after the next {@code writeBatchFfi} returns.
+ *       pending list and closed only after {@link VortexWriter#close()} drains the native task.
  *   <li>{@link ArrowSchema}'s release callback is never invoked by vortex's Rust side (it borrows
  *       {@code &*ffi_schema} instead of taking ownership). The exported C structs are therefore
- *       tracked alongside the pending batch and explicitly released after native no longer needs
- *       the batch.
+ *       tracked alongside the pending batch and explicitly released after the native drain.
  * </ul>
  */
 public class VortexRecordsWriter implements BundleFormatWriter {
@@ -72,7 +76,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     private final Supplier<ArrowFormatWriter> arrowFormatWriterSupplier;
     private final VortexWriter nativeWriter;
     private final String path;
-    @Nullable private PendingBatch pendingBatch;
+    private final List<PendingBatch> pendingBatches = new ArrayList<>();
     private ArrowFormatWriter currentArrowFormatWriter;
     private long jniCost = 0;
 
@@ -103,11 +107,26 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            FfiExport export =
-                    writeVsr(
+            flush();
+
+            VectorSchemaRoot copiedRoot =
+                    copyVectorSchemaRoot(
                             ((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot(),
                             currentArrowFormatWriter.getAllocator());
-            replacePendingBatch(new PendingBatch(null, export));
+            FfiExport export = null;
+            boolean success = false;
+            try {
+                export = writeVsr(copiedRoot, currentArrowFormatWriter.getAllocator());
+                success = true;
+                pendingBatches.add(new PendingBatch(copiedRoot::close, export));
+            } finally {
+                if (!success) {
+                    if (export != null) {
+                        export.close();
+                    }
+                    copiedRoot.close();
+                }
+            }
         } else {
             for (InternalRow row : bundleRecords) {
                 addElement(row);
@@ -135,7 +154,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         } finally {
             RuntimeException runtimeException = null;
             try {
-                closePendingBatch();
+                closePendingBatches();
             } catch (RuntimeException e) {
                 if (runtimeException == null) {
                     runtimeException = e;
@@ -182,13 +201,44 @@ public class VortexRecordsWriter implements BundleFormatWriter {
                         writeVsr(flushedWriter.getVectorSchemaRoot(), flushedWriter.getAllocator());
                 currentArrowFormatWriter = nextWriter;
                 success = true;
-                replacePendingBatch(new PendingBatch(flushedWriter, export));
+                pendingBatches.add(new PendingBatch(flushedWriter::close, export));
             } finally {
                 if (!success) {
                     nextWriter.close();
                     if (export != null) {
                         export.close();
                     }
+                }
+            }
+        }
+    }
+
+    static VectorSchemaRoot copyVectorSchemaRoot(
+            VectorSchemaRoot source, BufferAllocator allocator) {
+        int rowCount = source.getRowCount();
+        List<FieldVector> copiedVectors = new ArrayList<>(source.getFieldVectors().size());
+        boolean success = false;
+        try {
+            for (FieldVector sourceVector : source.getFieldVectors()) {
+                TransferPair transferPair = sourceVector.getTransferPair(allocator);
+                ValueVector targetVector = transferPair.getTo();
+                targetVector.setInitialCapacity(rowCount);
+                targetVector.allocateNew();
+                for (int i = 0; i < rowCount; i++) {
+                    transferPair.copyValueSafe(i, i);
+                }
+                targetVector.setValueCount(rowCount);
+                copiedVectors.add((FieldVector) targetVector);
+            }
+
+            VectorSchemaRoot copiedRoot =
+                    new VectorSchemaRoot(source.getSchema(), copiedVectors, rowCount);
+            success = true;
+            return copiedRoot;
+        } finally {
+            if (!success) {
+                for (FieldVector copiedVector : copiedVectors) {
+                    copiedVector.close();
                 }
             }
         }
@@ -213,30 +263,32 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         }
     }
 
-    private void replacePendingBatch(PendingBatch batch) {
-        PendingBatch previousBatch = pendingBatch;
-        pendingBatch = batch;
-        closePendingBatch(previousBatch);
-    }
-
-    private void closePendingBatch() {
-        closePendingBatch(pendingBatch);
-        pendingBatch = null;
-    }
-
-    private static void closePendingBatch(@Nullable PendingBatch batch) {
-        if (batch != null) {
-            batch.close();
+    private void closePendingBatches() {
+        RuntimeException runtimeException = null;
+        for (PendingBatch batch : pendingBatches) {
+            try {
+                batch.close();
+            } catch (RuntimeException e) {
+                if (runtimeException == null) {
+                    runtimeException = e;
+                } else {
+                    runtimeException.addSuppressed(e);
+                }
+            }
+        }
+        pendingBatches.clear();
+        if (runtimeException != null) {
+            throw runtimeException;
         }
     }
 
     private static class PendingBatch implements AutoCloseable {
 
-        @Nullable private final ArrowFormatWriter writer;
+        @Nullable private final Runnable closeOwner;
         private final FfiExport ffiExport;
 
-        private PendingBatch(@Nullable ArrowFormatWriter writer, FfiExport ffiExport) {
-            this.writer = writer;
+        private PendingBatch(@Nullable Runnable closeOwner, FfiExport ffiExport) {
+            this.closeOwner = closeOwner;
             this.ffiExport = ffiExport;
         }
 
@@ -244,8 +296,8 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         public void close() {
             RuntimeException runtimeException = null;
             runtimeException = FfiExport.run(runtimeException, ffiExport::close);
-            if (writer != null) {
-                runtimeException = FfiExport.run(runtimeException, writer::close);
+            if (closeOwner != null) {
+                runtimeException = FfiExport.run(runtimeException, closeOwner::run);
             }
             if (runtimeException != null) {
                 throw runtimeException;
