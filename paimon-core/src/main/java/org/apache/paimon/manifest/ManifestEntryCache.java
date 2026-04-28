@@ -31,6 +31,7 @@ import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFunctionWithIOE;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectsCache;
@@ -75,7 +76,8 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
     }
 
     @Override
-    protected ManifestEntrySegments createSegments(Path path, @Nullable Long fileSize) {
+    protected ManifestEntrySegments createSegments(
+            Path path, @Nullable Long fileSize, Filter<InternalRow> loadFilter) {
         Map<Triple<BinaryRow, Integer, Integer>, DataPagedOutputSerializer> segments =
                 new HashMap<>();
         Function<InternalRow, BinaryRow> partitionGetter = partitionGetter();
@@ -88,6 +90,9 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         try (CloseableIterator<InternalRow> iterator = reader.apply(path, fileSize)) {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
+                if (!loadFilter.test(row)) {
+                    continue;
+                }
                 BinaryRow partition = partitionGetter.apply(row);
                 int bucket = bucketGetter.apply(row);
                 int totalBucket = totalBucketGetter.apply(row);

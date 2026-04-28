@@ -28,7 +28,9 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.ObjectsFile.readFromIterator;
 
@@ -63,13 +65,31 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
     }
 
     public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
+        return read(
+                key,
+                fileSize,
+                Filter.alwaysTrue(),
+                filters.readFilter(),
+                filters.readVFilter(),
+                Function.identity());
+    }
+
+    public <R> List<R> read(
+            K key,
+            @Nullable Long fileSize,
+            Filter<InternalRow> loadFilter,
+            Filter<InternalRow> readFilter,
+            Filter<V> readVFilter,
+            Function<V, R> convertor)
+            throws IOException {
         @SuppressWarnings("unchecked")
         S segments = (S) cache.getIfPresents(key);
         if (segments != null) {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseHitObject();
             }
-            return readFromSegments(segments, filters);
+            return convert(
+                    readFromSegments(segments, new Filters<>(readFilter, readVFilter)), convertor);
         } else {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
@@ -78,22 +98,38 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
                 fileSize = fileSizeFunction.apply(key);
             }
             if (fileSize <= cache.maxElementSize()) {
-                segments = createSegments(key, fileSize);
+                segments = createSegments(key, fileSize, loadFilter);
                 cache.put(key, segments);
-                return readFromSegments(segments, filters);
+                return convert(
+                        readFromSegments(segments, new Filters<>(readFilter, readVFilter)),
+                        convertor);
             } else {
                 return readFromIterator(
                         reader.apply(key, fileSize),
                         projectedSerializer,
-                        filters.readFilter(),
-                        filters.readVFilter());
+                        readFilter,
+                        readVFilter,
+                        convertor);
             }
         }
     }
 
+    private <R> List<R> convert(List<V> values, Function<V, R> convertor) {
+        List<R> result = new ArrayList<>(values.size());
+        for (V v : values) {
+            result.add(convertor.apply(v));
+        }
+        return result;
+    }
+
     protected abstract List<V> readFromSegments(S segments, Filters<V> filters) throws IOException;
 
-    protected abstract S createSegments(K k, @Nullable Long fileSize);
+    protected abstract S createSegments(
+            K k, @Nullable Long fileSize, Filter<InternalRow> loadFilter);
+
+    protected S createSegments(K k, @Nullable Long fileSize) {
+        return createSegments(k, fileSize, Filter.alwaysTrue());
+    }
 
     /** Filter context for reading. */
     public static class Filters<V> {
