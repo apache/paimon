@@ -26,6 +26,7 @@ import dev.vortex.api.ScanOptions;
 import dev.vortex.api.proto.Expressions;
 import java.util.OptionalLong;
 
+/** JNI implementation of the File interface. */
 public final class JNIFile implements File {
     private OptionalLong pointer;
 

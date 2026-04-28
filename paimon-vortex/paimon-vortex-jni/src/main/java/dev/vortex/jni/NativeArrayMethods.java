@@ -20,6 +20,7 @@ package dev.vortex.jni;
 
 import java.math.BigDecimal;
 
+/** Native JNI methods for array operations. */
 public final class NativeArrayMethods {
     static {
         NativeLoader.loadJni();
@@ -67,13 +68,6 @@ public final class NativeArrayMethods {
 
     public static native String getUTF8(long pointer, int index);
 
-    /**
-     * Raw-pointer variant of {@link #getUTF8(long, int)} that accepts an array to hold
-     * a pointer and an output length.
-     * <p>
-     * For Java query engines that use Unsafe to manipulate native memory, this allows working with the string
-     * inside of the JVM without copying it into Java heap memory.
-     */
     public static native void getUTF8_ptr_len(long pointer, int index, long[] outPtr, int[] outLen);
 
     public static native byte[] getBinary(long pointer, int index);

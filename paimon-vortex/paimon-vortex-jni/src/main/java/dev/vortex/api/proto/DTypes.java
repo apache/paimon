@@ -25,29 +25,7 @@ import com.google.protobuf.ByteString;
 import dev.vortex.proto.DTypeProtos;
 import java.util.Optional;
 
-/**
- * Factory class for creating Vortex data type definitions.
- * <p>
- * This class provides static factory methods to create {@link DTypeProtos.DType} instances
- * for all supported Vortex data types. Data types in Vortex can be primitive types
- * (like integers, floats, booleans), complex types (like strings, decimals, binary data),
- * or extension types (like temporal types with specific metadata).
- * </p>
- * <p>
- * Each data type can optionally be nullable, which affects how null values are handled
- * during processing. The factory methods follow a consistent pattern where the boolean
- * {@code nullable} parameter determines whether the type can contain null values.
- * </p>
- * <p>
- * Extension types like dates, times, and timestamps are implemented as extensions
- * over primitive storage types with additional metadata that defines their semantic
- * meaning and encoding parameters.
- * </p>
- * <p>
- * This class is primarily used internally by the {@link Scalars} factory class
- * and other parts of the Vortex API to ensure consistent type definitions.
- * </p>
- */
+/** Factory class for creating Vortex data type definitions. */
 public final class DTypes {
     private DTypes() {}
 

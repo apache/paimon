@@ -23,10 +23,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Represents an IS NULL expression that checks whether values are null.
- * This expression returns true for null values and false for non-null values.
- */
 public final class IsNull implements Expression {
     private final Expression child;
 
@@ -34,16 +30,6 @@ public final class IsNull implements Expression {
         this.child = child;
     }
 
-    /**
-     * Parses an IsNull expression from serialized metadata and child expressions.
-     * This method is used during deserialization of Vortex expressions.
-     *
-     * @param metadata the serialized metadata, must be empty for IsNull expressions
-     * @param children the child expressions, must contain exactly one element
-     * @return a new IsNull expression parsed from the provided data
-     * @throws IllegalArgumentException if the number of children is not exactly one,
-     *                                  or if metadata is not empty
-     */
     public static IsNull parse(byte[] metadata, List<Expression> children) {
         if (children.size() != 1) {
             throw new IllegalArgumentException(
@@ -55,12 +41,6 @@ public final class IsNull implements Expression {
         return new IsNull(children.get(0));
     }
 
-    /**
-     * Creates a new IsNull expression that checks nullity of the given child expression.
-     *
-     * @param child the expression to check for null values
-     * @return a new IsNull expression
-     */
     public static IsNull of(Expression child) {
         return new IsNull(child);
     }
@@ -97,11 +77,6 @@ public final class IsNull implements Expression {
         return "vortex.is_null(" + child + ")";
     }
 
-    /**
-     * Returns the child expression that will be checked for null values.
-     *
-     * @return the child expression
-     */
     public Expression getChild() {
         return child;
     }

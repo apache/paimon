@@ -30,6 +30,7 @@ import org.apache.arrow.c.Data;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
+/** JNI implementation of the Array interface. */
 public final class JNIArray implements Array {
     static {
         NativeLoader.loadJni();

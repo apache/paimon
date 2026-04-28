@@ -34,18 +34,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Represents a literal value expression in the Vortex query system.
- * <p>
- * A literal is a constant value of a specific type that can be used in expressions.
- * This class provides factory methods for creating literals of various types including
- * primitives (boolean, integers, floats), temporal types (dates, times, timestamps),
- * and complex types (strings, bytes, decimals).
- * <p>
- * Literals are immutable and implement the visitor pattern for type-safe processing.
- *
- * @param <T> the Java type of the literal value
- */
+/** Literal value expression in the Vortex query system. */
 public abstract class Literal<T> implements Expression {
     private final T value;
 
@@ -53,17 +42,6 @@ public abstract class Literal<T> implements Expression {
         this.value = value;
     }
 
-    /**
-     * Parses a literal from serialized metadata and child expressions.
-     * <p>
-     * This method deserializes a literal expression from its protocol buffer
-     * representation. Literal expressions must have no children.
-     *
-     * @param metadata the serialized literal metadata as bytes
-     * @param children the list of child expressions (must be empty for literals)
-     * @return the parsed literal expression
-     * @throws RuntimeException if children is not empty or if metadata cannot be parsed
-     */
     public static Literal<?> parse(byte[] metadata, List<Expression> children) {
         if (!children.isEmpty()) {
             throw new IllegalArgumentException("Literal expression must have no children, found: " + children.size());
@@ -76,11 +54,6 @@ public abstract class Literal<T> implements Expression {
         }
     }
 
-    /**
-     * Returns the value of this literal.
-     *
-     * @return the literal value, may be null for null literals
-     */
     public T getValue() {
         return this.value;
     }
@@ -115,207 +88,82 @@ public abstract class Literal<T> implements Expression {
         return Objects.equals(value, literal.value);
     }
 
-    /**
-     * Creates a null literal.
-     *
-     * @return a literal representing null
-     */
     public static Literal<Void> nullLit() {
         return NullLiteral.INSTANCE;
     }
 
-    /**
-     * Creates a boolean literal.
-     *
-     * @param value the boolean value, may be null
-     * @return a boolean literal
-     */
     public static Literal<Boolean> bool(Boolean value) {
         return new BooleanLiteral(value);
     }
 
-    /**
-     * Creates an 8-bit signed integer literal.
-     *
-     * @param value the byte value, may be null
-     * @return an int8 literal
-     */
     public static Literal<Byte> int8(Byte value) {
         return new Int8Literal(value);
     }
 
-    /**
-     * Creates a 16-bit signed integer literal.
-     *
-     * @param value the short value, may be null
-     * @return an int16 literal
-     */
     public static Literal<Short> int16(Short value) {
         return new Int16Literal(value);
     }
 
-    /**
-     * Creates a 32-bit signed integer literal.
-     *
-     * @param value the integer value, may be null
-     * @return an int32 literal
-     */
     public static Literal<Integer> int32(Integer value) {
         return new Int32Literal(value);
     }
 
-    /**
-     * Creates a 64-bit signed integer literal.
-     *
-     * @param value the long value, may be null
-     * @return an int64 literal
-     */
     public static Literal<Long> int64(Long value) {
         return new Int64Literal(value);
     }
 
-    /**
-     * Creates a 32-bit floating-point literal.
-     *
-     * @param value the float value, may be null
-     * @return a float32 literal
-     */
     public static Literal<Float> float32(Float value) {
         return new Float32Literal(value);
     }
 
-    /**
-     * Creates a 64-bit floating-point literal.
-     *
-     * @param value the double value, may be null
-     * @return a float64 literal
-     */
     public static Literal<Double> float64(Double value) {
         return new Float64Literal(value);
     }
 
-    /**
-     * Creates a decimal literal with specified precision and scale.
-     *
-     * @param value the decimal value, may be null
-     * @param precision the total number of digits
-     * @param scale the number of digits after the decimal point
-     * @return a decimal literal
-     * @throws RuntimeException if the value's scale doesn't match the specified scale
-     */
     public static Literal<BigDecimal> decimal(BigDecimal value, int precision, int scale) {
         return new DecimalLiteral(value, precision, scale);
     }
 
-    /**
-     * Creates a string literal.
-     *
-     * @param value the string value, may be null
-     * @return a string literal
-     */
     public static Literal<String> string(String value) {
         return new StringLiteral(value);
     }
 
-    /**
-     * Creates a byte array literal.
-     *
-     * @param value the byte array value, may be null
-     * @return a bytes literal
-     */
     public static Literal<byte[]> bytes(byte[] value) {
         return new BytesLiteral(value);
     }
 
-    /**
-     * Creates a time literal representing time of day in seconds.
-     *
-     * @param value the time value in seconds since midnight, may be null
-     * @return a time literal with second precision
-     */
     public static Literal<Integer> timeSeconds(Integer value) {
         return new TimeSeconds(value);
     }
 
-    /**
-     * Creates a time literal representing time of day in milliseconds.
-     *
-     * @param value the time value in milliseconds since midnight, may be null
-     * @return a time literal with millisecond precision
-     */
     public static Literal<Integer> timeMillis(Integer value) {
         return new TimeMillis(value);
     }
 
-    /**
-     * Creates a time literal representing time of day in microseconds.
-     *
-     * @param value the time value in microseconds since midnight, may be null
-     * @return a time literal with microsecond precision
-     */
     public static Literal<Long> timeMicros(Long value) {
         return new TimeMicros(value);
     }
 
-    /**
-     * Creates a time literal representing time of day in nanoseconds.
-     *
-     * @param value the time value in nanoseconds since midnight, may be null
-     * @return a time literal with nanosecond precision
-     */
     public static Literal<Long> timeNanos(Long value) {
         return new TimeNanos(value);
     }
 
-    /**
-     * Creates a date literal representing date as days since epoch.
-     *
-     * @param value the number of days since Unix epoch (1970-01-01), may be null
-     * @return a date literal with day precision
-     */
     public static Literal<Integer> dateDays(Integer value) {
         return new DateDays(value);
     }
 
-    /**
-     * Creates a date literal representing date as milliseconds since epoch.
-     *
-     * @param value the number of milliseconds since Unix epoch, may be null
-     * @return a date literal with millisecond precision
-     */
     public static Literal<Long> dateMillis(Long value) {
         return new DateMillis(value);
     }
 
-    /**
-     * Creates a timestamp literal with millisecond precision.
-     *
-     * @param value the timestamp value in milliseconds since Unix epoch, may be null
-     * @param timeZone the time zone identifier (e.g., "UTC", "America/New_York"), optional
-     * @return a timestamp literal with millisecond precision
-     */
     public static Literal<Long> timestampMillis(Long value, Optional<String> timeZone) {
         return new TimestampMillis(value, timeZone);
     }
 
-    /**
-     * Creates a timestamp literal with microsecond precision.
-     *
-     * @param value the timestamp value in microseconds since Unix epoch, may be null
-     * @param timeZone the time zone identifier (e.g., "UTC", "America/New_York"), optional
-     * @return a timestamp literal with microsecond precision
-     */
     public static Literal<Long> timestampMicros(Long value, Optional<String> timeZone) {
         return new TimestampMicros(value, timeZone);
     }
 
-    /**
-     * Creates a timestamp literal with nanosecond precision.
-     *
-     * @param value the timestamp value in nanoseconds since Unix epoch, may be null
-     * @param timeZone the time zone identifier (e.g., "UTC", "America/New_York"), optional
-     * @return a timestamp literal with nanosecond precision
-     */
     public static Literal<Long> timestampNanos(Long value, Optional<String> timeZone) {
         return new TimestampNanos(value, timeZone);
     }
@@ -325,190 +173,47 @@ public abstract class Literal<T> implements Expression {
         return visitor.visitLiteral(this);
     }
 
-    /**
-     * Accepts a literal visitor to process this literal in a type-safe manner.
-     * <p>
-     * This method implements the visitor pattern, allowing different operations
-     * to be performed on literals based on their specific type.
-     *
-     * @param <U> the return type of the visitor operation
-     * @param visitor the visitor to accept
-     * @return the result of the visitor operation
-     */
     public abstract <U> U acceptLiteralVisitor(LiteralVisitor<U> visitor);
 
-    /**
-     * Visitor interface for processing literals in a type-safe manner.
-     * <p>
-     * This interface defines methods for visiting each type of literal that can
-     * be represented in the Vortex system. Implementations can provide type-specific
-     * processing logic while maintaining type safety.
-     *
-     * @param <U> the return type of visitor methods
-     */
     public interface LiteralVisitor<U> {
-        /**
-         * Visits a null literal.
-         *
-         * @return the result of processing the null literal
-         */
         U visitNull();
 
-        /**
-         * Visits a boolean literal.
-         *
-         * @param literal the boolean value, may be null
-         * @return the result of processing the boolean literal
-         */
         U visitBoolean(Boolean literal);
 
-        /**
-         * Visits an 8-bit signed integer literal.
-         *
-         * @param literal the byte value, may be null
-         * @return the result of processing the int8 literal
-         */
         U visitInt8(Byte literal);
 
-        /**
-         * Visits a 16-bit signed integer literal.
-         *
-         * @param literal the short value, may be null
-         * @return the result of processing the int16 literal
-         */
         U visitInt16(Short literal);
 
-        /**
-         * Visits a 32-bit signed integer literal.
-         *
-         * @param literal the integer value, may be null
-         * @return the result of processing the int32 literal
-         */
         U visitInt32(Integer literal);
 
-        /**
-         * Visits a 64-bit signed integer literal.
-         *
-         * @param literal the long value, may be null
-         * @return the result of processing the int64 literal
-         */
         U visitInt64(Long literal);
 
-        /**
-         * Visits a date literal with day precision.
-         *
-         * @param days the number of days since Unix epoch, may be null
-         * @return the result of processing the date literal
-         */
         U visitDateDays(Integer days);
 
-        /**
-         * Visits a date literal with millisecond precision.
-         *
-         * @param millis the number of milliseconds since Unix epoch, may be null
-         * @return the result of processing the date literal
-         */
         U visitDateMillis(Long millis);
 
-        /**
-         * Visits a time literal with second precision.
-         *
-         * @param seconds the time in seconds since midnight, may be null
-         * @return the result of processing the time literal
-         */
         U visitTimeSeconds(Integer seconds);
 
-        /**
-         * Visits a time literal with millisecond precision.
-         *
-         * @param seconds the time in milliseconds since midnight, may be null
-         * @return the result of processing the time literal
-         */
         U visitTimeMillis(Integer seconds);
 
-        /**
-         * Visits a time literal with microsecond precision.
-         *
-         * @param seconds the time in microseconds since midnight, may be null
-         * @return the result of processing the time literal
-         */
         U visitTimeMicros(Long seconds);
 
-        /**
-         * Visits a time literal with nanosecond precision.
-         *
-         * @param seconds the time in nanoseconds since midnight, may be null
-         * @return the result of processing the time literal
-         */
         U visitTimeNanos(Long seconds);
 
-        /**
-         * Visits a timestamp literal with millisecond precision.
-         *
-         * @param epochMillis the timestamp in milliseconds since Unix epoch, may be null
-         * @param timeZone the time zone identifier, optional
-         * @return the result of processing the timestamp literal
-         */
         U visitTimestampMillis(Long epochMillis, Optional<String> timeZone);
 
-        /**
-         * Visits a timestamp literal with microsecond precision.
-         *
-         * @param epochMicros the timestamp in microseconds since Unix epoch, may be null
-         * @param timeZone the time zone identifier, optional
-         * @return the result of processing the timestamp literal
-         */
         U visitTimestampMicros(Long epochMicros, Optional<String> timeZone);
 
-        /**
-         * Visits a timestamp literal with nanosecond precision.
-         *
-         * @param epochNanos the timestamp in nanoseconds since Unix epoch, may be null
-         * @param timeZone the time zone identifier, optional
-         * @return the result of processing the timestamp literal
-         */
         U visitTimestampNanos(Long epochNanos, Optional<String> timeZone);
 
-        /**
-         * Visits a 32-bit floating-point literal.
-         *
-         * @param literal the float value, may be null
-         * @return the result of processing the float32 literal
-         */
         U visitFloat32(Float literal);
 
-        /**
-         * Visits a 64-bit floating-point literal.
-         *
-         * @param literal the double value, may be null
-         * @return the result of processing the float64 literal
-         */
         U visitFloat64(Double literal);
 
-        /**
-         * Visits a decimal literal with specified precision and scale.
-         *
-         * @param decimal the decimal value, may be null
-         * @param precision the total number of digits
-         * @param scale the number of digits after the decimal point
-         * @return the result of processing the decimal literal
-         */
         U visitDecimal(BigDecimal decimal, int precision, int scale);
 
-        /**
-         * Visits a string literal.
-         *
-         * @param literal the string value, may be null
-         * @return the result of processing the string literal
-         */
         U visitString(String literal);
 
-        /**
-         * Visits a byte array literal.
-         *
-         * @param literal the byte array value, may be null
-         * @return the result of processing the bytes literal
-         */
         U visitBytes(byte[] literal);
     }
 

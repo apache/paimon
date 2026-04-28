@@ -25,6 +25,7 @@ import dev.vortex.api.DType;
 import java.util.Optional;
 import java.util.OptionalLong;
 
+/** JNI implementation of the ArrayIterator interface. */
 public final class JNIArrayIterator implements ArrayIterator {
     private OptionalLong pointer;
     private Optional<Array> next;

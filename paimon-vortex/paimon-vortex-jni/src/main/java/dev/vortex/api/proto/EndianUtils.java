@@ -22,18 +22,8 @@ import com.google.protobuf.ByteString;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 
-/**
- * Utility class for handling endianness conversions in Vortex protocol buffers.
- * Provides methods for converting between big-endian and little-endian byte representations,
- * particularly for decimal values that need to be serialized to the Vortex format.
- */
+/** Utility class for endianness conversions in Vortex protocol buffers. */
 public final class EndianUtils {
-    /**
-     * Reverses the byte order of a ByteString, converting from one endianness to another.
-     *
-     * @param src the source ByteString to reverse
-     * @return a new byte array with bytes in reverse order
-     */
     public static byte[] reverse(ByteString src) {
         byte[] dst = new byte[src.size()];
         for (int i = 0; i < dst.length; i++) {
@@ -42,15 +32,6 @@ public final class EndianUtils {
         return dst;
     }
 
-    /**
-     * Converts a BigDecimal to a little-endian byte array representation suitable for Vortex decimals.
-     * The method extracts the unscaled value of the decimal, converts it from big-endian to little-endian,
-     * and pads to a standard size (1, 2, 4, 8, 16, or 32 bytes) with proper sign extension for negative values.
-     *
-     * @param decimal the BigDecimal value to convert
-     * @return a little-endian byte array representation of the decimal's unscaled value
-     * @throws RuntimeException if the BigDecimal is too large for Arrow
-     */
     public static byte[] littleEndianDecimal(BigDecimal decimal) {
         BigInteger unscaled = decimal.unscaledValue();
         byte[] bigEndianBytes = unscaled.toByteArray();

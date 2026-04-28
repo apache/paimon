@@ -25,13 +25,8 @@ import dev.vortex.proto.ExprProtos;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Generate a protocol buffers representation of an {@link Expression}.
- */
+/** Serialize/deserialize Vortex expressions to/from protocol buffers. */
 public final class Expressions {
-    /**
-     * Serialize an {@link Expression} to a protocol buffer.
-     */
     public static ExprProtos.Expr serialize(Expression expression) {
         ByteString metadata = ByteString.copyFrom(expression
                 .metadata()
@@ -46,16 +41,6 @@ public final class Expressions {
                 .build();
     }
 
-    /**
-     * Deserialize a protocol buffer representation back into an {@link Expression} object.
-     * The method examines the expression ID and creates the appropriate concrete expression type
-     * based on the registered expression types (binary, get_item, root, literal, not, is null,
-     * is not null).
-     * If the expression ID is not recognized, an {@link Unknown} expression is created.
-     *
-     * @param expr the protocol buffer expression to deserialize
-     * @return the deserialized Expression object
-     */
     public static Expression deserialize(ExprProtos.Expr expr) {
         byte[] metadata = expr.getMetadata().toByteArray();
         List<Expression> children =

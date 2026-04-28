@@ -25,11 +25,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Represents a "get item" expression that extracts a field or property from a parent expression.
- * This expression is used to access nested fields in complex data structures such as structs,
- * lists, or other composite types by specifying a path to the desired field.
- */
+/** Expression that extracts a field from a parent expression. */
 public final class GetItem implements Expression {
     private final String path;
     private final Expression child;
@@ -39,27 +35,10 @@ public final class GetItem implements Expression {
         this.path = path;
     }
 
-    /**
-     * Creates a new GetItem expression that extracts the specified field from the given child expression.
-     *
-     * @param child the parent expression from which to extract the field
-     * @param path the path or name of the field to extract
-     * @return a new GetItem expression
-     */
     public static GetItem of(Expression child, String path) {
         return new GetItem(child, path);
     }
 
-    /**
-     * Parses a GetItem expression from serialized metadata and child expressions.
-     * This method is used during deserialization of Vortex expressions.
-     *
-     * @param metadata the serialized metadata containing the field path information
-     * @param children the child expressions, must contain exactly one element
-     * @return a new GetItem expression parsed from the provided data
-     * @throws RuntimeException if the number of children is not exactly one,
-     *                                  or if the metadata cannot be parsed
-     */
     public static GetItem parse(byte[] metadata, List<Expression> children) {
         if (children.size() != 1) {
             throw new IllegalArgumentException(
@@ -73,20 +52,10 @@ public final class GetItem implements Expression {
         }
     }
 
-    /**
-     * Returns the child expression from which the field is being extracted.
-     *
-     * @return the child expression
-     */
     public Expression getChild() {
         return child;
     }
 
-    /**
-     * Returns the path or name of the field being extracted from the child expression.
-     *
-     * @return the field path
-     */
     public String getPath() {
         return path;
     }

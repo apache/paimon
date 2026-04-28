@@ -25,12 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
-/**
- * Utility class for creating and parsing temporal metadata in Vortex protocol buffers.
- * Provides constants for time units and methods for serializing/deserializing timestamp
- * metadata including time zone information. This class handles the binary format used
- * to encode temporal type information in the Vortex data format.
- */
+/** Utility class for creating and parsing temporal metadata in Vortex protocol buffers. */
 public final class TemporalMetadatas {
     private TemporalMetadatas() {}
 
@@ -58,16 +53,6 @@ public final class TemporalMetadatas {
     /** Supplier for time metadata with nanoseconds precision. */
     public static final Supplier<byte[]> TIME_NANOS = Suppliers.memoize(() -> new byte[] {TIME_UNIT_NANOS});
 
-    /**
-     * Creates serialized timestamp metadata with the specified time unit and optional time zone.
-     * The resulting byte array contains the time unit as the first byte, followed by a little-endian
-     * uint16 length field, and then the UTF-8 encoded time zone string (if present).
-     *
-     * @param timeUnit the time unit for the timestamp, must be between TIME_UNIT_NANOS and TIME_UNIT_SECONDS (exclusive of TIME_UNIT_DAYS)
-     * @param timeZone optional time zone identifier string
-     * @return serialized timestamp metadata as a byte array
-     * @throws RuntimeException if timeUnit is invalid for timestamps
-     */
     public static byte[] timestamp(byte timeUnit, Optional<String> timeZone) {
         Preconditions.checkArgument(
                 timeUnit >= TIME_UNIT_NANOS && timeUnit < TIME_UNIT_DAYS, "invalid timeUnit for Timestamp:" + timeUnit);
@@ -90,13 +75,6 @@ public final class TemporalMetadatas {
         return baos.toByteArray();
     }
 
-    /**
-     * Extract the time unit byte from the serialized metadata.
-     *
-     * @param serializedMetadata the serialized temporal metadata byte array
-     * @return the time unit byte from the first position of the metadata
-     * @throws RuntimeException if the time unit byte is invalid
-     */
     public static byte getTimeUnit(byte[] serializedMetadata) {
         byte timeUnit = serializedMetadata[0];
         Preconditions.checkArgument(
@@ -105,14 +83,6 @@ public final class TemporalMetadatas {
         return timeUnit;
     }
 
-    /**
-     * Read from a serialized metadata representation into a time zone string.
-     * Parses the time zone information from the serialized metadata, reading the length
-     * as a little-endian uint16 and then decoding the UTF-8 time zone string.
-     *
-     * @param serializedMetadata the serialized temporal metadata byte array
-     * @return Optional containing the time zone string, or empty if no time zone was specified
-     */
     public static Optional<String> getTimeZone(byte[] serializedMetadata) {
         byte _timeUnit = serializedMetadata[0];
         byte lenLow = serializedMetadata[1];

@@ -24,45 +24,10 @@ import dev.vortex.proto.ScalarProtos;
 import java.math.BigDecimal;
 import java.util.Optional;
 
-/**
- * Factory class for creating Vortex scalar values with their associated data types.
- * <p>
- * This class provides static factory methods to create {@link ScalarProtos.Scalar} instances
- * for all supported Vortex data types. Each scalar consists of a value and its corresponding
- * data type definition. The class supports both nullable and non-nullable variants for most types.
- * </p>
- * <p>
- * Factory methods follow a consistent naming pattern:
- * </p>
- * <ul>
- * <li>{@code typeName(value)} - Creates a non-nullable scalar with the given value</li>
- * <li>{@code nullTypeName()} - Creates a nullable scalar with a null value</li>
- * </ul>
- * <p>
- * Example usage:
- * </p>
- * <pre>{@code
- * // Create a non-nullable integer
- * ScalarProtos.Scalar intScalar = Scalars.int32(42);
- *
- * // Create a nullable string with null value
- * ScalarProtos.Scalar nullString = Scalars.nullString();
- *
- * // Create a string with value
- * ScalarProtos.Scalar stringScalar = Scalars.string("hello");
- * }</pre>
- */
+/** Factory class for creating Vortex scalar values with their associated data types. */
 public final class Scalars {
     private Scalars() {}
 
-    /**
-     * Creates a null scalar value.
-     * <p>
-     * This represents a scalar that is explicitly null with null data type.
-     * </p>
-     *
-     * @return a {@link ScalarProtos.Scalar} representing a null value
-     */
     public static ScalarProtos.Scalar nullNull() {
         return ScalarProtos.Scalar.newBuilder()
                 .setValue(ScalarProtos.ScalarValue.newBuilder()
@@ -72,12 +37,6 @@ public final class Scalars {
                 .build();
     }
 
-    /**
-     * Creates a non-nullable boolean scalar with the specified value.
-     *
-     * @param value the boolean value
-     * @return a {@link ScalarProtos.Scalar} containing the boolean value
-     */
     public static ScalarProtos.Scalar bool(boolean value) {
         return ScalarProtos.Scalar.newBuilder()
                 .setValue(ScalarProtos.ScalarValue.newBuilder()
@@ -87,11 +46,6 @@ public final class Scalars {
                 .build();
     }
 
-    /**
-     * Creates a nullable boolean scalar with a null value.
-     *
-     * @return a {@link ScalarProtos.Scalar} representing a null boolean
-     */
     public static ScalarProtos.Scalar nullBool() {
         return ScalarProtos.Scalar.newBuilder()
                 .setValue(ScalarProtos.ScalarValue.newBuilder()
@@ -137,12 +91,6 @@ public final class Scalars {
                 .build();
     }
 
-    /**
-     * Creates a non-nullable 32-bit integer scalar with the specified value.
-     *
-     * @param value the integer value
-     * @return a {@link ScalarProtos.Scalar} containing the 32-bit integer value
-     */
     public static ScalarProtos.Scalar int32(int value) {
         return ScalarProtos.Scalar.newBuilder()
                 .setValue(ScalarProtos.ScalarValue.newBuilder()
@@ -213,12 +161,6 @@ public final class Scalars {
                 .build();
     }
 
-    /**
-     * Creates a non-nullable string scalar with the specified value.
-     *
-     * @param value the string value
-     * @return a {@link ScalarProtos.Scalar} containing the string value
-     */
     public static ScalarProtos.Scalar string(String value) {
         return ScalarProtos.Scalar.newBuilder()
                 .setValue(ScalarProtos.ScalarValue.newBuilder()
@@ -237,17 +179,6 @@ public final class Scalars {
                 .build();
     }
 
-    /**
-     * Creates a non-nullable decimal scalar with the specified value, precision, and scale.
-     * <p>
-     * The decimal value is converted to little-endian byte representation for storage.
-     * </p>
-     *
-     * @param decimal the decimal value as a {@link BigDecimal}
-     * @param precision the total number of digits in the decimal
-     * @param scale the number of digits after the decimal point
-     * @return a {@link ScalarProtos.Scalar} containing the decimal value
-     */
     public static ScalarProtos.Scalar decimal(BigDecimal decimal, int precision, int scale) {
         byte[] littleEndian = EndianUtils.littleEndianDecimal(decimal);
         return ScalarProtos.Scalar.newBuilder()
@@ -391,17 +322,6 @@ public final class Scalars {
                 .build();
     }
 
-    /**
-     * Creates a non-nullable timestamp scalar with millisecond precision.
-     * <p>
-     * The timestamp represents the number of milliseconds since Unix epoch
-     * (1970-01-01 00:00:00 UTC), optionally adjusted for the specified time zone.
-     * </p>
-     *
-     * @param value the timestamp value in milliseconds since Unix epoch
-     * @param timeZone optional time zone identifier (e.g., "UTC", "America/New_York")
-     * @return a {@link ScalarProtos.Scalar} containing the timestamp value
-     */
     public static ScalarProtos.Scalar timestampMillis(long value, Optional<String> timeZone) {
         return ScalarProtos.Scalar.newBuilder()
                 .setValue(ScalarProtos.ScalarValue.newBuilder()
