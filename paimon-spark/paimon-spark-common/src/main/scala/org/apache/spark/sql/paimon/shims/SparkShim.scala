@@ -20,6 +20,8 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
+import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
@@ -32,6 +34,7 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
@@ -111,6 +114,27 @@ trait SparkShim {
       tableSpec: TableSpec,
       additionalProperties: Map[String, String],
       location: Option[String]): TableSpec
+
+  /**
+   * Constructs a `BatchWrite` for Paimon's V2 write path. The implementation lives in each
+   * per-version shim module so the `extends BatchWrite` mixin is compiled against the right Spark
+   * minor version: Spark 4.1 added a default method `BatchWrite.commit(.., WriteSummary)` whose
+   * inherited signature triggers `ClassNotFoundException: WriteSummary` lazy-linking on Spark 4.0
+   * runtimes when the class is loaded for task serialization.
+   */
+  def createPaimonBatchWrite(
+      table: FileStoreTable,
+      writeSchema: StructType,
+      dataSchema: StructType,
+      overwritePartitions: Option[Map[String, String]],
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite
+
+  /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
+  def createFormatTableBatchWrite(
+      table: FormatTable,
+      overwriteDynamic: Option[Boolean],
+      overwritePartitions: Option[Map[String, String]],
+      writeSchema: StructType): BatchWrite
 
   def createCTERelationRef(
       cteId: Long,
