@@ -274,6 +274,10 @@ class PyArrowFileIO(FileIO):
         if principal and keytab:
             self._kerberos_login_from_keytab(principal, keytab)
             kerb_ticket = self._get_ticket_cache_path()
+            if not kerb_ticket:
+                raise RuntimeError(
+                    "kinit succeeded but no ticket cache path could be determined. "
+                    "Set the KRB5CCNAME environment variable to specify the cache location.")
         elif use_ticket_cache:
             cache_path = self._get_ticket_cache_path()
             if cache_path and os.path.exists(cache_path):

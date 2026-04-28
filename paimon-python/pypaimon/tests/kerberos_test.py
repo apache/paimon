@@ -277,6 +277,36 @@ class KerberosHdfsTest(unittest.TestCase):
                     PyArrowFileIO._kerberos_login_from_keytab("user@REALM", keytab_file.name)
                 self.assertIn("not readable", str(ctx.exception))
 
+    @patch("pypaimon.filesystem.pyarrow_file_io.subprocess.run")
+    def test_kinit_success_but_no_cache_raises_error(self, mock_subprocess_run):
+        mock_subprocess_run.return_value = MagicMock(stdout="/some/classpath")
+
+        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+
+        with tempfile.NamedTemporaryFile(suffix=".keytab") as keytab_file:
+            with patch.dict(os.environ, {
+                "HADOOP_HOME": "/opt/hadoop",
+                "HADOOP_CONF_DIR": "/opt/hadoop/etc/hadoop",
+            }):
+                opts = Options({
+                    "security.kerberos.login.principal": "user@REALM",
+                    "security.kerberos.login.keytab": keytab_file.name,
+                })
+
+                with patch.object(PyArrowFileIO, '__init__',
+                                  lambda self, *a, **kw: None):
+                    file_io = PyArrowFileIO.__new__(PyArrowFileIO)
+                    file_io.properties = opts
+                    file_io.logger = MagicMock()
+
+                    with patch.object(PyArrowFileIO,
+                                      '_get_ticket_cache_path',
+                                      return_value=None):
+                        with self.assertRaises(RuntimeError) as ctx:
+                            file_io._initialize_hdfs_fs("hdfs", "namenode:8020")
+                        self.assertIn("no ticket cache path",
+                                      str(ctx.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
