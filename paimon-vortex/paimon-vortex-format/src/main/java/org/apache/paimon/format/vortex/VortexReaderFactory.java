@@ -40,10 +40,15 @@ import static org.apache.paimon.format.vortex.VortexUtils.toVortexSpecified;
 /** A factory to create Vortex Reader. */
 public class VortexReaderFactory implements FormatReaderFactory {
 
+    private final RowType dataSchemaRowType;
     private final RowType projectedRowType;
     @Nullable private final List<Predicate> predicates;
 
-    public VortexReaderFactory(RowType projectedRowType, @Nullable List<Predicate> predicates) {
+    public VortexReaderFactory(
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates) {
+        this.dataSchemaRowType = dataSchemaRowType;
         this.projectedRowType = projectedRowType;
         this.predicates = predicates;
     }
@@ -56,6 +61,7 @@ public class VortexReaderFactory implements FormatReaderFactory {
                 toVortexSpecified(context.fileIO(), context.filePath());
         return new VortexRecordsReader(
                 vortexSpecified.getLeft(),
+                dataSchemaRowType,
                 projectedRowType,
                 rowIndices,
                 predicate,

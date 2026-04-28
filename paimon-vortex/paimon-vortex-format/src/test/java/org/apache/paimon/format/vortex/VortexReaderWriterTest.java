@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -45,6 +46,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -214,6 +216,52 @@ public class VortexReaderWriterTest {
             assertEquals(BinaryString.fromString("row1"), actualRows.get(0).getString(1));
             assertEquals(3, actualRows.get(1).getInt(0));
             assertEquals(BinaryString.fromString("row3"), actualRows.get(1).getString(1));
+        }
+    }
+
+    @Test
+    public void testReadWithVirtualRowTrackingField(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
+        RowType projectedRowType =
+                SpecialFields.rowTypeWithRowId(rowType)
+                        .project(Arrays.asList("f_string", SpecialFields.ROW_ID.name()));
+
+        Options options = new Options();
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile =
+                new Path(new Path(tempDir.toUri()), "test_virtual_row_id_" + UUID.randomUUID());
+
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, testFile, "")) {
+            writer.addElement(GenericRow.of(1, BinaryString.fromString("hello")));
+            writer.addElement(GenericRow.of(2, BinaryString.fromString("world")));
+        }
+
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(rowType, projectedRowType, null);
+        try (RecordReader<InternalRow> reader =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+            InternalRow row = iterator.next();
+            assertEquals(2, row.getFieldCount());
+            assertEquals(BinaryString.fromString("hello"), row.getString(0));
+            assertEquals(true, row.isNullAt(1));
+
+            row = iterator.next();
+            assertEquals(BinaryString.fromString("world"), row.getString(0));
+            assertEquals(true, row.isNullAt(1));
         }
     }
 
