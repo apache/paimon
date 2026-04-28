@@ -30,8 +30,10 @@ import org.apache.flink.streaming.api.lineage.SourceLineageVertex;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -45,13 +47,20 @@ public class LineageUtils {
     /** Default namespace when the catalog warehouse path is not available. */
     private static final String DEFAULT_NAMESPACE = "paimon";
 
+    private static final String CATALOG_PREFIX = "catalog.";
+
+    /** Catalog option keys safe to include in lineage facets (no credentials or secrets). */
+    private static final Set<String> CATALOG_OPTION_ALLOWLIST =
+            new HashSet<>(
+                    Arrays.asList(CatalogOptions.WAREHOUSE.key(), CatalogOptions.METASTORE.key()));
+
     private static final Set<String> PAIMON_OPTION_KEYS =
             CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
 
     /**
      * Builds the config map for a dataset facet from a {@link Table} and {@link Catalog}. Includes
-     * filtered Paimon {@link CoreOptions}, partition keys, primary keys, and all catalog-level
-     * options (warehouse, uri, metastore, etc.) prefixed with {@code "catalog."}.
+     * filtered Paimon {@link CoreOptions}, partition keys, primary keys, and a safe subset of
+     * catalog-level options (warehouse, metastore) prefixed with {@code "catalog."}.
      */
     private static Map<String, String> buildConfigMap(Table table, @Nullable Catalog catalog) {
         Map<String, String> config = new HashMap<>();
@@ -64,7 +73,13 @@ public class LineageUtils {
                 .forEach(e -> config.put(e.getKey(), e.getValue()));
 
         if (catalog != null) {
-            catalog.options().forEach((k, v) -> config.putIfAbsent(k, v));
+            catalog.options()
+                    .forEach(
+                            (k, v) -> {
+                                if (CATALOG_OPTION_ALLOWLIST.contains(k)) {
+                                    config.put(CATALOG_PREFIX + k, v);
+                                }
+                            });
         }
 
         return config;

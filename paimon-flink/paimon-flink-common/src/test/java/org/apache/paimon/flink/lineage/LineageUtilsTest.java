@@ -118,7 +118,30 @@ class LineageUtilsTest {
 
         DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
         Map<String, String> config = configFacet.config();
-        assertThat(config).containsEntry("warehouse", warehouse.toString());
+        assertThat(config).containsEntry("catalog.warehouse", warehouse.toString());
+
+        catalog.close();
+    }
+
+    @Test
+    void testConfigFacetExcludesNonAllowlistedCatalogOptions() throws Exception {
+        Options options = new Options();
+        options.set(CatalogOptions.WAREHOUSE, warehouse.toString());
+        options.setString("s3.access-key", "SECRET_KEY");
+        options.setString("s3.secret-key", "SECRET_VALUE");
+        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
+
+        FileStoreTable table =
+                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
+
+        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table, catalog);
+        LineageDataset dataset = vertex.datasets().get(0);
+
+        DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
+        Map<String, String> config = configFacet.config();
+        assertThat(config).containsEntry("catalog.warehouse", warehouse.toString());
+        assertThat(config).doesNotContainKey("catalog.s3.access-key");
+        assertThat(config).doesNotContainKey("catalog.s3.secret-key");
 
         catalog.close();
     }
