@@ -147,6 +147,38 @@ public class IncrementalClusterManagerTest {
     }
 
     @Test
+    public void testClusteringIncrementalModeDefault() throws Exception {
+        // Test default mode is GLOBAL_SORT
+        Map<String, String> options = new HashMap<>();
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        IncrementalClusterManager manager = new IncrementalClusterManager(table);
+        assertThat(manager.clusteringIncrementalMode())
+                .isEqualTo(CoreOptions.ClusteringIncrementalMode.GLOBAL_SORT);
+    }
+
+    @Test
+    public void testClusteringIncrementalModeLocalSort() throws Exception {
+        // Test local-sort mode
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL_MODE.key(), "local-sort");
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        IncrementalClusterManager manager = new IncrementalClusterManager(table);
+        assertThat(manager.clusteringIncrementalMode())
+                .isEqualTo(CoreOptions.ClusteringIncrementalMode.LOCAL_SORT);
+    }
+
+    @Test
+    public void testClusteringIncrementalModeGlobalSort() throws Exception {
+        // Test explicit global-sort mode
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL_MODE.key(), "global-sort");
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        IncrementalClusterManager manager = new IncrementalClusterManager(table);
+        assertThat(manager.clusteringIncrementalMode())
+                .isEqualTo(CoreOptions.ClusteringIncrementalMode.GLOBAL_SORT);
+    }
+
+    @Test
     public void testHistoryPartitionAutoClustering() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CLUSTERING_HISTORY_PARTITION_IDLE_TIME.key(), "2s");

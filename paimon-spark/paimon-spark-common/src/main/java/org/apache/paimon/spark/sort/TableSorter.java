@@ -62,6 +62,8 @@ public abstract class TableSorter {
 
     public abstract Dataset<Row> sort(Dataset<Row> input);
 
+    public abstract Dataset<Row> sortLocal(Dataset<Row> input);
+
     public static TableSorter getSorter(
             FileStoreTable table, OrderType orderType, List<String> orderColumns) {
         switch (orderType) {
@@ -75,6 +77,11 @@ public abstract class TableSorter {
                 return new TableSorter(table, orderColumns) {
                     @Override
                     public Dataset<Row> sort(Dataset<Row> input) {
+                        return input;
+                    }
+
+                    @Override
+                    public Dataset<Row> sortLocal(Dataset<Row> input) {
                         return input;
                     }
                 };
