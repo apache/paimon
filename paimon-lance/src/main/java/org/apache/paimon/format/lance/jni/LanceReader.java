@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -63,6 +64,9 @@ public class LanceReader {
                     projectedRowType.getFieldNames().stream()
                             .filter(fileFieldNames::contains)
                             .collect(Collectors.toList());
+            if (existingFields.isEmpty()) {
+                existingFields = Collections.singletonList(fileFieldNames.iterator().next());
+            }
             this.arrowReader = reader.readAll(existingFields, ranges, batchSize);
         } catch (IOException e) {
             throw new RuntimeException("Failed to open Lance file: " + path, e);
