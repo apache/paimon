@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.vortex;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
@@ -43,9 +44,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** File reader for Vortex format. */
 public class VortexRecordsReader implements FileRecordReader<InternalRow> {
@@ -164,24 +167,36 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         allocator.close();
     }
 
-    private static RowType physicalReadRowType(
-            RowType dataSchemaRowType, RowType projectedRowType) {
+    @VisibleForTesting
+    static RowType physicalReadRowType(RowType dataSchemaRowType, RowType projectedRowType) {
         if (!hasRowTrackingField(projectedRowType)) {
             return projectedRowType;
         }
 
         List<DataField> fields = new ArrayList<>();
-        for (DataField field : dataSchemaRowType.getFields()) {
-            if (!isRowTrackingField(field)) {
-                fields.add(field);
+        Set<Integer> selectedFieldIds = new HashSet<>();
+        Set<String> selectedFieldNames = new HashSet<>();
+        for (DataField projectedField : projectedRowType.getFields()) {
+            if (isRowTrackingField(projectedField)) {
+                continue;
             }
+
+            DataField physicalField = physicalDataField(dataSchemaRowType, projectedField);
+            if (physicalField == null
+                    || selectedFieldIds.contains(physicalField.id())
+                    || selectedFieldNames.contains(physicalField.name())) {
+                continue;
+            }
+            fields.add(physicalField);
+            selectedFieldIds.add(physicalField.id());
+            selectedFieldNames.add(physicalField.name());
         }
         return new RowType(fields);
     }
 
     @Nullable
-    private static int[] physicalFieldMapping(
-            RowType physicalReadRowType, RowType projectedRowType) {
+    @VisibleForTesting
+    static int[] physicalFieldMapping(RowType physicalReadRowType, RowType projectedRowType) {
         if (!hasRowTrackingField(projectedRowType)) {
             return null;
         }
@@ -192,13 +207,32 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             if (isRowTrackingField(field)) {
                 mapping[i] = -1;
             } else {
-                mapping[i] = physicalReadRowType.getFieldIndex(field.name());
-                if (mapping[i] < 0) {
+                if (physicalReadRowType.containsField(field.id())) {
                     mapping[i] = physicalReadRowType.getFieldIndexByFieldId(field.id());
+                } else {
+                    mapping[i] = physicalReadRowType.getFieldIndex(field.name());
+                    if (mapping[i] < 0) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Cannot find physical field for projected field '%s' with id %s.",
+                                        field.name(), field.id()));
+                    }
                 }
             }
         }
         return mapping;
+    }
+
+    @Nullable
+    private static DataField physicalDataField(
+            RowType dataSchemaRowType, DataField projectedField) {
+        if (dataSchemaRowType.containsField(projectedField.id())) {
+            return dataSchemaRowType.getField(projectedField.id());
+        }
+        if (dataSchemaRowType.containsField(projectedField.name())) {
+            return dataSchemaRowType.getField(projectedField.name());
+        }
+        return null;
     }
 
     private static boolean hasRowTrackingField(RowType rowType) {

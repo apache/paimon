@@ -45,9 +45,13 @@ public interface Expression {
 
         T visitGetItem(GetItem getItem);
 
-        T visitIsNull(IsNull isNull);
+        default T visitIsNull(IsNull isNull) {
+            return visitOther(isNull);
+        }
 
-        T visitIsNotNull(IsNotNull isNotNull);
+        default T visitIsNotNull(IsNotNull isNotNull) {
+            return visitOther(isNotNull);
+        }
 
         T visitOther(Expression expression);
     }

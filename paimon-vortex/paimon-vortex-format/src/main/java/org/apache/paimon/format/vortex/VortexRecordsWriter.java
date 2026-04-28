@@ -37,9 +37,9 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -58,10 +58,11 @@ import java.util.function.Supplier;
  *   <li>{@link ArrowFormatWriter#reset()} is implemented as in-place {@code zeroVector}; reusing a
  *       single writer across batches would zero buffers that the native side is still reading. Each
  *       batch therefore uses a fresh {@link ArrowFormatWriter}; the previous one is moved to a
- *       pending list and closed only after {@link VortexWriter#close()} drains the native task.
+ *       pending slot and closed after the next {@code writeBatchFfi} returns.
  *   <li>{@link ArrowSchema}'s release callback is never invoked by vortex's Rust side (it borrows
  *       {@code &*ffi_schema} instead of taking ownership). The exported C structs are therefore
- *       tracked in {@code pendingFfiExports} and explicitly released after the native drain.
+ *       tracked alongside the pending batch and explicitly released after native no longer needs
+ *       the batch.
  * </ul>
  */
 public class VortexRecordsWriter implements BundleFormatWriter {
@@ -71,8 +72,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     private final Supplier<ArrowFormatWriter> arrowFormatWriterSupplier;
     private final VortexWriter nativeWriter;
     private final String path;
-    private final List<ArrowFormatWriter> pendingArrowFormatWriters = new ArrayList<>();
-    private final List<FfiExport> pendingFfiExports = new ArrayList<>();
+    @Nullable private PendingBatch pendingBatch;
     private ArrowFormatWriter currentArrowFormatWriter;
     private long jniCost = 0;
 
@@ -103,9 +103,11 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            writeVsr(
-                    ((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot(),
-                    currentArrowFormatWriter.getAllocator());
+            FfiExport export =
+                    writeVsr(
+                            ((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot(),
+                            currentArrowFormatWriter.getAllocator());
+            replacePendingBatch(new PendingBatch(null, export));
         } else {
             for (InternalRow row : bundleRecords) {
                 addElement(row);
@@ -133,12 +135,16 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         } finally {
             RuntimeException runtimeException = null;
             try {
-                closePendingFfiExports();
+                closePendingBatch();
             } catch (RuntimeException e) {
-                runtimeException = e;
+                if (runtimeException == null) {
+                    runtimeException = e;
+                } else {
+                    runtimeException.addSuppressed(e);
+                }
             }
             try {
-                closeArrowFormatWriters();
+                currentArrowFormatWriter.close();
             } catch (RuntimeException e) {
                 if (runtimeException == null) {
                     runtimeException = e;
@@ -167,18 +173,28 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     private void flush() throws IOException {
         currentArrowFormatWriter.flush();
         if (!currentArrowFormatWriter.empty()) {
-            writeVsr(
-                    currentArrowFormatWriter.getVectorSchemaRoot(),
-                    currentArrowFormatWriter.getAllocator());
-            // Don't call reset(): it zeros the underlying buffers in place, which the native
-            // writer may still be reading. Move this writer to the pending list (kept alive
-            // until after the native drain) and start a fresh one for subsequent rows.
-            pendingArrowFormatWriters.add(currentArrowFormatWriter);
-            currentArrowFormatWriter = arrowFormatWriterSupplier.get();
+            ArrowFormatWriter flushedWriter = currentArrowFormatWriter;
+            ArrowFormatWriter nextWriter = arrowFormatWriterSupplier.get();
+            FfiExport export = null;
+            boolean success = false;
+            try {
+                export =
+                        writeVsr(flushedWriter.getVectorSchemaRoot(), flushedWriter.getAllocator());
+                currentArrowFormatWriter = nextWriter;
+                success = true;
+                replacePendingBatch(new PendingBatch(flushedWriter, export));
+            } finally {
+                if (!success) {
+                    nextWriter.close();
+                    if (export != null) {
+                        export.close();
+                    }
+                }
+            }
         }
     }
 
-    private void writeVsr(VectorSchemaRoot vsr, BufferAllocator allocator) throws IOException {
+    private FfiExport writeVsr(VectorSchemaRoot vsr, BufferAllocator allocator) throws IOException {
         ArrowArray arrowArray = ArrowArray.allocateNew(allocator);
         ArrowSchema arrowSchema = ArrowSchema.allocateNew(allocator);
         boolean success = false;
@@ -188,8 +204,8 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             long t1 = System.currentTimeMillis();
             nativeWriter.writeBatchFfi(cStruct.arrayAddress(), cStruct.schemaAddress());
             jniCost += (System.currentTimeMillis() - t1);
-            pendingFfiExports.add(new FfiExport(arrowArray, arrowSchema));
             success = true;
+            return new FfiExport(arrowArray, arrowSchema);
         } finally {
             if (!success) {
                 FfiExport.close(arrowArray, arrowSchema);
@@ -197,50 +213,43 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         }
     }
 
-    private void closePendingFfiExports() {
-        RuntimeException runtimeException = null;
-        for (FfiExport export : pendingFfiExports) {
-            try {
-                export.close();
-            } catch (RuntimeException e) {
-                if (runtimeException == null) {
-                    runtimeException = e;
-                } else {
-                    runtimeException.addSuppressed(e);
-                }
-            }
-        }
-        pendingFfiExports.clear();
-        if (runtimeException != null) {
-            throw runtimeException;
+    private void replacePendingBatch(PendingBatch batch) {
+        PendingBatch previousBatch = pendingBatch;
+        pendingBatch = batch;
+        closePendingBatch(previousBatch);
+    }
+
+    private void closePendingBatch() {
+        closePendingBatch(pendingBatch);
+        pendingBatch = null;
+    }
+
+    private static void closePendingBatch(@Nullable PendingBatch batch) {
+        if (batch != null) {
+            batch.close();
         }
     }
 
-    private void closeArrowFormatWriters() {
-        RuntimeException runtimeException = null;
-        for (ArrowFormatWriter writer : pendingArrowFormatWriters) {
-            try {
-                writer.close();
-            } catch (RuntimeException e) {
-                if (runtimeException == null) {
-                    runtimeException = e;
-                } else {
-                    runtimeException.addSuppressed(e);
-                }
-            }
+    private static class PendingBatch implements AutoCloseable {
+
+        @Nullable private final ArrowFormatWriter writer;
+        private final FfiExport ffiExport;
+
+        private PendingBatch(@Nullable ArrowFormatWriter writer, FfiExport ffiExport) {
+            this.writer = writer;
+            this.ffiExport = ffiExport;
         }
-        pendingArrowFormatWriters.clear();
-        try {
-            currentArrowFormatWriter.close();
-        } catch (RuntimeException e) {
-            if (runtimeException == null) {
-                runtimeException = e;
-            } else {
-                runtimeException.addSuppressed(e);
+
+        @Override
+        public void close() {
+            RuntimeException runtimeException = null;
+            runtimeException = FfiExport.run(runtimeException, ffiExport::close);
+            if (writer != null) {
+                runtimeException = FfiExport.run(runtimeException, writer::close);
             }
-        }
-        if (runtimeException != null) {
-            throw runtimeException;
+            if (runtimeException != null) {
+                throw runtimeException;
+            }
         }
     }
 
