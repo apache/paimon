@@ -102,14 +102,32 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Override
     public void close() throws IOException {
         long t1 = System.currentTimeMillis();
+        Throwable throwable = null;
+
         try {
             flush();
             LOG.info("Jni cost: {}ms for file: {}", jniCost, path);
+        } catch (Throwable t) {
+            throwable = t;
+        }
+
+        try {
             nativeWriter.close();
-        } finally {
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
             arrowFormatWriter.close();
-            long closeCost = System.currentTimeMillis() - t1;
-            LOG.info("Close cost: {}ms for file: {}", closeCost, path);
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        long closeCost = System.currentTimeMillis() - t1;
+        LOG.info("Close cost: {}ms for file: {}", closeCost, path);
+
+        if (throwable != null) {
+            rethrow(throwable);
         }
     }
 
@@ -126,5 +144,26 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         long t1 = System.currentTimeMillis();
         nativeWriter.writeBatch(bytes);
         jniCost += (System.currentTimeMillis() - t1);
+    }
+
+    private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
+        if (throwable == null) {
+            return suppressed;
+        }
+        throwable.addSuppressed(suppressed);
+        return throwable;
+    }
+
+    private static void rethrow(Throwable throwable) throws IOException {
+        if (throwable instanceof IOException) {
+            throw (IOException) throwable;
+        }
+        if (throwable instanceof RuntimeException) {
+            throw (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        throw new IOException(throwable);
     }
 }
