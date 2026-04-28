@@ -199,8 +199,10 @@ class CoreOptions:
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
-        .default_value("none")
-        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+        .default_value("truncate(16)")
+        .with_description("The mode of metadata stats. Available modes: "
+                          "'none' (no stats), 'counts' (null counts only), "
+                          "'full' (exact min/max), 'truncate(length)' (truncated min/max).")
     )
 
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
@@ -475,7 +477,10 @@ class CoreOptions:
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
 
     def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default).upper() != "NONE"
+
+    def metadata_stats_mode(self, default=None):
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default)
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
