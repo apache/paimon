@@ -20,18 +20,19 @@ package dev.vortex.jni;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
 import dev.vortex.api.DType;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 
-/** JNI implementation of the DType interface. */
 public final class JNIDType implements DType {
     OptionalLong pointer;
-    final boolean isOwned;
+    final boolean isOwned; // True if this object owns the native memory
 
+    /**
+     * Creates a JNIDType that borrows a native pointer.
+     * The caller is responsible for ensuring the pointer remains valid.
+     */
     public JNIDType(long pointer) {
         this(pointer, false);
     }
@@ -40,6 +41,12 @@ public final class JNIDType implements DType {
         return pointer.getAsLong();
     }
 
+    /**
+     * Creates a JNIDType with explicit ownership.
+     *
+     * @param pointer the native pointer
+     * @param isOwned true if this object owns the native memory and should free it
+     */
     public JNIDType(long pointer, boolean isOwned) {
         Preconditions.checkArgument(pointer > 0, "Invalid pointer address: " + pointer);
         this.pointer = OptionalLong.of(pointer);
@@ -63,12 +70,12 @@ public final class JNIDType implements DType {
 
     @Override
     public List<DType> getFieldTypes() {
-        return Lists.transform(
-                NativeDTypeMethods.getFieldTypes(pointer.getAsLong()), JNIDType::new);
+        return Lists.transform(NativeDTypeMethods.getFieldTypes(pointer.getAsLong()), JNIDType::new);
     }
 
     @Override
     public DType getElementType() {
+        // Returns a borrowed reference - the parent DType owns this memory
         return new JNIDType(NativeDTypeMethods.getElementType(pointer.getAsLong()));
     }
 
@@ -125,6 +132,10 @@ public final class JNIDType implements DType {
         }
     }
 
+    /**
+     * Creates a JNIDType that owns its native memory.
+     * This should only be used when receiving a newly allocated pointer from Rust.
+     */
     public static JNIDType ownedDType(long pointer) {
         return new JNIDType(pointer, true);
     }

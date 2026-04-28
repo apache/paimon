@@ -11,30 +11,38 @@ import "dtype.proto";
 option java_package = "dev.vortex.proto";
 option java_outer_classname = "ExprProtos";
 
+// Captures a generic representation of expressions in Vortex.
+// Expression deserializers can be registered with a Vortex session to handle parsing this into
+// an in-memory expression for execution.
 message Expr {
   string id = 1;
   repeated Expr children = 2;
   optional bytes metadata = 3;
 }
 
+// Captures a serialized aggregate function with its ID and options metadata.
 message AggregateFn {
   string id = 1;
   optional bytes metadata = 2;
 }
 
+// Options for `vortex.literal`
 message LiteralOpts {
   vortex.scalar.Scalar value = 1;
 }
 
+// Options for `vortex.pack`
 message PackOpts {
   repeated string paths = 1;
   bool nullable = 2;
 }
 
+// Options for `vortex.getitem`
 message GetItemOpts {
   string path = 1;
 }
 
+// Options for `vortex.binary`
 message BinaryOpts {
   BinaryOp op = 1;
 
@@ -79,6 +87,11 @@ message SelectOpts {
   }
 }
 
+// Options for `vortex.case_when`
+// Encodes num_when_then_pairs and has_else into a single u32 (num_children).
+// num_children = num_when_then_pairs * 2 + (has_else ? 1 : 0)
+// has_else = num_children % 2 == 1
+// num_when_then_pairs = num_children / 2
 message CaseWhenOpts {
   uint32 num_children = 1;
 }

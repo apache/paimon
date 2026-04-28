@@ -19,16 +19,13 @@
 package dev.vortex.jni;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Preconditions;
-
 import dev.vortex.api.ArrayIterator;
 import dev.vortex.api.DType;
 import dev.vortex.api.File;
 import dev.vortex.api.ScanOptions;
 import dev.vortex.api.proto.Expressions;
-
 import java.util.OptionalLong;
 
-/** JNI implementation of the File interface. */
 public final class JNIFile implements File {
     private OptionalLong pointer;
 
@@ -59,17 +56,12 @@ public final class JNIFile implements File {
         long[] rowRange = options.rowRange().orElse(null);
 
         return new JNIArrayIterator(
-                NativeFileMethods.scan(
-                        pointer.getAsLong(),
-                        options.columns(),
-                        predicateProto,
-                        rowRange,
-                        rowIndices));
+                NativeFileMethods.scan(pointer.getAsLong(), options.columns(), predicateProto, rowRange, rowIndices));
     }
 
     @Override
     public void close() {
-        if (!pointer.isPresent()) {
+        if (pointer.isEmpty()) {
             return;
         }
         NativeFileMethods.close(pointer.getAsLong());

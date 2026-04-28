@@ -19,27 +19,43 @@
 package dev.vortex.jni;
 
 import dev.vortex.api.VortexWriter;
+import java.io.IOException;
+import java.util.OptionalLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.OptionalLong;
-
-/** JNI implementation of VortexWriter. */
+/**
+ * JNI implementation of VortexWriter.
+ * <p>
+ * This class implements AutoCloseable to ensure proper resource cleanup
+ * when used with try-with-resources.
+ */
 public final class JNIWriter implements VortexWriter, AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(JNIWriter.class);
 
     private OptionalLong ptr;
 
+    /**
+     * Creates a new JNIWriter with the given native pointer.
+     *
+     * @param ptr the native writer pointer
+     */
     public JNIWriter(long ptr) {
         this.ptr = OptionalLong.of(ptr);
         logger.debug("Created JNIWriter with ptr={}", ptr);
     }
 
+    /**
+     * Writes a batch of Arrow data to the Vortex file.
+     *
+     * @param arrowData the Arrow data in IPC format as byte array
+     * @throws NullPointerException if this is called after the writer has been closed.
+     */
     @Override
     public void writeBatch(byte[] arrowData) throws IOException {
         logger.trace("Writing batch with {} bytes", arrowData.length);
 
+        // Write the Arrow data to Vortex through JNI
         boolean success = NativeWriterMethods.writeBatch(ptr.getAsLong(), arrowData);
         if (!success) {
             logger.error("Failed to write batch to Vortex file");
@@ -47,20 +63,32 @@ public final class JNIWriter implements VortexWriter, AutoCloseable {
         }
     }
 
+    /**
+     * Writes a batch of Arrow data directly from Arrow C Data Interface pointers.
+     *
+     * @param arrowArrayAddr  memory address of the ArrowArray struct
+     * @param arrowSchemaAddr memory address of the ArrowSchema struct
+     * @throws IOException if writing fails
+     */
     @Override
     public void writeBatchFfi(long arrowArrayAddr, long arrowSchemaAddr) throws IOException {
-        logger.trace("Writing batch via FFI with arrayAddr={}, schemaAddr={}", arrowArrayAddr, arrowSchemaAddr);
+        logger.trace("Writing batch via FFI (arrayAddr={}, schemaAddr={})", arrowArrayAddr, arrowSchemaAddr);
 
         boolean success = NativeWriterMethods.writeBatchFfi(ptr.getAsLong(), arrowArrayAddr, arrowSchemaAddr);
         if (!success) {
-            logger.error("Failed to write batch via FFI to Vortex file");
-            throw new IOException("Failed to write batch via FFI to Vortex file");
+            logger.error("Failed to write FFI batch to Vortex file");
+            throw new IOException("Failed to write FFI batch to Vortex file");
         }
     }
 
+    /**
+     * Closes the writer and finalizes the Vortex file.
+     *
+     * @throws RuntimeException if closing fails
+     */
     @Override
     public void close() {
-        if (!this.ptr.isPresent()) {
+        if (this.ptr.isEmpty()) {
             logger.debug("Attempted to close already closed JNIWriter, skipping");
             return;
         }

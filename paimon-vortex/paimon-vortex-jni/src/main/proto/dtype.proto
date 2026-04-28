@@ -85,7 +85,7 @@ message DType {
     Struct struct = 7;
     List list = 8;
     Extension extension = 9;
-    FixedSizeList fixed_size_list = 10;
+    FixedSizeList fixed_size_list = 10; // This is after `Extension` for backwards compatibility.
     Variant variant = 11;
   }
 }

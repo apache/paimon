@@ -19,15 +19,12 @@
 package dev.vortex.jni;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Preconditions;
-
 import dev.vortex.api.Array;
 import dev.vortex.api.ArrayIterator;
 import dev.vortex.api.DType;
-
 import java.util.Optional;
 import java.util.OptionalLong;
 
-/** JNI implementation of the ArrayIterator interface. */
 public final class JNIArrayIterator implements ArrayIterator {
     private OptionalLong pointer;
     private Optional<Array> next;
@@ -57,9 +54,10 @@ public final class JNIArrayIterator implements ArrayIterator {
 
     @Override
     public void close() {
-        if (!pointer.isPresent()) {
+        if (pointer.isEmpty()) {
             return;
         }
+
         NativeArrayIteratorMethods.free(pointer.getAsLong());
         pointer = OptionalLong.empty();
         next = Optional.empty();

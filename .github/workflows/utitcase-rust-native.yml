@@ -55,7 +55,7 @@ jobs:
 
       - name: Clone and build Vortex native library
         run: |
-          git clone --depth 1 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
+          git clone --depth 1  -b 0.69.0 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
           cd ${RUNNER_TEMP}/vortex
           cargo build --package vortex-jni --release
 

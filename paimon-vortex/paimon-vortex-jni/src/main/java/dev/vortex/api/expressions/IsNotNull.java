@@ -24,50 +24,52 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Represents a logical NOT expression that negates the boolean result of its child expression.
- * This expression applies the logical NOT operation to the result of evaluating its single child expression.
+ * Represents an IS NOT NULL expression that checks whether values are non-null.
+ * This expression returns true for non-null values and false for null values.
  */
-public final class Not implements Expression {
+public final class IsNotNull implements Expression {
     private final Expression child;
 
-    private Not(Expression child) {
+    private IsNotNull(Expression child) {
         this.child = child;
     }
 
     /**
-     * Parses a Not expression from serialized metadata and child expressions.
+     * Parses an IsNotNull expression from serialized metadata and child expressions.
      * This method is used during deserialization of Vortex expressions.
      *
-     * @param metadata the serialized metadata, must be empty for Not expressions
+     * @param metadata the serialized metadata, must be empty for IsNotNull expressions
      * @param children the child expressions, must contain exactly one element
-     * @return a new Not expression parsed from the provided data
-     * @throws RuntimeException if the number of children is not exactly one,
+     * @return a new IsNotNull expression parsed from the provided data
+     * @throws IllegalArgumentException if the number of children is not exactly one,
      *                                  or if metadata is not empty
      */
-    public static Not parse(byte[] metadata, List<Expression> children) {
+    public static IsNotNull parse(byte[] metadata, List<Expression> children) {
         if (children.size() != 1) {
-            throw new IllegalArgumentException("Not expression must have exactly one child, found: " + children.size());
+            throw new IllegalArgumentException(
+                    "IsNotNull expression must have exactly one child, found: " + children.size());
         }
         if (metadata.length > 0) {
-            throw new IllegalArgumentException("Not expression must not have metadata, found: " + metadata.length);
+            throw new IllegalArgumentException(
+                    "IsNotNull expression must not have metadata, found: " + metadata.length);
         }
-        return new Not(children.get(0));
+        return new IsNotNull(children.get(0));
     }
 
     /**
-     * Creates a new Not expression that negates the given child expression.
+     * Creates a new IsNotNull expression that checks non-nullity of the given child expression.
      *
-     * @param child the expression to negate
-     * @return a new Not expression
+     * @param child the expression to check for non-null values
+     * @return a new IsNotNull expression
      */
-    public static Not of(Expression child) {
-        return new Not(child);
+    public static IsNotNull of(Expression child) {
+        return new IsNotNull(child);
     }
 
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
-        Not other = (Not) o;
+        IsNotNull other = (IsNotNull) o;
         return Objects.equals(child, other.child);
     }
 
@@ -78,7 +80,7 @@ public final class Not implements Expression {
 
     @Override
     public String id() {
-        return "vortex.not";
+        return "vortex.is_not_null";
     }
 
     @Override
@@ -93,11 +95,11 @@ public final class Not implements Expression {
 
     @Override
     public String toString() {
-        return "not(" + child + ")";
+        return "vortex.is_not_null(" + child + ")";
     }
 
     /**
-     * Returns the child expression that will be negated by this Not expression.
+     * Returns the child expression that will be checked for non-null values.
      *
      * @return the child expression
      */
@@ -107,6 +109,6 @@ public final class Not implements Expression {
 
     @Override
     public <T> T accept(Visitor<T> visitor) {
-        return visitor.visitNot(this);
+        return visitor.visitIsNotNull(this);
     }
 }

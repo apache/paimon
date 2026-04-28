@@ -19,7 +19,6 @@
 package dev.vortex.api.expressions;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Preconditions;
-
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.vortex.api.Expression;
@@ -29,14 +28,24 @@ import dev.vortex.api.proto.TemporalMetadatas;
 import dev.vortex.proto.DTypeProtos;
 import dev.vortex.proto.ExprProtos;
 import dev.vortex.proto.ScalarProtos;
-
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Literal value expression in the Vortex query system. */
+/**
+ * Represents a literal value expression in the Vortex query system.
+ * <p>
+ * A literal is a constant value of a specific type that can be used in expressions.
+ * This class provides factory methods for creating literals of various types including
+ * primitives (boolean, integers, floats), temporal types (dates, times, timestamps),
+ * and complex types (strings, bytes, decimals).
+ * <p>
+ * Literals are immutable and implement the visitor pattern for type-safe processing.
+ *
+ * @param <T> the Java type of the literal value
+ */
 public abstract class Literal<T> implements Expression {
     private final T value;
 
@@ -44,10 +53,20 @@ public abstract class Literal<T> implements Expression {
         this.value = value;
     }
 
+    /**
+     * Parses a literal from serialized metadata and child expressions.
+     * <p>
+     * This method deserializes a literal expression from its protocol buffer
+     * representation. Literal expressions must have no children.
+     *
+     * @param metadata the serialized literal metadata as bytes
+     * @param children the list of child expressions (must be empty for literals)
+     * @return the parsed literal expression
+     * @throws RuntimeException if children is not empty or if metadata cannot be parsed
+     */
     public static Literal<?> parse(byte[] metadata, List<Expression> children) {
         if (!children.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Literal expression must have no children, found: " + children.size());
+            throw new IllegalArgumentException("Literal expression must have no children, found: " + children.size());
         }
         try {
             ExprProtos.LiteralOpts opts = ExprProtos.LiteralOpts.parseFrom(metadata);
@@ -57,6 +76,11 @@ public abstract class Literal<T> implements Expression {
         }
     }
 
+    /**
+     * Returns the value of this literal.
+     *
+     * @return the literal value, may be null for null literals
+     */
     public T getValue() {
         return this.value;
     }
@@ -73,11 +97,10 @@ public abstract class Literal<T> implements Expression {
 
     @Override
     public Optional<byte[]> metadata() {
-        return Optional.of(
-                ExprProtos.LiteralOpts.newBuilder()
-                        .setValue(this.acceptLiteralVisitor(LiteralToScalar.INSTANCE))
-                        .build()
-                        .toByteArray());
+        return Optional.of(ExprProtos.LiteralOpts.newBuilder()
+                .setValue(this.acceptLiteralVisitor(LiteralToScalar.INSTANCE))
+                .build()
+                .toByteArray());
     }
 
     @Override
@@ -92,82 +115,207 @@ public abstract class Literal<T> implements Expression {
         return Objects.equals(value, literal.value);
     }
 
+    /**
+     * Creates a null literal.
+     *
+     * @return a literal representing null
+     */
     public static Literal<Void> nullLit() {
         return NullLiteral.INSTANCE;
     }
 
+    /**
+     * Creates a boolean literal.
+     *
+     * @param value the boolean value, may be null
+     * @return a boolean literal
+     */
     public static Literal<Boolean> bool(Boolean value) {
         return new BooleanLiteral(value);
     }
 
+    /**
+     * Creates an 8-bit signed integer literal.
+     *
+     * @param value the byte value, may be null
+     * @return an int8 literal
+     */
     public static Literal<Byte> int8(Byte value) {
         return new Int8Literal(value);
     }
 
+    /**
+     * Creates a 16-bit signed integer literal.
+     *
+     * @param value the short value, may be null
+     * @return an int16 literal
+     */
     public static Literal<Short> int16(Short value) {
         return new Int16Literal(value);
     }
 
+    /**
+     * Creates a 32-bit signed integer literal.
+     *
+     * @param value the integer value, may be null
+     * @return an int32 literal
+     */
     public static Literal<Integer> int32(Integer value) {
         return new Int32Literal(value);
     }
 
+    /**
+     * Creates a 64-bit signed integer literal.
+     *
+     * @param value the long value, may be null
+     * @return an int64 literal
+     */
     public static Literal<Long> int64(Long value) {
         return new Int64Literal(value);
     }
 
+    /**
+     * Creates a 32-bit floating-point literal.
+     *
+     * @param value the float value, may be null
+     * @return a float32 literal
+     */
     public static Literal<Float> float32(Float value) {
         return new Float32Literal(value);
     }
 
+    /**
+     * Creates a 64-bit floating-point literal.
+     *
+     * @param value the double value, may be null
+     * @return a float64 literal
+     */
     public static Literal<Double> float64(Double value) {
         return new Float64Literal(value);
     }
 
+    /**
+     * Creates a decimal literal with specified precision and scale.
+     *
+     * @param value the decimal value, may be null
+     * @param precision the total number of digits
+     * @param scale the number of digits after the decimal point
+     * @return a decimal literal
+     * @throws RuntimeException if the value's scale doesn't match the specified scale
+     */
     public static Literal<BigDecimal> decimal(BigDecimal value, int precision, int scale) {
         return new DecimalLiteral(value, precision, scale);
     }
 
+    /**
+     * Creates a string literal.
+     *
+     * @param value the string value, may be null
+     * @return a string literal
+     */
     public static Literal<String> string(String value) {
         return new StringLiteral(value);
     }
 
+    /**
+     * Creates a byte array literal.
+     *
+     * @param value the byte array value, may be null
+     * @return a bytes literal
+     */
     public static Literal<byte[]> bytes(byte[] value) {
         return new BytesLiteral(value);
     }
 
+    /**
+     * Creates a time literal representing time of day in seconds.
+     *
+     * @param value the time value in seconds since midnight, may be null
+     * @return a time literal with second precision
+     */
     public static Literal<Integer> timeSeconds(Integer value) {
         return new TimeSeconds(value);
     }
 
+    /**
+     * Creates a time literal representing time of day in milliseconds.
+     *
+     * @param value the time value in milliseconds since midnight, may be null
+     * @return a time literal with millisecond precision
+     */
     public static Literal<Integer> timeMillis(Integer value) {
         return new TimeMillis(value);
     }
 
+    /**
+     * Creates a time literal representing time of day in microseconds.
+     *
+     * @param value the time value in microseconds since midnight, may be null
+     * @return a time literal with microsecond precision
+     */
     public static Literal<Long> timeMicros(Long value) {
         return new TimeMicros(value);
     }
 
+    /**
+     * Creates a time literal representing time of day in nanoseconds.
+     *
+     * @param value the time value in nanoseconds since midnight, may be null
+     * @return a time literal with nanosecond precision
+     */
     public static Literal<Long> timeNanos(Long value) {
         return new TimeNanos(value);
     }
 
+    /**
+     * Creates a date literal representing date as days since epoch.
+     *
+     * @param value the number of days since Unix epoch (1970-01-01), may be null
+     * @return a date literal with day precision
+     */
     public static Literal<Integer> dateDays(Integer value) {
         return new DateDays(value);
     }
 
+    /**
+     * Creates a date literal representing date as milliseconds since epoch.
+     *
+     * @param value the number of milliseconds since Unix epoch, may be null
+     * @return a date literal with millisecond precision
+     */
     public static Literal<Long> dateMillis(Long value) {
         return new DateMillis(value);
     }
 
+    /**
+     * Creates a timestamp literal with millisecond precision.
+     *
+     * @param value the timestamp value in milliseconds since Unix epoch, may be null
+     * @param timeZone the time zone identifier (e.g., "UTC", "America/New_York"), optional
+     * @return a timestamp literal with millisecond precision
+     */
     public static Literal<Long> timestampMillis(Long value, Optional<String> timeZone) {
         return new TimestampMillis(value, timeZone);
     }
 
+    /**
+     * Creates a timestamp literal with microsecond precision.
+     *
+     * @param value the timestamp value in microseconds since Unix epoch, may be null
+     * @param timeZone the time zone identifier (e.g., "UTC", "America/New_York"), optional
+     * @return a timestamp literal with microsecond precision
+     */
     public static Literal<Long> timestampMicros(Long value, Optional<String> timeZone) {
         return new TimestampMicros(value, timeZone);
     }
 
+    /**
+     * Creates a timestamp literal with nanosecond precision.
+     *
+     * @param value the timestamp value in nanoseconds since Unix epoch, may be null
+     * @param timeZone the time zone identifier (e.g., "UTC", "America/New_York"), optional
+     * @return a timestamp literal with nanosecond precision
+     */
     public static Literal<Long> timestampNanos(Long value, Optional<String> timeZone) {
         return new TimestampNanos(value, timeZone);
     }
@@ -177,48 +325,190 @@ public abstract class Literal<T> implements Expression {
         return visitor.visitLiteral(this);
     }
 
+    /**
+     * Accepts a literal visitor to process this literal in a type-safe manner.
+     * <p>
+     * This method implements the visitor pattern, allowing different operations
+     * to be performed on literals based on their specific type.
+     *
+     * @param <U> the return type of the visitor operation
+     * @param visitor the visitor to accept
+     * @return the result of the visitor operation
+     */
     public abstract <U> U acceptLiteralVisitor(LiteralVisitor<U> visitor);
 
-    /** Visitor interface for processing literals in a type-safe manner. */
+    /**
+     * Visitor interface for processing literals in a type-safe manner.
+     * <p>
+     * This interface defines methods for visiting each type of literal that can
+     * be represented in the Vortex system. Implementations can provide type-specific
+     * processing logic while maintaining type safety.
+     *
+     * @param <U> the return type of visitor methods
+     */
     public interface LiteralVisitor<U> {
+        /**
+         * Visits a null literal.
+         *
+         * @return the result of processing the null literal
+         */
         U visitNull();
 
+        /**
+         * Visits a boolean literal.
+         *
+         * @param literal the boolean value, may be null
+         * @return the result of processing the boolean literal
+         */
         U visitBoolean(Boolean literal);
 
+        /**
+         * Visits an 8-bit signed integer literal.
+         *
+         * @param literal the byte value, may be null
+         * @return the result of processing the int8 literal
+         */
         U visitInt8(Byte literal);
 
+        /**
+         * Visits a 16-bit signed integer literal.
+         *
+         * @param literal the short value, may be null
+         * @return the result of processing the int16 literal
+         */
         U visitInt16(Short literal);
 
+        /**
+         * Visits a 32-bit signed integer literal.
+         *
+         * @param literal the integer value, may be null
+         * @return the result of processing the int32 literal
+         */
         U visitInt32(Integer literal);
 
+        /**
+         * Visits a 64-bit signed integer literal.
+         *
+         * @param literal the long value, may be null
+         * @return the result of processing the int64 literal
+         */
         U visitInt64(Long literal);
 
+        /**
+         * Visits a date literal with day precision.
+         *
+         * @param days the number of days since Unix epoch, may be null
+         * @return the result of processing the date literal
+         */
         U visitDateDays(Integer days);
 
+        /**
+         * Visits a date literal with millisecond precision.
+         *
+         * @param millis the number of milliseconds since Unix epoch, may be null
+         * @return the result of processing the date literal
+         */
         U visitDateMillis(Long millis);
 
+        /**
+         * Visits a time literal with second precision.
+         *
+         * @param seconds the time in seconds since midnight, may be null
+         * @return the result of processing the time literal
+         */
         U visitTimeSeconds(Integer seconds);
 
+        /**
+         * Visits a time literal with millisecond precision.
+         *
+         * @param seconds the time in milliseconds since midnight, may be null
+         * @return the result of processing the time literal
+         */
         U visitTimeMillis(Integer seconds);
 
+        /**
+         * Visits a time literal with microsecond precision.
+         *
+         * @param seconds the time in microseconds since midnight, may be null
+         * @return the result of processing the time literal
+         */
         U visitTimeMicros(Long seconds);
 
+        /**
+         * Visits a time literal with nanosecond precision.
+         *
+         * @param seconds the time in nanoseconds since midnight, may be null
+         * @return the result of processing the time literal
+         */
         U visitTimeNanos(Long seconds);
 
+        /**
+         * Visits a timestamp literal with millisecond precision.
+         *
+         * @param epochMillis the timestamp in milliseconds since Unix epoch, may be null
+         * @param timeZone the time zone identifier, optional
+         * @return the result of processing the timestamp literal
+         */
         U visitTimestampMillis(Long epochMillis, Optional<String> timeZone);
 
+        /**
+         * Visits a timestamp literal with microsecond precision.
+         *
+         * @param epochMicros the timestamp in microseconds since Unix epoch, may be null
+         * @param timeZone the time zone identifier, optional
+         * @return the result of processing the timestamp literal
+         */
         U visitTimestampMicros(Long epochMicros, Optional<String> timeZone);
 
+        /**
+         * Visits a timestamp literal with nanosecond precision.
+         *
+         * @param epochNanos the timestamp in nanoseconds since Unix epoch, may be null
+         * @param timeZone the time zone identifier, optional
+         * @return the result of processing the timestamp literal
+         */
         U visitTimestampNanos(Long epochNanos, Optional<String> timeZone);
 
+        /**
+         * Visits a 32-bit floating-point literal.
+         *
+         * @param literal the float value, may be null
+         * @return the result of processing the float32 literal
+         */
         U visitFloat32(Float literal);
 
+        /**
+         * Visits a 64-bit floating-point literal.
+         *
+         * @param literal the double value, may be null
+         * @return the result of processing the float64 literal
+         */
         U visitFloat64(Double literal);
 
+        /**
+         * Visits a decimal literal with specified precision and scale.
+         *
+         * @param decimal the decimal value, may be null
+         * @param precision the total number of digits
+         * @param scale the number of digits after the decimal point
+         * @return the result of processing the decimal literal
+         */
         U visitDecimal(BigDecimal decimal, int precision, int scale);
 
+        /**
+         * Visits a string literal.
+         *
+         * @param literal the string value, may be null
+         * @return the result of processing the string literal
+         */
         U visitString(String literal);
 
+        /**
+         * Visits a byte array literal.
+         *
+         * @param literal the byte array value, may be null
+         * @return the result of processing the bytes literal
+         */
         U visitBytes(byte[] literal);
     }
 
@@ -319,8 +609,7 @@ public abstract class Literal<T> implements Expression {
         DecimalLiteral(BigDecimal value, int precision, int scale) {
             super(value);
             if (!Objects.isNull(value)) {
-                Preconditions.checkArgument(
-                        scale == value.scale(), "scale %s ≠ value scale %s", scale, value.scale());
+                Preconditions.checkArgument(scale == value.scale(), "scale %s ≠ value scale %s", scale, value.scale());
             }
             this.precision = precision;
             this.scale = scale;
@@ -474,117 +763,181 @@ public abstract class Literal<T> implements Expression {
 
         @Override
         public ScalarProtos.Scalar visitBoolean(Boolean literal) {
-            return Objects.isNull(literal) ? Scalars.nullBool() : Scalars.bool(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullBool();
+            } else {
+                return Scalars.bool(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitInt8(Byte literal) {
-            return Objects.isNull(literal) ? Scalars.nullInt8() : Scalars.int8(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullInt8();
+            } else {
+                return Scalars.int8(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitInt16(Short literal) {
-            return Objects.isNull(literal) ? Scalars.nullInt16() : Scalars.int16(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullInt16();
+            } else {
+                return Scalars.int16(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitInt32(Integer literal) {
-            return Objects.isNull(literal) ? Scalars.nullInt32() : Scalars.int32(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullInt32();
+            } else {
+                return Scalars.int32(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitInt64(Long literal) {
-            return Objects.isNull(literal) ? Scalars.nullInt64() : Scalars.int64(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullInt64();
+            } else {
+                return Scalars.int64(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitDateDays(Integer days) {
-            return Objects.isNull(days) ? Scalars.nullDateDays() : Scalars.dateDays(days);
+            if (Objects.isNull(days)) {
+                return Scalars.nullDateDays();
+            } else {
+                return Scalars.dateDays(days);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitDateMillis(Long millis) {
-            return Objects.isNull(millis) ? Scalars.nullDateMillis() : Scalars.dateMillis(millis);
+            if (Objects.isNull(millis)) {
+                return Scalars.nullDateMillis();
+            } else {
+                return Scalars.dateMillis(millis);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitTimeSeconds(Integer seconds) {
-            return Objects.isNull(seconds)
-                    ? Scalars.nullTimeSeconds()
-                    : Scalars.timeSeconds(seconds);
+            if (Objects.isNull(seconds)) {
+                return Scalars.nullTimeSeconds();
+            } else {
+                return Scalars.timeSeconds(seconds);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitTimeMillis(Integer seconds) {
-            return Objects.isNull(seconds) ? Scalars.nullTimeMillis() : Scalars.timeMillis(seconds);
+            if (Objects.isNull(seconds)) {
+                return Scalars.nullTimeMillis();
+            } else {
+                return Scalars.timeMillis(seconds);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitTimeMicros(Long seconds) {
-            return Objects.isNull(seconds) ? Scalars.nullTimeMicros() : Scalars.timeMicros(seconds);
+            if (Objects.isNull(seconds)) {
+                return Scalars.nullTimeMicros();
+            } else {
+                return Scalars.timeMicros(seconds);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitTimeNanos(Long seconds) {
-            return Objects.isNull(seconds) ? Scalars.nullTimeNanos() : Scalars.timeNanos(seconds);
+            if (Objects.isNull(seconds)) {
+                return Scalars.nullTimeNanos();
+            } else {
+                return Scalars.timeNanos(seconds);
+            }
         }
 
         @Override
-        public ScalarProtos.Scalar visitTimestampMillis(
-                Long epochMillis, Optional<String> timeZone) {
-            return Objects.isNull(epochMillis)
-                    ? Scalars.nullTimestampMillis(timeZone)
-                    : Scalars.timestampMillis(epochMillis, timeZone);
+        public ScalarProtos.Scalar visitTimestampMillis(Long epochMillis, Optional<String> timeZone) {
+            if (Objects.isNull(epochMillis)) {
+                return Scalars.nullTimestampMillis(timeZone);
+            } else {
+                return Scalars.timestampMillis(epochMillis, timeZone);
+            }
         }
 
         @Override
-        public ScalarProtos.Scalar visitTimestampMicros(
-                Long epochMicros, Optional<String> timeZone) {
-            return Objects.isNull(epochMicros)
-                    ? Scalars.nullTimestampMicros(timeZone)
-                    : Scalars.timestampMicros(epochMicros, timeZone);
+        public ScalarProtos.Scalar visitTimestampMicros(Long epochMicros, Optional<String> timeZone) {
+            if (Objects.isNull(epochMicros)) {
+                return Scalars.nullTimestampMicros(timeZone);
+            } else {
+                return Scalars.timestampMicros(epochMicros, timeZone);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitTimestampNanos(Long epochNanos, Optional<String> timeZone) {
-            return Objects.isNull(epochNanos)
-                    ? Scalars.nullTimestampNanos(timeZone)
-                    : Scalars.timestampNanos(epochNanos, timeZone);
+            if (Objects.isNull(epochNanos)) {
+                return Scalars.nullTimestampNanos(timeZone);
+            } else {
+                return Scalars.timestampNanos(epochNanos, timeZone);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitFloat32(Float literal) {
-            return Objects.isNull(literal) ? Scalars.nullFloat32() : Scalars.float32(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullFloat32();
+            } else {
+                return Scalars.float32(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitFloat64(Double literal) {
-            return Objects.isNull(literal) ? Scalars.nullFloat64() : Scalars.float64(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullFloat64();
+            } else {
+                return Scalars.float64(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitDecimal(BigDecimal decimal, int precision, int scale) {
-            return Objects.isNull(decimal)
-                    ? Scalars.nullDecimal(precision, scale)
-                    : Scalars.decimal(decimal, precision, scale);
+            if (Objects.isNull(decimal)) {
+                return Scalars.nullDecimal(precision, scale);
+            } else {
+                return Scalars.decimal(decimal, precision, scale);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitString(String literal) {
-            return Objects.isNull(literal) ? Scalars.nullString() : Scalars.string(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullString();
+            } else {
+                return Scalars.string(literal);
+            }
         }
 
         @Override
         public ScalarProtos.Scalar visitBytes(byte[] literal) {
-            return Objects.isNull(literal) ? Scalars.nullBytes() : Scalars.bytes(literal);
+            if (Objects.isNull(literal)) {
+                return Scalars.nullBytes();
+            } else {
+                return Scalars.bytes(literal);
+            }
         }
     }
 
-    private static Literal<?> deserializeLiteral(
-            ExprProtos.LiteralOpts literal, List<Expression> children) {
+    private static Literal<?> deserializeLiteral(ExprProtos.LiteralOpts literal, List<Expression> children) {
         ScalarProtos.Scalar literalScalar = literal.getValue();
         DTypeProtos.DType dtype = literalScalar.getDtype();
 
+        // Special handling of extension types
         if (dtype.hasExtension()) {
             return deserializeExtensionLiteral(literal);
         }
@@ -610,9 +963,8 @@ public abstract class Literal<T> implements Expression {
                 if (dtype.hasDecimal()) {
                     ByteString littleEndian = scalarValue.getBytesValue();
                     byte[] bigEndian = EndianUtils.reverse(littleEndian);
-                    BigDecimal value =
-                            new BigDecimal(
-                                    new BigInteger(bigEndian), dtype.getDecimal().getScale());
+                    BigDecimal value = new BigDecimal(
+                            new BigInteger(bigEndian), dtype.getDecimal().getScale());
                     return Literal.decimal(
                             value,
                             dtype.getDecimal().getPrecision(),
@@ -621,8 +973,7 @@ public abstract class Literal<T> implements Expression {
                     return Literal.bytes(scalarValue.getBytesValue().toByteArray());
                 }
             default:
-                throw new UnsupportedOperationException(
-                        "Unsupported ScalarValue type encountered: " + scalarValue);
+                throw new UnsupportedOperationException("Unsupported ScalarValue type encountered: " + scalarValue);
         }
     }
 
@@ -636,55 +987,47 @@ public abstract class Literal<T> implements Expression {
         String extId = scalarType.getExtension().getId();
 
         switch (extId) {
-            case "vortex.time":
-                {
-                    byte timeUnit =
-                            TemporalMetadatas.getTimeUnit(extType.getMetadata().toByteArray());
-                    if (timeUnit == TemporalMetadatas.TIME_UNIT_SECONDS) {
-                        return Literal.timeSeconds(
-                                Math.toIntExact(scalar.getValue().getInt64Value()));
-                    } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MILLIS) {
-                        return Literal.timeMillis(
-                                Math.toIntExact(scalar.getValue().getInt64Value()));
-                    } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MICROS) {
-                        return Literal.timeMicros(scalar.getValue().getInt64Value());
-                    } else if (timeUnit == TemporalMetadatas.TIME_UNIT_NANOS) {
-                        return Literal.timeNanos(scalar.getValue().getInt64Value());
-                    } else {
-                        throw new UnsupportedOperationException(
-                                "Unsupported TIME time unit: " + timeUnit);
-                    }
+            case "vortex.time": {
+                byte timeUnit =
+                        TemporalMetadatas.getTimeUnit(extType.getMetadata().toByteArray());
+                if (timeUnit == TemporalMetadatas.TIME_UNIT_SECONDS) {
+                    return Literal.timeSeconds(Math.toIntExact(scalar.getValue().getInt64Value()));
+                } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MILLIS) {
+                    return Literal.timeMillis(Math.toIntExact(scalar.getValue().getInt64Value()));
+                } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MICROS) {
+                    return Literal.timeMicros(scalar.getValue().getInt64Value());
+                } else if (timeUnit == TemporalMetadatas.TIME_UNIT_NANOS) {
+                    return Literal.timeNanos(scalar.getValue().getInt64Value());
+                } else {
+                    throw new UnsupportedOperationException("Unsupported TIME time unit: " + timeUnit);
                 }
-            case "vortex.date":
-                {
-                    byte timeUnit =
-                            TemporalMetadatas.getTimeUnit(extType.getMetadata().toByteArray());
-                    if (timeUnit == TemporalMetadatas.TIME_UNIT_DAYS) {
-                        return Literal.dateDays(Math.toIntExact(scalar.getValue().getInt64Value()));
-                    } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MILLIS) {
-                        return Literal.dateMillis(scalar.getValue().getInt64Value());
-                    } else {
-                        throw new UnsupportedOperationException(
-                                "Unsupported DATE time unit: " + timeUnit);
-                    }
+            }
+            case "vortex.date": {
+                byte timeUnit =
+                        TemporalMetadatas.getTimeUnit(extType.getMetadata().toByteArray());
+                if (timeUnit == TemporalMetadatas.TIME_UNIT_DAYS) {
+                    return Literal.dateDays(Math.toIntExact(scalar.getValue().getInt64Value()));
+                } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MILLIS) {
+                    return Literal.dateMillis(scalar.getValue().getInt64Value());
+                } else {
+                    throw new UnsupportedOperationException("Unsupported DATE time unit: " + timeUnit);
                 }
-            case "vortex.timestamp":
-                {
-                    byte timeUnit =
-                            TemporalMetadatas.getTimeUnit(extType.getMetadata().toByteArray());
-                    Optional<String> timeZone =
-                            TemporalMetadatas.getTimeZone(extType.getMetadata().toByteArray());
-                    if (timeUnit == TemporalMetadatas.TIME_UNIT_MILLIS) {
-                        return Literal.timestampMillis(scalar.getValue().getInt64Value(), timeZone);
-                    } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MICROS) {
-                        return Literal.timestampMicros(scalar.getValue().getInt64Value(), timeZone);
-                    } else if (timeUnit == TemporalMetadatas.TIME_UNIT_NANOS) {
-                        return Literal.timestampNanos(scalar.getValue().getInt64Value(), timeZone);
-                    } else {
-                        throw new UnsupportedOperationException(
-                                "Unsupported TIMESTAMP time unit: " + timeUnit);
-                    }
+            }
+            case "vortex.timestamp": {
+                byte timeUnit =
+                        TemporalMetadatas.getTimeUnit(extType.getMetadata().toByteArray());
+                Optional<String> timeZone =
+                        TemporalMetadatas.getTimeZone(extType.getMetadata().toByteArray());
+                if (timeUnit == TemporalMetadatas.TIME_UNIT_MILLIS) {
+                    return Literal.timestampMillis(scalar.getValue().getInt64Value(), timeZone);
+                } else if (timeUnit == TemporalMetadatas.TIME_UNIT_MICROS) {
+                    return Literal.timestampMicros(scalar.getValue().getInt64Value(), timeZone);
+                } else if (timeUnit == TemporalMetadatas.TIME_UNIT_NANOS) {
+                    return Literal.timestampNanos(scalar.getValue().getInt64Value(), timeZone);
+                } else {
+                    throw new UnsupportedOperationException("Unsupported TIMESTAMP time unit: " + timeUnit);
                 }
+            }
             default:
                 throw new UnsupportedOperationException("Unsupported extension type: " + extId);
         }
@@ -715,19 +1058,19 @@ public abstract class Literal<T> implements Expression {
                     case F64:
                         return Literal.float64(null);
                     default:
-                        throw new UnsupportedOperationException(
-                                "Unsupported ScalarValue type encountered: " + type);
+                        throw new UnsupportedOperationException("Unsupported ScalarValue type encountered: " + type);
                 }
             case DECIMAL:
                 return Literal.decimal(
-                        null, type.getDecimal().getPrecision(), type.getDecimal().getScale());
+                        null,
+                        type.getDecimal().getPrecision(),
+                        type.getDecimal().getScale());
             case UTF8:
                 return Literal.string(null);
             case BINARY:
                 return Literal.bytes(null);
             default:
-                throw new UnsupportedOperationException(
-                        "Unsupported ScalarValue type encountered: " + type);
+                throw new UnsupportedOperationException("Unsupported ScalarValue type encountered: " + type);
         }
     }
 }
