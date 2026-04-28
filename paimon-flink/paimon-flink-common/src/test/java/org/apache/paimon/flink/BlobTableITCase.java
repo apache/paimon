@@ -46,6 +46,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test write and read table with blob type. */
 public class BlobTableITCase extends CatalogITCaseBase {
@@ -196,6 +197,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "CREATE TABLE downstream_blob_view (id INT, label STRING, image_ref BYTES)"
                         + " WITH ('row-tracking.enabled'='true',"
                         + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='image_ref',"
                         + " 'blob-view-field'='image_ref')");
 
         batchSql(
@@ -214,6 +216,29 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(result.get(1).getField(0)).isEqualTo(2);
         assertThat(result.get(1).getField(1)).isEqualTo("row2");
         assertThat((byte[]) result.get(1).getField(2)).isEqualTo(new byte[] {89, 69});
+    }
+
+    @Test
+    public void testBlobInlineFieldRequiresBlobField() {
+        assertSecondaryBlobFieldRequiresBlobField(
+                "blob_descriptor_without_blob_field", "blob-descriptor-field");
+        assertSecondaryBlobFieldRequiresBlobField(
+                "blob_view_without_blob_field", "blob-view-field");
+    }
+
+    private void assertSecondaryBlobFieldRequiresBlobField(String tableName, String optionKey) {
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                        String.format(
+                                                "CREATE TABLE %s (id INT, picture BYTES)"
+                                                        + " WITH ('row-tracking.enabled'='true',"
+                                                        + " 'data-evolution.enabled'='true',"
+                                                        + " '%s'='picture')",
+                                                tableName, optionKey)))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Field 'picture' in '" + optionKey + "' must also be in 'blob-field'.");
     }
 
     @Test

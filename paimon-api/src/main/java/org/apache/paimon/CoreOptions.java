@@ -2261,8 +2261,8 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withFallbackKeys("blob.stored-descriptor-fields")
                     .withDescription(
-                            "Comma-separated BLOB field names to store as serialized BlobDescriptor "
-                                    + "bytes inline in data files.");
+                            "Comma-separated BLOB field names, selected from blob-field, to store "
+                                    + "as serialized BlobDescriptor bytes inline in data files.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_VIEW_FIELD =
@@ -2270,9 +2270,9 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Comma-separated BLOB field names to store as serialized BlobViewStruct "
-                                    + "bytes inline in data files and resolve from upstream tables "
-                                    + "at read time.");
+                            "Comma-separated BLOB field names, selected from blob-field, to store "
+                                    + "as serialized BlobViewStruct bytes inline in data files and "
+                                    + "resolve from upstream tables at read time.");
 
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")

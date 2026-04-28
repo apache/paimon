@@ -451,6 +451,7 @@ public class BlobTableTest extends TableTestBase {
                             schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
                             schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
                             schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
                             schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
                             schemaBuilder.option(
                                     CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
@@ -491,6 +492,52 @@ public class BlobTableTest extends TableTestBase {
                                 + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
                                 + "' must also be in '"
                                 + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
+                                + "'.");
+    }
+
+    @Test
+    public void testBlobViewFieldMustBeSubsetOfBlobField() {
+        assertThatThrownBy(
+                        () -> {
+                            Schema.Builder schemaBuilder = Schema.newBuilder();
+                            schemaBuilder.column("f0", DataTypes.INT());
+                            schemaBuilder.column("f1", DataTypes.STRING());
+                            schemaBuilder.column("f2", DataTypes.BLOB());
+                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.BLOB_VIEW_FIELD.key(), "f2");
+                            catalog.createTable(identifier(), schemaBuilder.build(), true);
+                        })
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Field 'f2' in '"
+                                + CoreOptions.BLOB_VIEW_FIELD.key()
+                                + "' must also be in '"
+                                + CoreOptions.BLOB_FIELD.key()
+                                + "'.");
+    }
+
+    @Test
+    public void testBlobDescriptorFieldMustBeSubsetOfBlobField() {
+        assertThatThrownBy(
+                        () -> {
+                            Schema.Builder schemaBuilder = Schema.newBuilder();
+                            schemaBuilder.column("f0", DataTypes.INT());
+                            schemaBuilder.column("f1", DataTypes.STRING());
+                            schemaBuilder.column("f2", DataTypes.BLOB());
+                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+                            schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
+                            catalog.createTable(identifier(), schemaBuilder.build(), true);
+                        })
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Field 'f2' in '"
+                                + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
+                                + "' must also be in '"
+                                + CoreOptions.BLOB_FIELD.key()
                                 + "'.");
     }
 
@@ -812,6 +859,7 @@ public class BlobTableTest extends TableTestBase {
         downstreamSchema.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         downstreamSchema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         downstreamSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        downstreamSchema.option(CoreOptions.BLOB_FIELD.key(), "image");
         downstreamSchema.option(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
         catalog.createTable(identifier(downstreamTableName), downstreamSchema.build(), true);
 
@@ -857,6 +905,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
         schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
         schemaBuilder.option(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
         schemaBuilder.option(
@@ -887,6 +936,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2,f3,f4");
         schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3,f4");
         schemaBuilder.option(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f4");
         schemaBuilder.option(
@@ -903,6 +953,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
         schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
@@ -920,6 +971,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2,f3");
         schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3");
         schemaBuilder.option(CoreOptions.FILE_FORMAT.key(), format);
         catalog.createTable(identifier(), schemaBuilder.build(), true);

@@ -1038,14 +1038,16 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
         List<String> blobFields = CoreOptions.blobField(options);
+        Set<String> blobDescriptorFields = new CoreOptions(options).blobDescriptorField();
         List<String> blobViewFields = CoreOptions.blobViewField(options);
-        if (!blobFields.isEmpty() || !blobViewFields.isEmpty()) {
+        validateSecondaryBlobFields(
+                blobFields, blobDescriptorFields, CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        validateSecondaryBlobFields(blobFields, blobViewFields, CoreOptions.BLOB_VIEW_FIELD.key());
+        if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
                     "When setting '"
                             + CoreOptions.BLOB_FIELD.key()
-                            + "' or '"
-                            + CoreOptions.BLOB_VIEW_FIELD.key()
                             + "', you must also set '"
                             + CoreOptions.DATA_EVOLUTION_ENABLED.key()
                             + "'");
@@ -1075,13 +1077,24 @@ public class FlinkCatalog extends AbstractCatalog {
         return schemaBuilder.build();
     }
 
+    private static void validateSecondaryBlobFields(
+            List<String> blobFields, Iterable<String> secondaryBlobFields, String optionKey) {
+        for (String secondaryBlobField : secondaryBlobFields) {
+            checkArgument(
+                    blobFields.contains(secondaryBlobField),
+                    "Field '%s' in '%s' must also be in '%s'.",
+                    secondaryBlobField,
+                    optionKey,
+                    CoreOptions.BLOB_FIELD.key());
+        }
+    }
+
     private static org.apache.paimon.types.DataType resolveDataType(
             String fieldName,
             org.apache.flink.table.types.logical.LogicalType logicalType,
             Map<String, String> options) {
         List<String> blobFields = CoreOptions.blobField(options);
-        List<String> blobViewFields = CoreOptions.blobViewField(options);
-        if (blobFields.contains(fieldName) || blobViewFields.contains(fieldName)) {
+        if (blobFields.contains(fieldName)) {
             return toBlobType(logicalType);
         }
         Set<String> vectorFields = CoreOptions.vectorField(options);
