@@ -32,6 +32,7 @@ import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -325,6 +326,21 @@ public class JdbcUtils {
                     + TABLE_NAME
                     + " = ? ";
 
+    static final String GET_TABLE_PROPERTY_SQL =
+            "SELECT "
+                    + TABLE_PROPERTY_VALUE
+                    + " FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ? AND "
+                    + TABLE_PROPERTY_KEY
+                    + " = ?";
+
     // Distributed locks table
     static final String DISTRIBUTED_LOCKS_TABLE_NAME = "paimon_distributed_locks";
     static final String LOCK_ID = "lock_id";
@@ -552,6 +568,41 @@ public class JdbcUtils {
                 String.format(
                         "Failed to insert: %d of %d succeeded",
                         insertedRecords, properties.size()));
+    }
+
+    @SuppressWarnings("checkstyle:NestedTryDepth")
+    public static Optional<String> getTableProperty(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String tableName,
+            String propertyKey) {
+        try {
+            return connections.run(
+                    conn -> {
+                        try (PreparedStatement ps = conn.prepareStatement(GET_TABLE_PROPERTY_SQL)) {
+                            ps.setString(1, storeKey);
+                            ps.setString(2, databaseName);
+                            ps.setString(3, tableName);
+                            ps.setString(4, propertyKey);
+                            try (ResultSet rs = ps.executeQuery()) {
+                                if (rs.next()) {
+                                    return Optional.of(rs.getString(TABLE_PROPERTY_VALUE));
+                                }
+                            }
+                        }
+                        return Optional.<String>empty();
+                    });
+        } catch (SQLException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to get table property '%s' for %s.%s",
+                            propertyKey, databaseName, tableName),
+                    e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted in SQL query", e);
+        }
     }
 
     private static String insertTablePropertiesStatement(int size) {
