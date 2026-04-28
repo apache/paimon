@@ -531,6 +531,12 @@ under the License.
             <td>Parallelism of assigner operator for dynamic bucket mode, it is related to the number of initialized bucket, too small will lead to insufficient processing speed of assigner.</td>
         </tr>
         <tr>
+            <td><h5>dynamic-bucket.empty-bucket-threshold</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>Threshold for triggering asynchronous refresh of bucket information. When a bucket's row count reaches (target-row-num - threshold), the assigner will asynchronously scan disk to find buckets freed by compaction. For example, with target-row-num=1000000 and threshold=100000, refresh triggers at 900000 rows. Set to -1 to disable. Recommended value: 10-20% of target-row-num.</td>
+        </tr>
+        <tr>
             <td><h5>dynamic-bucket.initial-buckets</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -541,6 +547,12 @@ under the License.
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
             <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.min-refresh-interval</h5></td>
+            <td style="word-wrap: break-word;">86400000 ms</td>
+            <td>Duration</td>
+            <td>Minimum time between bucket refresh checks. Default is 24 hours which is recommended for most use cases. Too short intervals (&lt; 1 hour) will cause excessive overhead from scanning bucket index files. With many partitions (e.g., 500+), a longer interval ensures the refresh queue remains manageable.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
