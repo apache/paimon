@@ -65,6 +65,11 @@ public class LanceReader {
                             .filter(fileFieldNames::contains)
                             .collect(Collectors.toList());
             if (existingFields.isEmpty()) {
+<<<<<<< HEAD
+=======
+                // Read at least one column to get the correct row count.
+                // ArrowBatchReader maps by name; unmatched projected fields become null.
+>>>>>>> e3ea8868b ([lance] Fix ArrayIndexOutOfBoundsException when reading vector search results with Lance format)
                 existingFields = Collections.singletonList(fileFieldNames.iterator().next());
             }
             this.arrowReader = reader.readAll(existingFields, ranges, batchSize);
