@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.globalindex.btree.{BTreeIndexMeta, KeySerializer}
+import org.apache.paimon.globalindex.btree.{BTreeGlobalIndexerFactory, BTreeIndexMeta, BTreeWithFileMetaBuilder, KeySerializer}
 import org.apache.paimon.memory.MemorySlice
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
@@ -343,6 +343,117 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
             .externalPath()
             .startsWith(indexPath + "/" + entry.indexFile().fileName()))
       }
+    }
+  }
+
+  test("create btree global index with file meta") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'btree-index.records-per-range' = '1000')
+                  |""".stripMargin)
+
+      val values =
+        (0 until 10000).map(i => s"($i, 'name_$i')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name'," +
+            " index_type => 'btree', options => 'btree-index.records-per-range=1000,index.with-file-meta=true')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val allEntries = table.store().newIndexFileHandler().scanEntries().asScala
+
+      // assert key-index (btree) entries exist with correct row count
+      val keyIndexEntries =
+        allEntries.filter(_.indexFile().indexType() == BTreeGlobalIndexerFactory.IDENTIFIER)
+      assert(keyIndexEntries.nonEmpty)
+      val totalRowCount = keyIndexEntries.map(_.indexFile().rowCount()).sum
+      assert(totalRowCount == 10000L)
+
+      // assert file-meta index (btree_file_meta) entries exist
+      val fileMetaEntries =
+        allEntries.filter(
+          _.indexFile().indexType() == BTreeWithFileMetaBuilder.INDEX_TYPE_FILE_META)
+      assert(fileMetaEntries.nonEmpty)
+
+      // assert query returns correct results via manifest-free read path
+      val result100 = spark.sql("SELECT * FROM T WHERE name = 'name_100'").collect()
+      assert(result100.length == 1)
+      assert(result100.head.getInt(0) == 100)
+
+      val result9999 = spark.sql("SELECT * FROM T WHERE name = 'name_9999'").collect()
+      assert(result9999.length == 1)
+      assert(result9999.head.getInt(0) == 9999)
+    }
+  }
+
+  test("create btree global index with file meta and multiple partitions") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING, pt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |  PARTITIONED BY (pt)
+                  |""".stripMargin)
+
+      var values = (0 until 5000).map(i => s"($i, 'name_p0_$i', 'p0')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      values = (0 until 5000).map(i => s"($i, 'name_p1_$i', 'p1')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name'," +
+            " index_type => 'btree', options => 'btree-index.records-per-range=1000,index.with-file-meta=true')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val allEntries = table.store().newIndexFileHandler().scanEntries().asScala
+
+      // assert key-index entries for both partitions
+      val keyIndexEntries =
+        allEntries.filter(_.indexFile().indexType() == BTreeGlobalIndexerFactory.IDENTIFIER)
+      assert(keyIndexEntries.nonEmpty)
+      val totalRowCount = keyIndexEntries.map(_.indexFile().rowCount()).sum
+      assert(totalRowCount == 10000L)
+
+      val keyIndexByPartition = keyIndexEntries.groupBy(_.partition())
+      assert(keyIndexByPartition.size == 2)
+      keyIndexByPartition.values.foreach {
+        entries => assert(entries.map(_.indexFile().rowCount()).sum == 5000L)
+      }
+
+      // assert file-meta index entries exist
+      assert(
+        allEntries.exists(
+          _.indexFile().indexType() == BTreeWithFileMetaBuilder.INDEX_TYPE_FILE_META))
+
+      // assert queries return correct results
+      val resP0 = spark.sql("SELECT * FROM T WHERE name = 'name_p0_100'").collect()
+      assert(resP0.length == 1)
+      assert(resP0.head.getString(2) == "p0")
+
+      val resP1 = spark.sql("SELECT * FROM T WHERE name = 'name_p1_200'").collect()
+      assert(resP1.length == 1)
+      assert(resP1.head.getString(2) == "p1")
     }
   }
 

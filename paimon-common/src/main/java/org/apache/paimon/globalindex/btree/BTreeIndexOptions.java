@@ -66,4 +66,14 @@ public class BTreeIndexOptions {
                     .intType()
                     .defaultValue(4096)
                     .withDescription("The max parallelism of Flink/Spark for building BTreeIndex.");
+
+    public static final ConfigOption<Boolean> BTREE_WITH_FILE_META =
+            ConfigOptions.key("index.with-file-meta")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to store file metadata (ManifestEntry) inside the BTree "
+                                    + "global index. When enabled, query planning can "
+                                    + "bypass manifest HDFS/OSS reads entirely by reading data file "
+                                    + "metadata directly from the index.");
 }
