@@ -613,5 +613,136 @@ class StreamingConsumerTest(unittest.TestCase):
         self.assertIsNone(scan._consumer_manager)
 
 
+class ScanFromTest(unittest.TestCase):
+    """Integration tests for AsyncStreamingTableScan scan_from parameter."""
+
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    def test_scan_from_earliest(
+        self, MockFileScanner, MockManifestFileManager,
+        MockManifestListManager, MockSnapshotManager
+    ):
+        """scan_from='earliest' should yield initial plan from the earliest snapshot."""
+        table, _ = _create_mock_table()
+
+        earliest = _create_mock_snapshot(1)
+        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_snapshot_manager.try_get_earliest_snapshot.return_value = earliest
+        mock_snapshot_manager.find_next_scannable.return_value = (None, 2, 0)
+
+        MockFileScanner.return_value.scan.return_value = Plan([])
+
+        scan = AsyncStreamingTableScan(table, scan_from="earliest", prefetch_enabled=False)
+
+        async def get_first():
+            async for plan in scan.stream():
+                return plan
+
+        plan = asyncio.run(get_first())
+        self.assertIsInstance(plan, Plan)
+        # next_snapshot_id should be earliest.id + 1
+        self.assertEqual(scan.next_snapshot_id, 2)
+
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    def test_scan_from_numeric_id(
+        self, MockFileScanner, MockManifestFileManager,
+        MockManifestListManager, MockSnapshotManager
+    ):
+        """scan_from=5 should set next_snapshot_id=5 without an initial full scan."""
+        table, _ = _create_mock_table()
+
+        mock_snapshot_manager = MockSnapshotManager.return_value
+        # get_latest_snapshot needed by _should_use_diff_catch_up
+        mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(5)
+        mock_snapshot_manager.find_next_scannable.return_value = (None, 6, 0)
+
+        scan = AsyncStreamingTableScan(table, scan_from=5, prefetch_enabled=False)
+
+        async def check_state():
+            gen = scan.stream()
+            try:
+                await asyncio.wait_for(gen.__anext__(), timeout=0.05)
+            except (asyncio.TimeoutError, StopAsyncIteration):
+                pass
+
+        asyncio.run(check_state())
+        # Numeric scan_from bypasses both earliest and latest initial-scan paths;
+        # try_get_earliest_snapshot must NOT have been called (that's the earliest path).
+        mock_snapshot_manager.try_get_earliest_snapshot.assert_not_called()
+        # FileScanner.scan was NOT called for an initial full-scan plan
+        MockFileScanner.return_value.scan.assert_not_called()
+
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    def test_scan_from_latest_matches_default(
+        self, MockFileScanner, MockManifestFileManager,
+        MockManifestListManager, MockSnapshotManager
+    ):
+        """scan_from='latest' should behave identically to the default (no scan_from)."""
+        table, _ = _create_mock_table()
+
+        latest = _create_mock_snapshot(7)
+        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_snapshot_manager.get_latest_snapshot.return_value = latest
+        mock_snapshot_manager.get_snapshot_by_id.return_value = None
+
+        MockFileScanner.return_value.scan.return_value = Plan([])
+
+        scan = AsyncStreamingTableScan(table, scan_from="latest", prefetch_enabled=False)
+
+        async def get_first():
+            async for plan in scan.stream():
+                return plan
+
+        asyncio.run(get_first())
+        self.assertEqual(scan.next_snapshot_id, 8)
+
+    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    def test_consumer_restore_overrides_scan_from(
+        self, MockFileScanner, MockManifestFileManager, MockManifestListManager,
+        MockSnapshotManager, MockConsumerManager
+    ):
+        """Consumer restore should take precedence over scan_from='earliest'."""
+        table, _ = _create_mock_table()
+
+        mock_consumer_manager = MockConsumerManager.return_value
+        mock_consumer = Mock()
+        mock_consumer.next_snapshot = 10
+        mock_consumer_manager.consumer.return_value = mock_consumer
+
+        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(10)
+        mock_snapshot_manager.find_next_scannable.return_value = (None, 11, 0)
+
+        scan = AsyncStreamingTableScan(
+            table, scan_from="earliest", consumer_id="my-consumer",
+            prefetch_enabled=False
+        )
+
+        async def check_state():
+            gen = scan.stream()
+            try:
+                await asyncio.wait_for(gen.__anext__(), timeout=0.05)
+            except (asyncio.TimeoutError, StopAsyncIteration):
+                pass
+
+        asyncio.run(check_state())
+        # Consumer restored position; try_get_earliest_snapshot must NOT have been called
+        mock_snapshot_manager.try_get_earliest_snapshot.assert_not_called()
+        # Consumer manager's consumer() was called to restore position
+        mock_consumer_manager.consumer.assert_called_once_with("my-consumer")
+
+
 if __name__ == '__main__':
     unittest.main()
