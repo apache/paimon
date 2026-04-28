@@ -84,7 +84,6 @@ public final class TemporalMetadatas {
     }
 
     public static Optional<String> getTimeZone(byte[] serializedMetadata) {
-        byte _timeUnit = serializedMetadata[0];
         byte lenLow = serializedMetadata[1];
         byte lenHigh = serializedMetadata[2];
         int len = ((lenHigh & 0xFF) << 8) | (lenLow & 0xFF);
