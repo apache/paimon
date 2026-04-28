@@ -18,13 +18,12 @@
 
 package dev.vortex.api.proto;
 
-import com.google.protobuf.ByteString;
-import dev.vortex.proto.DTypeProtos;
-
-import java.util.Optional;
-
 import static dev.vortex.api.proto.TemporalMetadatas.TIME_UNIT_MICROS;
 import static dev.vortex.api.proto.TemporalMetadatas.TIME_UNIT_NANOS;
+
+import com.google.protobuf.ByteString;
+import dev.vortex.proto.DTypeProtos;
+import java.util.Optional;
 
 /** Factory class for creating Vortex data type definitions. */
 public final class DTypes {
@@ -44,72 +43,65 @@ public final class DTypes {
 
     static DTypeProtos.DType int8(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setPrimitive(
-                        DTypeProtos.Primitive.newBuilder()
-                                .setType(DTypeProtos.PType.I8)
-                                .setNullable(nullable)
-                                .build())
+                .setPrimitive(DTypeProtos.Primitive.newBuilder()
+                        .setType(DTypeProtos.PType.I8)
+                        .setNullable(nullable)
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType int16(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setPrimitive(
-                        DTypeProtos.Primitive.newBuilder()
-                                .setType(DTypeProtos.PType.I16)
-                                .setNullable(nullable)
-                                .build())
+                .setPrimitive(DTypeProtos.Primitive.newBuilder()
+                        .setType(DTypeProtos.PType.I16)
+                        .setNullable(nullable)
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType int32(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setPrimitive(
-                        DTypeProtos.Primitive.newBuilder()
-                                .setType(DTypeProtos.PType.I32)
-                                .setNullable(nullable)
-                                .build())
+                .setPrimitive(DTypeProtos.Primitive.newBuilder()
+                        .setType(DTypeProtos.PType.I32)
+                        .setNullable(nullable)
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType int64(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setPrimitive(
-                        DTypeProtos.Primitive.newBuilder()
-                                .setType(DTypeProtos.PType.I64)
-                                .setNullable(nullable)
-                                .build())
+                .setPrimitive(DTypeProtos.Primitive.newBuilder()
+                        .setType(DTypeProtos.PType.I64)
+                        .setNullable(nullable)
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType float32(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setPrimitive(
-                        DTypeProtos.Primitive.newBuilder()
-                                .setType(DTypeProtos.PType.F32)
-                                .setNullable(nullable)
-                                .build())
+                .setPrimitive(DTypeProtos.Primitive.newBuilder()
+                        .setType(DTypeProtos.PType.F32)
+                        .setNullable(nullable)
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType float64(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setPrimitive(
-                        DTypeProtos.Primitive.newBuilder()
-                                .setType(DTypeProtos.PType.F64)
-                                .setNullable(nullable)
-                                .build())
+                .setPrimitive(DTypeProtos.Primitive.newBuilder()
+                        .setType(DTypeProtos.PType.F64)
+                        .setNullable(nullable)
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType decimal(boolean nullable, int precision, int scale) {
         return DTypeProtos.DType.newBuilder()
-                .setDecimal(
-                        DTypeProtos.Decimal.newBuilder()
-                                .setNullable(nullable)
-                                .setPrecision(precision)
-                                .setScale(scale)
-                                .build())
+                .setDecimal(DTypeProtos.Decimal.newBuilder()
+                        .setNullable(nullable)
+                        .setPrecision(precision)
+                        .setScale(scale)
+                        .build())
                 .build();
     }
 
@@ -127,72 +119,61 @@ public final class DTypes {
 
     static DTypeProtos.DType dateDays(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.date")
-                                .setStorageDtype(DTypes.int32(nullable))
-                                .setMetadata(ByteString.copyFrom(TemporalMetadatas.DATE_DAYS.get()))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.date")
+                        .setStorageDtype(DTypes.int32(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.DATE_DAYS.get()))
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType dateMillis(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.date")
-                                .setStorageDtype(DTypes.int64(nullable))
-                                .setMetadata(
-                                        ByteString.copyFrom(TemporalMetadatas.DATE_MILLIS.get()))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.date")
+                        .setStorageDtype(DTypes.int64(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.DATE_MILLIS.get()))
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType timeSeconds(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.time")
-                                .setStorageDtype(DTypes.int32(nullable))
-                                .setMetadata(
-                                        ByteString.copyFrom(TemporalMetadatas.TIME_SECONDS.get()))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.time")
+                        .setStorageDtype(DTypes.int32(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.TIME_SECONDS.get()))
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType timeMillis(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.time")
-                                .setStorageDtype(DTypes.int32(nullable))
-                                .setMetadata(
-                                        ByteString.copyFrom(TemporalMetadatas.TIME_MILLIS.get()))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.time")
+                        .setStorageDtype(DTypes.int32(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.TIME_MILLIS.get()))
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType timeMicros(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.time")
-                                .setStorageDtype(DTypes.int64(nullable))
-                                .setMetadata(
-                                        ByteString.copyFrom(TemporalMetadatas.TIME_MICROS.get()))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.time")
+                        .setStorageDtype(DTypes.int64(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.TIME_MICROS.get()))
+                        .build())
                 .build();
     }
 
     static DTypeProtos.DType timeNanos(boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.time")
-                                .setStorageDtype(DTypes.int64(nullable))
-                                .setMetadata(
-                                        ByteString.copyFrom(TemporalMetadatas.TIME_NANOS.get()))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.time")
+                        .setStorageDtype(DTypes.int64(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.TIME_NANOS.get()))
+                        .build())
                 .build();
     }
 
@@ -208,17 +189,13 @@ public final class DTypes {
         return timestamp(TIME_UNIT_NANOS, timeZone, nullable);
     }
 
-    private static DTypeProtos.DType timestamp(
-            byte timeUnit, Optional<String> timeZone, boolean nullable) {
+    private static DTypeProtos.DType timestamp(byte timeUnit, Optional<String> timeZone, boolean nullable) {
         return DTypeProtos.DType.newBuilder()
-                .setExtension(
-                        DTypeProtos.Extension.newBuilder()
-                                .setId("vortex.timestamp")
-                                .setStorageDtype(DTypes.int64(nullable))
-                                .setMetadata(
-                                        ByteString.copyFrom(
-                                                TemporalMetadatas.timestamp(timeUnit, timeZone)))
-                                .build())
+                .setExtension(DTypeProtos.Extension.newBuilder()
+                        .setId("vortex.timestamp")
+                        .setStorageDtype(DTypes.int64(nullable))
+                        .setMetadata(ByteString.copyFrom(TemporalMetadatas.timestamp(timeUnit, timeZone)))
+                        .build())
                 .build();
     }
 }

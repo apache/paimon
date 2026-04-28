@@ -19,10 +19,8 @@
 package dev.vortex.api;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Preconditions;
-
 import dev.vortex.jni.JNIFile;
 import dev.vortex.jni.NativeFileMethods;
-
 import java.net.URI;
 import java.nio.file.Paths;
 import java.util.Map;

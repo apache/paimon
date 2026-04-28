@@ -20,36 +20,23 @@ package dev.vortex.api.proto;
 
 import com.google.protobuf.ByteString;
 import dev.vortex.api.Expression;
-import dev.vortex.api.expressions.Binary;
-import dev.vortex.api.expressions.GetItem;
-import dev.vortex.api.expressions.Literal;
-import dev.vortex.api.expressions.Not;
-import dev.vortex.api.expressions.Root;
-import dev.vortex.api.expressions.Unknown;
+import dev.vortex.api.expressions.*;
 import dev.vortex.proto.ExprProtos;
-
 import java.util.List;
 import java.util.stream.Collectors;
 
 /** Serialize/deserialize Vortex expressions to/from protocol buffers. */
 public final class Expressions {
     public static ExprProtos.Expr serialize(Expression expression) {
-        ByteString metadata =
-                ByteString.copyFrom(
-                        expression
-                                .metadata()
-                                .orElseThrow(
-                                        () ->
-                                                new IllegalArgumentException(
-                                                        "Expression is not serializable: "
-                                                                + expression.id())));
+        ByteString metadata = ByteString.copyFrom(expression
+                .metadata()
+                .orElseThrow(() -> new IllegalArgumentException("Expression is not serializable: " + expression.id())));
 
         return ExprProtos.Expr.newBuilder()
                 .setId(expression.id())
-                .addAllChildren(
-                        expression.children().stream()
-                                .map(Expressions::serialize)
-                                .collect(Collectors.toList()))
+                .addAllChildren(expression.children().stream()
+                        .map(Expressions::serialize)
+                        .collect(Collectors.toList()))
                 .setMetadata(metadata)
                 .build();
     }
@@ -57,9 +44,7 @@ public final class Expressions {
     public static Expression deserialize(ExprProtos.Expr expr) {
         byte[] metadata = expr.getMetadata().toByteArray();
         List<Expression> children =
-                expr.getChildrenList().stream()
-                        .map(Expressions::deserialize)
-                        .collect(Collectors.toList());
+                expr.getChildrenList().stream().map(Expressions::deserialize).collect(Collectors.toList());
 
         switch (expr.getId()) {
             case "vortex.binary":
@@ -72,6 +57,10 @@ public final class Expressions {
                 return Literal.parse(metadata, children);
             case "vortex.not":
                 return Not.parse(metadata, children);
+            case "vortex.is_null":
+                return IsNull.parse(metadata, children);
+            case "vortex.is_not_null":
+                return IsNotNull.parse(metadata, children);
             default:
                 return new Unknown(expr.getId(), children, expr.getMetadata().toByteArray());
         }

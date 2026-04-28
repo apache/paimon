@@ -51,11 +51,13 @@ jobs:
           distribution: 'temurin'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Clone and build Vortex native library
         run: |
-          git clone --depth 1 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
+          git clone --depth 1  -b 0.69.0 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
           cd ${RUNNER_TEMP}/vortex
           cargo build --package vortex-jni --release
 
@@ -87,7 +89,9 @@ jobs:
           distribution: 'temurin'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build Tantivy native library
         run: |

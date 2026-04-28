@@ -20,7 +20,6 @@ package dev.vortex.api;
 
 import dev.vortex.jni.JNIDType;
 import dev.vortex.jni.NativeDTypeMethods;
-
 import java.util.List;
 import java.util.Optional;
 
@@ -99,14 +98,14 @@ public interface DType extends AutoCloseable {
     }
 
     static DType newList(DType element, boolean isNullable) {
+        // Get the pointer
         JNIDType jniType = (JNIDType) element;
         return new JNIDType(NativeDTypeMethods.newList(jniType.getPointer(), isNullable), true);
     }
 
     static DType newFixedSizeList(DType element, int size, boolean isNullable) {
         JNIDType jniType = (JNIDType) element;
-        return new JNIDType(
-                NativeDTypeMethods.newFixedSizeList(jniType.getPointer(), size, isNullable), true);
+        return new JNIDType(NativeDTypeMethods.newFixedSizeList(jniType.getPointer(), size, isNullable), true);
     }
 
     static DType newStruct(String[] fieldNames, DType[] fieldTypes, boolean isNullable) {
@@ -119,8 +118,7 @@ public interface DType extends AutoCloseable {
 
     static DType newTimestamp(TimeUnit unit, Optional<String> timeZone, boolean isNullable) {
         byte timeUnit = unit.asByte();
-        return new JNIDType(
-                NativeDTypeMethods.newTimestamp(timeUnit, timeZone.orElse(null), isNullable), true);
+        return new JNIDType(NativeDTypeMethods.newTimestamp(timeUnit, timeZone.orElse(null), isNullable), true);
     }
 
     static DType newDate(TimeUnit unit, boolean isNullable) {
@@ -133,13 +131,17 @@ public interface DType extends AutoCloseable {
         return new JNIDType(NativeDTypeMethods.newTime(timeUnit, isNullable), true);
     }
 
-    /** Time units supported by Vortex temporal data types. */
     enum TimeUnit {
         NANOSECONDS,
+
         MICROSECONDS,
+
         MILLISECONDS,
+
         SECONDS,
-        DAYS;
+
+        DAYS,
+        ;
 
         public static TimeUnit from(byte unit) {
             switch (unit) {
@@ -176,28 +178,47 @@ public interface DType extends AutoCloseable {
         }
     }
 
-    /** All supported data type variants in Vortex. */
     enum Variant {
         NULL,
+
         BOOL,
+
         PRIMITIVE_U8,
+
         PRIMITIVE_U16,
+
         PRIMITIVE_U32,
+
         PRIMITIVE_U64,
+
         PRIMITIVE_I8,
+
         PRIMITIVE_I16,
+
         PRIMITIVE_I32,
+
         PRIMITIVE_I64,
+
         PRIMITIVE_F16,
+
         PRIMITIVE_F32,
+
         PRIMITIVE_F64,
+
         UTF8,
+
         BINARY,
+
         STRUCT,
+
         LIST,
+
         EXTENSION,
+
         DECIMAL,
-        FIXED_SIZE_LIST;
+
+        FIXED_SIZE_LIST,
+        ;
 
         public static Variant from(byte variant) {
             switch (variant) {

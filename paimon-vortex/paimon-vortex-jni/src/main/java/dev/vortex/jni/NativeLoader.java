@@ -19,13 +19,7 @@
 package dev.vortex.jni;
 
 import org.apache.paimon.shade.guava30.com.google.common.io.ByteStreams;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
 import java.util.Locale;
 
 /** Utility class for loading the native Vortex JNI library. */
@@ -39,6 +33,7 @@ public final class NativeLoader {
             return;
         }
 
+        // Load the native library
         String osName = System.getProperty("os.name").toLowerCase(Locale.ROOT);
         String osArch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
         String libName = "libvortex_jni";
@@ -61,6 +56,8 @@ public final class NativeLoader {
             throw new UnsupportedOperationException("Unsupported OS: " + osName);
         }
 
+        // Extract the library from classpath
+        // This assumes the library is in the same package as this class
         String libPath = "/native/" + osShortName + "-" + osArch + "/" + libName;
         try (InputStream in = NativeLoader.class.getResourceAsStream(libPath)) {
             if (in == null) {
@@ -77,6 +74,7 @@ public final class NativeLoader {
             throw new RuntimeException("Failed to load library: " + e.getMessage(), e);
         }
 
+        // Load the library
         System.load(libName);
         loaded = true;
     }

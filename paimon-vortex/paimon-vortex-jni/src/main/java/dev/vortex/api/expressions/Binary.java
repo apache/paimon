@@ -21,7 +21,6 @@ package dev.vortex.api.expressions;
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.vortex.api.Expression;
 import dev.vortex.proto.ExprProtos;
-
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -103,8 +102,10 @@ public final class Binary implements Expression {
 
     @Override
     public Optional<byte[]> metadata() {
-        return Optional.of(
-                ExprProtos.BinaryOpts.newBuilder().setOp(operator.toProto()).build().toByteArray());
+        return Optional.of(ExprProtos.BinaryOpts.newBuilder()
+                .setOp(operator.toProto())
+                .build()
+                .toByteArray());
     }
 
     @Override
@@ -116,9 +117,7 @@ public final class Binary implements Expression {
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
         Binary binary = (Binary) o;
-        return operator == binary.operator
-                && Objects.equals(left, binary.left)
-                && Objects.equals(right, binary.right);
+        return operator == binary.operator && Objects.equals(left, binary.left) && Objects.equals(right, binary.right);
     }
 
     @Override
@@ -143,16 +142,24 @@ public final class Binary implements Expression {
         return right;
     }
 
-    /** Binary operators supported by binary expressions. */
     public enum BinaryOp {
+        /** Equality comparison operator (==) */
         EQ,
+        /** Inequality comparison operator (!=) */
         NOT_EQ,
+        /** Greater-than comparison operator (>) */
         GT,
+        /** Greater-than-or-equal comparison operator (>=) */
         GT_EQ,
+        /** Less-than comparison operator (&lt;) */
         LT,
+        /** Less-than-or-equal comparison operator (&lt;=) */
         LT_EQ,
+        /** Logical AND operator (&amp;&amp;) */
         AND,
-        OR;
+        /** Logical OR operator (||) */
+        OR,
+        ;
 
         @Override
         public String toString() {
@@ -197,8 +204,7 @@ public final class Binary implements Expression {
                 case Or:
                     return OR;
                 default:
-                    throw new IllegalArgumentException(
-                            "Unsupported binary operator proto: " + proto);
+                    throw new IllegalArgumentException("Unsupported binary operator proto: " + proto);
             }
         }
 

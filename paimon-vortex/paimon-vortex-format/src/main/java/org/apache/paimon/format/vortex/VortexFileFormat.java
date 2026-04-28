@@ -73,7 +73,7 @@ public class VortexFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates) {
-        return new VortexReaderFactory(projectedRowType, predicates);
+        return new VortexReaderFactory(dataSchemaRowType, projectedRowType, predicates);
     }
 
     @Override

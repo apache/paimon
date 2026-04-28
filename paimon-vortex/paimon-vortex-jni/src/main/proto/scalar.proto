@@ -28,6 +28,8 @@ message ScalarValue {
     bytes bytes_value = 8;
     ListValue list_value = 9;
     uint64 f16_value = 10;
+    // Variant scalars carry a row-specific nested scalar.
+    // See RFC 0015: https://github.com/vortex-data/rfcs/blob/develop/accepted/0015-variant-type.md
     Scalar variant_value = 11;
   }
 }

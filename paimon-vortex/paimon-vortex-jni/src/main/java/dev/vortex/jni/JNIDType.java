@@ -20,9 +20,7 @@ package dev.vortex.jni;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
 import dev.vortex.api.DType;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -30,7 +28,7 @@ import java.util.OptionalLong;
 /** JNI implementation of the DType interface. */
 public final class JNIDType implements DType {
     OptionalLong pointer;
-    final boolean isOwned;
+    final boolean isOwned; // True if this object owns the native memory
 
     public JNIDType(long pointer) {
         this(pointer, false);
@@ -63,12 +61,12 @@ public final class JNIDType implements DType {
 
     @Override
     public List<DType> getFieldTypes() {
-        return Lists.transform(
-                NativeDTypeMethods.getFieldTypes(pointer.getAsLong()), JNIDType::new);
+        return Lists.transform(NativeDTypeMethods.getFieldTypes(pointer.getAsLong()), JNIDType::new);
     }
 
     @Override
     public DType getElementType() {
+        // Returns a borrowed reference - the parent DType owns this memory
         return new JNIDType(NativeDTypeMethods.getElementType(pointer.getAsLong()));
     }
 

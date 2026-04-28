@@ -23,32 +23,32 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Logical NOT expression that negates its child expression. */
-public final class Not implements Expression {
+public final class IsNull implements Expression {
     private final Expression child;
 
-    private Not(Expression child) {
+    private IsNull(Expression child) {
         this.child = child;
     }
 
-    public static Not parse(byte[] metadata, List<Expression> children) {
+    public static IsNull parse(byte[] metadata, List<Expression> children) {
         if (children.size() != 1) {
-            throw new IllegalArgumentException("Not expression must have exactly one child, found: " + children.size());
+            throw new IllegalArgumentException(
+                    "IsNull expression must have exactly one child, found: " + children.size());
         }
         if (metadata.length > 0) {
-            throw new IllegalArgumentException("Not expression must not have metadata, found: " + metadata.length);
+            throw new IllegalArgumentException("IsNull expression must not have metadata, found: " + metadata.length);
         }
-        return new Not(children.get(0));
+        return new IsNull(children.get(0));
     }
 
-    public static Not of(Expression child) {
-        return new Not(child);
+    public static IsNull of(Expression child) {
+        return new IsNull(child);
     }
 
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
-        Not other = (Not) o;
+        IsNull other = (IsNull) o;
         return Objects.equals(child, other.child);
     }
 
@@ -59,7 +59,7 @@ public final class Not implements Expression {
 
     @Override
     public String id() {
-        return "vortex.not";
+        return "vortex.is_null";
     }
 
     @Override
@@ -74,7 +74,7 @@ public final class Not implements Expression {
 
     @Override
     public String toString() {
-        return "not(" + child + ")";
+        return "vortex.is_null(" + child + ")";
     }
 
     public Expression getChild() {
@@ -83,6 +83,6 @@ public final class Not implements Expression {
 
     @Override
     public <T> T accept(Visitor<T> visitor) {
-        return visitor.visitNot(this);
+        return visitor.visitIsNull(this);
     }
 }

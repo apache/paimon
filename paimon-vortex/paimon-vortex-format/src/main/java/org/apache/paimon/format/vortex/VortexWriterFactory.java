@@ -28,9 +28,6 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -39,8 +36,6 @@ import static org.apache.paimon.format.vortex.VortexUtils.toVortexSpecified;
 
 /** A factory to create Vortex {@link FormatWriter}. */
 public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectWrite {
-
-    private static final Logger LOG = LoggerFactory.getLogger(VortexWriterFactory.class);
 
     private final RowType rowType;
     private final Supplier<ArrowFormatWriter> arrowFormatWriterSupplier;
