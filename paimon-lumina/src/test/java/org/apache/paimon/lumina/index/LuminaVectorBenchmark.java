@@ -543,7 +543,7 @@ public class LuminaVectorBenchmark {
                                     new Path(benchIndexDir, ioMetaArg.filePath().getName()));
             try (LuminaVectorGlobalIndexReader reader =
                     new LuminaVectorGlobalIndexReader(
-                            gFileReader, ioMetas, vectorType, indexOptions)) {
+                            gFileReader, ioMetas, vectorType, indexOptions, new LuminaSearcherPool(0))) {
                 reader.visitVectorSearch(vs);
                 openBytesArr[i] = reader.getOpenBytesRead();
                 openSeekArr[i] = reader.getOpenSeekCount();
