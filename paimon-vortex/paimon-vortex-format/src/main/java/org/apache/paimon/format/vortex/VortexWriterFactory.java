@@ -63,7 +63,7 @@ public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectW
         Pair<Path, Map<String, String>> vortexSpecified = toVortexSpecified(fileIO, path);
         return new VortexRecordsWriter(
                 rowType,
-                arrowFormatWriterSupplier.get(),
+                arrowFormatWriterSupplier,
                 vortexSpecified.getLeft(),
                 vortexSpecified.getRight());
     }

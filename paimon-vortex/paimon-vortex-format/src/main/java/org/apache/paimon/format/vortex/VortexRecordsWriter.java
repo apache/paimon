@@ -20,6 +20,7 @@ package org.apache.paimon.format.vortex;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowUtils;
+import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
@@ -29,30 +30,60 @@ import org.apache.paimon.types.RowType;
 
 import dev.vortex.api.DType;
 import dev.vortex.api.VortexWriter;
+import org.apache.arrow.c.ArrowArray;
+import org.apache.arrow.c.ArrowSchema;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
-/** Vortex records writer. */
+/**
+ * Vortex records writer.
+ *
+ * <p>Uses the Arrow C Data Interface (FFI) to hand record batches to the native Vortex writer
+ * without a serialization copy. The native writer is asynchronous: {@code writeBatchFfi} only
+ * enqueues the batch and returns; the actual disk write happens on a separate task. Because
+ * vortex's {@code from_arrow} shares buffer references rather than copying, the original Arrow
+ * buffers must remain intact until the native writer drains.
+ *
+ * <p>Two consequences shape the lifecycle below:
+ *
+ * <ul>
+ *   <li>{@link ArrowFormatWriter#reset()} is implemented as in-place {@code zeroVector}; reusing a
+ *       single writer across batches would zero buffers that the native side is still reading. Each
+ *       batch therefore uses a fresh {@link ArrowFormatWriter}; the previous one is moved to a
+ *       pending list and closed only after {@link VortexWriter#close()} drains the native task.
+ *   <li>{@link ArrowSchema}'s release callback is never invoked by vortex's Rust side (it borrows
+ *       {@code &*ffi_schema} instead of taking ownership). The exported C structs are therefore
+ *       tracked in {@code pendingFfiExports} and explicitly released after the native drain.
+ * </ul>
+ */
 public class VortexRecordsWriter implements BundleFormatWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(VortexRecordsWriter.class);
 
-    private final ArrowFormatWriter arrowFormatWriter;
+    private final Supplier<ArrowFormatWriter> arrowFormatWriterSupplier;
     private final VortexWriter nativeWriter;
     private final String path;
+    private final List<ArrowFormatWriter> pendingArrowFormatWriters = new ArrayList<>();
+    private final List<FfiExport> pendingFfiExports = new ArrayList<>();
+    private ArrowFormatWriter currentArrowFormatWriter;
     private long jniCost = 0;
 
     public VortexRecordsWriter(
             RowType rowType,
-            ArrowFormatWriter arrowFormatWriter,
+            Supplier<ArrowFormatWriter> arrowFormatWriterSupplier,
             Path path,
             Map<String, String> storageOptions)
             throws IOException {
-        this.arrowFormatWriter = arrowFormatWriter;
+        this.arrowFormatWriterSupplier = arrowFormatWriterSupplier;
+        this.currentArrowFormatWriter = arrowFormatWriterSupplier.get();
         this.path = path.toUri().toString();
 
         DType dtype = VortexTypeUtils.toDType(rowType);
@@ -61,9 +92,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void addElement(InternalRow internalRow) throws IOException {
-        if (!arrowFormatWriter.write(internalRow)) {
+        if (!currentArrowFormatWriter.write(internalRow)) {
             flush();
-            if (!arrowFormatWriter.write(internalRow)) {
+            if (!currentArrowFormatWriter.write(internalRow)) {
                 throw new RuntimeException("Exception happens while write to vortex file");
             }
         }
@@ -72,7 +103,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            writeVsr(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
+            writeVsr(
+                    ((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot(),
+                    currentArrowFormatWriter.getAllocator());
         } else {
             for (InternalRow row : bundleRecords) {
                 addElement(row);
@@ -89,27 +122,180 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void close() throws IOException {
-        flush();
-        LOG.info("Jni cost: {}ms for file: {}", jniCost, path);
+        IOException ioException = null;
         long t1 = System.currentTimeMillis();
-        nativeWriter.close();
-        arrowFormatWriter.close();
-        long closeCost = (System.currentTimeMillis() - t1);
-        LOG.info("Close cost: {}ms for file: {}", closeCost, path);
+        try {
+            flush();
+            LOG.info("Jni cost: {}ms for file: {}", jniCost, path);
+            nativeWriter.close();
+        } catch (IOException e) {
+            ioException = e;
+        } finally {
+            RuntimeException runtimeException = null;
+            try {
+                closePendingFfiExports();
+            } catch (RuntimeException e) {
+                runtimeException = e;
+            }
+            try {
+                closeArrowFormatWriters();
+            } catch (RuntimeException e) {
+                if (runtimeException == null) {
+                    runtimeException = e;
+                } else {
+                    runtimeException.addSuppressed(e);
+                }
+            }
+
+            long closeCost = (System.currentTimeMillis() - t1);
+            LOG.info("Close cost: {}ms for file: {}", closeCost, path);
+
+            if (runtimeException != null) {
+                if (ioException != null) {
+                    ioException.addSuppressed(runtimeException);
+                } else {
+                    throw runtimeException;
+                }
+            }
+        }
+
+        if (ioException != null) {
+            throw ioException;
+        }
     }
 
     private void flush() throws IOException {
-        arrowFormatWriter.flush();
-        if (!arrowFormatWriter.empty()) {
-            writeVsr(arrowFormatWriter.getVectorSchemaRoot());
+        currentArrowFormatWriter.flush();
+        if (!currentArrowFormatWriter.empty()) {
+            writeVsr(
+                    currentArrowFormatWriter.getVectorSchemaRoot(),
+                    currentArrowFormatWriter.getAllocator());
+            // Don't call reset(): it zeros the underlying buffers in place, which the native
+            // writer may still be reading. Move this writer to the pending list (kept alive
+            // until after the native drain) and start a fresh one for subsequent rows.
+            pendingArrowFormatWriters.add(currentArrowFormatWriter);
+            currentArrowFormatWriter = arrowFormatWriterSupplier.get();
         }
-        arrowFormatWriter.reset();
     }
 
-    private void writeVsr(VectorSchemaRoot vsr) throws IOException {
-        byte[] arrowData = ArrowUtils.serializeToIpc(vsr);
-        long t1 = System.currentTimeMillis();
-        nativeWriter.writeBatch(arrowData);
-        jniCost += (System.currentTimeMillis() - t1);
+    private void writeVsr(VectorSchemaRoot vsr, BufferAllocator allocator) throws IOException {
+        ArrowArray arrowArray = ArrowArray.allocateNew(allocator);
+        ArrowSchema arrowSchema = ArrowSchema.allocateNew(allocator);
+        boolean success = false;
+        try {
+            ArrowCStruct cStruct =
+                    ArrowUtils.serializeToCStruct(vsr, arrowArray, arrowSchema, allocator);
+            long t1 = System.currentTimeMillis();
+            nativeWriter.writeBatchFfi(cStruct.arrayAddress(), cStruct.schemaAddress());
+            jniCost += (System.currentTimeMillis() - t1);
+            pendingFfiExports.add(new FfiExport(arrowArray, arrowSchema));
+            success = true;
+        } finally {
+            if (!success) {
+                FfiExport.close(arrowArray, arrowSchema);
+            }
+        }
+    }
+
+    private void closePendingFfiExports() {
+        RuntimeException runtimeException = null;
+        for (FfiExport export : pendingFfiExports) {
+            try {
+                export.close();
+            } catch (RuntimeException e) {
+                if (runtimeException == null) {
+                    runtimeException = e;
+                } else {
+                    runtimeException.addSuppressed(e);
+                }
+            }
+        }
+        pendingFfiExports.clear();
+        if (runtimeException != null) {
+            throw runtimeException;
+        }
+    }
+
+    private void closeArrowFormatWriters() {
+        RuntimeException runtimeException = null;
+        for (ArrowFormatWriter writer : pendingArrowFormatWriters) {
+            try {
+                writer.close();
+            } catch (RuntimeException e) {
+                if (runtimeException == null) {
+                    runtimeException = e;
+                } else {
+                    runtimeException.addSuppressed(e);
+                }
+            }
+        }
+        pendingArrowFormatWriters.clear();
+        try {
+            currentArrowFormatWriter.close();
+        } catch (RuntimeException e) {
+            if (runtimeException == null) {
+                runtimeException = e;
+            } else {
+                runtimeException.addSuppressed(e);
+            }
+        }
+        if (runtimeException != null) {
+            throw runtimeException;
+        }
+    }
+
+    private static class FfiExport implements AutoCloseable {
+
+        private final ArrowArray arrowArray;
+        private final ArrowSchema arrowSchema;
+
+        private FfiExport(ArrowArray arrowArray, ArrowSchema arrowSchema) {
+            this.arrowArray = arrowArray;
+            this.arrowSchema = arrowSchema;
+        }
+
+        @Override
+        public void close() {
+            close(arrowArray, arrowSchema);
+        }
+
+        private static void close(ArrowArray arrowArray, ArrowSchema arrowSchema) {
+            RuntimeException runtimeException = null;
+            runtimeException = run(runtimeException, () -> releaseArrayIfNeeded(arrowArray));
+            runtimeException = run(runtimeException, () -> releaseSchemaIfNeeded(arrowSchema));
+            runtimeException = run(runtimeException, arrowArray::close);
+            runtimeException = run(runtimeException, arrowSchema::close);
+            if (runtimeException != null) {
+                throw runtimeException;
+            }
+        }
+
+        private static void releaseArrayIfNeeded(ArrowArray arrowArray) {
+            if (arrowArray.snapshot().release != 0) {
+                arrowArray.release();
+            }
+        }
+
+        private static void releaseSchemaIfNeeded(ArrowSchema arrowSchema) {
+            if (arrowSchema.snapshot().release != 0) {
+                arrowSchema.release();
+            }
+        }
+
+        private static RuntimeException run(RuntimeException previous, ThrowingRunnable runnable) {
+            try {
+                runnable.run();
+            } catch (RuntimeException e) {
+                if (previous == null) {
+                    return e;
+                }
+                previous.addSuppressed(e);
+            }
+            return previous;
+        }
+
+        private interface ThrowingRunnable {
+            void run();
+        }
     }
 }
