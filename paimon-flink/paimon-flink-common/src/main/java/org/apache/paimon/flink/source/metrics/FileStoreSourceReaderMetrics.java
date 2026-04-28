@@ -27,7 +27,6 @@ public class FileStoreSourceReaderMetrics {
 
     private long latestFileCreationTime = UNDEFINED;
     private long lastSplitUpdateTime = UNDEFINED;
-
     public static final long UNDEFINED = -1L;
     public static final long ACTIVE = Long.MAX_VALUE;
 
