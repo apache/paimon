@@ -82,6 +82,7 @@ public class FlinkSinkBuilder {
 
     private DataStream<RowData> input;
     @Nullable protected Map<String, String> overwritePartition;
+    @Nullable protected Long overwriteBaseSnapshotId;
     @Nullable private Integer parallelism;
     @Nullable private TableSortInfo tableSortInfo;
 
@@ -128,6 +129,12 @@ public class FlinkSinkBuilder {
     /** INSERT OVERWRITE PARTITION (...). */
     public FlinkSinkBuilder overwrite(Map<String, String> overwritePartition) {
         this.overwritePartition = overwritePartition;
+        return this;
+    }
+
+    /** Set the base snapshot for overwrite conflict detection (used by sort compact). */
+    public FlinkSinkBuilder withOverwriteBaseSnapshot(@Nullable Long snapshotId) {
+        this.overwriteBaseSnapshotId = snapshotId;
         return this;
     }
 
@@ -259,14 +266,19 @@ public class FlinkSinkBuilder {
 
     protected DataStreamSink<?> buildDynamicBucketSink(
             DataStream<InternalRow> input, boolean globalIndex) {
-        return compactSink && !globalIndex
-                // todo support global index sort compact
-                ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
-                : globalIndex
-                        ? new GlobalDynamicBucketSink(table, overwritePartition)
-                                .build(input, parallelism)
-                        : new RowDynamicBucketSink(table, overwritePartition)
-                                .build(input, parallelism);
+        if (compactSink && !globalIndex) {
+            DynamicBucketCompactSink sink = new DynamicBucketCompactSink(table, overwritePartition);
+            sink.setOverwriteBaseSnapshotId(overwriteBaseSnapshotId);
+            return sink.build(input, parallelism);
+        } else if (globalIndex) {
+            GlobalDynamicBucketSink sink = new GlobalDynamicBucketSink(table, overwritePartition);
+            sink.setOverwriteBaseSnapshotId(overwriteBaseSnapshotId);
+            return sink.build(input, parallelism);
+        } else {
+            RowDynamicBucketSink sink = new RowDynamicBucketSink(table, overwritePartition);
+            sink.setOverwriteBaseSnapshotId(overwriteBaseSnapshotId);
+            return sink.build(input, parallelism);
+        }
     }
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
@@ -328,7 +340,9 @@ public class FlinkSinkBuilder {
                             parallelism);
         }
 
-        return new RowAppendTableSink(table, overwritePartition, parallelism).sinkFrom(input);
+        RowAppendTableSink sink = new RowAppendTableSink(table, overwritePartition, parallelism);
+        sink.setOverwriteBaseSnapshotId(overwriteBaseSnapshotId);
+        return sink.sinkFrom(input);
     }
 
     private DataStream<RowData> trySortInput(DataStream<RowData> input) {

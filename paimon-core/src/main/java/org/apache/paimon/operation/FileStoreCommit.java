@@ -55,11 +55,15 @@ public interface FileStoreCommit extends AutoCloseable {
      *     on the user-defined statement, the partition might not include all partition keys. Also
      *     note that this partition does not necessarily equal to the partitions of the newly added
      *     key-values. This is just the partition to be cleaned up.
+     * @param baseSnapshotId If non-null, the DELETE list is built from this snapshot instead of the
+     *     latest, and concurrent writes between this snapshot and the latest are detected as
+     *     conflicts. Used by sort compact to prevent data loss.
      */
     int overwritePartition(
             Map<String, String> partition,
             ManifestCommittable committable,
-            Map<String, String> properties);
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId);
 
     /**
      * Drop multiple partitions. The {@link Snapshot.CommitKind} of generated snapshot is {@link

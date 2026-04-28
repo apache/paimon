@@ -31,6 +31,13 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
     InnerTableCommit withOverwrite(@Nullable Map<String, String> staticPartition);
 
     /**
+     * Set the base snapshot ID for overwrite conflict detection. When set, the overwrite DELETE
+     * list is built from this snapshot instead of the latest, and concurrent writes between this
+     * snapshot and the latest are detected as conflicts.
+     */
+    InnerTableCommit withOverwriteBaseSnapshot(@Nullable Long snapshotId);
+
+    /**
      * If this is set to true, when there is no new data, no snapshot will be generated. By default,
      * empty commit is ignored.
      *
