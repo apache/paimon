@@ -168,7 +168,8 @@ class FileScanner:
         table,
         manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
         predicate: Optional[Predicate] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        partition_predicate: Optional[Predicate] = None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -185,8 +186,11 @@ class FileScanner:
         self.primary_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.trimmed_primary_keys)
 
-        self.partition_key_predicate = trim_and_transform_predicate(
-            self.predicate, self.table.field_names, self.table.partition_keys)
+        if partition_predicate is None:
+            self.partition_key_predicate = trim_and_transform_predicate(
+                self.predicate, self.table.field_names, self.table.partition_keys)
+        else:
+            self.partition_key_predicate = partition_predicate
         options = self.table.options
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
