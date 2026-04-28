@@ -156,7 +156,7 @@ public final class JNIArray implements Array {
 
     @Override
     public void close() {
-        if (pointer.isEmpty()) {
+        if (!pointer.isPresent()) {
             return;
         }
 

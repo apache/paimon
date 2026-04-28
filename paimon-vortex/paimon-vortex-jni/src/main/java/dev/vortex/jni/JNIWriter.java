@@ -88,7 +88,7 @@ public final class JNIWriter implements VortexWriter, AutoCloseable {
      */
     @Override
     public void close() {
-        if (this.ptr.isEmpty()) {
+        if (!this.ptr.isPresent()) {
             logger.debug("Attempted to close already closed JNIWriter, skipping");
             return;
         }

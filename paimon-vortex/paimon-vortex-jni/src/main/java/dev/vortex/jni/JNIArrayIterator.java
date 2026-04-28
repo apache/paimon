@@ -54,7 +54,7 @@ public final class JNIArrayIterator implements ArrayIterator {
 
     @Override
     public void close() {
-        if (pointer.isEmpty()) {
+        if (!pointer.isPresent()) {
             return;
         }
 

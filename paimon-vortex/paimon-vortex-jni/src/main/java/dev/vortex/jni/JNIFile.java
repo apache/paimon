@@ -61,7 +61,7 @@ public final class JNIFile implements File {
 
     @Override
     public void close() {
-        if (pointer.isEmpty()) {
+        if (!pointer.isPresent()) {
             return;
         }
         NativeFileMethods.close(pointer.getAsLong());

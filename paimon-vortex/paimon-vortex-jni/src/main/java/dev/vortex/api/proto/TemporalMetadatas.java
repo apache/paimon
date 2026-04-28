@@ -81,7 +81,7 @@ public final class TemporalMetadatas {
             int lenHigh = (timeZoneBytes.length >> 8) & 0xFF;
             baos.write(lenLow);
             baos.write(lenHigh);
-            baos.writeBytes(timeZoneBytes);
+            baos.write(timeZoneBytes, 0, timeZoneBytes.length);
         } else {
             // write uint16 zero value
             baos.write(0);
