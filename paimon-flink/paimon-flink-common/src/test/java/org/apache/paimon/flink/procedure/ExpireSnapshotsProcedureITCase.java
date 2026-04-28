@@ -72,12 +72,12 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         + "', retain_min => 3)");
         checkSnapshots(snapshotManager, 4, 6);
 
-        // older_than => timestamp of snapshot 6, expected snapshots (6)
+        // older_than => timestamp of snapshot 6, expected snapshots (5, 6)
         sql(
                 "CALL sys.expire_snapshots(`table`  => 'default.word_count', older_than => '"
                         + ts6.toString()
                         + "')");
-        checkSnapshots(snapshotManager, 6, 6);
+        checkSnapshots(snapshotManager, 5, 6);
     }
 
     @ParameterizedTest
@@ -157,7 +157,7 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                 .run();
         checkSnapshots(snapshotManager, 4, 6);
 
-        // older_than => timestamp of snapshot 6, expected snapshots (6)
+        // older_than => timestamp of snapshot 6, expected snapshots (5, 6)
         createAction(
                         ExpireSnapshotsAction.class,
                         "expire_snapshots",
@@ -173,7 +173,7 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
-        checkSnapshots(snapshotManager, 6, 6);
+        checkSnapshots(snapshotManager, 5, 6);
     }
 
     @Test

@@ -538,13 +538,63 @@ public class ExpireSnapshotsTest {
         expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
 
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
-        for (int i = 1; i <= latestSnapshotId; i++) {
-            if (snapshotManager.snapshotExists(i)) {
-                assertThat(snapshotManager.snapshot(i).timeMillis())
-                        .isBetween(expireMillis - 1000, expireMillis);
-                assertSnapshot(i, allData, snapshotPositions);
-            }
+        // snapshots 1-4 should be expired, snapshot 5 is retained because its next
+        // snapshot (6) is within the time window
+        for (int i = 1; i <= 4; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
         }
+        for (int i = 5; i <= latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(i, allData, snapshotPositions);
+        }
+
+        store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireWithTimeProtectsEachSnapshot() throws Exception {
+        // Even with a small retainMin, each snapshot should be protected by
+        // snapshotTimeRetain: a snapshot can only be expired when its next
+        // snapshot has been alive longer than snapshotTimeRetain.
+        ExpireConfig.Builder builder = ExpireConfig.builder();
+        builder.snapshotRetainMin(1)
+                .snapshotRetainMax(Integer.MAX_VALUE)
+                .snapshotTimeRetain(Duration.ofMillis(5000));
+        ExpireSnapshots expire = store.newExpire(builder.build());
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+
+        // create 5 snapshots quickly
+        commit(5, allData, snapshotPositions);
+
+        // expire immediately - no snapshot should be expired because each
+        // snapshot's next snapshot is still within the time window
+        expire.config(builder.build()).expire();
+
+        for (int i = 1; i <= 5; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(i, allData, snapshotPositions);
+        }
+
+        // wait for snapshotTimeRetain to pass
+        Thread.sleep(5500);
+
+        // create one more snapshot so snapshot 5 has a "next"
+        commit(1, allData, snapshotPositions);
+
+        // expire again - now snapshots 1-4 can be expired (their next snapshots
+        // are older than 5000ms), but snapshot 5 is still protected because its
+        // next snapshot (6) was just created
+        expire.config(builder.build()).expire();
+
+        for (int i = 1; i <= 4; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
+        }
+        assertThat(snapshotManager.snapshotExists(5)).isTrue();
+        assertThat(snapshotManager.snapshotExists(6)).isTrue();
+        assertSnapshot(5, allData, snapshotPositions);
+        assertSnapshot(6, allData, snapshotPositions);
 
         store.assertCleaned();
     }

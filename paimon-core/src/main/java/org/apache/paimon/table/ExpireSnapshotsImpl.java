@@ -136,10 +136,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
-            // (the maximum time of snapshots to retain)
+            // A snapshot can only be expired if its next snapshot has been alive
+            // longer than snapshotTimeRetain, providing stronger protection
             try {
-                Snapshot snapshot = snapshotManager.tryGetSnapshot(id);
-                if (olderThanMills <= snapshot.timeMillis()) {
+                Snapshot nextSnapshot = snapshotManager.tryGetSnapshot(id + 1);
+                if (olderThanMills <= nextSnapshot.timeMillis()) {
                     return expireUntil(earliest, id);
                 }
             } catch (FileNotFoundException e) {
