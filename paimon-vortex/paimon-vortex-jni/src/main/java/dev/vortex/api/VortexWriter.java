@@ -21,19 +21,16 @@ package dev.vortex.api;
 import dev.vortex.jni.JNIDType;
 import dev.vortex.jni.JNIWriter;
 import dev.vortex.jni.NativeWriterMethods;
-
 import java.io.IOException;
 import java.util.Map;
 
 /** Writer for creating Vortex files from Arrow data. */
 public interface VortexWriter extends AutoCloseable {
 
-    static VortexWriter create(String uri, DType dtype, Map<String, String> options)
-            throws IOException {
+    static VortexWriter create(String uri, DType dtype, Map<String, String> options) throws IOException {
         long ptr = NativeWriterMethods.create(uri, ((JNIDType) dtype).getPointer(), options);
         if (ptr <= 0) {
-            throw new IOException(
-                    "Failed to create Vortex writer for: " + uri + " (got ptr=" + ptr + ")");
+            throw new IOException("Failed to create Vortex writer for: " + uri + " (got ptr=" + ptr + ")");
         }
         return new JNIWriter(ptr);
     }

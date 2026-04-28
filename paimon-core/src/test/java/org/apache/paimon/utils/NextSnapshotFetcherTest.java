@@ -127,7 +127,8 @@ public class NextSnapshotFetcherTest {
         assertThatThrownBy(() -> fetcher.getNextSnapshot(nextSnapshotId))
                 .isInstanceOf(OutOfRangeException.class)
                 .hasMessageContaining(
-                        "The snapshot with id 2 has expired. You can: 1. increase the snapshot or changelog expiration time. "
+                        "You can: \n"
+                                + "1. increase the snapshot or changelog expiration time. \n"
                                 + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.");
     }
 

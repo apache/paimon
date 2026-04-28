@@ -19,7 +19,6 @@
 package dev.vortex.api.expressions;
 
 import dev.vortex.api.Expression;
-
 import java.util.List;
 import java.util.Optional;
 

@@ -19,11 +19,10 @@
 package dev.vortex.jni;
 
 import dev.vortex.api.VortexWriter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.util.OptionalLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** JNI implementation of VortexWriter. */
 public final class JNIWriter implements VortexWriter, AutoCloseable {
@@ -40,6 +39,7 @@ public final class JNIWriter implements VortexWriter, AutoCloseable {
     public void writeBatch(byte[] arrowData) throws IOException {
         logger.trace("Writing batch with {} bytes", arrowData.length);
 
+        // Write the Arrow data to Vortex through JNI
         boolean success = NativeWriterMethods.writeBatch(ptr.getAsLong(), arrowData);
         if (!success) {
             logger.error("Failed to write batch to Vortex file");
@@ -49,12 +49,12 @@ public final class JNIWriter implements VortexWriter, AutoCloseable {
 
     @Override
     public void writeBatchFfi(long arrowArrayAddr, long arrowSchemaAddr) throws IOException {
-        logger.trace("Writing batch via FFI with arrayAddr={}, schemaAddr={}", arrowArrayAddr, arrowSchemaAddr);
+        logger.trace("Writing batch via FFI (arrayAddr={}, schemaAddr={})", arrowArrayAddr, arrowSchemaAddr);
 
         boolean success = NativeWriterMethods.writeBatchFfi(ptr.getAsLong(), arrowArrayAddr, arrowSchemaAddr);
         if (!success) {
-            logger.error("Failed to write batch via FFI to Vortex file");
-            throw new IOException("Failed to write batch via FFI to Vortex file");
+            logger.error("Failed to write FFI batch to Vortex file");
+            throw new IOException("Failed to write FFI batch to Vortex file");
         }
     }
 

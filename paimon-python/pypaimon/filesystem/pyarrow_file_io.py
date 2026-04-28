@@ -21,7 +21,7 @@ import re
 import subprocess
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
@@ -32,7 +32,8 @@ from pyarrow._fs import FileSystem
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import OssOptions, S3Options
+from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
@@ -113,6 +114,35 @@ class PyArrowFileIO(FileIO):
         else:
             return {}
 
+    def _get_property(self, *keys: str):
+        data = self.properties.to_map()
+        for key in keys:
+            if key in data:
+                return data[key]
+        return None
+
+    @staticmethod
+    def _s3_key_variants(*names: str):
+        prefixes = ["s3.", "s3a.", "fs.s3.", "fs.s3a."]
+        for prefix in prefixes:
+            for name in names:
+                yield prefix + name
+
+    def _get_s3_property(self, name: str, legacy_key: str = None):
+        keys = []
+        if legacy_key:
+            keys.append(legacy_key)
+        keys.extend(self._s3_key_variants(name))
+        return self._get_property(*keys)
+
+    def _get_s3_boolean_property(self, name: str) -> bool:
+        value = self._get_s3_property(name)
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        return OptionsUtils.convert_to_boolean(value)
+
     def _extract_oss_bucket(self, location) -> str:
         uri = urlparse(location)
         if uri.scheme and uri.scheme != "oss":
@@ -169,7 +199,21 @@ class PyArrowFileIO(FileIO):
         return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
-        if self.properties.get(S3Options.S3_ACCESS_KEY_ID):
+        access_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_ID.key(),
+            *self._s3_key_variants("access-key", "access.key"))
+        secret_key = self._get_property(
+            S3Options.S3_ACCESS_KEY_SECRET.key(),
+            *self._s3_key_variants("secret-key", "secret.key"))
+        session_token = self._get_property(
+            S3Options.S3_SECURITY_TOKEN.key(),
+            *self._s3_key_variants(
+                "session-token", "session.token",
+                "security-token", "security.token"))
+        endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
+        region = self._get_s3_property("region", S3Options.S3_REGION.key())
+
+        if access_key:
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
             # Uses setdefault so that an explicit user setting is never overridden.
@@ -177,14 +221,17 @@ class PyArrowFileIO(FileIO):
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
-            "endpoint_override": self.properties.get(S3Options.S3_ENDPOINT),
-            "access_key": self.properties.get(S3Options.S3_ACCESS_KEY_ID),
-            "secret_key": self.properties.get(S3Options.S3_ACCESS_KEY_SECRET),
-            "session_token": self.properties.get(S3Options.S3_SECURITY_TOKEN),
-            "region": self.properties.get(S3Options.S3_REGION),
+            "endpoint_override": endpoint,
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "session_token": session_token,
+            "region": region,
         }
         if self._pyarrow_gte_7:
-            client_kwargs["force_virtual_addressing"] = True
+            path_style_access = (
+                self._get_s3_boolean_property("path-style-access") or
+                self._get_s3_boolean_property("path.style.access"))
+            client_kwargs["force_virtual_addressing"] = not path_style_access
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
@@ -209,12 +256,64 @@ class PyArrowFileIO(FileIO):
         )
         os.environ['CLASSPATH'] = class_paths.stdout.strip()
 
+        principal = (self.properties.get(SecurityOptions.KERBEROS_PRINCIPAL)
+                     or self._get_property("security.principal"))
+        keytab = (self.properties.get(SecurityOptions.KERBEROS_KEYTAB)
+                  or self._get_property("security.keytab"))
+        use_ticket_cache = self.properties.get(SecurityOptions.KERBEROS_USE_TICKET_CACHE)
+
+        if bool(principal) != bool(keytab):
+            raise ValueError(
+                "security.kerberos.login.principal and security.kerberos.login.keytab "
+                "must be both set or both unset")
+
         host, port_str = splitport(netloc)
-        return pafs.HadoopFileSystem(
-            host=host,
-            port=int(port_str),
-            user=os.environ.get('HADOOP_USER_NAME', 'hadoop')
+        port = int(port_str) if port_str else 0
+
+        kerb_ticket = None
+        if principal and keytab:
+            self._kerberos_login_from_keytab(principal, keytab)
+            kerb_ticket = self._get_ticket_cache_path()
+            if not kerb_ticket:
+                raise RuntimeError(
+                    "kinit succeeded but no ticket cache path could be determined. "
+                    "Set the KRB5CCNAME environment variable to specify the cache location.")
+        elif use_ticket_cache:
+            cache_path = self._get_ticket_cache_path()
+            if cache_path and os.path.exists(cache_path):
+                kerb_ticket = cache_path
+
+        if kerb_ticket:
+            return pafs.HadoopFileSystem(host=host, port=port, kerb_ticket=kerb_ticket)
+        else:
+            return pafs.HadoopFileSystem(
+                host=host,
+                port=port,
+                user=os.environ.get('HADOOP_USER_NAME', 'hadoop')
+            )
+
+    @staticmethod
+    def _kerberos_login_from_keytab(principal: str, keytab: str):
+        if not os.path.isfile(keytab):
+            raise FileNotFoundError(f"Kerberos keytab file not found: {keytab}")
+        if not os.access(keytab, os.R_OK):
+            raise PermissionError(f"Kerberos keytab file is not readable: {keytab}")
+        subprocess.run(
+            ['kinit', '-kt', keytab, principal],
+            check=True, capture_output=True, text=True
         )
+
+    @staticmethod
+    def _get_ticket_cache_path() -> Optional[str]:
+        cc = os.environ.get('KRB5CCNAME')
+        if cc:
+            if cc.startswith('FILE:'):
+                return cc[5:]
+            return cc
+        default_path = f'/tmp/krb5cc_{os.getuid()}'
+        if os.path.exists(default_path):
+            return default_path
+        return None
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -235,7 +334,7 @@ class PyArrowFileIO(FileIO):
             if parent_dir and not self.exists(parent_dir):
                 self.mkdirs(parent_dir)
         else:
-            parent_dir = Path(path_str).parent
+            parent_dir = PurePosixPath(path_str).parent
             if str(parent_dir) and not self.exists(str(parent_dir)):
                 self.mkdirs(str(parent_dir))
 
@@ -326,7 +425,7 @@ class PyArrowFileIO(FileIO):
 
     def rename(self, src: str, dst: str) -> bool:
         dst_str = self.to_filesystem_path(dst)
-        dst_parent = Path(dst_str).parent
+        dst_parent = PurePosixPath(dst_str).parent
         if str(dst_parent) and not self.exists(str(dst_parent)):
             self.mkdirs(str(dst_parent))
 
@@ -342,8 +441,8 @@ class PyArrowFileIO(FileIO):
                     return False
                 # Make it compatible with HadoopFileIO: if dst is an existing directory,
                 # dst=dst/srcFileName
-                src_name = Path(src_str).name
-                dst_str = str(Path(dst_str) / src_name)
+                src_name = PurePosixPath(src_str).name
+                dst_str = str(PurePosixPath(dst_str) / src_name)
                 final_dst_info = self._get_file_info(dst_str)
                 if final_dst_info.type != pafs.FileType.NotFound:
                     return False
@@ -402,7 +501,7 @@ class PyArrowFileIO(FileIO):
 
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
-        target_parent = Path(target_str).parent
+        target_parent = PurePosixPath(target_str).parent
 
         if str(target_parent) and not self.exists(str(target_parent)):
             self.mkdirs(str(target_parent))

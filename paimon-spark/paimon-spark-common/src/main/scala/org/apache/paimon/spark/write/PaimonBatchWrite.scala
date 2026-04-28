@@ -61,7 +61,7 @@ case class PaimonBatchWrite(
           writeSchema,
           dataSchema,
           coreOptions,
-          table.catalogEnvironment().catalogContext())
+          catalogContextForBlobDescriptor)
       }
   }
 

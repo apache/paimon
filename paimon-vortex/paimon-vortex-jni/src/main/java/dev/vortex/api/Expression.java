@@ -18,12 +18,7 @@
 
 package dev.vortex.api;
 
-import dev.vortex.api.expressions.Binary;
-import dev.vortex.api.expressions.GetItem;
-import dev.vortex.api.expressions.Literal;
-import dev.vortex.api.expressions.Not;
-import dev.vortex.api.expressions.Root;
-
+import dev.vortex.api.expressions.*;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,7 +34,6 @@ public interface Expression {
         return visitor.visitOther(this);
     }
 
-    /** Visitor interface for expression tree traversal. */
     interface Visitor<T> {
         T visitLiteral(Literal<?> literal);
 
@@ -50,6 +44,14 @@ public interface Expression {
         T visitNot(Not not);
 
         T visitGetItem(GetItem getItem);
+
+        default T visitIsNull(IsNull isNull) {
+            return visitOther(isNull);
+        }
+
+        default T visitIsNotNull(IsNotNull isNotNull) {
+            return visitOther(isNotNull);
+        }
 
         T visitOther(Expression expression);
     }

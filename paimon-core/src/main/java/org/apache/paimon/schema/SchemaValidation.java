@@ -204,13 +204,6 @@ public class SchemaValidation {
                             CoreOptions.STREAMING_READ_APPEND_OVERWRITE.key()));
         }
 
-        if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
-            if (schema.partitionKeys().isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Can not set 'partition.expiration-time' for non-partitioned table.");
-            }
-        }
-
         String recordLevelTimeField = options.recordLevelTimeField();
         if (recordLevelTimeField != null) {
             Optional<DataField> field =
@@ -648,13 +641,13 @@ public class SchemaValidation {
         boolean rowTrackingEnabled = options.rowTrackingEnabled();
         if (rowTrackingEnabled) {
             checkArgument(
-                    options.bucket() == -1,
-                    "Cannot define %s for row tracking table, it only support bucket = -1",
-                    CoreOptions.BUCKET.key());
-            checkArgument(
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for row tracking table.",
                     PRIMARY_KEY.key());
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for row tracking table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
         }
 
         if (options.dataEvolutionEnabled()) {

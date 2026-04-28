@@ -23,9 +23,12 @@ import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.io.VectorizedBundleRecords;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
@@ -33,6 +36,8 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 
@@ -72,6 +77,9 @@ public class ArrowBundleWriter implements BundleFormatWriter {
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
             add(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
+        } else if (bundleRecords instanceof VectorizedBundleRecords) {
+            VectorizedBundleRecords records = (VectorizedBundleRecords) bundleRecords;
+            add(records.batch(), records.selected());
         } else {
             for (InternalRow row : bundleRecords) {
                 addElement(row);
@@ -95,6 +103,26 @@ public class ArrowBundleWriter implements BundleFormatWriter {
         } catch (RuntimeException e) {
             LOG.error("Exception happens while add vsr", e);
             throw e;
+        }
+    }
+
+    public void add(VectorizedColumnBatch batch, @Nullable int[] selected) {
+        if (!arrowFormatWriter.empty()) {
+            flush();
+        }
+
+        int batchSize = arrowFormatWriter.formatWriter().getBatchSize();
+        ColumnVector[] columns = batch.columns;
+        int totalNumRows = selected != null ? selected.length : batch.getNumRows();
+
+        int startIndex = 0;
+        while (startIndex < totalNumRows) {
+            int batchRows = Math.min(batchSize, totalNumRows - startIndex);
+            arrowFormatWriter.write(columns, selected, startIndex, batchRows);
+            startIndex += batchRows;
+            if (startIndex < totalNumRows) {
+                flush();
+            }
         }
     }
 

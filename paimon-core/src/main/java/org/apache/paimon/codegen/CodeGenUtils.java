@@ -69,6 +69,19 @@ public class CodeGenUtils {
                 () -> getCodeGenerator().generateNormalizedKeyComputer(inputTypes, sortFields));
     }
 
+    public static NormalizedKeyComputer newNormalizedKeyComputer(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders) {
+        return generate(
+                NormalizedKeyComputer.class,
+                inputTypes,
+                sortFields,
+                Arrays.hashCode(ascendingOrders),
+                () ->
+                        getCodeGenerator()
+                                .generateNormalizedKeyComputer(
+                                        inputTypes, sortFields, ascendingOrders));
+    }
+
     public static RecordComparator newRecordComparator(List<DataType> inputTypes) {
         return newRecordComparator(
                 inputTypes, IntStream.range(0, inputTypes.size()).toArray(), true);
@@ -85,6 +98,18 @@ public class CodeGenUtils {
                         getCodeGenerator()
                                 .generateRecordComparator(
                                         inputTypes, sortFields, isAscendingOrder));
+    }
+
+    public static RecordComparator newRecordComparator(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders) {
+        return generate(
+                RecordComparator.class,
+                inputTypes,
+                sortFields,
+                Arrays.hashCode(ascendingOrders),
+                () ->
+                        getCodeGenerator()
+                                .generateRecordComparator(inputTypes, sortFields, ascendingOrders));
     }
 
     public static RecordEqualiser newRecordEqualiser(List<DataType> fieldTypes) {

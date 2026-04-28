@@ -66,7 +66,7 @@ class CommitScanner:
 
         all_manifests = self.manifest_list_manager.read_all(latest_snapshot)
         return FileScanner(
-            self.table, lambda: ([], None), partition_filter
+            self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(all_manifests)
 
     def read_incremental_entries_from_changed_partitions(self, snapshot: Snapshot,
@@ -92,7 +92,7 @@ class CommitScanner:
         partition_filter = self._build_partition_filter_from_entries(commit_entries)
 
         return FileScanner(
-            self.table, lambda: ([], None), partition_filter
+            self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(delta_manifests)
 
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):
@@ -116,7 +116,7 @@ class CommitScanner:
         if not changed_partitions:
             return None
 
-        predicate_builder = PredicateBuilder(self.table.fields)
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
         partition_predicates = []
         for partition_values in changed_partitions:
             sub_predicates = []

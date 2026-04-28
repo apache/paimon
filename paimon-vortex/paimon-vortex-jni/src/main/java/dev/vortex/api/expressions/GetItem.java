@@ -21,7 +21,6 @@ package dev.vortex.api.expressions;
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.vortex.api.Expression;
 import dev.vortex.proto.ExprProtos;
-
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -73,7 +72,8 @@ public final class GetItem implements Expression {
 
     @Override
     public Optional<byte[]> metadata() {
-        return Optional.of(ExprProtos.GetItemOpts.newBuilder().setPath(path).build().toByteArray());
+        return Optional.of(
+                ExprProtos.GetItemOpts.newBuilder().setPath(path).build().toByteArray());
     }
 
     @Override

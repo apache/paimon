@@ -19,7 +19,6 @@
 package dev.vortex.api.expressions;
 
 import dev.vortex.api.Expression;
-
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -34,12 +33,10 @@ public final class Not implements Expression {
 
     public static Not parse(byte[] metadata, List<Expression> children) {
         if (children.size() != 1) {
-            throw new IllegalArgumentException(
-                    "Not expression must have exactly one child, found: " + children.size());
+            throw new IllegalArgumentException("Not expression must have exactly one child, found: " + children.size());
         }
         if (metadata.length > 0) {
-            throw new IllegalArgumentException(
-                    "Not expression must not have metadata, found: " + metadata.length);
+            throw new IllegalArgumentException("Not expression must not have metadata, found: " + metadata.length);
         }
         return new Not(children.get(0));
     }

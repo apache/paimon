@@ -24,16 +24,27 @@ import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensi
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, Spark3InternalRowWithBlob, SparkArrayData, SparkInternalRow}
 import org.apache.paimon.types.{DataType, RowType}
 
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnresolvedOrdinals}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith}
+// NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
+// reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
+// on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.8 at
+// compile time but must also run on 3.2 / 3.3).
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.SparkFormatTable
+import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -108,6 +119,59 @@ class Spark3Shim extends SparkShim {
       notMatchedBySourceActions)
   }
 
+  override def earlyBatchRules(): Seq[Rule[LogicalPlan]] =
+    Seq(CTESubstitution, SubstituteUnresolvedOrdinals)
+
+  // Loaded on first call; not referenced from class signatures so Spark3Shim can link on 3.2/3.3.
+  private lazy val keepCompanion: AnyRef = {
+    val cls = Class.forName("org.apache.spark.sql.catalyst.plans.logical.MergeRows$Keep$")
+    cls.getField("MODULE$").get(null)
+  }
+
+  private def buildKeep(condition: Expression, output: Seq[Expression]): AnyRef = {
+    val applyMethod = keepCompanion.getClass.getMethods
+      .find(m => m.getName == "apply" && m.getParameterCount == 2)
+      .getOrElse(throw new NoSuchMethodException(
+        "MergeRows.Keep.apply(Expression, Seq[Expression]) not found — MergeRows requires Spark 3.4+"))
+    applyMethod.invoke(keepCompanion, condition, output)
+  }
+
+  override def mergeRowsKeepCopy(condition: Expression, output: Seq[Expression]): AnyRef =
+    buildKeep(condition, output)
+
+  override def mergeRowsKeepUpdate(condition: Expression, output: Seq[Expression]): AnyRef =
+    buildKeep(condition, output)
+
+  override def mergeRowsKeepInsert(condition: Expression, output: Seq[Expression]): AnyRef =
+    buildKeep(condition, output)
+
+  override def transformUnresolvedWithCteRelations(
+      u: UnresolvedWith,
+      transform: SubqueryAlias => SubqueryAlias): UnresolvedWith = {
+    u.copy(cteRelations = u.cteRelations.map { case (name, alias) => (name, transform(alias)) })
+  }
+
+  override def hasFileStreamSinkMetadata(
+      paths: Seq[String],
+      hadoopConf: Configuration,
+      sqlConf: SQLConf): Boolean = {
+    FileStreamSink.hasMetadata(paths, hadoopConf, sqlConf)
+  }
+
+  override def createPartitionedMetadataLogFileIndex(
+      sparkSession: SparkSession,
+      path: Path,
+      parameters: Map[String, String],
+      userSpecifiedSchema: Option[StructType],
+      partitionSchema: StructType): PartitioningAwareFileIndex = {
+    new Spark3Shim.PartitionedMetadataLogFileIndex(
+      sparkSession,
+      path,
+      parameters,
+      userSpecifiedSchema,
+      partitionSchema)
+  }
+
   override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
 
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
@@ -120,4 +184,21 @@ class Spark3Shim extends SparkShim {
 
   override def toPaimonVariant(array: ArrayData, pos: Int): Variant =
     throw new UnsupportedOperationException()
+}
+
+object Spark3Shim {
+
+  /** Paimon's partition-aware wrapper over Spark's `MetadataLogFileIndex`. */
+  private[shims] class PartitionedMetadataLogFileIndex(
+      sparkSession: SparkSession,
+      path: Path,
+      parameters: Map[String, String],
+      userSpecifiedSchema: Option[StructType],
+      override val partitionSchema: StructType)
+    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema) {
+
+    override def partitionSpec(): PartitionSpec = {
+      SparkFormatTable.alignPartitionSpec(super.partitionSpec(), partitionSchema)
+    }
+  }
 }

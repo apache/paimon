@@ -83,6 +83,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PartitionExpire}. */
@@ -158,7 +159,7 @@ public class PartitionExpireTest {
     @Test
     public void testNonPartitionedTable() {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
-        assertThatThrownBy(
+        assertThatCode(
                         () ->
                                 schemaManager.createTable(
                                         new Schema(
@@ -168,8 +169,7 @@ public class PartitionExpireTest {
                                                 Collections.singletonMap(
                                                         PARTITION_EXPIRATION_TIME.key(), "1 d"),
                                                 "")))
-                .hasMessageContaining(
-                        "Can not set 'partition.expiration-time' for non-partitioned table");
+                .doesNotThrowAnyException();
     }
 
     @Test

@@ -19,7 +19,6 @@
 package dev.vortex.api.proto;
 
 import com.google.protobuf.ByteString;
-
 import java.math.BigDecimal;
 import java.math.BigInteger;
 
@@ -37,6 +36,7 @@ public final class EndianUtils {
         BigInteger unscaled = decimal.unscaledValue();
         byte[] bigEndianBytes = unscaled.toByteArray();
 
+        // Determine target size (1, 2, 4, 8, 16, or 32 bytes)
         int targetSize;
         if (bigEndianBytes.length <= 1) {
             targetSize = 1;
@@ -52,17 +52,17 @@ public final class EndianUtils {
             targetSize = 32;
         } else {
             throw new IllegalArgumentException(
-                    "BigDecimal with "
-                            + bigEndianBytes.length
-                            + " bytes overflows maximum Vortex decimal size");
+                    "BigDecimal with " + bigEndianBytes.length + " bytes overflows maximum Vortex decimal size");
         }
 
         byte[] result = new byte[targetSize];
 
+        // Copy bytes in reverse order (big endian to little endian)
         for (int i = 0; i < bigEndianBytes.length; i++) {
             result[i] = bigEndianBytes[bigEndianBytes.length - 1 - i];
         }
 
+        // Sign extend if negative
         if (unscaled.signum() < 0) {
             for (int i = bigEndianBytes.length; i < targetSize; i++) {
                 result[i] = (byte) 0xFF;

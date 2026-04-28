@@ -68,6 +68,7 @@ public final class NativeDTypeMethods {
 
     public static native List<String> getFieldNames(long pointer);
 
+    // Returns a list of DType pointers.
     public static native List<Long> getFieldTypes(long pointer);
 
     public static native long getElementType(long pointer);

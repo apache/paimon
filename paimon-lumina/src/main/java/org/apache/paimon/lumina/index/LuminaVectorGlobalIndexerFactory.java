@@ -26,7 +26,7 @@ import org.apache.paimon.types.DataField;
 /** Factory for creating Lumina vector index. */
 public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "lumina-vector-ann";
+    public static final String IDENTIFIER = "lumina";
 
     @Override
     public String identifier() {

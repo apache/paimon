@@ -627,6 +627,51 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Lumina vector search matched rows: ids={ids}")
         self.assertIn(0, ids)
 
+    def test_read_lumina_vector_with_btree_filter(self):
+        """Vector search + btree scalar pre-filter, using a table that Java
+        populated with both a Lumina vector index on `embedding` and a BTree
+        global index on `id` (JavaPyLuminaE2ETest.testLuminaVectorWithBTreeIndexWrite)."""
+        from pypaimon.common.predicate_builder import PredicateBuilder
+
+        table = self.catalog.get_table('default.test_lumina_vector_btree_filter')
+
+        # Baseline search — same 6 vectors as test_read_lumina_vector_index,
+        # no filter, top 6 covers the whole table.
+        baseline = (table.new_vector_search_builder()
+                    .with_vector_column('embedding')
+                    .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                    .with_limit(6)
+                    .execute_local())
+        baseline_ids = sorted(list(baseline.results()))
+        print(f"Baseline vector search ids={baseline_ids}")
+        self.assertEqual(baseline_ids, [0, 1, 2, 3, 4, 5])
+
+        # Filtered search — id >= 3 should restrict vector search to rows
+        # {3,4,5}, so top_k results must be a subset of that.
+        pb = PredicateBuilder(table.fields)
+        filter_pred = pb.greater_or_equal('id', 3)
+        filtered = (table.new_vector_search_builder()
+                    .with_vector_column('embedding')
+                    .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                    .with_limit(6)
+                    .with_filter(filter_pred)
+                    .execute_local())
+        filtered_ids = sorted(list(filtered.results()))
+        print(f"Filtered (id >= 3) vector search ids={filtered_ids}")
+        self.assertEqual(filtered_ids, [3, 4, 5])
+
+        # Narrower filter — id in {5} — only row 5 should survive.
+        filter_eq = pb.equal('id', 5)
+        eq_result = (table.new_vector_search_builder()
+                     .with_vector_column('embedding')
+                     .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                     .with_limit(6)
+                     .with_filter(filter_eq)
+                     .execute_local())
+        eq_ids = sorted(list(eq_result.results()))
+        print(f"Filtered (id == 5) vector search ids={eq_ids}")
+        self.assertEqual(eq_ids, [5])
+
     def test_read_blob_after_alter_and_compact(self):
         table = self.catalog.get_table('default.blob_alter_compact_test')
         read_builder = table.new_read_builder()
@@ -694,3 +739,72 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn("conflicts", str(ctx.exception))
         tc.close()
         print(f"Conflict detected as expected: {ctx.exception}")
+
+    @parameterized.expand(get_file_format_params())
+    def test_read_data_evolution_table(self, file_format):
+        """Read data evolution tables written by Java and verify merged results."""
+        table = self.catalog.get_table(f'default.data_evolution_test_{file_format}')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+        result = table_sort_by(result, 'f0')
+        self.assertEqual(result.num_rows, 5)
+        for i in range(5):
+            self.assertEqual(result.column('f0')[i].as_py(), i)
+            self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
+            self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
+
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_data_evolution_table(self, file_format):
+        """Python writes data evolution tables for Java to read."""
+        table_name = f'default.data_evolution_test_py_{file_format}'
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.utf8()),
+            ('f2', pa.utf8()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': file_format,
+        })
+        self.catalog.create_table(table_name, schema, True)
+        table = self.catalog.get_table(table_name)
+
+        # Write (f0, f1) columns
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['f0', 'f1'])
+        table_commit = write_builder.new_commit()
+        data0 = pa.Table.from_pydict({
+            'f0': list(range(5)),
+            'f1': [f'a{i}' for i in range(5)],
+        }, schema=pa.schema([('f0', pa.int32()), ('f1', pa.utf8())]))
+        table_write.write_arrow(data0)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Write (f2) column with first_row_id
+        table_write = write_builder.new_write().with_write_type(['f2'])
+        table_commit = write_builder.new_commit()
+        data1 = pa.Table.from_pydict({
+            'f2': [f'b{i}' for i in range(5)],
+        }, schema=pa.schema([('f2', pa.utf8())]))
+        table_write.write_arrow(data1)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 0
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        # Verify read-back
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'f0')
+        self.assertEqual(result.num_rows, 5)
+        for i in range(5):
+            self.assertEqual(result.column('f0')[i].as_py(), i)
+            self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
+            self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')

@@ -204,9 +204,7 @@ class FileStoreCommit:
                         f"Partition keys are: {list(self.table.partition_keys)}."
                     )
 
-        # Use full table fields so FullStartingScanner's trim_and_transform_predicate
-        # maps indices correctly (full schema index -> partition index).
-        predicate_builder = PredicateBuilder(self.table.fields)
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
         partition_predicates = []
         for part in partitions:
             sub_predicates = [
@@ -524,7 +522,7 @@ class FileStoreCommit:
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latest_snapshot is None \
-            else (FileScanner(self.table, lambda: ([], None), partition_filter).
+            else (FileScanner(self.table, lambda: ([], None), partition_predicate=partition_filter).
                   read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE

@@ -120,6 +120,11 @@ public class FileTypeTest {
         // lumina vector global index
         assertThat(
                         FileType.classify(
+                                new Path(TABLE_ROOT + "/index/lumina-global-index-a1b2c3d4.index")))
+                .isEqualTo(FileType.GLOBAL_INDEX);
+        // legacy lumina vector global index
+        assertThat(
+                        FileType.classify(
                                 new Path(
                                         TABLE_ROOT
                                                 + "/index/lumina-vector-ann-global-index-a1b2c3d4.index")))

@@ -20,7 +20,7 @@ package org.apache.paimon.spark.data
 
 import org.apache.paimon.types.DataType
 
-import org.apache.spark.unsafe.types.VariantVal
+import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
 
 class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkArrayData {
 
@@ -28,4 +28,10 @@ class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkA
     val v = paimonArray.getVariant(ordinal)
     new VariantVal(v.value(), v.metadata())
   }
+
+  override def getGeography(ordinal: Int): GeographyVal =
+    throw new UnsupportedOperationException("Paimon does not support Geography type")
+
+  override def getGeometry(ordinal: Int): GeometryVal =
+    throw new UnsupportedOperationException("Paimon does not support Geometry type")
 }

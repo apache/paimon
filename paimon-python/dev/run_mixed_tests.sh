@@ -290,6 +290,30 @@ run_lumina_vector_test() {
     fi
 }
 
+# Function to run Lumina vector + BTree pre-filter test.
+run_lumina_vector_btree_test() {
+    echo -e "${YELLOW}=== Running Lumina Vector + BTree Pre-Filter Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyLuminaE2ETest.testLuminaVectorWithBTreeIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorWithBTreeIndexWrite -pl paimon-lumina -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_lumina_vector_with_btree_filter..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_lumina_vector_with_btree_filter -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
 run_compact_conflict_test() {
     echo -e "${YELLOW}=== Running Compact Conflict Test (Java Write Base, Python Shard Update + Java Compact) ===${NC}"
 
@@ -314,6 +338,89 @@ run_compact_conflict_test() {
         echo -e "${RED}✗ Python compact conflict test failed${NC}"
         return 1
     fi
+}
+
+run_data_evolution_test() {
+    echo -e "${YELLOW}=== Running Data Evolution Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    # Java write data evolution tables (parquet/orc/avro)
+    echo "Running Maven test for JavaPyE2ETest.testDataEvolutionWrite..."
+    local core_result=0
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testDataEvolutionWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java data evolution write (parquet/orc/avro) completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java data evolution write (parquet/orc/avro) failed${NC}"
+        core_result=1
+    fi
+
+    # Java write data evolution table (lance)
+    echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
+    local lance_result=0
+    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
+        lance_result=1
+    fi
+
+    # Python read data evolution tables
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_data_evolution_table..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_data_evolution_table" -v; then
+        echo -e "${GREEN}✓ Python data evolution read completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Python data evolution read failed${NC}"
+        return 1
+    fi
+
+    if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+run_data_evolution_py_write_test() {
+    echo -e "${YELLOW}=== Running Data Evolution Test (Python Write, Java Read) ===${NC}"
+
+    cd "$PAIMON_PYTHON_DIR"
+
+    # Python write data evolution tables
+    echo "Running Python test for JavaPyReadWriteTest.test_py_write_data_evolution_table..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_data_evolution_table" -v; then
+        echo -e "${GREEN}✓ Python data evolution write completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Python data evolution write failed${NC}"
+        return 1
+    fi
+
+    cd "$PROJECT_ROOT"
+
+    # Java read data evolution tables (parquet/orc/avro)
+    echo "Running Maven test for JavaPyE2ETest.testReadDataEvolutionTable..."
+    local core_result=0
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadDataEvolutionTable -pl paimon-core -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+        echo -e "${GREEN}✓ Java data evolution read (parquet/orc/avro) completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java data evolution read (parquet/orc/avro) failed${NC}"
+        core_result=1
+    fi
+
+    # Java read data evolution table (lance)
+    echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+    local lance_result=0
+    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+        echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
+        lance_result=1
+    fi
+
+    if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
+        return 1
+    fi
+    return 0
 }
 
 run_blob_alter_compact_test() {
@@ -350,8 +457,11 @@ main() {
     local compressed_text_result=0
     local tantivy_fulltext_result=0
     local lumina_vector_result=0
+    local lumina_vector_btree_result=0
     local compact_conflict_result=0
     local blob_alter_compact_result=0
+    local data_evolution_result=0
+    local data_evolution_py_write_result=0
 
     # Detect Python version
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
@@ -434,6 +544,13 @@ main() {
 
     echo ""
 
+    # Run Lumina vector + BTree pre-filter test (Java write, Python read)
+    if ! run_lumina_vector_btree_test; then
+        lumina_vector_btree_result=1
+    fi
+
+    echo ""
+
     # Run compact conflict test (Java write+compact, Python read)
     if ! run_compact_conflict_test; then
         compact_conflict_result=1
@@ -444,6 +561,20 @@ main() {
     # Run blob alter+compact test (Java write+alter+compact, Python read)
     if ! run_blob_alter_compact_test; then
         blob_alter_compact_result=1
+    fi
+
+    echo ""
+
+    # Run data evolution test (Java write, Python read)
+    if ! run_data_evolution_test; then
+        data_evolution_result=1
+    fi
+
+    echo ""
+
+    # Run data evolution test (Python write, Java read)
+    if ! run_data_evolution_py_write_test; then
+        data_evolution_py_write_result=1
     fi
 
     echo ""
@@ -504,6 +635,12 @@ main() {
         echo -e "${RED}✗ Lumina Vector Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $lumina_vector_btree_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Lumina Vector + BTree Pre-Filter Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Lumina Vector + BTree Pre-Filter Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     if [[ $compact_conflict_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Compact Conflict Test (Java Write+Compact, Python Read): PASSED${NC}"
     else
@@ -516,12 +653,24 @@ main() {
         echo -e "${RED}✗ Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read): FAILED${NC}"
     fi
 
+    if [[ $data_evolution_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Data Evolution Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Data Evolution Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
+    if [[ $data_evolution_py_write_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Data Evolution Test (Python Write, Java Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Data Evolution Test (Python Write, Java Read): FAILED${NC}"
+    fi
+
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

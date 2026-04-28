@@ -29,15 +29,22 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.lance.jni.LanceReader;
 import org.apache.paimon.format.lance.jni.LanceWriter;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.arrow.memory.RootAllocator;
@@ -58,10 +65,12 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -315,6 +324,84 @@ public class JavaPyLanceE2ETest {
         } catch (Throwable t) {
             throw t;
         }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testDataEvolutionWriteLance() throws Exception {
+        Identifier identifier = identifier("data_evolution_test_lance");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.STRING())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "lance")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        // Write (f0, f1) columns
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        // Write (f2) column with setFirstRowId
+        table = (FileStoreTable) catalog.getTable(identifier);
+        long rowId = table.snapshotManager().latestSnapshot().nextRowId() - 5;
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, rowId);
+            builder.newCommit().commit(messages);
+        }
+    }
+
+    /** Read data evolution table with Lance format written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    @DisabledIfSystemProperty(named = "python.version", matches = "3.6")
+    public void testReadDataEvolutionTableLance() throws Exception {
+        Identifier identifier = identifier("data_evolution_test_py_lance");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = new ArrayList<>(readBuilder.newScan().plan().splits());
+        TableRead read = readBuilder.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res).hasSize(5);
+    }
+
+    private void setFirstRowId(List<CommitMessage> messages, long firstRowId) {
+        messages.forEach(
+                c -> {
+                    CommitMessageImpl impl = (CommitMessageImpl) c;
+                    List<DataFileMeta> newFiles =
+                            new ArrayList<>(impl.newFilesIncrement().newFiles());
+                    impl.newFilesIncrement().newFiles().clear();
+                    impl.newFilesIncrement()
+                            .newFiles()
+                            .addAll(
+                                    newFiles.stream()
+                                            .map(f -> f.assignFirstRowId(firstRowId))
+                                            .collect(Collectors.toList()));
+                });
     }
 
     // Helper method from TableTestBase

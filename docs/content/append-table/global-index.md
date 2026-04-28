@@ -41,6 +41,8 @@ Global indexes work on top of Data Evolution tables. To use global indexes, your
 - `'row-tracking.enabled' = 'true'`
 - `'data-evolution.enabled' = 'true'`
 
+> Global index queries may not be exact when the index only covers part of the table data. If a query predicate matches the index, Paimon returns only the results from the indexed portion. Matching records in data that has not been indexed yet will not be returned.
+
 ## Prerequisites
 
 Create a table with the required properties:
@@ -95,10 +97,12 @@ Generation) applications.
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding',
-    index_type => 'lumina-vector-ann',
+    index_type => 'lumina',
     options => 'lumina.index.dimension=128'
 );
 ```
+
+The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
 
 **Vector Search**
 

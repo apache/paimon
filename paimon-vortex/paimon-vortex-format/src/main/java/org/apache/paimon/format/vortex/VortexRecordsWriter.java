@@ -20,7 +20,6 @@ package org.apache.paimon.format.vortex;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowUtils;
-import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
@@ -30,9 +29,6 @@ import org.apache.paimon.types.RowType;
 
 import dev.vortex.api.DType;
 import dev.vortex.api.VortexWriter;
-import org.apache.arrow.c.ArrowArray;
-import org.apache.arrow.c.ArrowSchema;
-import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +36,18 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Map;
 
-/** Vortex records writer. */
+/**
+ * Vortex records writer.
+ *
+ * <p>Hands record batches to the native Vortex writer via the synchronous {@code
+ * writeBatch(byte[])} path: each batch is serialized to an Arrow IPC byte array and copied into
+ * native memory by the JNI call. Once {@code writeBatch} returns, the byte array (and the source
+ * Arrow buffers) are no longer referenced by the native side, so the underlying {@link
+ * ArrowFormatWriter} can be reset and reused immediately. This trades the FFI zero-copy throughput
+ * for bounded memory and simpler lifetime management — without it, native asynchronously borrows
+ * the Arrow buffers and they must be kept alive until file close, which grows unboundedly with
+ * batch count.
+ */
 public class VortexRecordsWriter implements BundleFormatWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(VortexRecordsWriter.class);
@@ -48,9 +55,6 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     private final ArrowFormatWriter arrowFormatWriter;
     private final VortexWriter nativeWriter;
     private final String path;
-    private final ArrowArray arrowArray;
-    private final ArrowSchema arrowSchema;
-    private final BufferAllocator allocator;
     private long jniCost = 0;
 
     public VortexRecordsWriter(
@@ -61,9 +65,6 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             throws IOException {
         this.arrowFormatWriter = arrowFormatWriter;
         this.path = path.toUri().toString();
-        this.allocator = arrowFormatWriter.getAllocator();
-        this.arrowArray = ArrowArray.allocateNew(allocator);
-        this.arrowSchema = ArrowSchema.allocateNew(allocator);
 
         DType dtype = VortexTypeUtils.toDType(rowType);
         this.nativeWriter = VortexWriter.create(this.path, dtype, storageOptions);
@@ -82,6 +83,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
+            flush();
             writeVsr(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
         } else {
             for (InternalRow row : bundleRecords) {
@@ -99,30 +101,71 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     @Override
     public void close() throws IOException {
-        flush();
-        LOG.info("Jni cost: {}ms for file: {}", jniCost, path);
         long t1 = System.currentTimeMillis();
-        nativeWriter.close();
-        arrowArray.close();
-        arrowSchema.close();
-        arrowFormatWriter.close();
-        long closeCost = (System.currentTimeMillis() - t1);
-        LOG.info("Close cost: {}ms for file: {}", closeCost, path);
+        Throwable throwable = null;
+
+        try {
+            flush();
+        } catch (Throwable t) {
+            throwable = t;
+        }
+
+        try {
+            nativeWriter.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
+            arrowFormatWriter.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        long closeCost = System.currentTimeMillis() - t1;
+        LOG.info("Jni cost: {}ms, close cost: {}ms for file: {}", jniCost, closeCost, path);
+
+        if (throwable != null) {
+            rethrow(throwable);
+        }
     }
 
     private void flush() throws IOException {
-        arrowFormatWriter.flush();
-        if (!arrowFormatWriter.empty()) {
-            writeVsr(arrowFormatWriter.getVectorSchemaRoot());
+        try {
+            arrowFormatWriter.flush();
+            if (!arrowFormatWriter.empty()) {
+                writeVsr(arrowFormatWriter.getVectorSchemaRoot());
+            }
+        } finally {
+            arrowFormatWriter.reset();
         }
-        arrowFormatWriter.reset();
     }
 
     private void writeVsr(VectorSchemaRoot vsr) throws IOException {
-        ArrowCStruct cStruct =
-                ArrowUtils.serializeToCStruct(vsr, arrowArray, arrowSchema, allocator);
+        byte[] bytes = ArrowUtils.serializeToIpc(vsr);
         long t1 = System.currentTimeMillis();
-        nativeWriter.writeBatchFfi(cStruct.arrayAddress(), cStruct.schemaAddress());
+        nativeWriter.writeBatch(bytes);
         jniCost += (System.currentTimeMillis() - t1);
+    }
+
+    private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
+        if (throwable == null) {
+            return suppressed;
+        }
+        throwable.addSuppressed(suppressed);
+        return throwable;
+    }
+
+    private static void rethrow(Throwable throwable) throws IOException {
+        if (throwable instanceof IOException) {
+            throw (IOException) throwable;
+        }
+        if (throwable instanceof RuntimeException) {
+            throw (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        throw new IOException(throwable);
     }
 }

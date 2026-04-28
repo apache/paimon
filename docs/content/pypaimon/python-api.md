@@ -44,6 +44,61 @@ catalog_options = {
 catalog = CatalogFactory.create(catalog_options)
 ```
 
+For an S3 warehouse, pass S3 authentication options with the filesystem catalog options:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 's3://bucket/path/to/warehouse',
+    's3.endpoint': 'https://s3.amazonaws.com',
+    's3.access-key': 'xxx',
+    's3.secret-key': 'yyy',
+    # Optional. Required for temporary credentials.
+    's3.session-token': 'zzz',
+    # Optional. Useful for S3 compatible stores such as MinIO.
+    's3.path-style-access': 'true',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+For an HDFS warehouse with Kerberos authentication:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 'hdfs://namenode:8020/path/to/warehouse',
+    # Keytab mode: automatic kinit
+    'security.kerberos.login.principal': 'user@YOUR.REALM',
+    'security.kerberos.login.keytab': '/path/to/user.keytab',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+If you have already run `kinit` externally, you can omit `principal` and `keytab`.
+PyPaimon will automatically pick up the ticket from `KRB5CCNAME` environment variable
+or the default `/tmp/krb5cc_<uid>`:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 'hdfs://namenode:8020/path/to/warehouse',
+    # Ticket cache mode: uses existing Kerberos ticket
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+To disable ticket cache auto-detection and force SIMPLE authentication, set:
+
+```python
+catalog_options = {
+    'warehouse': 'hdfs://namenode:8020/path/to/warehouse',
+    'security.kerberos.login.use-ticket-cache': 'false',
+}
+```
+
 {{< /tab >}}
 {{< tab "rest catalog" >}}
 The sample code is as follows. The detailed meaning of option can be found in [REST]({{< ref "concepts/rest/overview" >}}).
@@ -966,6 +1021,14 @@ The following shows the supported features of Python Paimon compared to Java Pai
 
 - FileSystemCatalog
 - RestCatalog
+
+**Filesystem & Security**
+
+- Local filesystem (`file://`)
+- HDFS (`hdfs://`) with SIMPLE authentication
+- HDFS (`hdfs://`) with Kerberos authentication (keytab or ticket cache)
+- Aliyun OSS (`oss://`)
+- S3 (`s3://`)
 
 **Table Level**
 

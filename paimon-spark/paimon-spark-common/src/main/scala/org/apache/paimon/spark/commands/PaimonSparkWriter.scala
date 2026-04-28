@@ -138,7 +138,7 @@ case class PaimonSparkWriter(
       writeRowTracking,
       fullCompactionDeltaCommits,
       batchId,
-      table.catalogEnvironment().catalogContext(),
+      catalogContextForBlobDescriptor,
       postponePartitionBucketComputer
     )
 
@@ -263,7 +263,8 @@ case class PaimonSparkWriter(
                   coreOptions.dynamicBucketMaxBuckets
                 )
               row => {
-                val sparkRow = new SparkRow(writeType, row)
+                val sparkRow =
+                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
                 assigner.assign(
                   extractor.partition(sparkRow),
                   extractor.trimmedPrimaryKey(sparkRow).hashCode)
@@ -454,10 +455,8 @@ case class PaimonSparkWriter(
               .bootstrap(numSparkPartitions, sparkPartitionId)
               .toCloseableIterator
             TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
-            val toPaimonRow = SparkRowUtils.toPaimonRow(
-              rowType,
-              rowKindColIdx,
-              table.catalogEnvironment().catalogContext())
+            val toPaimonRow =
+              SparkRowUtils.toPaimonRow(rowType, rowKindColIdx, catalogContextForBlobDescriptor)
 
             bootstrapIterator.asScala
               .map(
@@ -491,7 +490,8 @@ case class PaimonSparkWriter(
             val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(tableSchema)
             iterator.map(
               row => {
-                val sparkRow = new SparkRow(writeType, row)
+                val sparkRow =
+                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
                 val partitionHash = rowPartitionKeyExtractor.partition(sparkRow).hashCode
                 val keyHash = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow).hashCode
                 (

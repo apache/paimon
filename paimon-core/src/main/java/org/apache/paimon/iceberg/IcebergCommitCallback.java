@@ -548,7 +548,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             addedFiles,
                             modifiedPartitions,
                             baseDataManifestFileMetas,
-                            snapshotId);
+                            snapshotId,
+                            snapshot.commitKind());
             newDataManifestFileMetas = result.getLeft();
             snapshotSummary = result.getRight();
         }
@@ -778,7 +779,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     Map<String, Pair<BinaryRow, DataFileMeta>> addedFiles,
                     List<BinaryRow> modifiedPartitions,
                     List<IcebergManifestFileMeta> baseManifestFileMetas,
-                    long currentSnapshotId)
+                    long currentSnapshotId,
+                    Snapshot.CommitKind commitKind)
                     throws IOException {
         IcebergSnapshotSummary snapshotSummary = IcebergSnapshotSummary.APPEND;
         List<IcebergManifestFileMeta> newManifestFileMetas = new ArrayList<>();
@@ -833,7 +835,10 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     newManifestFileMetas.add(fileMeta);
                 } else {
                     // some file is removed, rewrite this file meta
-                    snapshotSummary = IcebergSnapshotSummary.OVERWRITE;
+                    snapshotSummary =
+                            commitKind == Snapshot.CommitKind.COMPACT
+                                    ? IcebergSnapshotSummary.REPLACE
+                                    : IcebergSnapshotSummary.OVERWRITE;
                     List<IcebergManifestEntry> newEntries = new ArrayList<>();
                     for (IcebergManifestEntry entry : entries) {
                         if (entry.isLive()) {

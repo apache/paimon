@@ -18,12 +18,10 @@
 
 package dev.vortex.api;
 
-import org.immutables.value.Value;
-
 import java.util.List;
 import java.util.Optional;
+import org.immutables.value.Value;
 
-/** Options for configuring a Vortex file scan. */
 @Value.Immutable
 public interface ScanOptions {
     List<String> columns();

@@ -18,10 +18,9 @@
 
 package dev.vortex.api;
 
+import java.math.BigDecimal;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
-
-import java.math.BigDecimal;
 
 /** Vortex array interface for accessing columnar data. */
 public interface Array extends AutoCloseable {

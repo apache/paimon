@@ -20,11 +20,12 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.TagCreationMode
+import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.tag.TagBatchCreation
-import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, TypeUtils}
+import org.apache.paimon.utils.{BlobDescriptorUtils, InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, TypeUtils}
 
 import org.apache.spark.internal.Logging
 
@@ -35,6 +36,11 @@ trait WriteHelper extends Logging {
   val table: FileStoreTable
 
   lazy val coreOptions: CoreOptions = table.coreOptions()
+
+  lazy val catalogContextForBlobDescriptor: CatalogContext =
+    BlobDescriptorUtils.getCatalogContext(
+      table.catalogEnvironment().catalogContext(),
+      coreOptions.toConfiguration)
 
   def postCommit(messages: Seq[CommitMessage]): Unit = {
     if (messages.isEmpty) {

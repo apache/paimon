@@ -19,7 +19,6 @@
 package dev.vortex.api.expressions;
 
 import dev.vortex.api.Expression;
-
 import java.util.List;
 import java.util.Optional;
 
@@ -31,8 +30,7 @@ public final class Root implements Expression {
 
     public static Root parse(byte[] _metadata, List<Expression> children) {
         if (!children.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Root expression must have no children, found: " + children.size());
+            throw new IllegalArgumentException("Root expression must have no children, found: " + children.size());
         }
         return INSTANCE;
     }
@@ -56,6 +54,8 @@ public final class Root implements Expression {
     public String toString() {
         return "$";
     }
+
+    // equals and hashCode depend on address equality to INSTANCE.
 
     @Override
     public <T> T accept(Visitor<T> visitor) {

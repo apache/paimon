@@ -163,7 +163,9 @@ class SplitRead(ABC):
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
-            format_reader = FormatLanceReader(self.table.file_io, file_path, read_file_fields,
+            name_to_field = {f.name: f for f in self.read_fields}
+            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
                                               read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             name_to_field = {f.name: f for f in self.read_fields}
