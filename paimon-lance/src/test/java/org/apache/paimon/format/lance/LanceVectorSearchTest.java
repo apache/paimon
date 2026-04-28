@@ -31,6 +31,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 
@@ -61,4 +63,9 @@ public class LanceVectorSearchTest extends VectorSearchBuilderTest {
                 .option("test.vector.metric", "l2")
                 .build();
     }
+
+    @Disabled("Cosine metric uses Tantivy index which requires Hadoop dependencies")
+    @Test
+    @Override
+    public void testVectorSearchWithCosineMetric() {}
 }
