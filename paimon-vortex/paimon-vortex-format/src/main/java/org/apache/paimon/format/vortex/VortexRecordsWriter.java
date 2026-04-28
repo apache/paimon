@@ -106,7 +106,6 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
         try {
             flush();
-            LOG.info("Jni cost: {}ms for file: {}", jniCost, path);
         } catch (Throwable t) {
             throwable = t;
         }
@@ -124,7 +123,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         }
 
         long closeCost = System.currentTimeMillis() - t1;
-        LOG.info("Close cost: {}ms for file: {}", closeCost, path);
+        LOG.info("Jni cost: {}ms, close cost: {}ms for file: {}", jniCost, closeCost, path);
 
         if (throwable != null) {
             rethrow(throwable);
@@ -132,11 +131,14 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     }
 
     private void flush() throws IOException {
-        arrowFormatWriter.flush();
-        if (!arrowFormatWriter.empty()) {
-            writeVsr(arrowFormatWriter.getVectorSchemaRoot());
+        try {
+            arrowFormatWriter.flush();
+            if (!arrowFormatWriter.empty()) {
+                writeVsr(arrowFormatWriter.getVectorSchemaRoot());
+            }
+        } finally {
+            arrowFormatWriter.reset();
         }
-        arrowFormatWriter.reset();
     }
 
     private void writeVsr(VectorSchemaRoot vsr) throws IOException {

@@ -177,7 +177,7 @@ public class VortexReaderWriterTest {
     }
 
     @Test
-    public void testFfiWriteDoesNotLeakArrowMemoryOnClose(@TempDir java.nio.file.Path tempDir)
+    public void testWriteDoesNotLeakArrowMemoryOnClose(@TempDir java.nio.file.Path tempDir)
             throws Exception {
         RowType rowType =
                 RowType.builder()
