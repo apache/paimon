@@ -19,8 +19,8 @@
 package org.apache.paimon.format.vortex;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.utils.Pair;
@@ -33,35 +33,18 @@ import java.util.Map;
 /** Utils for Vortex storage options. */
 public class VortexUtils {
 
-    private static final Class<?> ossFileIOKlass;
-    private static final Class<?> pluginFileIO;
-    private static final Class<?> jindoFileIOKlass;
-
-    static {
-        Class<?> klass;
-        try {
-            klass = Class.forName("org.apache.paimon.oss.OSSFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        ossFileIOKlass = klass;
-
-        try {
-            klass = Class.forName("org.apache.paimon.jindo.JindoFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        jindoFileIOKlass = klass;
-
-        try {
-            klass = Class.forName("org.apache.paimon.fs.PluginFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        pluginFileIO = klass;
+    public static Pair<Path, Map<String, String>> toVortexSpecifiedForReader(
+            FileIO fileIO, Path path) {
+        return toVortexSpecified(fileIO, path, true);
     }
 
-    public static Pair<Path, Map<String, String>> toVortexSpecified(FileIO fileIO, Path path) {
+    public static Pair<Path, Map<String, String>> toVortexSpecifiedForWriter(
+            FileIO fileIO, Path path) {
+        return toVortexSpecified(fileIO, path, false);
+    }
+
+    private static Pair<Path, Map<String, String>> toVortexSpecified(
+            FileIO fileIO, Path path, boolean isRead) {
         URI uri = path.toUri();
         String schema = uri.getScheme();
 
@@ -74,12 +57,9 @@ public class VortexUtils {
         }
 
         Options originOptions;
-        if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
-            originOptions = invokeHadoopOptions(fileIO);
-        } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
-            originOptions = invokeHadoopOptions(fileIO);
-        } else if (pluginFileIO != null && pluginFileIO.isInstance(fileIO)) {
-            originOptions = ((PluginFileIO) fileIO).options();
+        if (fileIO instanceof HadoopOptionsProvider) {
+            originOptions =
+                    ((HadoopOptionsProvider) fileIO).hadoopOptions(path, isRead ? "read" : "write");
         } else {
             originOptions = new Options();
         }
@@ -100,13 +80,5 @@ public class VortexUtils {
         }
 
         return Pair.of(converted, storageOptions);
-    }
-
-    private static Options invokeHadoopOptions(Object fileIO) {
-        try {
-            return (Options) fileIO.getClass().getMethod("hadoopOptions").invoke(fileIO);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to invoke hadoopOptions", e);
-        }
     }
 }
