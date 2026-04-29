@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.AlwaysFalse;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafBinaryFunction;
@@ -36,27 +37,43 @@ import java.util.List;
 
 /**
  * Helper for applying partition predicate pushdown in system tables (BucketsTable, FilesTable,
- * FileKeyRangesTable).
+ * FileKeyRangesTable, PartitionsTable).
  */
 public class PartitionPredicateHelper {
 
-    public static boolean applyPartitionFilter(
-            SnapshotReader snapshotReader,
-            @Nullable LeafPredicate partitionPredicate,
+    /**
+     * Build a partition-typed predicate from a string-based leaf predicate on the "partition"
+     * column.
+     *
+     * @return {@code null} if the predicate type is unsupported for pushdown (caller should skip
+     *     pushdown), {@link PredicateBuilder#alwaysFalse()} if no partition can match (caller
+     *     should return empty), or a normal predicate to push down.
+     */
+    @Nullable
+    public static Predicate buildPartitionPredicate(
+            LeafPredicate partitionPredicate,
             List<String> partitionKeys,
-            RowType partitionType) {
-        if (partitionPredicate == null) {
-            return true;
-        }
-
+            RowType partitionType,
+            String defaultPartitionName) {
         if (partitionPredicate.function() instanceof Equal) {
             LinkedHashMap<String, String> partSpec =
                     parsePartitionSpec(
                             partitionPredicate.literals().get(0).toString(), partitionKeys);
             if (partSpec == null) {
-                return false;
+                return PredicateBuilder.alwaysFalse();
             }
-            snapshotReader.withPartitionFilter(partSpec);
+            PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
+            List<Predicate> predicates = new ArrayList<>();
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                String strValue = partSpec.get(partitionKeys.get(i));
+                if (defaultPartitionName.equals(strValue)) {
+                    predicates.add(partBuilder.isNull(i));
+                } else {
+                    Object value = TypeUtils.castFromString(strValue, partitionType.getTypeAt(i));
+                    predicates.add(partBuilder.equal(i, value));
+                }
+            }
+            return PredicateBuilder.and(predicates);
         } else if (partitionPredicate.function() instanceof In) {
             List<Predicate> orPredicates = new ArrayList<>();
             PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
@@ -68,27 +85,36 @@ public class PartitionPredicateHelper {
                 }
                 List<Predicate> andPredicates = new ArrayList<>();
                 for (int i = 0; i < partitionKeys.size(); i++) {
-                    Object value =
-                            TypeUtils.castFromString(
-                                    partSpec.get(partitionKeys.get(i)), partitionType.getTypeAt(i));
-                    andPredicates.add(partBuilder.equal(i, value));
+                    String strValue = partSpec.get(partitionKeys.get(i));
+                    if (defaultPartitionName.equals(strValue)) {
+                        andPredicates.add(partBuilder.isNull(i));
+                    } else {
+                        Object value =
+                                TypeUtils.castFromString(strValue, partitionType.getTypeAt(i));
+                        andPredicates.add(partBuilder.equal(i, value));
+                    }
                 }
                 orPredicates.add(PredicateBuilder.and(andPredicates));
             }
-            if (!orPredicates.isEmpty()) {
-                snapshotReader.withPartitionFilter(PredicateBuilder.or(orPredicates));
-            }
-        } else if (partitionPredicate.function() instanceof LeafBinaryFunction) {
+            return orPredicates.isEmpty()
+                    ? PredicateBuilder.alwaysFalse()
+                    : PredicateBuilder.or(orPredicates);
+        }
+        if (partitionPredicate.function() instanceof LeafBinaryFunction) {
             LinkedHashMap<String, String> partSpec =
                     parsePartitionSpec(
                             partitionPredicate.literals().get(0).toString(), partitionKeys);
-            if (partSpec != null) {
-                PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
-                List<Predicate> predicates = new ArrayList<>();
-                for (int i = 0; i < partitionKeys.size(); i++) {
-                    Object value =
-                            TypeUtils.castFromString(
-                                    partSpec.get(partitionKeys.get(i)), partitionType.getTypeAt(i));
+            if (partSpec == null) {
+                return PredicateBuilder.alwaysFalse();
+            }
+            PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
+            List<Predicate> predicates = new ArrayList<>();
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                String strValue = partSpec.get(partitionKeys.get(i));
+                if (defaultPartitionName.equals(strValue)) {
+                    predicates.add(partBuilder.isNull(i));
+                } else {
+                    Object value = TypeUtils.castFromString(strValue, partitionType.getTypeAt(i));
                     predicates.add(
                             new LeafPredicate(
                                     partitionPredicate.function(),
@@ -97,29 +123,77 @@ public class PartitionPredicateHelper {
                                     partitionKeys.get(i),
                                     Collections.singletonList(value)));
                 }
-                snapshotReader.withPartitionFilter(PredicateBuilder.and(predicates));
             }
+            return PredicateBuilder.and(predicates);
+        }
+        return null;
+    }
+
+    public static boolean applyPartitionFilter(
+            SnapshotReader snapshotReader,
+            @Nullable LeafPredicate partitionPredicate,
+            List<String> partitionKeys,
+            RowType partitionType,
+            String defaultPartitionName) {
+        if (partitionPredicate == null) {
+            return true;
         }
 
+        Predicate result =
+                buildPartitionPredicate(
+                        partitionPredicate, partitionKeys, partitionType, defaultPartitionName);
+        if (result == null) {
+            return true;
+        }
+        if (isAlwaysFalse(result)) {
+            return false;
+        }
+        snapshotReader.withPartitionFilter(result);
         return true;
+    }
+
+    public static boolean isAlwaysFalse(Predicate predicate) {
+        return predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).function().equals(AlwaysFalse.INSTANCE);
     }
 
     @Nullable
     public static LinkedHashMap<String, String> parsePartitionSpec(
             String partitionStr, List<String> partitionKeys) {
+        // Handle {value1, value2} format (BucketsTable, FilesTable, FileKeyRangesTable)
         if (partitionStr.startsWith("{")) {
             partitionStr = partitionStr.substring(1);
+            if (partitionStr.endsWith("}")) {
+                partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
+            }
+            String[] partFields = partitionStr.split(", ");
+            if (partitionKeys.size() != partFields.length) {
+                return null;
+            }
+            LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                partSpec.put(partitionKeys.get(i), partFields[i]);
+            }
+            return partSpec;
         }
-        if (partitionStr.endsWith("}")) {
-            partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
-        }
-        String[] partFields = partitionStr.split(", ");
+
+        // Handle key=value/key=value format (PartitionsTable)
+        String[] partFields = partitionStr.split("/");
         if (partitionKeys.size() != partFields.length) {
             return null;
         }
         LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            partSpec.put(partitionKeys.get(i), partFields[i]);
+        for (String field : partFields) {
+            int eqIndex = field.indexOf('=');
+            if (eqIndex < 0) {
+                return null;
+            }
+            partSpec.put(field.substring(0, eqIndex), field.substring(eqIndex + 1));
+        }
+        for (String key : partitionKeys) {
+            if (!partSpec.containsKey(key)) {
+                return null;
+            }
         }
         return partSpec;
     }
