@@ -496,6 +496,7 @@ class AoReaderTest(unittest.TestCase):
             RetryResult(None),
             "APPEND",
             commit_entries,
+            [],
             BATCH_COMMIT_IDENTIFIER,
             latest_snapshot)
         self.assertTrue(success.is_success())
