@@ -266,6 +266,94 @@ class ChangelogProducerTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    def test_reject_changelog_producer_on_append_only_table(self):
+        append_schema = pa.schema([
+            ('user_id', pa.int32()),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            ('dt', pa.string())
+        ])
+        for mode in ['input', 'full-compaction', 'lookup']:
+            with self.assertRaises(ValueError, msg=f"Should reject changelog-producer={mode} without PKs"):
+                Schema.from_pyarrow_schema(
+                    append_schema,
+                    partition_keys=['dt'],
+                    options={'changelog-producer': mode, 'bucket': '1'}
+                )
+
+    def test_changelog_producer_none_allowed_on_append_only_table(self):
+        append_schema = pa.schema([
+            ('user_id', pa.int32()),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            ('dt', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(
+            append_schema,
+            partition_keys=['dt'],
+            options={'changelog-producer': 'none', 'bucket': '1'}
+        )
+        self.assertIsNotNone(schema)
+
+    def test_input_mode_changelog_uses_parquet_regardless_of_data_format(self):
+        table = self._create_table(
+            'test_input_changelog_format',
+            options={'changelog-producer': 'input', 'bucket': '1', 'file.format': 'orc'}
+        )
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        table_write.write_arrow(self._sample_data())
+        table_commit.commit(table_write.prepare_commit())
+
+        bucket_dir = os.path.join(
+            self.warehouse, 'default.db', 'test_input_changelog_format', 'dt=p1', 'bucket-0')
+        changelog_files = glob.glob(os.path.join(bucket_dir, 'changelog-*'))
+        self.assertTrue(len(changelog_files) > 0, "Should have changelog files")
+        for f in changelog_files:
+            self.assertTrue(f.endswith('.parquet'),
+                            f"Changelog file should use parquet format by default, got {f}")
+
+        data_files = glob.glob(os.path.join(bucket_dir, 'data-*'))
+        self.assertTrue(len(data_files) > 0, "Should have data files")
+        for f in data_files:
+            self.assertTrue(f.endswith('.orc'),
+                            f"Data file should use orc format, got {f}")
+
+        table_write.close()
+        table_commit.close()
+
+    def test_input_mode_changelog_respects_changelog_file_format(self):
+        table = self._create_table(
+            'test_input_cl_file_fmt',
+            options={'changelog-producer': 'input', 'bucket': '1',
+                     'file.format': 'parquet', 'changelog-file.format': 'orc'}
+        )
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        table_write.write_arrow(self._sample_data())
+        table_commit.commit(table_write.prepare_commit())
+
+        bucket_dir = os.path.join(
+            self.warehouse, 'default.db', 'test_input_cl_file_fmt', 'dt=p1', 'bucket-0')
+        changelog_files = glob.glob(os.path.join(bucket_dir, 'changelog-*'))
+        self.assertTrue(len(changelog_files) > 0, "Should have changelog files")
+        for f in changelog_files:
+            self.assertTrue(f.endswith('.orc'),
+                            f"Changelog file should use orc format, got {f}")
+
+        data_files = glob.glob(os.path.join(bucket_dir, 'data-*'))
+        self.assertTrue(len(data_files) > 0, "Should have data files")
+        for f in data_files:
+            self.assertTrue(f.endswith('.parquet'),
+                            f"Data file should use parquet format, got {f}")
+
+        table_write.close()
+        table_commit.close()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -64,6 +64,10 @@ class DataWriter(ABC):
         self.committed_files: List[DataFileMeta] = []
         self.committed_changelog_files: List[DataFileMeta] = []
         self.changelog_producer = changelog_producer
+        self.changelog_file_format = (
+            self.options.changelog_file_format()
+            or CoreOptions.FILE_FORMAT_PARQUET
+        )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
 
@@ -296,25 +300,26 @@ class DataWriter(ABC):
     def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
                               min_seq, max_seq, creation_time,
                               value_stats_enabled, is_external):
-        changelog_file_name = f"changelog-{uuid.uuid4()}-0.{self.file_format}"
+        cl_fmt = self.changelog_file_format
+        changelog_file_name = f"changelog-{uuid.uuid4()}-0.{cl_fmt}"
         changelog_file_path = self._generate_file_path(changelog_file_name)
 
         changelog_external_path = None
         if is_external and self._current_external_path:
             changelog_external_path = self._current_external_path
 
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+        if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
                                        zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
+        elif cl_fmt == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(changelog_file_path, data, compression=self.compression,
-                                    zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
+                                   zstd_level=self.zstd_level)
+        elif cl_fmt == CoreOptions.FILE_FORMAT_AVRO:
             self.file_io.write_avro(changelog_file_path, data, compression=self.compression,
-                                     zstd_level=self.zstd_level)
+                                    zstd_level=self.zstd_level)
         else:
-            self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
-                                       zstd_level=self.zstd_level)
+            raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
+                             f"Supported formats: parquet, orc, avro.")
 
         self.committed_changelog_files.append(DataFileMeta.create(
             file_name=changelog_file_name,
