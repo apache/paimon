@@ -127,7 +127,6 @@ class FileStoreCommit:
             len(commit_messages),
         )
         commit_entries = []
-        changelog_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
@@ -138,17 +137,10 @@ class FileStoreCommit:
                     total_buckets=self.table.total_buckets,
                     file=file
                 ))
-            for file in msg.changelog_files:
-                changelog_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+        changelog_entries = self._collect_changelog_entries(commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries, %d changelog entries",
-                     len(commit_entries), len(changelog_entries))
+                    len(commit_entries), len(changelog_entries))
 
         commit_kind = "APPEND"
         detect_conflicts = False
@@ -193,17 +185,7 @@ class FileStoreCommit:
                     raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
                                        f"in {msg.partition} does not belong to this partition")
 
-        changelog_entries = []
-        for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.changelog_files:
-                changelog_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+        changelog_entries = self._collect_changelog_entries(commit_messages)
 
         self._try_commit(
             commit_kind="OVERWRITE",
@@ -599,6 +581,20 @@ class FileStoreCommit:
         total_wait_ms = retry_wait_ms + jitter_ms
 
         time.sleep(total_wait_ms / 1000.0)
+
+    def _collect_changelog_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        changelog_entries = []
+        for msg in commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            for file in msg.changelog_files:
+                changelog_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file
+                ))
+        return changelog_entries
 
     def _cleanup_preparation_failure(self,
                                      delta_manifest_list: Optional[str],
