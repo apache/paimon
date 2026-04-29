@@ -267,8 +267,20 @@ class PyArrowFileIO(FileIO):
                 "security.kerberos.login.principal and security.kerberos.login.keytab "
                 "must be both set or both unset")
 
-        host, port_str = splitport(netloc)
-        port = int(port_str) if port_str else 0
+        # Resolve (host, port) for pafs.HadoopFileSystem.
+        # - ViewFS URIs delegate to fs.defaultFS (host='default') so libhdfs
+        #   resolves the mount table from core-site.xml.
+        # - HDFS HA URIs carry a nameservice without a port; also delegate to
+        #   fs.defaultFS to avoid int(None) on the missing port.
+        # - Explicit "host:port" URIs connect directly.
+        if scheme == 'viewfs' or not netloc:
+            host, port = 'default', 0
+        else:
+            parsed_host, port_str = splitport(netloc)
+            if port_str is None:
+                host, port = 'default', 0
+            else:
+                host, port = parsed_host, int(port_str)
 
         kerb_ticket = None
         if principal and keytab:

@@ -489,5 +489,78 @@ class FileIOTest(unittest.TestCase):
             self.assertNotIn("\\", call[0][0], f"backslash in path: {call[0][0]}")
 
 
+class HdfsFileIOTest(unittest.TestCase):
+    """Cases for HDFS / ViewFS URI handling in PyArrowFileIO._initialize_hdfs_fs."""
+
+    def _make_hdfs_env(self, env_patch):
+        env_patch.setdefault('HADOOP_HOME', '/opt/hadoop')
+        env_patch.setdefault('HADOOP_CONF_DIR', '/opt/hadoop/etc/hadoop')
+        env_patch.setdefault('CLASSPATH', '')
+        env_patch.setdefault('LD_LIBRARY_PATH', '')
+        return env_patch
+
+    def _make_file_io(self):
+        file_io = PyArrowFileIO.__new__(PyArrowFileIO)
+        file_io.properties = Options({})
+        return file_io
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_viewfs_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('viewfs', 'clusterName')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_viewfs_without_netloc_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('viewfs', '')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_hdfs_with_port_uses_explicit_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('hdfs', 'namenode:8020')
+        mock_hadoop_fs.assert_called_once_with(host='namenode', port=8020, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_hdfs_ha_nameservice_without_port_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('hdfs', 'nameservice1')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_hdfs_without_netloc_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('hdfs', '')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    def test_hdfs_missing_hadoop_home_raises(self):
+        with patch.dict(os.environ, {'HADOOP_CONF_DIR': '/opt/hadoop/etc/hadoop'}, clear=True):
+            with self.assertRaises(RuntimeError) as ctx:
+                self._make_file_io()._initialize_hdfs_fs('hdfs', 'namenode:8020')
+            self.assertIn('HADOOP_HOME', str(ctx.exception))
+
+    def test_hdfs_missing_hadoop_conf_dir_raises(self):
+        with patch.dict(os.environ, {'HADOOP_HOME': '/opt/hadoop'}, clear=True):
+            with self.assertRaises(RuntimeError) as ctx:
+                self._make_file_io()._initialize_hdfs_fs('hdfs', 'namenode:8020')
+            self.assertIn('HADOOP_CONF_DIR', str(ctx.exception))
+
+
 if __name__ == '__main__':
     unittest.main()
