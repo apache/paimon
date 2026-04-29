@@ -29,7 +29,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.api.auth.bearer import BearTokenAuthProvider
 from pypaimon.api.auth.dlf_provider import DLFAuthProvider
-from pypaimon.common.identifier import Identifier, SYSTEM_TABLE_SPLITTER
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
@@ -273,12 +273,14 @@ class RESTTokenFileIO(FileIO):
             self.api_instance = RESTApi(self.properties, False)
 
         table_identifier = self.identifier
-        if SYSTEM_TABLE_SPLITTER in self.identifier.get_object_name():
-            base_table = self.identifier.get_object_name().split(SYSTEM_TABLE_SPLITTER)[0]
-            table_identifier = Identifier(
-                database=self.identifier.get_database_name(),
-                object=base_table,
-                branch=self.identifier.get_branch_name())
+        if self.identifier.is_system_table():
+            # Strip the system-table suffix; preserve the branch so the token
+            # request resolves against the correct branch backing.
+            table_identifier = Identifier.create(
+                self.identifier.get_database_name(),
+                self.identifier.get_table_name(),
+                branch=self.identifier.get_branch_name(),
+            )
 
         response = self.api_instance.load_table_token(table_identifier)
         self.log.info(

@@ -479,7 +479,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
     def test_refresh_token_strips_system_table_suffix(self):
         """refresh_token() strips $snapshots suffix before requesting token."""
-        system_identifier = Identifier.create("db", "my_table$snapshots")
+        system_identifier = Identifier.create("db", "my_table", system_table="snapshots")
         file_io = RESTTokenFileIO(
             system_identifier, self.warehouse_path, self.catalog_options)
 

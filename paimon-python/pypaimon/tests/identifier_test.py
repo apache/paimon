@@ -62,10 +62,40 @@ class IdentifierTest(unittest.TestCase):
         identifier = Identifier.create("mydb", "mytable")
         self.assertEqual(identifier.get_full_name(), "mydb.mytable")
 
-    def test_get_full_name_with_branch(self):
-        """get_full_name() includes branch when set."""
-        identifier = Identifier(database="mydb", object="mytable", branch="feature")
-        self.assertEqual(identifier.get_full_name(), "mydb.mytable.feature")
+    def test_get_full_name_with_branch_encoded_in_object(self):
+        """A branch is encoded into ``object`` (Java-compatible)."""
+        identifier = Identifier.create("mydb", "mytable", branch="feature")
+        self.assertEqual(identifier.object, "mytable$branch_feature")
+        self.assertEqual(identifier.get_full_name(), "mydb.mytable$branch_feature")
+        self.assertEqual(identifier.get_table_name(), "mytable")
+        self.assertEqual(identifier.get_branch_name(), "feature")
+        self.assertEqual(identifier.get_branch_name_or_default(), "feature")
+        self.assertFalse(identifier.is_system_table())
+
+    def test_main_branch_is_not_encoded_into_object(self):
+        """``main`` (case-insensitive) is the default branch and is not encoded into ``object``.
+
+        Note: matching Java semantics, the cached branch value passed to
+        ``create`` is preserved on the instance, so ``get_branch_name()``
+        returns the supplied string. The identifier is still wire-equal to
+        a no-branch one because only ``object`` round-trips through JSON.
+        """
+        for branch in ("main", "MAIN", "Main"):
+            identifier = Identifier.create("mydb", "mytable", branch=branch)
+            self.assertEqual(identifier.object, "mytable")
+            # Wire-equal to a no-branch identifier.
+            self.assertEqual(identifier, Identifier.create("mydb", "mytable"))
+
+    def test_get_branch_name_or_default_when_unset(self):
+        """``get_branch_name_or_default`` falls back to 'main'."""
+        identifier = Identifier.create("mydb", "mytable")
+        self.assertIsNone(identifier.get_branch_name())
+        self.assertEqual(identifier.get_branch_name_or_default(), "main")
+
+    def test_unknown_database_drops_database_segment(self):
+        """``UNKNOWN_DATABASE`` is dropped from full name (Java-compatible)."""
+        identifier = Identifier("unknown", "mytable")
+        self.assertEqual(identifier.get_full_name(), "mytable")
 
     def test_empty_string_raises_error(self):
         """Empty string should raise ValueError."""
@@ -98,15 +128,66 @@ class IdentifierTest(unittest.TestCase):
 
     def test_is_system_table_snapshots_suffix(self):
         """object name '<base>$snapshots' is a system table."""
-        self.assertTrue(Identifier.create("mydb", "orders$snapshots").is_system_table())
+        self.assertTrue(Identifier("mydb", "orders$snapshots").is_system_table())
+        self.assertTrue(
+            Identifier.create("mydb", "orders", system_table="snapshots").is_system_table())
 
     def test_is_system_table_schemas_suffix(self):
         """object name '<base>$schemas' is a system table."""
-        self.assertTrue(Identifier.create("mydb", "orders$schemas").is_system_table())
+        self.assertTrue(Identifier("mydb", "orders$schemas").is_system_table())
 
     def test_is_system_table_files_suffix(self):
         """object name '<base>$files' is a system table."""
-        self.assertTrue(Identifier.create("mydb", "orders$files").is_system_table())
+        self.assertTrue(Identifier("mydb", "orders$files").is_system_table())
+
+    def test_is_system_table_two_parts_with_branch_prefix(self):
+        """A '<table>$branch_<name>' object is a branched table, NOT a system table."""
+        identifier = Identifier("mydb", "orders$branch_dev")
+        self.assertFalse(identifier.is_system_table())
+        self.assertEqual(identifier.get_table_name(), "orders")
+        self.assertEqual(identifier.get_branch_name(), "dev")
+        self.assertIsNone(identifier.get_system_table_name())
+
+    def test_is_system_table_three_parts_branch_and_system(self):
+        """A '<table>$branch_<name>$snapshots' object is a system table on a branch."""
+        identifier = Identifier("mydb", "orders$branch_dev$snapshots")
+        self.assertTrue(identifier.is_system_table())
+        self.assertEqual(identifier.get_table_name(), "orders")
+        self.assertEqual(identifier.get_branch_name(), "dev")
+        self.assertEqual(identifier.get_system_table_name(), "snapshots")
+
+    def test_three_parts_without_branch_prefix_raises(self):
+        """A '<table>$<x>$<y>' object without branch prefix is invalid (single '$' allowed)."""
+        identifier = Identifier("mydb", "orders$schemas$snapshots")
+        with self.assertRaises(ValueError):
+            identifier.is_system_table()
+
+    def test_create_with_branch_and_system_table(self):
+        """``create`` encodes both branch and system_table into the object name."""
+        identifier = Identifier.create(
+            "mydb", "orders", branch="dev", system_table="snapshots"
+        )
+        self.assertEqual(identifier.object, "orders$branch_dev$snapshots")
+        self.assertEqual(identifier.get_table_name(), "orders")
+        self.assertEqual(identifier.get_branch_name(), "dev")
+        self.assertEqual(identifier.get_system_table_name(), "snapshots")
+
+    def test_create_with_system_table_only(self):
+        """``create`` with system_table but no branch."""
+        identifier = Identifier.create("mydb", "orders", system_table="files")
+        self.assertEqual(identifier.object, "orders$files")
+        self.assertEqual(identifier.get_table_name(), "orders")
+        self.assertIsNone(identifier.get_branch_name())
+        self.assertEqual(identifier.get_system_table_name(), "files")
+
+    def test_equality_and_hash_ignore_cached_fields(self):
+        """Equality and hash depend only on (database, object), matching Java JSON shape."""
+        a = Identifier("mydb", "orders$branch_dev$snapshots")
+        b = Identifier.create(
+            "mydb", "orders", branch="dev", system_table="snapshots"
+        )
+        self.assertEqual(a, b)
+        self.assertEqual(hash(a), hash(b))
 
 
 if __name__ == '__main__':
