@@ -135,7 +135,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         TableMetadata newMetadata = TableMetadataParser.fromJson(newIcebergMetadata.toJson());
 
         // updates to be committed
-        TableMetadata.Builder updatdeBuilder;
+        TableMetadata.Builder updateBuilder;
 
         // create database if not exist
         if (!databaseExists()) {
@@ -146,7 +146,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             if (!tableExists()) {
                 LOG.info("Table {} does not exist, create it.", icebergTableIdentifier);
                 icebergTable = createTable(newMetadata);
-                updatdeBuilder =
+                updateBuilder =
                         updatesForCorrectBase(
                                 ((BaseTable) icebergTable).operations().current(),
                                 newMetadata,
@@ -158,7 +158,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
                 if (withBase) {
                     LOG.info("create updates with base metadata.");
-                    updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, false);
+                    updateBuilder = updatesForCorrectBase(metadata, newMetadata, false);
                 } else {
                     LOG.info(
                             "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
@@ -168,7 +168,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                             newMetadata.currentSnapshot() != null
                                     ? newMetadata.currentSnapshot().snapshotId()
                                     : "No snapshot");
-                    updatdeBuilder = updatesForIncorrectBase(newMetadata);
+                    updateBuilder = updatesForIncorrectBase(newMetadata);
                 }
             }
         } catch (Exception e) {
@@ -176,7 +176,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     "Fail to create table or get table: " + icebergTableIdentifier, e);
         }
 
-        TableMetadata updatedForCommit = updatdeBuilder.build();
+        TableMetadata updatedForCommit = updateBuilder.build();
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("updates:{}", updatesToString(updatedForCommit.changes()));
