@@ -84,6 +84,16 @@ class CatalogOptions:
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+    HTTP_CONNECT_TIMEOUT = ConfigOptions.key("http.connect-timeout").int_type() \
+        .default_value(180).with_description("HTTP connect timeout in seconds")
+    HTTP_READ_TIMEOUT = ConfigOptions.key("http.read-timeout").int_type() \
+        .default_value(180).with_description("HTTP read timeout in seconds")
+    HTTP_MAX_CONNECT_RETRIES = ConfigOptions.key("http.max-connect-retries").int_type() \
+        .default_value(3).with_description("HTTP max retries for connect errors")
+    HTTP_MAX_READ_RETRIES = ConfigOptions.key("http.max-read-retries").int_type() \
+        .default_value(3).with_description("HTTP max retries for read/status errors (429/502/503/504)")
+    HTTP_KEEP_ALIVE = ConfigOptions.key("http.keep-alive").boolean_type() \
+        .default_value(True).with_description("Enable HTTP keep-alive")
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
 
 
