@@ -371,10 +371,30 @@ class FileScanner:
         scanned_row_count = 0
         limited_splits = []
 
+        # Keep every split. Only ``raw_convertible`` splits contribute to
+        # the row-count accumulator. Mirrors Java's
+        # DataTableBatchScan.applyPushDownLimit() — Java accumulates
+        # ``split.partialMergedRowCount()``, the file-level row count *minus*
+        # any deletion-vector cardinality already recorded in the manifest.
+        # Python has the same value via ``DataSplit.merged_row_count()``;
+        # the previous Python code accumulated ``split.row_count`` which is
+        # the pre-DV upper bound and over-counts when DV is on, causing the
+        # early return to fire before the reader can actually produce the
+        # budget. When the merged count is unavailable (older manifests /
+        # some data-evolution layouts where ``first_row_id`` is not
+        # populated) fall back to ``split.row_count``: the file-level upper
+        # bound is the previous behaviour and is still safer than skipping
+        # the split's contribution entirely.
+        # Non-raw_convertible splits cannot be cheaply counted ahead of
+        # read, so we keep them around so the reader still has data to
+        # drain.
         for split in splits:
+            limited_splits.append(split)
             if split.raw_convertible:
-                limited_splits.append(split)
-                scanned_row_count += split.row_count
+                merged = split.merged_row_count()
+                scanned_row_count += (
+                    merged if merged is not None else split.row_count
+                )
                 if scanned_row_count >= self.limit:
                     return limited_splits
 

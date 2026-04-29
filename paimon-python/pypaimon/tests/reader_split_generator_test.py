@@ -329,6 +329,222 @@ class SplitGeneratorTest(unittest.TestCase):
         # Note: SlicedSplit may or may not be created depending on data distribution
         # This test ensures that if SlicedSplit is created, merged_row_count() works correctly
 
+    def test_limit_drops_non_raw_split_after_raw_budget_is_met(self):
+        """Reproducer for the limit-pushdown bug.
+
+        The pre-fix loop in ``FileScanner._apply_push_down_limit`` was::
+
+            for split in splits:
+                if split.raw_convertible:
+                    limited_splits.append(split)
+                    scanned_row_count += split.row_count
+                    if scanned_row_count >= self.limit:
+                        return limited_splits   # <-- early return drops
+                                                #     any subsequent non-raw splits
+            return splits
+
+        So the bug only triggers when:
+          (a) at least one raw_convertible split's ``row_count`` reaches the
+              limit, AND
+          (b) at least one *more* non-raw_convertible split exists in the
+              same plan.
+
+        If every split is non-raw the loop never enters the body and the
+        fallback ``return splits`` masks the bug; if every split is raw
+        and row_counts sum to the limit, dropping the rest is correct
+        anyway. So a proper regression test must construct a *mix* of
+        raw and non-raw splits in a single plan and assert that
+        ``len(limited_splits) >= len(raw_convertible_splits) + 1`` —
+        i.e. at least one non-raw split survives the limit pushdown.
+
+        Build that mix using two partitions with a single bucket each:
+          * partition ``p1`` — one batch, one file → raw_convertible split
+          * partition ``p2`` — two overlapping batches on the same PK →
+            non-raw_convertible split (needs merge-on-read)
+
+        With ``bucket=1`` per partition the layout is deterministic.
+        """
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            pa.field('dt', pa.string(), nullable=False),
+            ('value', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['id', 'dt'],
+            options={'bucket': '1', 'merge-engine': 'deduplicate'},
+        )
+        self.catalog.create_table(
+            'default.test_limit_mix_raw_nonraw', schema, False)
+        table = self.catalog.get_table('default.test_limit_mix_raw_nonraw')
+
+        def _write(rows):
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            c = wb.new_commit()
+            try:
+                w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+                c.commit(w.prepare_commit())
+            finally:
+                w.close()
+                c.close()
+
+        # Order matters. The buggy loop short-circuits as soon as one
+        # raw_convertible split's row_count meets the limit, so a
+        # non-raw split that appears AFTER that point is dropped no
+        # matter what (matching Java). The bug we want to catch is the
+        # one where a non-raw split appearing BEFORE the raw budget is
+        # met gets silently skipped — the iteration would never even
+        # add it to ``limited_splits``.
+        # ``PrimaryKeyTableSplitGenerator`` walks partitions in order,
+        # so making ``p1`` the non-raw partition guarantees the bad
+        # ordering [non-raw (p1), raw (p2)].
+        # p1 — two overlapping writes on the same PK → non-raw_convertible.
+        _write([{'id': 1, 'dt': 'p1', 'value': 'p1-a'}])
+        _write([{'id': 1, 'dt': 'p1', 'value': 'p1-b'}])
+        # p2 — single write → raw_convertible.
+        _write([{'id': 2, 'dt': 'p2', 'value': 'p2-a'}])
+
+        all_splits = table.new_read_builder().new_scan().plan().splits()
+        raw_splits = [s for s in all_splits if s.raw_convertible]
+        non_raw_splits = [s for s in all_splits if not s.raw_convertible]
+        self.assertGreaterEqual(
+            len(raw_splits), 1,
+            "test fixture must produce at least one raw_convertible split"
+            " — the bug only triggers in a mixed plan",
+        )
+        self.assertGreaterEqual(
+            len(non_raw_splits), 1,
+            "test fixture must produce at least one non-raw_convertible split"
+            " — without one the early-return branch in the pre-fix code"
+            " never drops anything",
+        )
+
+        # Limit small enough that a single raw split's row_count already
+        # meets the budget. Pre-fix: scanner returns just the raw split,
+        # silently drops every non-raw split. Post-fix: every split is
+        # carried through; only the raw rows count toward the budget.
+        limited_splits = table.new_read_builder().with_limit(1).new_scan().plan().splits()
+
+        self.assertEqual(
+            len(limited_splits), len(all_splits),
+            "limit pushdown dropped {} non-raw_convertible split(s); "
+            "they must be retained because their row_count is the "
+            "pre-merge file count and cannot be used as the limit budget"
+            .format(len(all_splits) - len(limited_splits)),
+        )
+        # Spot-check both buckets are still represented.
+        retained_raw = sum(1 for s in limited_splits if s.raw_convertible)
+        retained_non_raw = sum(1 for s in limited_splits if not s.raw_convertible)
+        self.assertGreaterEqual(retained_raw, 1)
+        self.assertGreaterEqual(retained_non_raw, 1)
+
+
+class ApplyPushDownLimitUnitTest(unittest.TestCase):
+    """Direct, mock-driven coverage of ``FileScanner._apply_push_down_limit``.
+
+    Pypaimon's writer doesn't compact L0 → L1+, and the DV-enabled
+    PK-table read path skips L0 files, so a true DV-aware
+    ``raw_convertible`` split (where ``merged_row_count < row_count``)
+    is hard to produce from a pure-Python end-to-end fixture. The
+    accumulator semantics, however, are a simple loop on the splits
+    list — exercise it directly with synthetic split stand-ins.
+
+    These cases pin down the correctness contract without depending on
+    storage layout: the accumulator must use ``merged_row_count``
+    (matching Java's ``partialMergedRowCount``) and must keep every
+    split it has visited up to and including the one that meets the
+    budget.
+    """
+
+    @staticmethod
+    def _apply(splits, limit):
+        from pypaimon.read.scanner.file_scanner import FileScanner
+
+        # Stand in for ``self`` — only ``self.limit`` is read by the method.
+        class _FakeScanner:
+            pass
+
+        scanner = _FakeScanner()
+        scanner.limit = limit
+        return FileScanner._apply_push_down_limit(scanner, splits)
+
+    @staticmethod
+    def _split(raw_convertible, row_count, merged_row_count):
+        class _FakeSplit:
+            pass
+
+        s = _FakeSplit()
+        s.raw_convertible = raw_convertible
+        s.row_count = row_count
+        s._merged = merged_row_count
+
+        def _merged_fn():
+            return s._merged
+
+        s.merged_row_count = _merged_fn
+        return s
+
+    def test_dv_aware_accumulator_uses_merged_row_count(self):
+        """[raw(row_count=10, dv→merged=4), non-raw, non-raw] + limit=5.
+
+        Pre-fix accumulator (``+= row_count``): the raw split's pre-DV
+        count of 10 already meets ``limit=5``, the loop early-returns
+        with just ``[raw]`` and the two non-raw splits are dropped. The
+        reader can then only see 4 rows from the DV split — silently
+        less than ``limit``.
+
+        Post-fix accumulator (``+= merged_row_count``): only 4 rows of
+        budget after the raw split, so 4 < 5; the loop keeps walking,
+        adds the two non-raw splits without changing the accumulator,
+        and falls through to ``return splits`` with all three. The
+        reader then has enough material across three splits to produce
+        ``limit`` rows.
+        """
+        s_raw = self._split(raw_convertible=True, row_count=10, merged_row_count=4)
+        s_nr1 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
+        s_nr2 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
+
+        result = self._apply([s_raw, s_nr1, s_nr2], limit=5)
+        self.assertEqual(
+            len(result), 3,
+            "merged_row_count accumulator must NOT early-return after a "
+            "DV-aware raw split whose post-DV count is below the limit; "
+            "got {}".format([id(s) for s in result]),
+        )
+
+    def test_accumulator_falls_back_to_row_count_when_merged_unavailable(self):
+        """``merged_row_count`` returns ``None`` for layouts where the
+        DV cardinality / data-evolution range isn't recorded yet. The
+        accumulator must fall back to ``row_count`` rather than treat
+        ``None`` as zero (which would never trigger the early return)
+        or skip the split entirely. With a single raw split whose
+        ``merged_row_count`` is unavailable but ``row_count`` already
+        meets the budget, the loop should early-return with just that
+        split."""
+        s = self._split(raw_convertible=True, row_count=10, merged_row_count=None)
+        result = self._apply([s], limit=5)
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0], s)
+
+    def test_no_raw_splits_falls_through_to_full_list(self):
+        """No raw splits → accumulator never moves → loop completes →
+        fallback returns the full list (matching Java's behaviour for
+        the all-non-raw case)."""
+        s1 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
+        s2 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
+        result = self._apply([s1, s2], limit=5)
+        self.assertEqual(result, [s1, s2])
+
+    def test_empty_splits_returns_empty(self):
+        self.assertEqual(self._apply([], limit=5), [])
+
+    def test_no_limit_returns_input_unchanged(self):
+        s = self._split(raw_convertible=True, row_count=10, merged_row_count=10)
+        result = self._apply([s], limit=None)
+        self.assertEqual(result, [s])
+
 
 if __name__ == '__main__':
     unittest.main()
