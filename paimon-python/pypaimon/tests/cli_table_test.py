@@ -238,6 +238,40 @@ class CliTableTest(unittest.TestCase):
                 self.assertGreater(snapshot_json['id'], 0)
                 self.assertGreater(snapshot_json['totalRecordCount'], 0)
 
+    def test_cli_table_snapshot_by_id(self):
+        """Test table snapshot by ID via CLI."""
+        latest_snapshot = self.catalog.get_table('test_db.users').snapshot_manager().get_latest_snapshot()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file, 'table', 'snapshot',
+                    'test_db.users', '--id', str(latest_snapshot.id)]):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                import json
+                snapshot_json = json.loads(mock_stdout.getvalue())
+                self.assertEqual(latest_snapshot.id, snapshot_json['id'])
+
+    def test_cli_table_snapshot_all(self):
+        """Test table snapshot list via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file, 'table', 'snapshot',
+                    'test_db.users', '--all']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                import json
+                snapshots_json = json.loads(mock_stdout.getvalue())
+                self.assertIsInstance(snapshots_json, list)
+                self.assertGreaterEqual(len(snapshots_json), 1)
+                self.assertIn('id', snapshots_json[0])
+
     def test_cli_table_create_with_json_schema(self):
         """Test table create with JSON schema file."""
         import json
