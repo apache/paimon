@@ -463,6 +463,30 @@ arrow_table = table_read.to_arrow(splits)
 pandas_df = table_read.to_pandas(splits)
 ```
 
+### Snapshot Query
+
+You can inspect table snapshots through `SnapshotManager`:
+
+```python
+snapshot_manager = table.snapshot_manager()
+
+latest = snapshot_manager.get_latest_snapshot()
+earliest = snapshot_manager.try_get_earliest_snapshot()
+snapshot_10 = snapshot_manager.get_snapshot_by_id(10)
+snapshots = snapshot_manager.list_snapshots()
+snapshot_at_time = snapshot_manager.earlier_or_equal_time_mills(1700000000000)
+```
+
+The CLI also supports querying snapshots:
+
+```shell
+paimon -c catalog.yaml table snapshot default.my_table
+paimon -c catalog.yaml table snapshot default.my_table --id 10
+paimon -c catalog.yaml table snapshot default.my_table --earliest
+paimon -c catalog.yaml table snapshot default.my_table --time-millis 1700000000000
+paimon -c catalog.yaml table snapshot default.my_table --all
+```
+
 ### Shard Read
 
 Shard Read allows you to read data in parallel by dividing the table into multiple shards. This is useful for
@@ -605,6 +629,50 @@ table.rollback_to('v3')  # tag name
 
 The `rollback_to` method accepts either an `int` (snapshot ID) or a `str` (tag name) and automatically dispatches
 to the appropriate rollback logic.
+
+## Maintenance
+
+PyPaimon supports native maintenance helpers for rewriting current table data.
+
+### Compact
+
+Use `compact` to rewrite the current visible records and commit a `COMPACT` snapshot. You can compact the whole table
+or a specific partition:
+
+```python
+table = catalog.get_table('database_name.table_name')
+result = table.new_maintenance().compact({'dt': '2024-01-01'})
+
+print(result.snapshot_id)
+print(result.rewritten_record_count)
+print(result.rewritten_file_count)
+```
+
+You can also trigger compaction from the CLI:
+
+```shell
+paimon -c catalog.yaml table compact default.my_table --partition dt=2024-01-01
+```
+
+### Rescale Bucket
+
+Use `rescale_bucket` to rewrite data with a new bucket number. For partitioned tables, specify the target partition:
+
+```python
+table = catalog.get_table('database_name.table_name')
+result = table.new_maintenance().rescale_bucket(
+    bucket_num=4,
+    partition={'dt': '2024-01-01'}
+)
+```
+
+The same operation is available from the CLI:
+
+```shell
+paimon -c catalog.yaml table rescale default.my_table --bucket-num 4 --partition dt=2024-01-01
+```
+
+Native Python maintenance does not yet support row tracking, data evolution, or deletion vectors.
 
 ## Streaming Read
 
