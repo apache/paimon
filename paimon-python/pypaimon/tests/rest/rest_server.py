@@ -484,25 +484,16 @@ class RESTCatalogServer:
     def _handle_table_resource(self, method: str, path_parts: List[str],
                                identifier: Identifier, data: str,
                                parameters: Dict[str, str]) -> Tuple[str, int]:
-        """Handle table-specific resource requests"""
-        # Extract table name and check for branch information
-        raw_table_name = path_parts[2]
-
-        # Parse table name with potential branch (e.g., "table.main" -> "table", branch="main")
-        if '.' in raw_table_name and len(raw_table_name.split('.')) > 1:
-            # This might be a table with branch
-            table_parts = raw_table_name.split('.')
-            if len(table_parts) == 2:
-                table_name_part = table_parts[0]
-                branch_part = table_parts[1]
-                # Recreate identifier without branch for lookup
-                lookup_identifier = Identifier.create(identifier.get_database_name(), table_name_part)
-            else:
-                lookup_identifier = identifier
-                branch_part = None
+        """Handle table-specific resource requests."""
+        # The branch (if any) is encoded into the object name as
+        # "$branch_<name>" — see Identifier. Strip it for table lookup, and
+        # surface the branch separately for routes that care (e.g. commit).
+        branch_part = identifier.get_branch_name()
+        if branch_part is not None:
+            lookup_identifier = Identifier.create(
+                identifier.get_database_name(), identifier.get_table_name())
         else:
             lookup_identifier = identifier
-            branch_part = None
 
         # Check table permissions using the base identifier
         if lookup_identifier.get_full_name() in self.no_permission_tables:

@@ -125,7 +125,7 @@ class TestCatalogBranchManager(unittest.TestCase):
     def test_fast_forward_to_main(self):
         """Test fast-forward to main branch should raise error."""
         from pypaimon.common.identifier import Identifier
-        identifier_with_branch = Identifier("test_db", "test_table", "feature")
+        identifier_with_branch = Identifier.create("test_db", "test_table", branch="feature")
         branch_manager = CatalogBranchManager(self.catalog_loader, identifier_with_branch)
 
         with self.assertRaises(ValueError) as cm:
@@ -136,7 +136,7 @@ class TestCatalogBranchManager(unittest.TestCase):
     def test_fast_forward_to_current_branch(self):
         """Test fast-forward to current branch should raise error."""
         from pypaimon.common.identifier import Identifier
-        identifier_with_branch = Identifier("test_db", "test_table", "feature")
+        identifier_with_branch = Identifier.create("test_db", "test_table", branch="feature")
         branch_manager = CatalogBranchManager(self.catalog_loader, identifier_with_branch)
 
         with self.assertRaises(ValueError) as cm:

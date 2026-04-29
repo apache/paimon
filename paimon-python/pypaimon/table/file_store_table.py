@@ -83,8 +83,8 @@ class FileStoreTable(Table):
         return cls(file_io, identifier, table_path, table_schema)
 
     def current_branch(self) -> str:
-        """Get the current branch name from options."""
-        return self.options.branch()
+        """Get the current branch name from the identifier."""
+        return self.identifier.get_branch_name_or_default()
 
     def comment(self) -> Optional[str]:
         """Get the table comment."""
@@ -406,8 +406,23 @@ class FileStoreTable(Table):
         if time_travel_schema is not None:
             new_table_schema = time_travel_schema
 
-        return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
-                              self.catalog_environment)
+        # Re-encode the branch into the identifier when the option changes, so
+        # current_branch() and any catalog-routed snapshot commit see the
+        # branched object name without an extra side channel.
+        new_identifier = self.identifier
+        catalog_env = self.catalog_environment
+        branch_key = CoreOptions.BRANCH.key()
+        if branch_key in options:
+            new_branch = options[branch_key]
+            new_identifier = Identifier.create(
+                self.identifier.get_database_name(),
+                self.identifier.get_table_name(),
+                branch=new_branch,
+            )
+            catalog_env = self.catalog_environment.copy(new_identifier)
+
+        return FileStoreTable(self.file_io, new_identifier, self.table_path, new_table_schema,
+                              catalog_env)
 
     def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
         """

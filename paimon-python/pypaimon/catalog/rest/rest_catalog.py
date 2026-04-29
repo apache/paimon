@@ -483,10 +483,6 @@ class RESTCatalog(Catalog):
         options[CoreOptions.PATH.key()] = response.get_path()
         response.put_audit_options_to(options)
 
-        identifier = Identifier.create(db, response.get_name())
-        if identifier.get_branch_name() is not None:
-            options[CoreOptions.BRANCH.key()] = identifier.get_branch_name()
-
         return TableMetadata(
             schema=schema.copy(options),
             is_external=response.get_is_external(),
