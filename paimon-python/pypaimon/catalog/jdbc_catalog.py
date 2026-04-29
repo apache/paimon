@@ -43,12 +43,12 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
 
 
-class _JdbcConnection:
+class _DbApiConnection:
     def __init__(self, options: Dict[str, str]):
         self.options = options
         self.uri = options.get(CatalogOptions.URI.key())
         if not self.uri:
-            raise ValueError(f"Paimon '{CatalogOptions.URI.key()}' must be set for jdbc catalog")
+            raise ValueError(f"Paimon '{CatalogOptions.URI.key()}' must be set for JDBC catalog")
         self.protocol, self.placeholder, self.connection = self._connect(self.uri, options)
 
     def close(self):
@@ -90,7 +90,7 @@ class _JdbcConnection:
             return self._connect_mysql(uri, options)
         if uri.startswith("jdbc:postgresql:"):
             return self._connect_postgresql(uri, options)
-        raise ValueError(f"Unsupported jdbc catalog URI: {uri}")
+        raise ValueError(f"Unsupported JDBC catalog URI for Python DB-API connection: {uri}")
 
     def _connect_sqlite(self, uri: str):
         sqlite_uri = uri[len("jdbc:sqlite:"):]
@@ -110,8 +110,8 @@ class _JdbcConnection:
                 connector = "mysql-connector"
             except ImportError as e:
                 raise ImportError(
-                    "PyPaimon jdbc catalog requires pymysql or mysql-connector-python "
-                    "to connect to MySQL."
+                    "PyPaimon JDBC catalog uses Python DB-API drivers and requires "
+                    "pymysql or mysql-connector-python to connect to MySQL."
                 ) from e
 
         parsed = urlparse(uri[len("jdbc:"):])
@@ -153,8 +153,8 @@ class _JdbcConnection:
                 connector = "psycopg"
             except ImportError as e:
                 raise ImportError(
-                    "PyPaimon jdbc catalog requires psycopg2 or psycopg "
-                    "to connect to PostgreSQL."
+                    "PyPaimon JDBC catalog uses Python DB-API drivers and requires "
+                    "psycopg2 or psycopg to connect to PostgreSQL."
                 ) from e
 
         parsed = urlparse(uri[len("jdbc:"):])
@@ -201,7 +201,7 @@ class JdbcCatalog(Catalog):
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_key = catalog_options.get(JdbcCatalogOptions.CATALOG_KEY)
         self.file_io = FileIO.get(self.warehouse, self.catalog_options)
-        self.connection = _JdbcConnection(self.options)
+        self.connection = _DbApiConnection(self.options)
         self._initialize_catalog_tables()
 
     def close(self):

@@ -61,7 +61,7 @@ class GcsOptions:
 
 class JdbcCatalogOptions:
     CATALOG_KEY = ConfigOptions.key("catalog-key").string_type().default_value("jdbc").with_description(
-        "Custom jdbc catalog store key.")
+        "Custom JDBC catalog store key.")
 
 
 class PVFSOptions:
