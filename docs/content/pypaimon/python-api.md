@@ -93,6 +93,11 @@ catalog_options = {
 }
 ```
 
+Unlike Flink or Spark, PyPaimon does not use JVM JDBC drivers or load JDBC connector jars.
+It keeps the `metastore='jdbc'` and `jdbc:` URI format for compatibility with Paimon's
+JDBC catalog configuration, but the database connection is created through native Python DB-API
+drivers such as `pymysql`, `mysql-connector-python`, `psycopg2`, or `psycopg`.
+
 {{< /tab >}}
 {{< tab "rest catalog" >}}
 The sample code is as follows. The detailed meaning of option can be found in [REST]({{< ref "concepts/rest/overview" >}}).
