@@ -16,7 +16,7 @@
 #  limitations under the License.
 ################################################################################
 
-from typing import List, Optional, Any
+from typing import Any, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -36,7 +36,9 @@ class FormatLanceReader(RecordBatchReader):
     """
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
-                 push_down_predicate: Any, batch_size: int = 1024):
+                 push_down_predicate: Any, batch_size: int = 1024,
+                 row_range: Optional[Tuple[int, int]] = None,
+                 row_indices: Optional[List[int]] = None):
         """Initialize Lance reader."""
         import lance
 
@@ -61,7 +63,14 @@ class FormatLanceReader(RecordBatchReader):
             file_path_for_lance,
             storage_options=storage_options,
             columns=columns_for_lance)
-        pa_table = lance_reader.read_all().to_table()
+        if row_indices is not None:
+            reader_results = lance_reader.take_rows(row_indices)
+        elif row_range is not None:
+            start, end = row_range
+            reader_results = lance_reader.read_range(start, end - start)
+        else:
+            reader_results = lance_reader.read_all()
+        pa_table = reader_results.to_table()
 
         # Precompute output schema for missing fields
         if self.missing_fields:
