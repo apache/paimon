@@ -66,7 +66,7 @@ class DataWriter(ABC):
         self.changelog_producer = changelog_producer
         self.changelog_file_format = (
             self.options.changelog_file_format()
-            or CoreOptions.FILE_FORMAT_PARQUET
+            or self.file_format
         )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
