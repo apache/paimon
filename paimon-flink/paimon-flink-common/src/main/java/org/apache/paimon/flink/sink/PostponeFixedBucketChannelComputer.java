@@ -55,7 +55,12 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
     @Override
     public int channel(InternalRow record) {
         BinaryRow partition = partitionKeyExtractor.partition(record);
-        int bucket = knownNumBuckets.computeIfAbsent(partition, p -> numChannels);
+        int numBuckets = knownNumBuckets.computeIfAbsent(partition, p -> numChannels);
+        int hash = partitionKeyExtractor.trimmedPrimaryKey(record).hashCode();
+        if (hash == Integer.MIN_VALUE) {
+            hash = Integer.MAX_VALUE;
+        }
+        int bucket = Math.abs(hash) % numBuckets;
         return ChannelComputer.select(partition, bucket, numChannels);
     }
 
