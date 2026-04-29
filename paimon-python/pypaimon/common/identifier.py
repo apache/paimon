@@ -15,6 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -24,6 +25,10 @@ SYSTEM_TABLE_SPLITTER = '$'
 SYSTEM_BRANCH_PREFIX = 'branch_'
 DEFAULT_MAIN_BRANCH = 'main'
 UNKNOWN_DATABASE = 'unknown'
+
+# Sentinel used to detect "the caller did not pass branch=" so we can
+# distinguish from "the caller explicitly passed branch=None".
+_BRANCH_NOT_SET = object()
 
 
 @dataclass(init=False)
@@ -47,7 +52,32 @@ class Identifier:
     database: str = json_field("database", default=None)
     object: str = json_field("object", default=None)
 
-    def __init__(self, database: str, object: Optional[str] = None):
+    def __init__(self, database: str, object: Optional[str] = None,
+                 branch=_BRANCH_NOT_SET):
+        """Construct an Identifier.
+
+        Standard form: ``Identifier(database, object)`` — the ``object``
+        may already carry encoded branch / system_table segments.
+
+        Backward-compat form (deprecated): ``Identifier(database, object,
+        branch=...)`` is still accepted for one release. The branch is
+        encoded into ``object`` for you and a :class:`DeprecationWarning`
+        is emitted. New code should call
+        :meth:`Identifier.create` with explicit ``branch=`` instead.
+        """
+        if branch is not _BRANCH_NOT_SET:
+            warnings.warn(
+                "Identifier(..., branch=...) is deprecated; the branch is "
+                "now encoded directly into the `object` field. Use "
+                "Identifier.create(database, table, branch=...) instead. "
+                "This shim will be removed in the next minor release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if (object is not None and branch is not None
+                    and str(branch).lower() != DEFAULT_MAIN_BRANCH):
+                object = (object + SYSTEM_TABLE_SPLITTER
+                          + SYSTEM_BRANCH_PREFIX + str(branch))
         self.database = database
         self.object = object
         # Lazily populated by _split_object_name().
@@ -70,7 +100,31 @@ class Identifier:
 
         ``branch == "main"`` (case-insensitive) is treated as the default
         branch and is not encoded into the object name, matching Java.
+
+        Backward-compat form (deprecated): if the second positional
+        argument already contains ``$`` and no branch / system_table
+        kwargs were supplied, the call is treated as the legacy
+        ``create(database, object)`` form: the string is stored verbatim
+        as ``object`` (so existing callers passing pre-encoded names like
+        ``"orders$snapshots"`` keep working). A :class:`DeprecationWarning`
+        is emitted; new code should use ``Identifier(database, object)``
+        for raw strings or ``Identifier.create(..., system_table=...)``
+        for explicit decomposition.
         """
+        if (branch is None and system_table is None
+                and isinstance(table, str) and SYSTEM_TABLE_SPLITTER in table):
+            warnings.warn(
+                "Identifier.create(database, object) where the second "
+                "argument already contains '$' is deprecated; pre-encoded "
+                "object strings should be passed via Identifier(database, "
+                "object), and decomposed components via "
+                "Identifier.create(database, table, branch=..., "
+                "system_table=...). This shim will be removed in the "
+                "next minor release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return cls(database, table)
         obj = table
         if branch is not None and branch.lower() != DEFAULT_MAIN_BRANCH:
             obj = obj + SYSTEM_TABLE_SPLITTER + SYSTEM_BRANCH_PREFIX + branch
@@ -189,6 +243,24 @@ class Identifier:
 
     def is_system_table(self) -> bool:
         return self.get_system_table_name() is not None
+
+    @property
+    def branch(self) -> Optional[str]:
+        """Deprecated alias for :meth:`get_branch_name`.
+
+        Kept for backward compatibility with code that read the old
+        ``Identifier.branch`` dataclass field directly. Will be removed
+        in the next minor release.
+        """
+        warnings.warn(
+            "Identifier.branch is deprecated; use "
+            "Identifier.get_branch_name() (or "
+            "Identifier.get_branch_name_or_default()) instead. This "
+            "shim will be removed in the next minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_branch_name()
 
     def __hash__(self):
         return hash((self.database, self.object))

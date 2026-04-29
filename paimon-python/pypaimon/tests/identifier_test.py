@@ -20,6 +20,7 @@ Tests for Identifier parsing, including backtick support for database names with
 """
 
 import unittest
+import warnings
 
 from pypaimon.common.identifier import Identifier
 
@@ -188,6 +189,115 @@ class IdentifierTest(unittest.TestCase):
         )
         self.assertEqual(a, b)
         self.assertEqual(hash(a), hash(b))
+
+
+class IdentifierBackwardCompatibilityShimTest(unittest.TestCase):
+    """Locks in the backward-compat shim for the previous Identifier shape.
+
+    The shim is intentionally narrow: it covers the three concrete API
+    breaks that escaped pre-review (constructor ``branch=`` kwarg,
+    ``identifier.branch`` attribute, ``Identifier.create(db, object)``
+    two-arg form with ``$`` in the second arg). It is scheduled for
+    removal in the next minor release; tests below assert both the
+    behavioural compatibility AND the ``DeprecationWarning`` so the
+    shim doesn't get silently dropped before users have a chance to
+    migrate.
+    """
+
+    def test_constructor_branch_kwarg_still_works_with_warning(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            identifier = Identifier(database="db", object="tbl",
+                                    branch="feature")
+
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(depr), 1, "exactly one DeprecationWarning expected")
+        self.assertIn("Identifier(..., branch=...)", str(depr[0].message))
+
+        # Branch must be encoded into the object field, matching the
+        # behaviour of the new ``Identifier.create(..., branch=...)`` form.
+        self.assertEqual(identifier.object, "tbl$branch_feature")
+        self.assertEqual(identifier.get_branch_name(), "feature")
+        self.assertEqual(
+            identifier,
+            Identifier.create("db", "tbl", branch="feature"),
+            "shim must produce a wire-equal Identifier",
+        )
+
+    def test_constructor_branch_kwarg_main_is_not_encoded(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            identifier = Identifier("db", "tbl", branch="main")
+        # main is the default branch; encoding rule matches Java/create().
+        self.assertEqual(identifier.object, "tbl")
+
+    def test_constructor_branch_kwarg_none_is_no_op(self):
+        # Explicit branch=None must still trigger the warning (it's the
+        # deprecated kwarg form) but produce the un-encoded object.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            identifier = Identifier("db", "tbl", branch=None)
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(depr), 1)
+        self.assertEqual(identifier.object, "tbl")
+
+    def test_branch_property_delegates_to_get_branch_name(self):
+        identifier = Identifier.create("db", "tbl", branch="dev")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            value = identifier.branch
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(depr), 1)
+        self.assertIn("Identifier.branch is deprecated", str(depr[0].message))
+        self.assertEqual(value, "dev")
+        self.assertEqual(value, identifier.get_branch_name())
+
+    def test_branch_property_returns_none_when_no_branch(self):
+        identifier = Identifier.create("db", "tbl")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.assertIsNone(identifier.branch)
+
+    def test_create_two_arg_form_with_dollar_falls_back_to_raw(self):
+        # ``create("db", "orders$snapshots")`` used to mean "store
+        # orders$snapshots as the object". Honour that shape with a
+        # warning so existing callers keep working.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            identifier = Identifier.create("db", "orders$snapshots")
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(depr), 1)
+        self.assertIn("Identifier.create(database, object)",
+                      str(depr[0].message))
+        self.assertEqual(identifier.object, "orders$snapshots")
+        self.assertTrue(identifier.is_system_table())
+        self.assertEqual(identifier.get_table_name(), "orders")
+        self.assertEqual(identifier.get_system_table_name(), "snapshots")
+
+    def test_create_two_arg_form_without_dollar_does_not_warn(self):
+        # The new shape — ``create("db", "tbl")`` — must NOT trigger the
+        # legacy fallback (no ``$`` in the table name).
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            identifier = Identifier.create("db", "tbl")
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(depr), 0,
+                         "non-legacy create() must not warn")
+        self.assertEqual(identifier.object, "tbl")
+
+    def test_create_with_kwargs_skips_legacy_fallback(self):
+        # When branch=/system_table= are explicitly passed, the second
+        # arg is the table name even if it contains ``$``: do NOT route
+        # through the legacy raw-object fallback.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            identifier = Identifier.create("db", "weird$table",
+                                           branch="dev")
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        self.assertEqual(len(depr), 0)
+        self.assertEqual(identifier.object, "weird$table$branch_dev")
+        self.assertEqual(identifier.get_branch_name(), "dev")
+        self.assertEqual(identifier.get_table_name(), "weird$table")
 
 
 if __name__ == '__main__':
