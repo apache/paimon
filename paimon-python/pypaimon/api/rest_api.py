@@ -75,7 +75,7 @@ class RESTApi:
             raise ValueError("URI cannot be empty")
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.client = HttpClient(uri)
+        self.client = HttpClient(uri, options)
         auth_provider = AuthProviderFactory.create_auth_provider(options)
         base_headers = RESTUtil.extract_prefix_map(options, self.HEADER_PREFIX)
 

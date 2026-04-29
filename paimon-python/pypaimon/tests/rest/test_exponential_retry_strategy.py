@@ -27,37 +27,48 @@ from pypaimon.api.client import ExponentialRetry
 
 class TestExponentialRetryStrategy(unittest.TestCase):
 
-    def setUp(self):
-        self.retry_strategy = ExponentialRetry(max_retries=5)
-
     def test_basic_retry(self):
-        retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(5)
-        
-        self.assertEqual(retry.total, 5)
-        self.assertEqual(retry.read, 5)
-        self.assertEqual(retry.connect, 0)  # Connection errors should not retry
-        
+        retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(5, 3)
+
+        self.assertIsNone(retry.total)
+        self.assertEqual(retry.connect, 5)
+        self.assertEqual(retry.read, 3)
+        self.assertEqual(retry.status, 3)
+
         self.assertIn(429, retry.status_forcelist)  # Too Many Requests
         self.assertIn(503, retry.status_forcelist)  # Service Unavailable
         self.assertNotIn(404, retry.status_forcelist)
 
-    def test_no_retry_on_connect_error(self):
+    def test_retry_on_connect_error(self):
+        retry_strategy = ExponentialRetry(connect_retries=2, read_retries=0)
         session = requests.Session()
-        session.mount("http://", self.retry_strategy.adapter)
-        session.mount("https://", self.retry_strategy.adapter)
-        session.timeout = (1, 1)
+        session.mount("http://", retry_strategy.adapter)
+        session.mount("https://", retry_strategy.adapter)
 
         start_time = time.time()
-        
+
         try:
             session.get("http://192.168.255.255:9999", timeout=(1, 1))
             self.fail("Expected ConnectionError")
         except (ConnectionError, ConnectTimeout, Timeout, NewConnectionError, MaxRetryError):
             elapsed = time.time() - start_time
-            self.assertLess(
-                elapsed, 5.0,
-                f"Connection error took {elapsed:.2f}s, should fail quickly without retry"
+            # connect_retries=2 with backoff_factor=1 → at least 1s of backoff between attempts
+            self.assertGreaterEqual(
+                elapsed, 2.0,
+                f"Connection error took {elapsed:.2f}s, expected retries with backoff"
             )
+
+    def test_no_connect_retry_but_read_retry(self):
+        retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(0, 5)
+        self.assertEqual(retry.connect, 0)
+        self.assertEqual(retry.read, 5)
+        self.assertEqual(retry.status, 5)
+
+    def test_zero_retries(self):
+        retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(0, 0)
+        self.assertEqual(retry.connect, 0)
+        self.assertEqual(retry.read, 0)
+        self.assertEqual(retry.status, 0)
 
 
 if __name__ == '__main__':
