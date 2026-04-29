@@ -89,7 +89,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
         commit.updateStatistics(colStats);
         commit.close();
-        DataTableSource scanSource = new DataTableSource(identifier, table, false, null);
+        DataTableSource scanSource = new DataTableSource(identifier, table, false, null, null);
         Assertions.assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
         expectedColStats.put(
@@ -131,7 +131,7 @@ public abstract class FileStoreTableStatisticsTestBase {
     @Test
     public void testTableStreamingStatistics() throws Exception {
         FileStoreTable table = writeData();
-        DataTableSource streamSource = new DataTableSource(identifier, table, true, null);
+        DataTableSource streamSource = new DataTableSource(identifier, table, true, null, null);
         Assertions.assertThat(streamSource.reportStatistics()).isEqualTo(TableStats.UNKNOWN);
     }
 
@@ -146,6 +146,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         false,
                         null,
                         builder.equal(0, 1),
+                        null,
                         null,
                         null,
                         null,
@@ -227,6 +228,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
         Map<String, ColStats<?>> colStatsMap = new HashMap<>();
@@ -300,6 +302,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         false,
                         null,
                         builder.greaterThan(2, 500L),
+                        null,
                         null,
                         null,
                         null,

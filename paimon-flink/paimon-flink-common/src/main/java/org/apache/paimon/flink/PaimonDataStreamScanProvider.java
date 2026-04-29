@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.lineage.LineageUtils;
 import org.apache.paimon.table.Table;
 
@@ -28,6 +29,8 @@ import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.data.RowData;
+
+import javax.annotation.Nullable;
 
 import java.util.function.Function;
 
@@ -41,16 +44,19 @@ public class PaimonDataStreamScanProvider implements DataStreamScanProvider, Lin
     private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
     private final String name;
     private final Table table;
+    @Nullable private final Catalog catalog;
 
     public PaimonDataStreamScanProvider(
             boolean isBounded,
             Function<StreamExecutionEnvironment, DataStream<RowData>> producer,
             String name,
-            Table table) {
+            Table table,
+            @Nullable Catalog catalog) {
         this.isBounded = isBounded;
         this.producer = producer;
         this.name = name;
         this.table = table;
+        this.catalog = catalog;
     }
 
     @Override
@@ -66,6 +72,6 @@ public class PaimonDataStreamScanProvider implements DataStreamScanProvider, Lin
 
     @Override
     public LineageVertex getLineageVertex() {
-        return LineageUtils.sourceLineageVertex(name, isBounded, table);
+        return LineageUtils.sourceLineageVertex(name, isBounded, table, catalog);
     }
 }

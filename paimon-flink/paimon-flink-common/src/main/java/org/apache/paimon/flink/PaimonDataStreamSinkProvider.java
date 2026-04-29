@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.lineage.LineageUtils;
 import org.apache.paimon.table.Table;
 
@@ -28,6 +29,8 @@ import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.data.RowData;
+
+import javax.annotation.Nullable;
 
 import java.util.function.Function;
 
@@ -40,12 +43,17 @@ public class PaimonDataStreamSinkProvider implements DataStreamSinkProvider, Lin
     private final Function<DataStream<RowData>, DataStreamSink<?>> producer;
     private final String name;
     private final Table table;
+    @Nullable private final Catalog catalog;
 
     public PaimonDataStreamSinkProvider(
-            Function<DataStream<RowData>, DataStreamSink<?>> producer, String name, Table table) {
+            Function<DataStream<RowData>, DataStreamSink<?>> producer,
+            String name,
+            Table table,
+            @Nullable Catalog catalog) {
         this.producer = producer;
         this.name = name;
         this.table = table;
+        this.catalog = catalog;
     }
 
     @Override
@@ -56,6 +64,6 @@ public class PaimonDataStreamSinkProvider implements DataStreamSinkProvider, Lin
 
     @Override
     public LineageVertex getLineageVertex() {
-        return LineageUtils.sinkLineageVertex(name, table);
+        return LineageUtils.sinkLineageVertex(name, table, catalog);
     }
 }
