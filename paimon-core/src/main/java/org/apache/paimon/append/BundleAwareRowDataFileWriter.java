@@ -1,0 +1,115 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.append;
+
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.io.FileWriterContext;
+import org.apache.paimon.io.ReplayableBundleRecords;
+import org.apache.paimon.io.RowDataFileWriter;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LongCounter;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.function.Supplier;
+
+/**
+ * Dedicated-path {@link RowDataFileWriter} which preserves row-level side effects when writing
+ * replayable bundles.
+ */
+class BundleAwareRowDataFileWriter extends RowDataFileWriter implements BundlePassThroughWriter {
+
+    private final boolean supportsBundlePassThrough;
+
+    public BundleAwareRowDataFileWriter(
+            FileIO fileIO,
+            FileWriterContext context,
+            Path path,
+            RowType writeSchema,
+            long schemaId,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            boolean isExternalPath,
+            @Nullable List<String> writeCols) {
+        super(
+                fileIO,
+                context,
+                path,
+                writeSchema,
+                schemaId,
+                seqNumCounterSupplier,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                isExternalPath,
+                writeCols);
+        this.supportsBundlePassThrough = supportsBundleWrite();
+    }
+
+    @Override
+    public boolean supportsBundlePassThrough() {
+        return supportsBundlePassThrough;
+    }
+
+    @Override
+    public void writeBundle(BundleRecords bundle) throws IOException {
+        if (!(bundle instanceof ReplayableBundleRecords)) {
+            for (InternalRow row : bundle) {
+                write(row);
+            }
+            return;
+        }
+
+        writeReplayableBundle((ReplayableBundleRecords) bundle);
+    }
+
+    @Override
+    public void writeReplayableBundle(ReplayableBundleRecords bundle) throws IOException {
+        if (!supportsBundlePassThrough) {
+            for (InternalRow row : bundle) {
+                write(row);
+            }
+            return;
+        }
+
+        try {
+            super.writeBundle(bundle);
+            // Dedicated-format fan-out only forwards replayable bundles here, so row-level side
+            // effects can safely replay the same logical rows after the format writer consumes the
+            // bundle.
+            for (InternalRow row : bundle) {
+                recordRowWrite(row);
+            }
+        } catch (Throwable e) {
+            abort();
+            throw e;
+        }
+    }
+}
