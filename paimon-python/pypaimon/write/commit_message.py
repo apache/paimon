@@ -27,8 +27,8 @@ class CommitMessage:
     partition: Tuple
     bucket: int
     new_files: List[DataFileMeta]
-    changelog_files: List[DataFileMeta] = field(default_factory=list)
     check_from_snapshot: Optional[int] = -1
+    changelog_files: List[DataFileMeta] = field(default_factory=list)
 
     def is_empty(self):
         return not self.new_files and not self.changelog_files

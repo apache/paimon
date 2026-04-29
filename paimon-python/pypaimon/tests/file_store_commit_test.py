@@ -437,6 +437,7 @@ class TestFileStoreCommit(unittest.TestCase):
             retry_result=None,
             commit_kind="APPEND",
             commit_entries=[commit_entry],
+            changelog_entries=[],
             commit_identifier=11,
             latest_snapshot=latest_snapshot
         )
