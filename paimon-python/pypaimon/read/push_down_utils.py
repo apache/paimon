@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Set
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.schema.data_types import DataField
 
 
 def extract_partition_spec_from_predicate(
@@ -66,6 +67,43 @@ def _split_and(input_predicate: Predicate):
         return [p for element in (input_predicate.literals or []) for p in _split_and(element)]
 
     return [input_predicate]
+
+
+def rewrite_predicate_indices(
+    input_predicate: Optional[Predicate],
+    read_fields: List[DataField],
+) -> Optional[Predicate]:
+    """Rewrite predicate leaf indices to match positions in ``read_fields``.
+
+    Predicate leaves are built against the original table schema (via
+    PredicateBuilder), so their ``index`` field encodes that schema's column
+    order. When the same predicate is later evaluated row-by-row against a
+    projected scan (read_type narrower or reordered), those indices no longer
+    match the OffsetRow layout the reader hands to FilterRecordReader, and
+    ``OffsetRow.get_field(idx)`` raises IndexError.
+
+    Returns a new predicate where every leaf's ``index`` is rebound to its
+    column's position in ``read_fields``. The caller is responsible for
+    ensuring that every leaf field is present in ``read_fields``.
+    """
+    if input_predicate is None:
+        return None
+    name_to_pos = {f.name: i for i, f in enumerate(read_fields)}
+    return _rewrite_by_name(input_predicate, name_to_pos)
+
+
+def _rewrite_by_name(p: Predicate, name_to_pos: Dict[str, int]) -> Predicate:
+    if p.method == 'and' or p.method == 'or':
+        return p.new_literals(
+            [_rewrite_by_name(c, name_to_pos) for c in (p.literals or [])]
+        )
+    if p.field is None or p.field not in name_to_pos:
+        raise ValueError(
+            "Cannot rewrite predicate index for leaf {!r}: field {!r} is not "
+            "in read fields {}. The caller must ensure all referenced columns "
+            "are projected.".format(p, p.field, list(name_to_pos))
+        )
+    return p.new_index(name_to_pos[p.field])
 
 
 def _change_index(input_predicate: Predicate, mapping: Dict[int, int]):
