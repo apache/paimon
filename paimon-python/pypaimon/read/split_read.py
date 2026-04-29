@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Callable, List, Optional, Tuple
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import ApplyDeletionVectorReader
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
@@ -54,7 +54,10 @@ from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
-from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
+from pypaimon.read.reader.partial_update_merge_function import \
+    PartialUpdateMergeFunction
+from pypaimon.read.reader.sort_merge_reader import (DeduplicateMergeFunction,
+                                                    SortMergeReaderWithMinHeap)
 from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
@@ -482,7 +485,33 @@ class MergeFileSplitRead(SplitRead):
                 supplier = partial(self.kv_reader_supplier, file, self.deletion_file_readers.get(file.file_name, None))
                 data_readers.append(supplier)
             readers.append(ConcatRecordReader(data_readers))
-        return SortMergeReaderWithMinHeap(readers, self.table.table_schema)
+        merge_function = self._build_merge_function()
+        return SortMergeReaderWithMinHeap(
+            readers, self.table.table_schema, merge_function=merge_function)
+
+    def _build_merge_function(self):
+        """Pick the right MergeFunction implementation for the table's
+        ``merge-engine`` option. ``DEDUPLICATE`` is the default and the
+        only engine supported on the Python read path historically;
+        ``PARTIAL_UPDATE`` is now wired up to its dedicated
+        implementation. The remaining engines (``AGGREGATE`` /
+        ``FIRST_ROW``) used to silently degrade to dedupe — that quietly
+        produced wrong data — so we now raise an explicit
+        ``NotImplementedError`` instead, until they're ported.
+        """
+        engine = self.table.options.merge_engine()
+        if engine == MergeEngine.DEDUPLICATE:
+            return DeduplicateMergeFunction()
+        if engine == MergeEngine.PARTIAL_UPDATE:
+            return PartialUpdateMergeFunction(
+                key_arity=len(self.trimmed_primary_key),
+                value_arity=self.value_arity,
+            )
+        raise NotImplementedError(
+            "merge-engine '{}' is not implemented in pypaimon yet "
+            "(supported: deduplicate, partial-update). Use the Java "
+            "client or open an issue to track support.".format(engine.value)
+        )
 
     def create_reader(self) -> RecordReader:
         # Create a dict mapping data file name to deletion file reader method
