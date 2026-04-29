@@ -96,7 +96,23 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                         .withBloomFilterEnabled(
                                 conf.getBoolean(
                                         ParquetOutputFormat.BLOOM_FILTER_ENABLED,
-                                        ParquetProperties.DEFAULT_BLOOM_FILTER_ENABLED));
+                                        ParquetProperties.DEFAULT_BLOOM_FILTER_ENABLED))
+                        .withMinRowCountForPageSizeCheck(
+                                conf.getInt(
+                                        ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK,
+                                        ParquetProperties.DEFAULT_MINIMUM_RECORD_COUNT_FOR_CHECK))
+                        .withMaxRowCountForPageSizeCheck(
+                                conf.getInt(
+                                        ParquetOutputFormat.MAX_ROW_COUNT_FOR_PAGE_SIZE_CHECK,
+                                        ParquetProperties.DEFAULT_MAXIMUM_RECORD_COUNT_FOR_CHECK))
+                        .withStatisticsTruncateLength(
+                                conf.getInt(
+                                        ParquetOutputFormat.STATISTICS_TRUNCATE_LENGTH,
+                                        ParquetProperties.DEFAULT_STATISTICS_TRUNCATE_LENGTH))
+                        .withColumnIndexTruncateLength(
+                                conf.getInt(
+                                        ParquetOutputFormat.COLUMN_INDEX_TRUNCATE_LENGTH,
+                                        ParquetProperties.DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH));
         new ColumnConfigParser()
                 .withColumnConfig(
                         ParquetOutputFormat.ENABLE_DICTIONARY,

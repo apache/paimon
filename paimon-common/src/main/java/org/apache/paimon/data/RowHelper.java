@@ -36,6 +36,14 @@ public class RowHelper implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Threshold in bytes for releasing the internal reuse buffer. When big records are written, the
+     * BinaryRowWriter's internal segment can grow very large via grow(). The {@link
+     * #resetIfTooLarge()} method checks this threshold and releases the bloated
+     * reuseRow/reuseWriter to avoid holding onto oversized buffers indefinitely.
+     */
+    private static final int REUSE_RELEASE_THRESHOLD = 4 * 1024 * 1024; // 4MB
+
     private final FieldGetter[] fieldGetters;
     private final ValueSetter[] valueSetters;
     private final boolean[] writeNulls;
@@ -79,6 +87,20 @@ public class RowHelper implements Serializable {
             }
         }
         reuseWriter.complete();
+    }
+
+    /**
+     * Release the internal reuse buffer if the segment exceeds the threshold. This should be called
+     * after the caller has finished using the reuseRow (e.g. after serialization), so that large
+     * records don't linger in memory.
+     */
+    public void resetIfTooLarge() {
+        if (reuseWriter != null
+                && reuseWriter.getSegments() != null
+                && reuseWriter.getSegments().size() > REUSE_RELEASE_THRESHOLD) {
+            reuseRow = null;
+            reuseWriter = null;
+        }
     }
 
     public BinaryRow reuseRow() {
