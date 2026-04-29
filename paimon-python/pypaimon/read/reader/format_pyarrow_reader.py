@@ -16,13 +16,20 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.data.variant_shredding import (
+    VariantSchema,
+    assemble_shredded_column,
+    build_variant_schema,
+    is_shredded_variant,
+)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
@@ -32,11 +39,16 @@ class FormatPyArrowReader(RecordBatchReader):
     """
     A Format Reader that reads record batch from a Parquet or ORC file using PyArrow,
     and filters it based on the provided predicate and projection.
+
+    When a VARIANT column is stored in the shredded Parquet format (a struct with
+    ``metadata``, ``value``, and ``typed_value`` fields), this reader transparently
+    reconstructs the standard ``struct<value: binary, metadata: binary>`` representation.
     """
 
     def __init__(self, file_io: FileIO, file_format: str, file_path: str,
                  read_fields: List[DataField],
-                 push_down_predicate: Any, batch_size: int = 1024):
+                 push_down_predicate: Any, batch_size: int = 1024,
+                 options: CoreOptions = None):
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
         self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
         self._file_format = file_format
@@ -44,9 +56,18 @@ class FormatPyArrowReader(RecordBatchReader):
         self._read_field_names = [f.name for f in read_fields]
 
         # Identify which fields exist in the file and which are missing
-        file_schema_names = set(self.dataset.schema.names)
+        file_schema = self.dataset.schema
+        file_schema_names = set(file_schema.names)
         self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
         self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
+
+        # column name → VariantSchema for shredded columns that need assembly
+        self._shredded_schemas: Dict[str, VariantSchema] = {}
+        if options is None or options.variant_shredding_enabled():
+            for name in self.existing_fields:
+                field_type = file_schema.field(name).type
+                if is_shredded_variant(field_type):
+                    self._shredded_schemas[name] = build_variant_schema(field_type)
 
         # Only pass existing fields to PyArrow scanner to avoid errors
         self.reader = self.dataset.scanner(
@@ -65,6 +86,9 @@ class FormatPyArrowReader(RecordBatchReader):
 
             if self._file_format == 'orc' and self._output_schema is not None:
                 batch = self._cast_orc_time_columns(batch)
+
+            if self._shredded_schemas:
+                batch = self._assemble_shredded_variants(batch)
 
             if not self.missing_fields:
                 return batch
@@ -102,6 +126,24 @@ class FormatPyArrowReader(RecordBatchReader):
 
         except StopIteration:
             return None
+
+    def _assemble_shredded_variants(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        """Replace shredded VARIANT columns with standard struct<value, metadata>."""
+        changed = False
+        columns = list(batch.columns)
+        fields = list(batch.schema)
+
+        for i, f in enumerate(fields):
+            if f.name in self._shredded_schemas:
+                schema = self._shredded_schemas[f.name]
+                new_col = assemble_shredded_column(columns[i], schema)
+                columns[i] = new_col
+                fields[i] = pa.field(f.name, new_col.type, nullable=f.nullable)
+                changed = True
+
+        if not changed:
+            return batch
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
 
     def _cast_orc_time_columns(self, batch):
         """Cast int32 TIME columns back to time32('ms') when reading ORC.

@@ -28,6 +28,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -941,6 +942,188 @@ public class JavaPyE2ETest {
 
     protected GenericRow createRow3ColsWithKind(RowKind rowKind, Object... values) {
         return GenericRow.ofKind(rowKind, values[0], values[1], values[2]);
+    }
+
+    /** Java writes a VARIANT-column table for Python to read (Java→Python E2E). */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteVariantTable() throws Exception {
+        Identifier identifier = identifier("variant_test");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("payload", DataTypes.VARIANT())
+                        .option("bucket", "-1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("Alice"),
+                            GenericVariant.fromJson("{\"age\":30,\"city\":\"Beijing\"}")));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryString.fromString("Bob"),
+                            GenericVariant.fromJson("{\"age\":25,\"city\":\"Shanghai\"}")));
+            write.write(
+                    GenericRow.of(
+                            3,
+                            BinaryString.fromString("Carol"),
+                            GenericVariant.fromJson("[1,2,3]")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // Verify Java can read back what it wrote
+        FileStoreTable readTable = (FileStoreTable) catalog.getTable(identifier);
+        List<Split> splits = new ArrayList<>(readTable.newSnapshotReader().read().dataSplits());
+        TableRead read = readTable.newRead();
+        List<String> res =
+                getResult(read, splits, row -> internalRowToString(row, readTable.rowType()));
+        assertThat(res).hasSize(3);
+        LOG.info("testJavaWriteVariantTable: wrote and read back {} VARIANT rows", res.size());
+
+        // Also write a shredded VARIANT table for Python to read (variant_shredded_test).
+        // The shredding schema shreds the 'age' (BIGINT) and 'city' (VARCHAR) sub-fields
+        // of the 'payload' column so Python can exercise the shredded-read path.
+        String shreddingJson =
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"payload\",\"type\":"
+                        + "{\"type\":\"ROW\",\"fields\":["
+                        + "{\"name\":\"age\",\"type\":\"BIGINT\"},"
+                        + "{\"name\":\"city\",\"type\":\"VARCHAR\"}"
+                        + "]}}]}";
+        Identifier shreddedId = identifier("variant_shredded_test");
+        catalog.dropTable(shreddedId, true);
+        Schema shreddedSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("payload", DataTypes.VARIANT())
+                        .option("bucket", "-1")
+                        .option("parquet.variant.shreddingSchema", shreddingJson)
+                        .build();
+        catalog.createTable(shreddedId, shreddedSchema, false);
+
+        FileStoreTable shreddedTable = (FileStoreTable) catalog.getTable(shreddedId);
+        BatchWriteBuilder shreddedWriteBuilder = shreddedTable.newBatchWriteBuilder();
+        try (BatchTableWrite shreddedWrite = shreddedWriteBuilder.newWrite();
+                BatchTableCommit shreddedCommit = shreddedWriteBuilder.newCommit()) {
+            shreddedWrite.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("Alice"),
+                            GenericVariant.fromJson("{\"age\":30,\"city\":\"Beijing\"}")));
+            shreddedWrite.write(
+                    GenericRow.of(
+                            2,
+                            BinaryString.fromString("Bob"),
+                            GenericVariant.fromJson("{\"age\":25,\"city\":\"Shanghai\"}")));
+            shreddedWrite.write(
+                    GenericRow.of(
+                            3,
+                            BinaryString.fromString("Carol"),
+                            GenericVariant.fromJson("[1,2,3]")));
+            shreddedCommit.commit(shreddedWrite.prepareCommit());
+        }
+
+        FileStoreTable shreddedReadTable = (FileStoreTable) catalog.getTable(shreddedId);
+        List<Split> shreddedSplits =
+                new ArrayList<>(shreddedReadTable.newSnapshotReader().read().dataSplits());
+        List<String> shreddedRes =
+                getResult(
+                        shreddedReadTable.newRead(),
+                        shreddedSplits,
+                        row -> internalRowToString(row, shreddedReadTable.rowType()));
+        assertThat(shreddedRes).hasSize(3);
+        LOG.info(
+                "testJavaWriteVariantTable: wrote shredded VARIANT table '{}' with {} rows",
+                shreddedId.getTableName(),
+                shreddedRes.size());
+    }
+
+    /** Java reads a VARIANT-column table written by Python (Python→Java E2E). */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadVariantTable() throws Exception {
+        Identifier identifier = identifier("py_variant_test");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        List<String> res =
+                getResult(read, splits, row -> internalRowToString(row, table.rowType()));
+        assertThat(res).hasSize(4);
+
+        // Verify the VARIANT column is present in the schema
+        assertThat(table.rowType().getFieldNames()).contains("payload");
+        assertThat(table.rowType().getTypeAt(table.rowType().getFieldIndex("payload")))
+                .isEqualTo(DataTypes.VARIANT());
+
+        // Verify each row's VARIANT payload can be decoded by Java
+        List<Split> splits2 = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                read.createReader(splits2)) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        if (id == 4) {
+                            // null payload
+                            assertThat(row.isNullAt(2)).isTrue();
+                        } else {
+                            assertThat(row.isNullAt(2)).isFalse();
+                            org.apache.paimon.data.variant.Variant v = row.getVariant(2);
+                            assertThat(v).isNotNull();
+                        }
+                    });
+        }
+        LOG.info(
+                "testJavaReadVariantTable: Java read {} VARIANT rows written by Python",
+                res.size());
+
+        // Also read the shredded VARIANT table written by Python (py_variant_shredded_test).
+        // Python writes with variant.shreddingSchema to produce shredded Parquet; Java must
+        // reassemble the shredded sub-columns back into VARIANT values.
+        Identifier shreddedId = identifier("py_variant_shredded_test");
+        FileStoreTable shreddedTable = (FileStoreTable) catalog.getTable(shreddedId);
+        List<Split> shreddedSplits =
+                new ArrayList<>(shreddedTable.newSnapshotReader().read().dataSplits());
+        TableRead shreddedRead = shreddedTable.newRead();
+        List<String> shreddedRes =
+                getResult(
+                        shreddedRead,
+                        shreddedSplits,
+                        row -> internalRowToString(row, shreddedTable.rowType()));
+        assertThat(shreddedRes).hasSize(3);
+
+        // Schema check: the logical type must still be VARIANT
+        assertThat(shreddedTable.rowType().getFieldNames()).contains("payload");
+        assertThat(
+                        shreddedTable
+                                .rowType()
+                                .getTypeAt(shreddedTable.rowType().getFieldIndex("payload")))
+                .isEqualTo(DataTypes.VARIANT());
+
+        // Verify each row's VARIANT can be decoded
+        List<Split> shreddedSplits2 =
+                new ArrayList<>(shreddedTable.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                shreddedRead.createReader(shreddedSplits2)) {
+            reader.forEachRemaining(
+                    row -> {
+                        assertThat(row.isNullAt(2)).isFalse();
+                        org.apache.paimon.data.variant.Variant v = row.getVariant(2);
+                        assertThat(v).isNotNull();
+                    });
+        }
+        LOG.info(
+                "testJavaReadVariantTable: Java read {} shredded VARIANT rows written by Python",
+                shreddedRes.size());
     }
 
     /** Step 1: Write 5 base files for compact conflict test. */

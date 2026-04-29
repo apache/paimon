@@ -454,6 +454,22 @@ class DataTypeParser:
         )
 
 
+def is_variant_struct(pa_type: pyarrow.StructType) -> bool:
+    """Return True if *pa_type* is the shredded VARIANT struct encoding.
+
+    Matches ``struct<value: binary NOT NULL, metadata: binary NOT NULL>``.
+    """
+    if pa_type.num_fields != 2:
+        return False
+    names = {pa_type[i].name for i in range(pa_type.num_fields)}
+    if names != {'value', 'metadata'}:
+        return False
+    return all(
+        pyarrow.types.is_binary(pa_type[n].type) and not pa_type[n].nullable
+        for n in ('value', 'metadata')
+    )
+
+
 class PyarrowFieldParser:
 
     @staticmethod
@@ -481,6 +497,11 @@ class PyarrowFieldParser:
                 return pyarrow.binary()
             elif type_name == 'BLOB':
                 return pyarrow.large_binary()
+            elif type_name == 'VARIANT':
+                return pyarrow.struct([
+                    pyarrow.field('value', pyarrow.binary(), nullable=False),
+                    pyarrow.field('metadata', pyarrow.binary(), nullable=False),
+                ])
             elif type_name.startswith('DECIMAL'):
                 if type_name == 'DECIMAL':
                     return pyarrow.decimal128(10, 0)  # default to 10, 0
@@ -591,6 +612,8 @@ class PyarrowFieldParser:
             key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
             value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
+        elif types.is_struct(pa_type) and is_variant_struct(pa_type):
+            return AtomicType('VARIANT', nullable)
         elif types.is_struct(pa_type):
             pa_type: pyarrow.StructType
             fields = []

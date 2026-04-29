@@ -25,6 +25,7 @@ import pandas as pd
 import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
 
@@ -808,3 +809,195 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertEqual(result.column('f0')[i].as_py(), i)
             self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
             self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
+
+    def test_py_read_variant_table(self):
+        """Python reads a VARIANT-column table written by Java (Java→Python E2E)."""
+        table = self.catalog.get_table('default.variant_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+
+        self.assertEqual(result.num_rows, 3)
+
+        # VARIANT maps to struct<value: binary NOT NULL, metadata: binary NOT NULL>
+        payload_field = result.schema.field('payload')
+        self.assertTrue(pa.types.is_struct(payload_field.type),
+                        f"Expected struct type for VARIANT, got {payload_field.type}")
+        self.assertEqual(payload_field.type.num_fields, 2)
+        self.assertEqual(payload_field.type[0].name, 'value')
+        self.assertEqual(payload_field.type[1].name, 'metadata')
+        self.assertTrue(pa.types.is_binary(payload_field.type[0].type))
+        self.assertTrue(pa.types.is_binary(payload_field.type[1].type))
+
+        # All rows should have non-null payload structs
+        payload_col = result.column('payload')
+        for i in range(result.num_rows):
+            row = payload_col[i].as_py()
+            self.assertIsNotNone(row, f"Row {i}: expected non-null VARIANT")
+            self.assertIn('value', row)
+            self.assertIn('metadata', row)
+            self.assertIsInstance(row['value'], bytes)
+            self.assertIsInstance(row['metadata'], bytes)
+            self.assertGreater(len(row['value']), 0)
+
+        # Verify bytes are non-empty and can be decoded via GenericVariant
+        result_sorted = table_sort_by(result, 'id')
+        id_list = result_sorted.column('id').to_pylist()
+        payload_list = result_sorted.column('payload').to_pylist()
+
+        # Row 1: Alice, {"age":30,"city":"Beijing"}
+        alice_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(1)]).to_python()
+        self.assertEqual(alice_data['age'], 30)
+        self.assertEqual(alice_data['city'], 'Beijing')
+
+        # Row 2: Bob, {"age":25,"city":"Shanghai"}
+        bob_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(2)]).to_python()
+        self.assertEqual(bob_data['age'], 25)
+        self.assertEqual(bob_data['city'], 'Shanghai')
+
+        # Row 3: Carol, [1,2,3]
+        carol_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(3)]).to_python()
+        self.assertEqual(carol_data, [1, 2, 3])
+
+        print("test_py_read_variant_table: verified {} VARIANT rows".format(result.num_rows))
+
+        # Also verify shredded VARIANT: Java wrote variant_shredded_test with
+        # parquet.variant.shreddingSchema (age+city shredded). Python must reassemble
+        # the shredded Parquet columns back into standard struct<value, metadata>.
+        # Requires Python >= 3.7 (variant_shredding module uses __future__ annotations).
+        if sys.version_info[:2] < (3, 7):
+            print("test_py_read_variant_table: skipping shredded VARIANT check (Python < 3.7)")
+            return
+        shredded_table = self.catalog.get_table('default.variant_shredded_test')
+        shredded_rb = shredded_table.new_read_builder()
+        shredded_result = shredded_rb.new_read().to_arrow(
+            shredded_rb.new_scan().plan().splits())
+        self.assertEqual(shredded_result.num_rows, 3)
+
+        # Assembled column must be the same struct<value: binary, metadata: binary> shape
+        shredded_pf = shredded_result.schema.field('payload')
+        self.assertTrue(pa.types.is_struct(shredded_pf.type),
+                        "shredded VARIANT should assemble to struct, got {}".format(shredded_pf.type))
+        self.assertEqual(shredded_pf.type.num_fields, 2)
+        self.assertEqual(shredded_pf.type[0].name, 'value')
+        self.assertEqual(shredded_pf.type[1].name, 'metadata')
+
+        # Verify decoded values match what Java wrote
+        shredded_sorted = table_sort_by(shredded_result, 'id')
+        shredded_ids = shredded_sorted.column('id').to_pylist()
+        shredded_payloads = shredded_sorted.column('payload').to_pylist()
+
+        # Row 1: Alice {"age":30,"city":"Beijing"} — both fields were shredded
+        alice = GenericVariant.from_arrow_struct(
+            shredded_payloads[shredded_ids.index(1)]).to_python()
+        self.assertEqual(alice['age'], 30)
+        self.assertEqual(alice['city'], 'Beijing')
+
+        # Row 2: Bob {"age":25,"city":"Shanghai"} — both fields were shredded
+        bob = GenericVariant.from_arrow_struct(
+            shredded_payloads[shredded_ids.index(2)]).to_python()
+        self.assertEqual(bob['age'], 25)
+        self.assertEqual(bob['city'], 'Shanghai')
+
+        # Row 3: Carol [1,2,3] — array, no shredded fields; everything in overflow
+        carol = GenericVariant.from_arrow_struct(
+            shredded_payloads[shredded_ids.index(3)]).to_python()
+        self.assertEqual(carol, [1, 2, 3])
+
+        print("test_py_read_variant_table: verified {} shredded VARIANT rows".format(
+            shredded_result.num_rows))
+
+    def test_py_write_variant_table(self):
+        """Python writes a VARIANT-column table for Java to read back (Python→Java E2E).
+
+        Data written:
+            id=1  payload={"name":"test","value":42}
+            id=2  payload=[10,20,30]
+            id=3  payload="hello"
+            id=4  payload=null
+        """
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', variant_type),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'})
+
+        table_name = 'default.py_variant_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        variant_col = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({"name": "test", "value": 42}),
+            GenericVariant.from_python([10, 20, 30]),
+            GenericVariant.from_python("hello"),
+            None,  # SQL NULL at the column level, not a VARIANT containing JSON null
+        ])
+        data = pa.table({
+            'id': pa.array([1, 2, 3, 4], type=pa.int32()),
+            'name': pa.array(['row1', 'row2', 'row3', 'row4'], type=pa.string()),
+            'payload': variant_col,
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        print("test_py_write_variant_table: wrote 4 VARIANT rows to {}".format(table_name))
+
+        # Also write a shredded VARIANT table (py_variant_shredded_test) for Java to read.
+        # Python shreds the 'age' (BIGINT) and 'city' (VARCHAR) sub-fields of 'payload'
+        # when writing Parquet. Java must reassemble the shredded columns on read.
+        # Requires Python >= 3.7 (variant_shredding module uses __future__ annotations).
+        if sys.version_info[:2] < (3, 7):
+            print("test_py_write_variant_table: skipping shredded VARIANT write (Python < 3.7)")
+            return
+        shredding_json = (
+            '{"type":"ROW","fields":[{"name":"payload","type":{"type":"ROW","fields":['
+            '{"name":"age","type":"BIGINT"},'
+            '{"name":"city","type":"VARCHAR"}'
+            ']}}]}'
+        )
+        shredded_table_name = 'default.py_variant_shredded_test'
+        self.catalog.drop_table(shredded_table_name, True)
+        shredded_schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'bucket': '-1', 'variant.shreddingSchema': shredding_json}
+        )
+        self.catalog.create_table(shredded_table_name, shredded_schema, False)
+        shredded_table = self.catalog.get_table(shredded_table_name)
+
+        # Use data with age+city fields so the shredded sub-columns are exercised.
+        # Row 3 is an array — it has no age/city, so it goes entirely to overflow.
+        shredded_variant_col = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({"age": 30, "city": "Beijing"}),
+            GenericVariant.from_python({"age": 25, "city": "Shanghai"}),
+            GenericVariant.from_python([1, 2, 3]),
+        ])
+        shredded_data = pa.table(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': pa.array(['Alice', 'Bob', 'Carol'], type=pa.string()),
+                'payload': shredded_variant_col,
+            },
+            schema=pa_schema,
+        )
+        shredded_wb = shredded_table.new_batch_write_builder()
+        shredded_tw = shredded_wb.new_write()
+        shredded_tc = shredded_wb.new_commit()
+        shredded_tw.write_arrow(shredded_data)
+        shredded_tc.commit(shredded_tw.prepare_commit())
+        shredded_tw.close()
+        shredded_tc.close()
+        print("test_py_write_variant_table: wrote 3 shredded VARIANT rows to {}".format(
+            shredded_table_name))

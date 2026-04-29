@@ -70,6 +70,22 @@ class DataWriter(ABC):
         )
         # Store the current generated external path to preserve scheme in metadata
         self._current_external_path: Optional[str] = None
+        # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
+        self._variant_shredding: Dict[str, Tuple] = {}
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
+                and self.options.variant_shredding_enabled():
+            shredding_json = self.options.variant_shredding_schema()
+            if shredding_json:
+                from pypaimon.data.variant_shredding import (
+                    parse_shredding_schema_option, shredding_schema_to_arrow_type)
+                col_schemas = parse_shredding_schema_option(shredding_json)
+                for col_name, obj_fields in col_schemas.items():
+                    target_type = shredding_schema_to_arrow_type(obj_fields)
+                    self._variant_shredding[col_name] = (obj_fields, target_type)
+
+        # Paimon field id map, used by _apply_variant_shredding; built once since
+        # the table schema is fixed for the lifetime of this writer.
+        self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -167,6 +183,9 @@ class DataWriter(ABC):
         else:
             external_path_str = None
 
+        if self._variant_shredding:
+            data = self._apply_variant_shredding(data)
+
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
@@ -236,6 +255,31 @@ class DataWriter(ABC):
             # None means all columns in the table have been written
             file_path=file_path,
         ))
+
+    def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
+        """Transform VARIANT columns into shredded Parquet format.
+
+        Each shredded parent column is tagged with a ``PARQUET:field_id`` so that
+        the Java ``ParquetSchemaConverter.convertToPaimonField`` (called from
+        ``VariantUtils.variantFileType``) can read ``parquetType.getId().intValue()``
+        without a NullPointerException.
+        """
+        from pypaimon.data.variant_shredding import shred_variant_column
+        columns = list(data.columns)
+        fields = list(data.schema)
+        changed = False
+
+        for i, f in enumerate(fields):
+            if f.name in self._variant_shredding:
+                obj_fields, target_type = self._variant_shredding[f.name]
+                columns[i] = shred_variant_column(columns[i], obj_fields, target_type)
+                pid = self._paimon_field_id.get(f.name)
+                parent_meta = {b'PARQUET:field_id': str(pid).encode()} if pid is not None else None
+                fields[i] = pa.field(f.name, target_type, nullable=f.nullable, metadata=parent_meta)
+                changed = True
+        if not changed:
+            return data
+        return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
