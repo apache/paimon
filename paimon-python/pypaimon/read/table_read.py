@@ -232,7 +232,7 @@ class TableRead:
             raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
 
         from pypaimon.read.datasource.ray_datasource import RayDatasource
-        datasource = RayDatasource(self, splits)
+        datasource = RayDatasource._from_table_read(self, splits)
         return ray.data.read_datasource(
             datasource,
             ray_remote_args=ray_remote_args,
