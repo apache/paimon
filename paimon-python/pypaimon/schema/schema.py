@@ -98,4 +98,11 @@ class Schema:
                     f"Table with vector-store file format requires: {', '.join(missing)}."
                 )
 
+        changelog_producer = (options or {}).get(CoreOptions.CHANGELOG_PRODUCER.key(), 'none')
+        if changelog_producer != 'none' and not primary_keys:
+            raise ValueError(
+                f"Cannot set 'changelog-producer' to '{changelog_producer}' on a table without primary keys. "
+                f"Changelog producer requires primary keys to be defined."
+            )
+
         return Schema(fields, partition_keys, primary_keys, options, comment)
