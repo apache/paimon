@@ -295,7 +295,7 @@ class ChangelogProducerTest(unittest.TestCase):
         )
         self.assertIsNotNone(schema)
 
-    def test_input_mode_changelog_uses_parquet_regardless_of_data_format(self):
+    def test_input_mode_changelog_inherits_data_file_format(self):
         table = self._create_table(
             'test_input_changelog_format',
             options={'changelog-producer': 'input', 'bucket': '1', 'file.format': 'orc'}
@@ -312,8 +312,8 @@ class ChangelogProducerTest(unittest.TestCase):
         changelog_files = glob.glob(os.path.join(bucket_dir, 'changelog-*'))
         self.assertTrue(len(changelog_files) > 0, "Should have changelog files")
         for f in changelog_files:
-            self.assertTrue(f.endswith('.parquet'),
-                            f"Changelog file should use parquet format by default, got {f}")
+            self.assertTrue(f.endswith('.orc'),
+                            f"Changelog file should inherit data file format (orc), got {f}")
 
         data_files = glob.glob(os.path.join(bucket_dir, 'data-*'))
         self.assertTrue(len(data_files) > 0, "Should have data files")
