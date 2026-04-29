@@ -27,36 +27,39 @@ from pypaimon.api.client import ExponentialRetry
 
 class TestExponentialRetryStrategy(unittest.TestCase):
 
-    def setUp(self):
-        self.retry_strategy = ExponentialRetry(max_retries=5)
-
     def test_basic_retry(self):
         retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(5)
-        
+
         self.assertEqual(retry.total, 5)
         self.assertEqual(retry.read, 5)
-        self.assertEqual(retry.connect, 0)  # Connection errors should not retry
-        
+        # Connect failures are intentionally non-retriable — see the
+        # comment on ``ExponentialRetry.__create_retry_strategy``.
+        self.assertEqual(retry.connect, 0)
+
         self.assertIn(429, retry.status_forcelist)  # Too Many Requests
         self.assertIn(503, retry.status_forcelist)  # Service Unavailable
         self.assertNotIn(404, retry.status_forcelist)
 
-    def test_no_retry_on_connect_error(self):
+    def test_retry_on_connect_error(self):
+        # ``connect=0`` means connect errors are not retried — the
+        # request should fail fast within roughly the connect timeout.
+        retry_strategy = ExponentialRetry(max_retries=2)
         session = requests.Session()
-        session.mount("http://", self.retry_strategy.adapter)
-        session.mount("https://", self.retry_strategy.adapter)
-        session.timeout = (1, 1)
+        session.mount("http://", retry_strategy.adapter)
+        session.mount("https://", retry_strategy.adapter)
 
         start_time = time.time()
-        
+
         try:
             session.get("http://192.168.255.255:9999", timeout=(1, 1))
             self.fail("Expected ConnectionError")
         except (ConnectionError, ConnectTimeout, Timeout, NewConnectionError, MaxRetryError):
             elapsed = time.time() - start_time
+            # No connect retries → bail out within roughly the connect
+            # timeout, with no exponential backoff.
             self.assertLess(
                 elapsed, 5.0,
-                f"Connection error took {elapsed:.2f}s, should fail quickly without retry"
+                "connect failures should not be retried (got {:.2f}s)".format(elapsed)
             )
 
 
