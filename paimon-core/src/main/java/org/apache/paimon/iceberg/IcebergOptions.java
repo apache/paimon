@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -136,7 +137,9 @@ public class IcebergOptions {
                     .noDefaultValue()
                     .withDescription(
                             "Metastore database name for Iceberg Catalog. "
-                                    + "Set this as an iceberg database alias if using a centralized Catalog.");
+                                    + "Set this as an iceberg database alias if using a centralized Catalog. "
+                                    + "Multiple databases can be specified with semicolons, "
+                                    + "e.g. 'db1;db2'. The table will be registered in each database.");
 
     public static final ConfigOption<String> METASTORE_TABLE =
             key("metadata.iceberg.table")
@@ -257,6 +260,19 @@ public class IcebergOptions {
         public InlineElement getDescription() {
             return TextElement.text(description);
         }
+    }
+
+    public static List<String> metastoreDatabases(Options options, String fallbackDatabase) {
+        String dbValue = options.get(METASTORE_DATABASE);
+        if (dbValue == null || dbValue.isEmpty()) {
+            return Collections.singletonList(fallbackDatabase);
+        }
+        String[] parts = dbValue.split(";");
+        List<String> databases = new ArrayList<>(parts.length);
+        for (String part : parts) {
+            databases.add(part.trim());
+        }
+        return databases;
     }
 
     /**

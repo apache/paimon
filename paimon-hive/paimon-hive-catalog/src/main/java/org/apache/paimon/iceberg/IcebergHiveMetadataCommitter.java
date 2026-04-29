@@ -49,6 +49,7 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.iceberg.IcebergCommitCallback.catalogDatabasePath;
@@ -62,14 +63,14 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
     private static final Logger LOG = LoggerFactory.getLogger(IcebergHiveMetadataCommitter.class);
 
     private final FileStoreTable table;
-    private final Identifier identifier;
     private final ClientPool<IMetaStoreClient, TException> clients;
-    private final String icebergHiveDatabase;
-    private final String icebergHiveTable;
+    // Supports syncing to multiple Iceberg databases via semicolon-delimited config
+    private final List<String> icebergDatabases;
+    private final String icebergTableName;
 
     public IcebergHiveMetadataCommitter(FileStoreTable table) {
         this.table = table;
-        this.identifier =
+        Identifier identifier =
                 Preconditions.checkNotNull(
                         table.catalogEnvironment().identifier(),
                         "If you want to sync Paimon Iceberg compatible metadata to Hive, "
@@ -83,8 +84,6 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         String uri = options.get(IcebergOptions.URI);
         String hiveConfDir = options.get(IcebergOptions.HIVE_CONF_DIR);
         String hadoopConfDir = options.get(IcebergOptions.HADOOP_CONF_DIR);
-        String icebergDatabase = options.get(IcebergOptions.METASTORE_DATABASE);
-        String icebergTable = options.get(IcebergOptions.METASTORE_TABLE);
         Configuration hadoopConf = new Configuration();
         hadoopConf.setClassLoader(IcebergHiveMetadataCommitter.class.getClassLoader());
         HiveConf hiveConf = HiveCatalog.createHiveConf(hiveConfDir, hadoopConfDir, hadoopConf);
@@ -104,14 +103,13 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
                     IcebergOptions.URI.key());
         }
 
-        this.icebergHiveDatabase =
-                icebergDatabase != null && !icebergDatabase.isEmpty()
-                        ? icebergDatabase
-                        : this.identifier.getDatabaseName();
-        this.icebergHiveTable =
-                icebergTable != null && !icebergTable.isEmpty()
-                        ? icebergTable
-                        : this.identifier.getTableName();
+        this.icebergDatabases =
+                IcebergOptions.metastoreDatabases(options, identifier.getDatabaseName());
+        String tableValue = options.get(IcebergOptions.METASTORE_TABLE);
+        this.icebergTableName =
+                tableValue != null && !tableValue.isEmpty()
+                        ? tableValue
+                        : identifier.getTableName();
 
         this.clients =
                 new CachedClientPool(
@@ -140,16 +138,27 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
     private void commitMetadataImpl(Path newMetadataPath, @Nullable Path baseMetadataPath)
             throws Exception {
-        if (!databaseExists(icebergHiveDatabase)) {
-            createDatabase(icebergHiveDatabase);
+        for (String databaseName : icebergDatabases) {
+            commitMetadataForTarget(
+                    databaseName, icebergTableName, newMetadataPath, baseMetadataPath);
+        }
+    }
+
+    private void commitMetadataForTarget(
+            String databaseName,
+            String tableName,
+            Path newMetadataPath,
+            @Nullable Path baseMetadataPath)
+            throws Exception {
+        if (!databaseExists(databaseName)) {
+            createDatabase(databaseName);
         }
 
         Table hiveTable;
-        if (tableExists()) {
-            hiveTable =
-                    clients.run(client -> client.getTable(icebergHiveDatabase, icebergHiveTable));
+        if (tableExists(databaseName, tableName)) {
+            hiveTable = clients.run(client -> client.getTable(databaseName, tableName));
         } else {
-            hiveTable = createTable(newMetadataPath);
+            hiveTable = createTable(databaseName, tableName, newMetadataPath);
         }
 
         hiveTable.getParameters().put("metadata_location", newMetadataPath.toString());
@@ -180,10 +189,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         clients.execute(
                 client ->
                         client.alter_table_with_environmentContext(
-                                icebergHiveDatabase,
-                                icebergHiveTable,
-                                hiveTable,
-                                environmentContext));
+                                databaseName, tableName, hiveTable, environmentContext));
     }
 
     private boolean databaseExists(String databaseName) throws Exception {
@@ -202,16 +208,17 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         clients.execute(client -> client.createDatabase(database));
     }
 
-    private boolean tableExists() throws Exception {
-        return clients.run(client -> client.tableExists(icebergHiveDatabase, icebergHiveTable));
+    private boolean tableExists(String databaseName, String tableName) throws Exception {
+        return clients.run(client -> client.tableExists(databaseName, tableName));
     }
 
-    private Table createTable(Path metadataPath) throws Exception {
+    private Table createTable(String databaseName, String tableName, Path metadataPath)
+            throws Exception {
         long currentTimeMillis = System.currentTimeMillis();
         Table hiveTable =
                 new Table(
-                        icebergHiveTable,
-                        icebergHiveDatabase,
+                        tableName,
+                        databaseName,
                         // current linux user
                         System.getProperty("user.name"),
                         (int) (currentTimeMillis / 1000),

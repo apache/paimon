@@ -63,6 +63,8 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
     public void after() {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
         hiveShell.execute("DROP DATABASE IF EXISTS test_db_iceberg CASCADE");
+        hiveShell.execute("DROP DATABASE IF EXISTS iceberg_db1 CASCADE");
+        hiveShell.execute("DROP DATABASE IF EXISTS iceberg_db2 CASCADE");
     }
 
     @Test
@@ -243,6 +245,80 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                 collect(
                         tEnv.executeSql(
                                 "SELECT data, id, pt FROM my_iceberg.test_db_iceberg.t1_iceberg WHERE id > 1 ORDER BY pt, id")));
+    }
+
+    @Test
+    public void testMultipleDatabases() throws Exception {
+        TableEnvironment tEnv =
+                TableEnvironmentImpl.create(
+                        EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(
+                "CREATE CATALOG my_paimon WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + path
+                        + "' )");
+        tEnv.executeSql("CREATE DATABASE my_paimon.test_db");
+        tEnv.executeSql(
+                "CREATE TABLE my_paimon.test_db.t2 ( pt INT, id INT, data STRING, PRIMARY KEY (pt, id) NOT ENFORCED ) "
+                        + "PARTITIONED BY (pt) WITH "
+                        + "( 'metadata.iceberg.storage' = 'hive-catalog', 'metadata.iceberg.uri' = '', 'file.format' = 'avro', "
+                        + " 'metadata.iceberg.database' = 'iceberg_db1;iceberg_db2',"
+                        + " 'full-compaction.delta-commits' = '1' )");
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon.test_db.t2 VALUES "
+                                + "(1, 1, 'apple'), (1, 2, 'pear'), (2, 1, 'cat'), (2, 2, 'dog')")
+                .await();
+
+        tEnv.executeSql(
+                "CREATE CATALOG my_iceberg WITH "
+                        + "( 'type' = 'iceberg', 'catalog-type' = 'hive', 'uri' = '', 'warehouse' = '"
+                        + path
+                        + "', 'cache-enabled' = 'false' )");
+
+        // data visible in first database
+        assertEquals(
+                Arrays.asList(
+                        Row.of(1, 1, "apple"),
+                        Row.of(1, 2, "pear"),
+                        Row.of(2, 1, "cat"),
+                        Row.of(2, 2, "dog")),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT * FROM my_iceberg.iceberg_db1.t2 ORDER BY pt, id")));
+
+        // data visible in second database
+        assertEquals(
+                Arrays.asList(
+                        Row.of(1, 1, "apple"),
+                        Row.of(1, 2, "pear"),
+                        Row.of(2, 1, "cat"),
+                        Row.of(2, 2, "dog")),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT * FROM my_iceberg.iceberg_db2.t2 ORDER BY pt, id")));
+
+        // updates propagate to both databases
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon.test_db.t2 VALUES "
+                                + "(1, 1, 'cherry'), (2, 2, 'elephant')")
+                .await();
+        assertEquals(
+                Arrays.asList(
+                        Row.of(1, 1, "cherry"),
+                        Row.of(1, 2, "pear"),
+                        Row.of(2, 1, "cat"),
+                        Row.of(2, 2, "elephant")),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT * FROM my_iceberg.iceberg_db1.t2 ORDER BY pt, id")));
+        assertEquals(
+                Arrays.asList(
+                        Row.of(1, 1, "cherry"),
+                        Row.of(1, 2, "pear"),
+                        Row.of(2, 1, "cat"),
+                        Row.of(2, 2, "elephant")),
+                collect(
+                        tEnv.executeSql(
+                                "SELECT * FROM my_iceberg.iceberg_db2.t2 ORDER BY pt, id")));
     }
 
     @Test
