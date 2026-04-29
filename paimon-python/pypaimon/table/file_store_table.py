@@ -377,6 +377,11 @@ class FileStoreTable(Table):
         from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
         return VectorSearchBuilderImpl(self)
 
+    def new_maintenance(self):
+        """Create a table maintenance helper."""
+        from pypaimon.table.maintenance import TableMaintenance
+        return TableMaintenance(self)
+
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:
@@ -390,8 +395,9 @@ class FileStoreTable(Table):
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
-    def copy(self, options: dict) -> 'FileStoreTable':
-        if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
+    def copy(self, options: dict, allow_bucket_change: bool = False) -> 'FileStoreTable':
+        if (not allow_bucket_change and CoreOptions.BUCKET.key() in options
+                and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket()):
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():

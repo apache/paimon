@@ -83,6 +83,18 @@ class BatchTableCommit(TableCommit):
     def commit(self, commit_messages: List[CommitMessage]):
         self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
 
+    def compact(self, compact_partition: Optional[Dict[str, str]], commit_messages: List[CommitMessage]):
+        """Commit rewritten files as a compaction snapshot."""
+        self._check_committed()
+        non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
+        if not non_empty_messages:
+            return
+        self.file_store_commit.compact(
+            compact_partition=compact_partition,
+            commit_messages=non_empty_messages,
+            commit_identifier=BATCH_COMMIT_IDENTIFIER
+        )
+
     def truncate_table(self) -> None:
         """Truncate the entire table, deleting all data."""
         self._check_committed()

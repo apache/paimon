@@ -191,6 +191,28 @@ class FileStoreCommit:
             allow_rollback=False,
         )
 
+    def compact(self, compact_partition, commit_messages: List[CommitMessage], commit_identifier: int):
+        """Commit rewritten files as a compaction snapshot."""
+        if not commit_messages:
+            return
+
+        partition_filter = None
+        if compact_partition is not None and len(compact_partition) > 0:
+            predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+            sub_predicates = []
+            for key, value in compact_partition.items():
+                sub_predicates.append(predicate_builder.equal(key, value))
+            partition_filter = predicate_builder.and_predicates(sub_predicates)
+
+        self._try_commit(
+            commit_kind="COMPACT",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                snapshot, partition_filter, commit_messages),
+            detect_conflicts=True,
+            allow_rollback=False,
+        )
+
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
