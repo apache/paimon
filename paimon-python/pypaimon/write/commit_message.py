@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -27,7 +27,8 @@ class CommitMessage:
     partition: Tuple
     bucket: int
     new_files: List[DataFileMeta]
+    changelog_files: List[DataFileMeta] = field(default_factory=list)
     check_from_snapshot: Optional[int] = -1
 
     def is_empty(self):
-        return not self.new_files
+        return not self.new_files and not self.changelog_files
