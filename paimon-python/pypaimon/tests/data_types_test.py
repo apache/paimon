@@ -20,7 +20,7 @@ from parameterized import parameterized
 import pyarrow as pa
 
 from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
-                                        RowType, PyarrowFieldParser)
+                                        RowType, VectorType, PyarrowFieldParser)
 
 
 class DataTypesTest(unittest.TestCase):
@@ -58,6 +58,32 @@ class DataTypesTest(unittest.TestCase):
     def test_map_type(self):
         self.assertEqual(str(MapType(True, AtomicType("STRING"), AtomicType("TIMESTAMP(6)"))),
                          "MAP<STRING, TIMESTAMP(6)>")
+
+    def test_vector_type(self):
+        vector_type = VectorType(True, AtomicType("FLOAT"), 3)
+        self.assertEqual(str(vector_type), "VECTOR<FLOAT, 3>")
+        self.assertEqual(
+            vector_type.to_dict(),
+            {
+                "type": "VECTOR",
+                "element": "FLOAT",
+                "length": 3,
+                "nullable": True
+            }
+        )
+        self.assertEqual(vector_type, VectorType.from_dict(vector_type.to_dict()))
+        self.assertEqual(hash(vector_type), hash(VectorType(True, AtomicType("FLOAT"), 3)))
+
+        not_null_vector = VectorType(False, AtomicType("FLOAT", nullable=False), 3)
+        self.assertEqual(str(not_null_vector), "VECTOR<FLOAT NOT NULL, 3> NOT NULL")
+        self.assertEqual(not_null_vector, VectorType.from_dict(not_null_vector.to_dict()))
+
+        with self.assertRaises(ValueError):
+            VectorType(True, AtomicType("FLOAT"), 0)
+        with self.assertRaises(ValueError):
+            VectorType(True, AtomicType("STRING"), 3)
+        with self.assertRaises(ValueError):
+            VectorType(True, ArrayType(True, AtomicType("INT")), 3)
 
     def test_row_type(self):
         self.assertEqual(str(RowType(True, [DataField(0, "a", AtomicType("STRING"), "Someone's desc."),
@@ -134,6 +160,20 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(len(converted_nested_field.fields), 2)
         self.assertEqual(converted_nested_field.fields[0].name, "inner_field1")
         self.assertEqual(converted_nested_field.fields[1].name, "inner_field2")
+
+    def test_vector_pyarrow_roundtrip(self):
+        paimon_vector = VectorType(True, AtomicType("FLOAT"), 3)
+        pa_type = PyarrowFieldParser.from_paimon_type(paimon_vector)
+
+        self.assertTrue(pa.types.is_fixed_size_list(pa_type))
+        self.assertEqual(pa_type.list_size, 3)
+        self.assertTrue(pa.types.is_float32(pa_type.value_type))
+
+        converted_paimon_vector = PyarrowFieldParser.to_paimon_type(pa_type, nullable=True)
+        self.assertEqual(converted_paimon_vector, paimon_vector)
+
+        avro_type = PyarrowFieldParser.to_avro_type(pa_type, "embedding")
+        self.assertEqual(avro_type, {"type": "array", "items": "float"})
 
     def test_time_type(self):
         pa_type = PyarrowFieldParser.from_paimon_type(AtomicType("TIME"))
