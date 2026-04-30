@@ -567,6 +567,36 @@ under the License.
             <td>Default aggregate function of all fields for partial-update and aggregate merge function.</td>
         </tr>
         <tr>
+            <td><h5>file-cache.block-size</h5></td>
+            <td style="word-wrap: break-word;">1 mb</td>
+            <td>MemorySize</td>
+            <td>Block size for local disk cache.</td>
+        </tr>
+        <tr>
+            <td><h5>file-cache.dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Directory for file block cache. Defaults to a 'paimon-file-cache' subdirectory under the system temp directory.</td>
+        </tr>
+        <tr>
+            <td><h5>file-cache.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable local disk block cache for file reads.</td>
+        </tr>
+        <tr>
+            <td><h5>file-cache.max-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of the local disk block cache. Unlimited by default.</td>
+        </tr>
+        <tr>
+            <td><h5>file-cache.whitelist</h5></td>
+            <td style="word-wrap: break-word;">"meta,global-index"</td>
+            <td>String</td>
+            <td>Comma-separated list of file types to cache. Supported values: meta, global-index, bucket-index, data, file-index.</td>
+        </tr>
+        <tr>
             <td><h5>file-index.in-manifest-threshold</h5></td>
             <td style="word-wrap: break-word;">500 bytes</td>
             <td>MemorySize</td>

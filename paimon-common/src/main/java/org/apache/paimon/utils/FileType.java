@@ -20,6 +20,12 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.Path;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Classification of Paimon files.
  *
@@ -38,6 +44,8 @@ public enum FileType {
     BUCKET_INDEX,
     GLOBAL_INDEX,
     FILE_INDEX;
+
+    private static final Logger LOG = LoggerFactory.getLogger(FileType.class);
 
     // keep in sync with SnapshotManager.SNAPSHOT_PREFIX
     private static final String SNAPSHOT_PREFIX = "snapshot-";
@@ -68,6 +76,46 @@ public enum FileType {
     /** Returns {@code true} if this file type is any kind of index. */
     public boolean isIndex() {
         return this == BUCKET_INDEX || this == GLOBAL_INDEX || this == FILE_INDEX;
+    }
+
+    /** Parse a comma-separated whitelist string into a set of {@link FileType}s. */
+    public static Set<FileType> parseWhitelist(String whitelist) {
+        Set<FileType> result = EnumSet.noneOf(FileType.class);
+        for (String name : whitelist.split(",")) {
+            name = name.trim();
+            switch (name) {
+                case "meta":
+                    result.add(META);
+                    break;
+                case "global-index":
+                    result.add(GLOBAL_INDEX);
+                    break;
+                case "bucket-index":
+                    result.add(BUCKET_INDEX);
+                    break;
+                case "data":
+                    result.add(DATA);
+                    break;
+                case "file-index":
+                    result.add(FILE_INDEX);
+                    break;
+                default:
+                    if (!name.isEmpty()) {
+                        LOG.warn(
+                                "Unknown file-cache.whitelist value '{}'. "
+                                        + "Supported values: meta, global-index, bucket-index, data, file-index.",
+                                name);
+                    }
+                    break;
+            }
+        }
+        return result;
+    }
+
+    /** Returns {@code true} if the file is mutable and should not be cached. */
+    public static boolean isMutable(Path filePath) {
+        String name = filePath.getName();
+        return "EARLIEST".equals(name) || "LATEST".equals(name);
     }
 
     /**

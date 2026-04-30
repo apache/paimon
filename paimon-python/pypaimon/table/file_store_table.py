@@ -28,6 +28,7 @@ from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.utils.file_type import FileType
 from pypaimon.table.table import Table
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
@@ -40,7 +41,6 @@ from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 class FileStoreTable(Table):
     def __init__(self, file_io: FileIO, identifier: Identifier, table_path: str,
                  table_schema: TableSchema, catalog_environment: Optional[CatalogEnvironment] = None):
-        self.file_io = file_io
         self.identifier = identifier
         self.table_path = table_path
         self.catalog_environment = catalog_environment or CatalogEnvironment.empty()
@@ -60,6 +60,22 @@ class FileStoreTable(Table):
         self.cross_partition_update = self.table_schema.cross_partition_update()
         self.is_primary_key_table = bool(self.primary_keys)
         self.total_buckets = self.options.bucket()
+
+        if self.options.file_cache_enabled():
+            import os
+            import tempfile
+            from pypaimon.filesystem.caching_file_io import CachingFileIO, BlockDiskCache
+            cache_dir = (self.options.file_cache_dir()
+                         or os.path.join(tempfile.gettempdir(), "paimon-file-cache"))
+            max_size_opt = self.options.file_cache_max_size()
+            max_size = max_size_opt.get_bytes() if max_size_opt is not None else (2 ** 63 - 1)
+            block_size = self.options.file_cache_block_size().get_bytes()
+            cache = BlockDiskCache.get_or_create(cache_dir, max_size, block_size)
+            whitelist = FileType.parse_whitelist(self.options.file_cache_whitelist())
+            if whitelist:
+                file_io = CachingFileIO(file_io, cache, whitelist)
+
+        self.file_io = file_io
 
         current_branch = self.options.branch()
         self.schema_manager = SchemaManager(file_io, table_path, branch=current_branch)
