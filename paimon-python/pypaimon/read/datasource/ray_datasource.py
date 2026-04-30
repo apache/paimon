@@ -75,30 +75,57 @@ class RayDatasource(Datasource):
 
     def __init__(
         self,
-        table_identifier: str,
-        catalog_options: Dict[str, str],
+        table_identifier: Optional[str] = None,
+        catalog_options: Optional[Dict[str, str]] = None,
         predicate=None,
         projection: Optional[List[str]] = None,
         limit: Optional[int] = None,
+        _resolved=None,
     ):
         """
         Initialize RayDatasource.
 
         Args:
             table_identifier: Fully qualified table name, e.g. ``"db.table"``.
+                Required unless ``_resolved`` is provided.
             catalog_options: Options passed to ``CatalogFactory.create()``.
+                Required unless ``_resolved`` is provided.
             predicate: Optional ``Predicate`` for scan-time filtering.
             projection: Optional list of column names to read.
             limit: Optional row limit for the scan.
+            _resolved: Internal sentinel used by ``TableRead.to_ray()``. When
+                supplied, must be a ``(table, splits, read_type)`` tuple of
+                already-resolved values; the catalog/identifier path is then
+                skipped. Not part of the public API.
         """
-        self.table_identifier = table_identifier
-        self.catalog_options = catalog_options
-        self.predicate = predicate
-        self.projection = projection
-        self.limit = limit
-        self._table = None
-        self._splits = None
-        self._read_type = None
+        if _resolved is None:
+            if not table_identifier:
+                raise ValueError(
+                    "table_identifier is required (or pass _resolved=...).")
+            if catalog_options is None:
+                raise ValueError(
+                    "catalog_options is required (or pass _resolved=...).")
+            self.table_identifier = table_identifier
+            self.catalog_options = catalog_options
+            self.predicate = predicate
+            self.projection = projection
+            self.limit = limit
+            self._table = None
+            self._splits = None
+            self._read_type = None
+        else:
+            # Pre-resolved bridge path used by ``TableRead.to_ray()`` — the
+            # caller has already loaded the table and planned splits, so we
+            # short-circuit the catalog lookup and ``ReadBuilder`` planning.
+            table, splits, read_type = _resolved
+            self.table_identifier = None
+            self.catalog_options = None
+            self.predicate = predicate
+            self.projection = projection
+            self.limit = limit
+            self._table = table
+            self._splits = splits
+            self._read_type = read_type
         self._schema = None
 
     @property
@@ -113,18 +140,24 @@ class RayDatasource(Datasource):
     @property
     def splits(self):
         """Lazily plan splits from the table."""
-        if self._splits is None:
-            self._plan()
+        self._ensure_planned()
         return self._splits
 
     @property
     def read_type(self):
         """Lazily resolve the scan read type from filter / projection / limit."""
-        if self._read_type is None:
-            self._plan()
+        self._ensure_planned()
         return self._read_type
 
-    def _plan(self):
+    def _ensure_planned(self):
+        """Run the scan plan if either ``_splits`` or ``_read_type`` is missing.
+
+        Both are populated together by a single ``ReadBuilder`` plan, so the
+        ``splits`` / ``read_type`` properties share this entry point instead
+        of duplicating the ``if x is None`` check.
+        """
+        if self._splits is not None and self._read_type is not None:
+            return
         from pypaimon.read.read_builder import ReadBuilder
         rb = ReadBuilder(self.table)
         if self.predicate is not None:
@@ -140,18 +173,15 @@ class RayDatasource(Datasource):
     def _from_table_read(cls, table_read, splits):
         """Bridge for ``TableRead.to_ray()`` — wraps an already-resolved
         ``(table_read, splits)`` pair without going back through the catalog.
+
+        Forwards through ``__init__`` via the ``_resolved`` sentinel so any
+        future field added to ``__init__`` is automatically initialized for
+        this path too.
         """
-        ds = cls.__new__(cls)
-        ds.table_identifier = None
-        ds.catalog_options = None
-        ds.predicate = table_read.predicate
-        ds.projection = None
-        ds.limit = None
-        ds._table = table_read.table
-        ds._splits = splits
-        ds._read_type = table_read.read_type
-        ds._schema = None
-        return ds
+        return cls(
+            predicate=table_read.predicate,
+            _resolved=(table_read.table, splits, table_read.read_type),
+        )
 
     def get_name(self) -> str:
         if self.table_identifier:

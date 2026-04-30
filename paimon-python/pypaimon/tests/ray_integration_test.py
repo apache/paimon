@@ -142,6 +142,47 @@ class RayIntegrationTest(unittest.TestCase):
         df = ds.to_pandas()
         self.assertEqual(set(df['category'].tolist()), {'A'})
 
+    def test_read_paimon_with_limit(self):
+        """``read_paimon(limit=N)`` propagates the limit into the scan plan.
+
+        Writes 10 rows across two partitions (5 + 5) so the scan produces two
+        raw-convertible splits. ``limit=3`` causes ``FileScanner`` to drop the
+        second split once the first already covers the limit, so the Ray
+        Dataset contains strictly fewer than the full 10 rows.
+
+        We assert ``< 10`` (not ``== N``) because Paimon's scan-time limit is
+        a per-split cap — whole-split granularity at this layer — not a
+        row-exact hard limit. Row-exact short-circuiting in the reader is a
+        separate follow-up.
+        """
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('part', pa.string()),
+            ('value', pa.string()),
+        ])
+        identifier = self._create_and_populate_table(
+            'test_read_limit', pa_schema,
+            {
+                'id': list(range(10)),
+                'part': ['a'] * 5 + ['b'] * 5,
+                'value': [str(i) for i in range(10)],
+            },
+            partition_keys=['part'],
+        )
+
+        # Sanity baseline: the full unbounded scan returns all 10 rows.
+        ds_full = read_paimon(identifier, self.catalog_options)
+        self.assertEqual(ds_full.count(), 10)
+
+        # With limit=3, the scan plan drops the second partition's split
+        # once the first split's row count already covers the limit.
+        ds = read_paimon(identifier, self.catalog_options, limit=3)
+        limited_count = ds.count()
+        self.assertGreater(limited_count, 0)
+        self.assertLess(limited_count, 10)
+
     def test_read_paimon_empty_table(self):
         """read_paimon() on a table with no data returns an empty dataset."""
         from pypaimon.ray import read_paimon
