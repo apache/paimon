@@ -43,15 +43,13 @@ class GlobalIndexResult(ABC):
 
     def and_(self, other: 'GlobalIndexResult') -> 'GlobalIndexResult':
         """Returns the intersection of this result and the other result."""
-        return LazyGlobalIndexResult(
-            lambda: RoaringBitmap64.and_(self.results(), other.results())
-        )
+        result = RoaringBitmap64.and_(self.results(), other.results())
+        return LazyGlobalIndexResult(lambda: result)
 
     def or_(self, other: 'GlobalIndexResult') -> 'GlobalIndexResult':
         """Returns the union of this result and the other result."""
-        return LazyGlobalIndexResult(
-            lambda: RoaringBitmap64.or_(self.results(), other.results())
-        )
+        result = RoaringBitmap64.or_(self.results(), other.results())
+        return LazyGlobalIndexResult(lambda: result)
 
     def is_empty(self) -> bool:
         """Check if the result is empty."""
