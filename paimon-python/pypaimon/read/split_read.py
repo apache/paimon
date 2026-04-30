@@ -498,11 +498,32 @@ class MergeFileSplitRead(SplitRead):
         ``FIRST_ROW``) used to silently degrade to dedupe — that quietly
         produced wrong data — so we now raise an explicit
         ``NotImplementedError`` instead, until they're ported.
+
+        For ``PARTIAL_UPDATE``, we also refuse to run when the table
+        configures any option whose semantics this port does not yet
+        implement (sequence-group, per-field aggregator overrides,
+        ignore-delete and friends). Without this guard those options
+        would be silently ignored and produce subtly wrong results —
+        the same anti-pattern this PR exists to close.
         """
         engine = self.table.options.merge_engine()
         if engine == MergeEngine.DEDUPLICATE:
             return DeduplicateMergeFunction()
         if engine == MergeEngine.PARTIAL_UPDATE:
+            unsupported = self._partial_update_unsupported_options()
+            if unsupported:
+                raise NotImplementedError(
+                    "merge-engine 'partial-update' is enabled together "
+                    "with options that pypaimon does not yet implement: "
+                    "{}. The supported subset is per-key last-non-null "
+                    "merge with no sequence-group, no per-field "
+                    "aggregator override, no ignore-delete and no "
+                    "partial-update.remove-record-on-* flags. Use the "
+                    "Java client for the full feature set, or open an "
+                    "issue to track Python support.".format(
+                        ", ".join(sorted(unsupported))
+                    )
+                )
             return PartialUpdateMergeFunction(
                 key_arity=len(self.trimmed_primary_key),
                 value_arity=self.value_arity,
@@ -512,6 +533,52 @@ class MergeFileSplitRead(SplitRead):
             "(supported: deduplicate, partial-update). Use the Java "
             "client or open an issue to track support.".format(engine.value)
         )
+
+    # Boolean-valued options that, when truthy, opt the table into
+    # behaviour the Python PartialUpdateMergeFunction does not implement.
+    # Mirrors org.apache.paimon.CoreOptions and the fallback keys in
+    # PartialUpdateMergeFunction.java.
+    _PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS = (
+        "ignore-delete",
+        "partial-update.ignore-delete",
+        "first-row.ignore-delete",
+        "deduplicate.ignore-delete",
+        "partial-update.remove-record-on-delete",
+        "partial-update.remove-record-on-sequence-group",
+    )
+    _FIELDS_PREFIX = "fields."
+    _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
+    _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
+    _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
+
+    def _partial_update_unsupported_options(self):
+        """Return the set of option keys configured on this table that
+        ``PartialUpdateMergeFunction`` does not yet support. Empty set
+        means we can safely run the simple last-non-null merge.
+        """
+        flagged = set()
+        raw = self.table.options.options.to_map()
+        for key, value in raw.items():
+            if (key in self._PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS
+                    and self._option_is_truthy(value)):
+                flagged.add(key)
+            elif key == self._DEFAULT_AGGREGATE_FUNCTION_KEY:
+                flagged.add(key)
+            elif key.startswith(self._FIELDS_PREFIX) and (
+                    key.endswith(self._FIELD_SEQUENCE_GROUP_SUFFIX)
+                    or key.endswith(self._FIELD_AGGREGATE_FUNCTION_SUFFIX)):
+                flagged.add(key)
+        return flagged
+
+    @staticmethod
+    def _option_is_truthy(raw):
+        if raw is None:
+            return False
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            return raw.strip().lower() in ("true", "1", "yes", "on")
+        return bool(raw)
 
     def create_reader(self) -> RecordReader:
         # Create a dict mapping data file name to deletion file reader method
