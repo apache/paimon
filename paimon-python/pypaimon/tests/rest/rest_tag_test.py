@@ -16,6 +16,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import unittest
+
 from pypaimon.api.api_response import GetTagResponse
 from pypaimon.catalog.catalog_exception import (TableNotExistException,
                                                 TagAlreadyExistException,
