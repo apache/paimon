@@ -100,6 +100,42 @@ catalog_options = {
 ```
 
 {{< /tab >}}
+{{< tab "jdbc catalog" >}}
+
+```python
+from pypaimon import CatalogFactory
+
+# Note that keys and values are all string
+catalog_options = {
+  'metastore': 'jdbc',
+  'warehouse': 'file:///path/to/warehouse',
+  'uri': 'jdbc:sqlite:/path/to/catalog.db',
+  # Optional. Defaults to 'jdbc'.
+  'catalog-key': 'jdbc',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+For MySQL or PostgreSQL, install the corresponding Python DB-API driver and use the same Paimon
+JDBC catalog options:
+
+```python
+catalog_options = {
+  'metastore': 'jdbc',
+  'warehouse': 's3://bucket/path/to/warehouse',
+  'uri': 'jdbc:mysql://<host>:<port>/<databaseName>',
+  'jdbc.user': '...',
+  'jdbc.password': '...',
+  'catalog-key': 'jdbc',
+}
+```
+
+Unlike Flink or Spark, PyPaimon does not use JVM JDBC drivers or load JDBC connector jars.
+It keeps the `metastore='jdbc'` and `jdbc:` URI format for compatibility with Paimon's
+JDBC catalog configuration, but the database connection is created through native Python DB-API
+drivers such as `pymysql`, `mysql-connector-python`, `psycopg2`, or `psycopg`.
+
+{{< /tab >}}
 {{< tab "rest catalog" >}}
 The sample code is as follows. The detailed meaning of option can be found in [REST]({{< ref "concepts/rest/overview" >}}).
 
@@ -119,7 +155,8 @@ catalog = CatalogFactory.create(catalog_options)
 {{< /tab >}}
 {{< /tabs >}}
 
-Currently, PyPaimon only support filesystem catalog and rest catalog. See [Catalog]({{< ref "concepts/catalog" >}}).
+Currently, PyPaimon supports filesystem catalog, jdbc catalog and rest catalog.
+See [Catalog]({{< ref "concepts/catalog" >}}).
 
 You can use the catalog to create table for writing data.
 
