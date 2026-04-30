@@ -31,6 +31,7 @@ from pypaimon.catalog.catalog_exception import (
     TableNoPermissionException, DatabaseNoPermissionException,
     FunctionNotExistException, FunctionAlreadyExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
+    TagNotExistException, TagAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
@@ -467,6 +468,73 @@ class RESTCatalog(Catalog):
             return PagedList(functions, result.next_page_token)
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
+
+    # Tag CRUD: each method mirrors the corresponding Java handler in
+    # paimon-core/.../rest/RESTCatalog.java line-for-line. Specifically:
+    #   create_tag        — RESTCatalog.java:1100-1127
+    #   get_tag           — RESTCatalog.java:1056-1071 (getTag)
+    #   list_tags_paged   — RESTCatalog.java:1142-1156
+    #   delete_tag        — RESTCatalog.java:1167-1182
+
+    def create_tag(self, identifier: Union[str, Identifier], tag_name: str,
+                   snapshot_id: Optional[int] = None,
+                   time_retained: Optional[str] = None,
+                   ignore_if_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.create_tag(identifier, tag_name, snapshot_id, time_retained)
+        except AlreadyExistsException as e:
+            if not ignore_if_exists:
+                raise TagAlreadyExistException(tag_name) from e
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                raise ValueError(
+                    "Snapshot {} in table {} doesn't exist.".format(
+                        e.resource_name, identifier.get_full_name())) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
+
+    def get_tag(self, identifier: Union[str, Identifier], tag_name: str):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.get_tag(identifier, tag_name)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
+                raise TagNotExistException(tag_name) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def list_tags_paged(self, identifier: Union[str, Identifier],
+                        max_results: Optional[int] = None,
+                        page_token: Optional[str] = None,
+                        tag_name_prefix: Optional[str] = None) -> PagedList[str]:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.list_tags_paged(
+                identifier, max_results, page_token, tag_name_prefix)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def delete_tag(self, identifier: Union[str, Identifier], tag_name: str) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.delete_tag(identifier, tag_name)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
+                raise TagNotExistException(tag_name) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
         try:

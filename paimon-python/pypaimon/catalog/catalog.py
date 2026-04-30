@@ -293,3 +293,91 @@ class Catalog(ABC):
         raise NotImplementedError(
             "list_branches is not supported by this catalog."
         )
+
+    def create_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+            ignore_if_exists: bool = False,
+    ) -> None:
+        """Create a tag on a table.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            tag_name: Tag name to create.
+            snapshot_id: Optional snapshot id; if not set the latest snapshot is tagged.
+            time_retained: Optional time retained string (e.g., ``"1d"``, ``"12h"``, ``"30m"``).
+            ignore_if_exists: If True, do not raise when the tag already exists.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "create_tag is not supported by this catalog."
+        )
+
+    def delete_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ) -> None:
+        """Delete a tag from a table.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            tag_name: Tag name to delete.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "delete_tag is not supported by this catalog."
+        )
+
+    def get_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ):
+        """Get a tag of a table.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            tag_name: Tag name to look up.
+
+        Returns:
+            GetTagResponse describing the tag.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "get_tag is not supported by this catalog."
+        )
+
+    def list_tags_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            tag_name_prefix: Optional[str] = None,
+    ):
+        """List tags of a table with pagination.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            max_results: Maximum number of results to return per page.
+            page_token: Token for pagination.
+            tag_name_prefix: Optional prefix filter for tag names.
+
+        Returns:
+            PagedList of tag names.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "list_tags_paged is not supported by this catalog."
+        )

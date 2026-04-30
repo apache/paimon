@@ -30,6 +30,7 @@ class ResourcePaths:
     PARTITIONS = "partitions"
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
+    TAGS = "tags"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -99,3 +100,14 @@ class ResourcePaths:
     def function(self, database_name: str, function_name: str) -> str:
         return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                        self.FUNCTIONS, RESTUtil.encode_string(function_name))
+
+    def tags(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.TAGS)
+
+    def tag(self, database_name: str, table_name: str, tag_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.TAGS,
+            RESTUtil.encode_string(tag_name))

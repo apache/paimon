@@ -180,6 +180,14 @@ class TagNotExistException(CatalogException):
         super().__init__(f"Tag {tag} does not exist")
 
 
+class TagAlreadyExistException(CatalogException):
+    """Tag already exist exception"""
+
+    def __init__(self, tag: str):
+        self.tag = tag
+        super().__init__(f"Tag {tag} already exists")
+
+
 class IllegalArgumentError(CatalogException):
     """Illegal argument exception"""
     pass
