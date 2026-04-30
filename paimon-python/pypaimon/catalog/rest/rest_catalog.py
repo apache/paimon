@@ -32,6 +32,7 @@ from pypaimon.catalog.catalog_exception import (
     FunctionNotExistException, FunctionAlreadyExistException,
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
+    BranchNotExistException, BranchAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
@@ -469,13 +470,7 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
 
-    # Tag CRUD: each method mirrors the corresponding Java handler in
-    # paimon-core/.../rest/RESTCatalog.java line-for-line. Specifically:
-    #   create_tag        — RESTCatalog.java:1100-1127
-    #   get_tag           — RESTCatalog.java:1056-1071 (getTag)
-    #   list_tags_paged   — RESTCatalog.java:1142-1156
-    #   delete_tag        — RESTCatalog.java:1167-1182
-
+    # Tag CRUD: mirrors Java RESTCatalog tag handlers.
     def create_tag(self, identifier: Union[str, Identifier], tag_name: str,
                    snapshot_id: Optional[int] = None,
                    time_retained: Optional[str] = None,
@@ -532,6 +527,67 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise TagNotExistException(tag_name) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    # Branch CRUD: mirrors Java RESTCatalog branch handlers.
+    def create_branch(self, identifier: Union[str, Identifier], branch_name: str,
+                      tag_name: Optional[str] = None) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.create_branch(identifier, branch_name, tag_name)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
+                raise TagNotExistException(tag_name) from e
+            raise TableNotExistException(identifier) from e
+        except AlreadyExistsException as e:
+            raise BranchAlreadyExistException(branch_name) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
+
+    def drop_branch(self, identifier: Union[str, Identifier], branch_name: str) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.drop_branch(identifier, branch_name)
+        except NoSuchResourceException as e:
+            raise BranchNotExistException(branch_name) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def rename_branch(self, identifier: Union[str, Identifier], from_branch: str,
+                      to_branch: str) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.rename_branch(identifier, from_branch, to_branch)
+        except NoSuchResourceException as e:
+            raise BranchNotExistException(from_branch) from e
+        except AlreadyExistsException as e:
+            raise BranchAlreadyExistException(to_branch) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def fast_forward(self, identifier: Union[str, Identifier], branch_name: str) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.fast_forward(identifier, branch_name)
+        except NoSuchResourceException as e:
+            raise BranchNotExistException(branch_name) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def list_branches(self, identifier: Union[str, Identifier]) -> List[str]:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.list_branches(identifier)
+        except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e

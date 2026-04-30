@@ -217,6 +217,19 @@ class ListTagsResponse(PagedResponse[str]):
 
 
 @dataclass
+class ListBranchesResponse(RESTResponse):
+    """Response for listing branches.
+
+    Mirrors Java ``ListBranchesResponse`` — NOT a paged response (no
+    ``nextPageToken``); Java's ``listBranches`` returns plain
+    ``List<String>``.
+    """
+    FIELD_BRANCHES = "branches"
+
+    branches: Optional[List[str]] = json_field(FIELD_BRANCHES, default=None)
+
+
+@dataclass
 class GetTableResponse(AuditRESTResponse):
     """Response for getting table"""
 
