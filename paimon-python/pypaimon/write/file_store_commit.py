@@ -22,6 +22,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -159,37 +160,33 @@ class FileStoreCommit:
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
-        if not commit_messages:
-            return
-
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
             len(commit_messages),
         )
+        skip_overwrite = False
         partition_filter = None
-        # sanity check, all changes must be done within the given partition, meanwhile build a partition filter
-        if len(overwrite_partition) > 0:
-            predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
-            sub_predicates = []
-            for key, value in overwrite_partition.items():
-                sub_predicates.append(predicate_builder.equal(key, value))
-            partition_filter = predicate_builder.and_predicates(sub_predicates)
 
-            for msg in commit_messages:
-                row = OffsetRow(msg.partition, 0, len(msg.partition))
-                if not partition_filter.test(row):
-                    raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
-                                       f"in {msg.partition} does not belong to this partition")
+        # Partition filter is built from dynamic or static partition according to options.
+        if len(self.table.partition_keys) > 0 and self.table.options.dynamic_partition_overwrite():
+            if not commit_messages:
+                # In dynamic mode, if there are no changes to commit, no data will be deleted
+                skip_overwrite = True
+            else:
+                partition_filter = self._create_dynamic_partition_filter(commit_messages)
+        else:
+            partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 
-        self._try_commit(
-            commit_kind="OVERWRITE",
-            commit_identifier=commit_identifier,
-            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                snapshot, partition_filter, commit_messages),
-            detect_conflicts=True,
-            allow_rollback=False,
-        )
+        if not skip_overwrite:
+            self._try_commit(
+                commit_kind="OVERWRITE",
+                commit_identifier=commit_identifier,
+                commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                    snapshot, partition_filter, commit_messages),
+                detect_conflicts=True,
+                allow_rollback=False,
+            )
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
         if not partitions:
@@ -205,12 +202,16 @@ class FileStoreCommit:
                     )
 
         predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        default_part_value = self.table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         partition_predicates = []
         for part in partitions:
-            sub_predicates = [
-                predicate_builder.equal(key, value)
-                for key, value in part.items()
-            ]
+            sub_predicates = []
+            for key, value in part.items():
+                if value is None or (isinstance(value, str) and value == default_part_value):
+                    sub_predicates.append(predicate_builder.is_null(key))
+                else:
+                    sub_predicates.append(predicate_builder.equal(key, value))
             if sub_predicates:
                 pred = predicate_builder.and_predicates(sub_predicates)
                 if pred is not None:
@@ -517,6 +518,45 @@ class FileStoreCommit:
                     )
                     return True
         return False
+
+    def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
+        """Build a partition filter from the unique partitions present in commit_messages."""
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        predicates = []
+        seen_partitions = set()
+        for msg in commit_messages:
+            partition_values = tuple(msg.partition)
+            if partition_values not in seen_partitions:
+                seen_partitions.add(partition_values)
+                equalities = []
+                for name, value in zip(self.table.partition_keys, msg.partition):
+                    if value is None:
+                        equalities.append(predicate_builder.is_null(name))
+                    else:
+                        equalities.append(predicate_builder.equal(name, value))
+                predicates.append(predicate_builder.and_predicates(equalities))
+        return predicate_builder.or_predicates(predicates)
+
+    def _create_static_partition_filter(self, overwrite_partition, commit_messages: List[CommitMessage]):
+        """Build a partition filter from the explicit overwrite_partition spec."""
+        if not overwrite_partition:
+            return None
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        default_part_value = self.table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
+        equalities = []
+        for key, value in overwrite_partition.items():
+            if value is None or (isinstance(value, str) and value == default_part_value):
+                equalities.append(predicate_builder.is_null(key))
+            else:
+                equalities.append(predicate_builder.equal(key, value))
+        partition_filter = predicate_builder.and_predicates(equalities)
+        for msg in commit_messages:
+            row = OffsetRow(msg.partition, 0, len(msg.partition))
+            if not partition_filter.test(row):
+                raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
+                                   f"in {msg.partition} does not belong to this partition")
+        return partition_filter
 
     def _generate_overwrite_entries(self, latest_snapshot, partition_filter, commit_messages):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
