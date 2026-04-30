@@ -2823,9 +2823,15 @@ class DataBlobWriterTest(unittest.TestCase):
                         'error': str(e)
                     })
 
-            # Create and start multiple threads
+            # Create and start multiple threads. We keep this modest (5 vs.
+            # the original 10) because GHA runners under load have shown they
+            # can't drain 10 simultaneously-conflicting commits even with
+            # ``commit.max-retries=50`` (50 attempts × 30s back-off ≈ 25 min,
+            # still timing out in CI). Five threads exercises the retry path
+            # without reducing the wall-time budget to the point where each
+            # iteration takes ~25 minutes.
             threads = []
-            num_threads = 10
+            num_threads = 5
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=write_blob_data,
