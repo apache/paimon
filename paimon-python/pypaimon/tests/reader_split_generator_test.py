@@ -329,118 +329,6 @@ class SplitGeneratorTest(unittest.TestCase):
         # Note: SlicedSplit may or may not be created depending on data distribution
         # This test ensures that if SlicedSplit is created, merged_row_count() works correctly
 
-    def test_limit_drops_non_raw_split_after_raw_budget_is_met(self):
-        """Reproducer for the limit-pushdown bug.
-
-        The pre-fix loop in ``FileScanner._apply_push_down_limit`` was::
-
-            for split in splits:
-                if split.raw_convertible:
-                    limited_splits.append(split)
-                    scanned_row_count += split.row_count
-                    if scanned_row_count >= self.limit:
-                        return limited_splits   # <-- early return drops
-                                                #     any subsequent non-raw splits
-            return splits
-
-        So the bug only triggers when:
-          (a) at least one raw_convertible split's ``row_count`` reaches the
-              limit, AND
-          (b) at least one *more* non-raw_convertible split exists in the
-              same plan.
-
-        If every split is non-raw the loop never enters the body and the
-        fallback ``return splits`` masks the bug; if every split is raw
-        and row_counts sum to the limit, dropping the rest is correct
-        anyway. So a proper regression test must construct a *mix* of
-        raw and non-raw splits in a single plan and assert that
-        ``len(limited_splits) >= len(raw_convertible_splits) + 1`` —
-        i.e. at least one non-raw split survives the limit pushdown.
-
-        Build that mix using two partitions with a single bucket each:
-          * partition ``p1`` — one batch, one file → raw_convertible split
-          * partition ``p2`` — two overlapping batches on the same PK →
-            non-raw_convertible split (needs merge-on-read)
-
-        With ``bucket=1`` per partition the layout is deterministic.
-        """
-        pa_schema = pa.schema([
-            pa.field('id', pa.int64(), nullable=False),
-            pa.field('dt', pa.string(), nullable=False),
-            ('value', pa.string()),
-        ])
-        schema = Schema.from_pyarrow_schema(
-            pa_schema,
-            partition_keys=['dt'],
-            primary_keys=['id', 'dt'],
-            options={'bucket': '1', 'merge-engine': 'deduplicate'},
-        )
-        self.catalog.create_table(
-            'default.test_limit_mix_raw_nonraw', schema, False)
-        table = self.catalog.get_table('default.test_limit_mix_raw_nonraw')
-
-        def _write(rows):
-            wb = table.new_batch_write_builder()
-            w = wb.new_write()
-            c = wb.new_commit()
-            try:
-                w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
-                c.commit(w.prepare_commit())
-            finally:
-                w.close()
-                c.close()
-
-        # Order matters. The buggy loop short-circuits as soon as one
-        # raw_convertible split's row_count meets the limit, so a
-        # non-raw split that appears AFTER that point is dropped no
-        # matter what (matching Java). The bug we want to catch is the
-        # one where a non-raw split appearing BEFORE the raw budget is
-        # met gets silently skipped — the iteration would never even
-        # add it to ``limited_splits``.
-        # ``PrimaryKeyTableSplitGenerator`` walks partitions in order,
-        # so making ``p1`` the non-raw partition guarantees the bad
-        # ordering [non-raw (p1), raw (p2)].
-        # p1 — two overlapping writes on the same PK → non-raw_convertible.
-        _write([{'id': 1, 'dt': 'p1', 'value': 'p1-a'}])
-        _write([{'id': 1, 'dt': 'p1', 'value': 'p1-b'}])
-        # p2 — single write → raw_convertible.
-        _write([{'id': 2, 'dt': 'p2', 'value': 'p2-a'}])
-
-        all_splits = table.new_read_builder().new_scan().plan().splits()
-        raw_splits = [s for s in all_splits if s.raw_convertible]
-        non_raw_splits = [s for s in all_splits if not s.raw_convertible]
-        self.assertGreaterEqual(
-            len(raw_splits), 1,
-            "test fixture must produce at least one raw_convertible split"
-            " — the bug only triggers in a mixed plan",
-        )
-        self.assertGreaterEqual(
-            len(non_raw_splits), 1,
-            "test fixture must produce at least one non-raw_convertible split"
-            " — without one the early-return branch in the pre-fix code"
-            " never drops anything",
-        )
-
-        # Limit small enough that a single raw split's row_count already
-        # meets the budget. Pre-fix: scanner returns just the raw split,
-        # silently drops every non-raw split. Post-fix: every split is
-        # carried through; only the raw rows count toward the budget.
-        limited_splits = table.new_read_builder().with_limit(1).new_scan().plan().splits()
-
-        self.assertEqual(
-            len(limited_splits), len(all_splits),
-            "limit pushdown dropped {} non-raw_convertible split(s); "
-            "they must be retained because their row_count is the "
-            "pre-merge file count and cannot be used as the limit budget"
-            .format(len(all_splits) - len(limited_splits)),
-        )
-        # Spot-check both buckets are still represented.
-        retained_raw = sum(1 for s in limited_splits if s.raw_convertible)
-        retained_non_raw = sum(1 for s in limited_splits if not s.raw_convertible)
-        self.assertGreaterEqual(retained_raw, 1)
-        self.assertGreaterEqual(retained_non_raw, 1)
-
-
 class ApplyPushDownLimitUnitTest(unittest.TestCase):
     """Direct, mock-driven coverage of ``FileScanner._apply_push_down_limit``.
 
@@ -514,15 +402,17 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
             "got {}".format([id(s) for s in result]),
         )
 
-    def test_accumulator_falls_back_to_row_count_when_merged_unavailable(self):
+    def test_accumulator_skips_splits_with_unknown_merged_count(self):
         """``merged_row_count`` returns ``None`` for layouts where the
-        DV cardinality / data-evolution range isn't recorded yet. The
-        accumulator must fall back to ``row_count`` rather than treat
-        ``None`` as zero (which would never trigger the early return)
-        or skip the split entirely. With a single raw split whose
-        ``merged_row_count`` is unavailable but ``row_count`` already
-        meets the budget, the loop should early-return with just that
-        split."""
+        DV cardinality / data-evolution range isn't recorded yet (e.g.
+        a non-raw split, or a raw split missing DV cardinality in the
+        manifest). Such splits cannot meaningfully contribute to the
+        budget — Java's ``applyPushDownLimit`` skips them in the
+        accumulator loop and falls through to the full split list when
+        the loop completes without reaching the limit. We mirror that:
+        with a single split whose ``merged_row_count`` is unavailable,
+        the loop never accumulates anything and we return the input
+        unchanged."""
         s = self._split(raw_convertible=True, row_count=10, merged_row_count=None)
         result = self._apply([s], limit=5)
         self.assertEqual(len(result), 1)

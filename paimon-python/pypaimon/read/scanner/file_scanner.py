@@ -371,30 +371,34 @@ class FileScanner:
         scanned_row_count = 0
         limited_splits = []
 
-        # Keep every split. Only ``raw_convertible`` splits contribute to
-        # the row-count accumulator. Mirrors Java's
-        # DataTableBatchScan.applyPushDownLimit() — Java accumulates
-        # ``split.partialMergedRowCount()``, the file-level row count *minus*
-        # any deletion-vector cardinality already recorded in the manifest.
-        # Python has the same value via ``DataSplit.merged_row_count()``;
-        # the previous Python code accumulated ``split.row_count`` which is
-        # the pre-DV upper bound and over-counts when DV is on, causing the
-        # early return to fire before the reader can actually produce the
-        # budget. When the merged count is unavailable (older manifests /
-        # some data-evolution layouts where ``first_row_id`` is not
-        # populated) fall back to ``split.row_count``: the file-level upper
-        # bound is the previous behaviour and is still safer than skipping
-        # the split's contribution entirely.
-        # Non-raw_convertible splits cannot be cheaply counted ahead of
-        # read, so we keep them around so the reader still has data to
-        # drain.
+        # Line-for-line port of Java
+        # ``DataTableBatchScan.applyPushDownLimit`` (paimon-core/.../source/
+        # DataTableBatchScan.java:128-165):
+        #
+        #   for each split:
+        #       if mergedRowCount.isPresent():
+        #           limitedSplits.add(split)
+        #           scanned += mergedRowCount.getAsLong()
+        #           if scanned >= limit: return limitedSplits
+        #   return result  // == original splits
+        #
+        # The previous Python code accumulated ``split.row_count`` (the
+        # pre-DV upper bound) and over-counted when DV was enabled,
+        # causing the early return to fire before the reader could
+        # actually produce ``limit`` rows. Java avoids that by using
+        # ``mergedRowCount`` (DV-aware); we use the same source via
+        # ``DataSplit.merged_row_count()``.
+        #
+        # Splits whose merged count is unknown (non-raw, or data-evolution
+        # layouts where ``first_row_id`` is missing) are skipped — they
+        # cannot meaningfully contribute to the budget. They still reach
+        # the reader via the fall-through ``return splits`` when the
+        # accumulator never reaches the limit, mirroring Java's behaviour.
         for split in splits:
-            limited_splits.append(split)
-            if split.raw_convertible:
-                merged = split.merged_row_count()
-                scanned_row_count += (
-                    merged if merged is not None else split.row_count
-                )
+            merged = split.merged_row_count()
+            if merged is not None:
+                limited_splits.append(split)
+                scanned_row_count += merged
                 if scanned_row_count >= self.limit:
                     return limited_splits
 
