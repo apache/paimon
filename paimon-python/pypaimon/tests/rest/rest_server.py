@@ -31,14 +31,17 @@ if TYPE_CHECKING:
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
                                       CreateDatabaseRequest,
-                                      CreateTableRequest, RenameTableRequest)
+                                      CreateTableRequest, CreateTagRequest,
+                                      RenameTableRequest)
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetFunctionResponse,
-                                       GetTableResponse, ListDatabasesResponse,
+                                       GetTableResponse, GetTagResponse,
+                                       ListDatabasesResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
                                        ListPartitionsResponse, ListTablesResponse,
+                                       ListTagsResponse,
                                        PagedList, Partition,
                                        RESTResponse, ErrorResponse)
 from pypaimon.api.resource_paths import ResourcePaths
@@ -51,7 +54,9 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 FunctionNotExistException,
                                                 FunctionAlreadyExistException,
                                                 DefinitionAlreadyExistException,
-                                                DefinitionNotExistException)
+                                                DefinitionNotExistException,
+                                                TagNotExistException,
+                                                TagAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
@@ -72,6 +77,7 @@ TABLE_TYPE = "tableType"
 VIEW_NAME_PATTERN = "viewNamePattern"
 FUNCTION_NAME_PATTERN = "functionNamePattern"
 PARTITION_NAME_PATTERN = "partitionNamePattern"
+TAG_NAME_PREFIX = "tagNamePrefix"
 MAX_RESULTS = "maxResults"
 PAGE_TOKEN = "pageToken"
 
@@ -205,6 +211,8 @@ class RESTCatalogServer:
         self.table_latest_snapshot_store: Dict[str, str] = {}
         self.table_partitions_store: Dict[str, List] = {}
         self.function_store: Dict[str, Dict] = {}  # key: "db.func_name", value: GetFunctionResponse-like dict
+        # Tag store: key = full table name, value = {tag_name: GetTagResponse}.
+        self.tag_store: Dict[str, Dict[str, GetTagResponse]] = {}
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
         self.table_token_store: Dict[str, "RESTToken"] = {}
@@ -466,6 +474,16 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_FUNCTION, e.identifier.get_full_name(), str(e), 409
             )
             return self._mock_response(response, 409)
+        except TagNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TAG, e.tag, str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except TagAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TAG, e.tag, str(e), 409
+            )
+            return self._mock_response(response, 409)
         except DefinitionAlreadyExistException as e:
             response = ErrorResponse(
                 ErrorResponse.RESOURCE_TYPE_DEFINITION, e.name, str(e), 409
@@ -524,8 +542,13 @@ class RESTCatalogServer:
                 return self._table_snapshot_handle(method, lookup_identifier)
             elif operation == ResourcePaths.PARTITIONS:
                 return self._table_partitions_handle(method, lookup_identifier, parameters)
+            elif operation == ResourcePaths.TAGS:
+                return self._tags_handle(method, data, lookup_identifier, parameters)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+        elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
+            tag_name = RESTUtil.decode_string(path_parts[4])
+            return self._tag_handle(method, lookup_identifier, tag_name)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     # ======================= Function Handlers ===============================
@@ -721,6 +744,80 @@ class RESTCatalogServer:
 
         partitions = self._list_partitions(identifier, parameters)
         return self._generate_final_list_partitions_response(parameters, partitions)
+
+    # ======================= Tag Handlers ====================================
+
+    def _tags_handle(self, method: str, data: str, identifier: Identifier,
+                     parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle the table-scoped tags collection (POST create / GET list-paged)."""
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        if method == "POST":
+            request = JSON.from_json(data, CreateTagRequest)
+            store = self.tag_store.setdefault(identifier.get_full_name(), {})
+            if request.tag_name in store:
+                raise TagAlreadyExistException(request.tag_name)
+            snapshot = self._resolve_tag_snapshot(identifier, request.snapshot_id)
+            store[request.tag_name] = GetTagResponse(
+                tag_name=request.tag_name,
+                snapshot=snapshot,
+                tag_create_time=int(time.time() * 1000),
+                tag_time_retained=request.time_retained,
+            )
+            return self._mock_response("", 200)
+
+        if method == "GET":
+            tags = list(self.tag_store.get(identifier.get_full_name(), {}).keys())
+            tag_name_prefix = parameters.get(TAG_NAME_PREFIX)
+            if tag_name_prefix:
+                tags = [t for t in tags if t.startswith(tag_name_prefix)]
+            if tags:
+                max_results = self._get_max_results(parameters)
+                page_token = parameters.get(PAGE_TOKEN)
+                paged = self._build_paged_entities(tags, max_results, page_token)
+                response = ListTagsResponse(
+                    tags=paged.elements, next_page_token=paged.next_page_token)
+            else:
+                response = ListTagsResponse(tags=[], next_page_token=None)
+            return self._mock_response(response, 200)
+
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _tag_handle(self, method: str, identifier: Identifier,
+                    tag_name: str) -> Tuple[str, int]:
+        """Handle a single tag (GET / DELETE)."""
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+        store = self.tag_store.get(identifier.get_full_name(), {})
+
+        if method == "GET":
+            if tag_name not in store:
+                raise TagNotExistException(tag_name)
+            return self._mock_response(store[tag_name], 200)
+        if method == "DELETE":
+            if tag_name not in store:
+                raise TagNotExistException(tag_name)
+            del store[tag_name]
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _resolve_tag_snapshot(self, identifier: Identifier,
+                              snapshot_id: Optional[int]):
+        """Look up the snapshot to embed in GetTagResponse.
+
+        When ``snapshot_id`` is None, fall back to the table's latest snapshot.
+        Mirrors Java behavior of ``TagManager`` resolving the latest snapshot
+        when no explicit id is supplied.
+        """
+        try:
+            table = self._get_file_table(identifier)
+            snapshot_manager = table.snapshot_manager()
+            if snapshot_id is None:
+                return snapshot_manager.get_latest_snapshot()
+            return snapshot_manager.get_snapshot_by_id(snapshot_id)
+        except Exception:
+            return None
 
     def _databases_api_handler(self, method: str, data: str,
                                parameters: Dict[str, str]) -> Tuple[str, int]:
