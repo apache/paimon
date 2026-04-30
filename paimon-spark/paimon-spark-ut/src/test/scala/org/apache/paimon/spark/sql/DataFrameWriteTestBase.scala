@@ -150,13 +150,17 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
             sql("SHOW PARTITIONS t"),
             Seq(Row("pt=p1"))
           )
+          val replacedTable = loadTable("t")
+          Assertions.assertEquals(2, replacedTable.primaryKeys().size())
+          Assertions.assertEquals("a", replacedTable.primaryKeys().get(0))
+          Assertions.assertEquals("pt", replacedTable.primaryKeys().get(1))
         }
       }
     }
   }
 
   test("Paimon: DataFrameWrite.saveAsTable") {
-    withTable("test_ctas") {
+    withTable("test_ctas", "test_rtas") {
       Seq((1L, "x1"), (2L, "x2"))
         .toDF("a", "b")
         .write
@@ -180,6 +184,31 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
       // non-core options should not be here.
       Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
       Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
+
+      Seq((3L, "x3"), (4L, "x4"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .option("primary-key", "a")
+        .option("bucket", "-1")
+        .option("target-file-size", "256MB")
+        .option("write.merge-schema", "true")
+        .option("write.merge-schema.explicit-cast", "true")
+        .saveAsTable("test_rtas")
+
+      val replacedTable = loadTable("test_rtas")
+      Assertions.assertEquals(1, replacedTable.primaryKeys().size())
+      Assertions.assertEquals("a", replacedTable.primaryKeys().get(0))
+
+      // check all the core options
+      Assertions.assertEquals("-1", replacedTable.options().get("bucket"))
+      Assertions.assertEquals("256MB", replacedTable.options().get("target-file-size"))
+
+      // non-core options should not be here.
+      Assertions.assertFalse(replacedTable.options().containsKey("write.merge-schema"))
+      Assertions.assertFalse(
+        replacedTable.options().containsKey("write.merge-schema.explicit-cast"))
     }
   }
 
