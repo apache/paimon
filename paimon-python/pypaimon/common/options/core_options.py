@@ -442,6 +442,16 @@ class CoreOptions:
         )
     )
 
+    DYNAMIC_PARTITION_OVERWRITE: ConfigOption[bool] = (
+        ConfigOptions.key("dynamic-partition-overwrite")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether only overwrite dynamic partition when overwriting a partitioned table "
+            "with dynamic partition columns. Works only when the table has partition keys."
+        )
+    )
+
     def __init__(self, options: Options):
         self.options = options
 
@@ -622,3 +632,6 @@ class CoreOptions:
 
     def add_column_before_partition(self) -> bool:
         return self.options.get(CoreOptions.ADD_COLUMN_BEFORE_PARTITION, False)
+
+    def dynamic_partition_overwrite(self) -> bool:
+        return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)

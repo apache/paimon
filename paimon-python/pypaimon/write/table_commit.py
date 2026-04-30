@@ -48,20 +48,27 @@ class TableCommit:
         self._check_committed()
 
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
-        if not non_empty_messages:
-            return
 
-        logger.info(
-            "Committing batch table %s, %d non-empty messages",
-            self.table.identifier, len(non_empty_messages)
-        )
         if self.overwrite_partition is not None:
+            # Always call overwrite() even with empty messages, so that
+            # FileStoreCommit.overwrite can handle the empty case properly
+            # (e.g. static overwrite with empty data should delete the partition).
+            logger.info(
+                "Committing overwrite to table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
             self.file_store_commit.overwrite(
                 overwrite_partition=self.overwrite_partition,
                 commit_messages=non_empty_messages,
                 commit_identifier=commit_identifier
             )
         else:
+            if not non_empty_messages:
+                return
+            logger.info(
+                "Committing batch table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
             self.file_store_commit.commit(
                 commit_messages=non_empty_messages,
                 commit_identifier=commit_identifier
