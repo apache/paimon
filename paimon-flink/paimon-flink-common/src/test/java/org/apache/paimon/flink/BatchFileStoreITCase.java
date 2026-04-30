@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -808,6 +809,98 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         String sql = "SELECT COUNT(*) FROM count_pk_dv";
         assertThat(sql(sql)).containsOnly(Row.of(4L));
         validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarBTreeIndexNonPartitionedTable() {
+        sql(
+                "CREATE TABLE count_btree_index_non_partitioned (id INT, name STRING, category INT) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        String values =
+                IntStream.range(0, 20)
+                        .mapToObj(i -> String.format("(%s, '%s', %s)", i, "name_" + i, i % 2))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO count_btree_index_non_partitioned VALUES " + values);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.count_btree_index_non_partitioned', index_column => 'id', index_type => 'btree')");
+
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_non_partitioned WHERE id IN (1, 2, 3)",
+                3L,
+                true);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_non_partitioned WHERE id BETWEEN 10 AND 14",
+                5L,
+                true);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_non_partitioned WHERE id = 6 AND category = 0",
+                1L,
+                false);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_non_partitioned WHERE id > 15", 4L, false);
+    }
+
+    @Test
+    public void testCountStarBTreeIndexPartitionedTable() {
+        sql(
+                "CREATE TABLE count_btree_index_partitioned (id INT, name STRING, category INT, dt STRING) "
+                        + "PARTITIONED BY (dt) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        String values =
+                IntStream.range(0, 10)
+                        .mapToObj(
+                                i ->
+                                        String.format(
+                                                "(%s, '%s', %s, 'dt1'), (%s, '%s', %s, 'dt2')",
+                                                i, "name_" + i, i % 2, i, "name_" + i, (i + 1) % 2))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO count_btree_index_partitioned VALUES " + values);
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.count_btree_index_partitioned', "
+                        + "index_column => 'id', "
+                        + "index_type => 'btree', "
+                        + "partitions => 'dt=dt1')");
+
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_partitioned WHERE dt = 'dt1' AND id = 1",
+                1L,
+                true);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_partitioned WHERE dt = 'dt1' AND id IN (1, 2, 3)",
+                3L,
+                true);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_partitioned WHERE dt = 'dt2' AND id = 1",
+                1L,
+                false);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_partitioned WHERE id = 1", 1L, true);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_partitioned WHERE dt = 'dt1' AND id = 1 AND category = 1",
+                1L,
+                false);
+        assertCountStarQuery(
+                "SELECT COUNT(*) FROM count_btree_index_partitioned WHERE dt = 'dt1' AND id > 5",
+                4L,
+                false);
+    }
+
+    private void assertCountStarQuery(String sql, long expectedCount, boolean pushDown) {
+        if (pushDown) {
+            validateCount1PushDown(sql);
+        } else {
+            validateCount1NotPushDown(sql);
+        }
+        assertThat(sql(sql)).containsOnly(Row.of(expectedCount));
     }
 
     private void validateCount1PushDown(String sql) {
