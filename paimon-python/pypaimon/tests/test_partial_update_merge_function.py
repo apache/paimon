@@ -172,6 +172,55 @@ class PartialUpdateMergeFunctionTest(unittest.TestCase):
         self.assertEqual(_result_key(result), (1,))
         self.assertEqual(_result_value(result), ('a', 'x'))
 
+    # -- NOT-NULL input validation (mirrors Java's updateNonNullFields) ----
+
+    def test_first_insert_with_null_for_not_null_field_raises(self):
+        """If the very first row writes null to a NOT NULL field, raise —
+        same input-validation Java does in updateNonNullFields()."""
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, nullables=[True, False])
+        mf.reset()
+        with self.assertRaises(ValueError) as cm:
+            mf.add(_kv((1,), 1, RowKind.INSERT, ('a', None)))
+        self.assertIn("Field 1", str(cm.exception))
+
+    def test_subsequent_insert_with_null_for_not_null_field_raises(self):
+        """A later null on a NOT NULL field must also raise — Java checks
+        on every add(), not just the first one."""
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, nullables=[True, False])
+        mf.reset()
+        mf.add(_kv((1,), 1, RowKind.INSERT, ('a', 'x')))
+        with self.assertRaises(ValueError) as cm:
+            mf.add(_kv((1,), 2, RowKind.INSERT, (None, None)))
+        self.assertIn("Field 1", str(cm.exception))
+
+    def test_null_for_nullable_field_is_absorbed(self):
+        """A null input on a nullable field is silently absorbed (existing
+        accumulator value wins) — the standard partial-update semantic."""
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2, nullables=[True, True])
+        mf.reset()
+        mf.add(_kv((1,), 1, RowKind.INSERT, ('a', 'x')))
+        mf.add(_kv((1,), 2, RowKind.INSERT, (None, 'y')))
+        result = mf.get_result()
+        self.assertEqual(_result_value(result), ('a', 'y'))
+
+    def test_nullables_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            PartialUpdateMergeFunction(
+                key_arity=1, value_arity=2, nullables=[True])
+
+    def test_no_nullables_arg_skips_check(self):
+        """Backward-compat: callers that don't pass ``nullables`` get the
+        previous behaviour (no NOT-NULL validation)."""
+        mf = PartialUpdateMergeFunction(key_arity=1, value_arity=2)
+        mf.reset()
+        # Would have raised had we declared the second field NOT NULL.
+        mf.add(_kv((1,), 1, RowKind.INSERT, ('a', None)))
+        result = mf.get_result()
+        self.assertEqual(_result_value(result), ('a', None))
+
 
 if __name__ == '__main__':
     unittest.main()

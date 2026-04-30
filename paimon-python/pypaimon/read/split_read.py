@@ -103,6 +103,10 @@ class SplitRead(ABC):
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
         self.nested_name_paths = nested_name_paths
+        # Snapshot the raw value-side schema before _create_key_value_fields
+        # wraps it, so MergeFileSplitRead can hand per-value-field nullable
+        # flags to merge functions that mirror Java's NOT-NULL check.
+        self.value_fields = list(read_type)
 
         self.trimmed_primary_key = self.table.trimmed_primary_keys
         self.read_fields = read_type
@@ -623,6 +627,7 @@ class MergeFileSplitRead(SplitRead):
             return PartialUpdateMergeFunction(
                 key_arity=len(self.trimmed_primary_key),
                 value_arity=self.value_arity,
+                nullables=[f.type.nullable for f in self.value_fields],
             )
         raise NotImplementedError(
             "merge-engine '{}' is not implemented in pypaimon yet "
