@@ -598,35 +598,35 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn(3, ids3)
 
     def test_read_lumina_vector_index(self):
-        """Test reading a Lumina vector index built by Java."""
-        table = self.catalog.get_table('default.test_lumina_vector')
+        """Test reading a Lumina vector index built by Java (orc and lance formats)."""
+        for table_name, label in [
+            ('default.test_lumina_vector', 'orc'),
+            ('default.test_lumina_vector_lance', 'lance'),
+        ]:
+            with self.subTest(file_format=label):
+                table = self.catalog.get_table(table_name)
 
-        # Use VectorSearchBuilder to search
-        # Java wrote 6 vectors: [1,0,0,0], [0.9,0.1,0,0], [0,1,0,0],
-        #                        [0,0,1,0], [0,0,0,1], [0.95,0.05,0,0]
-        # Query with [1,0,0,0] - nearest by L2 should be row 0, 5, 1
-        builder = table.new_vector_search_builder()
-        builder.with_vector_column('embedding')
-        builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
-        builder.with_limit(3)
+                builder = table.new_vector_search_builder()
+                builder.with_vector_column('embedding')
+                builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
+                builder.with_limit(3)
 
-        result = builder.execute_local()
-        row_ids = sorted(list(result.results()))
-        print(f"Lumina vector search for [1,0,0,0]: row_ids={row_ids}")
-        self.assertIn(0, row_ids)  # exact match
-        self.assertEqual(len(row_ids), 3)
+                result = builder.execute_local()
+                row_ids = sorted(list(result.results()))
+                print(f"Lumina vector search ({label}) for [1,0,0,0]: row_ids={row_ids}")
+                self.assertIn(0, row_ids)
+                self.assertEqual(len(row_ids), 3)
 
-        # Read matching rows using withGlobalIndexResult
-        read_builder = table.new_read_builder()
-        scan = read_builder.new_scan().with_global_index_result(result)
-        plan = scan.plan()
-        table_read = read_builder.new_read()
-        pa_table = table_read.to_arrow(plan.splits())
-        pa_table = table_sort_by(pa_table, 'id')
-        self.assertEqual(pa_table.num_rows, 3)
-        ids = pa_table.column('id').to_pylist()
-        print(f"Lumina vector search matched rows: ids={ids}")
-        self.assertIn(0, ids)
+                read_builder = table.new_read_builder()
+                scan = read_builder.new_scan().with_global_index_result(result)
+                plan = scan.plan()
+                table_read = read_builder.new_read()
+                pa_table = table_read.to_arrow(plan.splits())
+                pa_table = table_sort_by(pa_table, 'id')
+                self.assertEqual(pa_table.num_rows, 3)
+                ids = pa_table.column('id').to_pylist()
+                print(f"Lumina vector search ({label}) matched rows: ids={ids}")
+                self.assertIn(0, ids)
 
     def test_read_lumina_vector_with_btree_filter(self):
         """Vector search + btree scalar pre-filter, using a table that Java
