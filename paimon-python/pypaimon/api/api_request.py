@@ -156,3 +156,19 @@ class AlterFunctionRequest(RESTRequest):
         return {
             self.FIELD_CHANGES: [c.to_dict() for c in self.changes]
         }
+
+
+# Wire DTO for ``POST /databases/{db}/tables/{tbl}/tags``. Mirrors Java
+# ``CreateTagRequest`` (paimon-api/.../rest/requests/CreateTagRequest.java) — only
+# three fields are serialized. ``ignoreIfExists`` is intentionally NOT included
+# here; it is a client-side flag handled by ``RESTCatalog.create_tag``, not part
+# of the wire format.
+@dataclass
+class CreateTagRequest(RESTRequest):
+    FIELD_TAG_NAME = "tagName"
+    FIELD_SNAPSHOT_ID = "snapshotId"
+    FIELD_TIME_RETAINED = "timeRetained"
+
+    tag_name: str = json_field(FIELD_TAG_NAME)
+    snapshot_id: Optional[int] = json_field(FIELD_SNAPSHOT_ID, default=None)
+    time_retained: Optional[str] = json_field(FIELD_TIME_RETAINED, default=None)

@@ -23,18 +23,19 @@ import re
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest,
                                       AlterTableRequest, CommitTableRequest,
                                       CreateDatabaseRequest, CreateFunctionRequest,
-                                      CreateTableRequest, RenameTableRequest,
-                                      RollbackTableRequest)
+                                      CreateTableRequest, CreateTagRequest,
+                                      RenameTableRequest, RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
                                        GetTableResponse,
-                                       GetTableTokenResponse,
+                                       GetTableTokenResponse, GetTagResponse,
                                        ListDatabasesResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
                                        ListPartitionsResponse,
-                                       ListTablesResponse, PagedList,
+                                       ListTablesResponse, ListTagsResponse,
+                                       PagedList,
                                        PagedResponse, GetTableSnapshotResponse,
                                        Partition)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
@@ -59,6 +60,7 @@ class RESTApi:
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
+    TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     # Function name validation pattern
@@ -435,6 +437,62 @@ class RESTApi:
 
         partitions = response.data() or []
         return PagedList(partitions, response.get_next_page_token())
+
+    # Tag CRUD wrappers — mirror Java RESTApi.java:1062-1123.
+    def create_tag(
+            self,
+            identifier: Identifier,
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+    ) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = CreateTagRequest(
+            tag_name=tag_name,
+            snapshot_id=snapshot_id,
+            time_retained=time_retained,
+        )
+        self.client.post(
+            self.resource_paths.tags(database_name, table_name),
+            request,
+            self.rest_auth_function,
+        )
+
+    def get_tag(self, identifier: Identifier, tag_name: str) -> GetTagResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+        return self.client.get(
+            self.resource_paths.tag(database_name, table_name, tag_name),
+            GetTagResponse,
+            self.rest_auth_function,
+        )
+
+    def list_tags_paged(
+            self,
+            identifier: Identifier,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            tag_name_prefix: Optional[str] = None,
+    ) -> PagedList[str]:
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get_with_params(
+            self.resource_paths.tags(database_name, table_name),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {self.TAG_NAME_PREFIX: tag_name_prefix},
+            ),
+            ListTagsResponse,
+            self.rest_auth_function,
+        )
+        tags = response.data() or []
+        return PagedList(tags, response.get_next_page_token())
+
+    def delete_tag(self, identifier: Identifier, tag_name: str) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        self.client.delete(
+            self.resource_paths.tag(database_name, table_name, tag_name),
+            self.rest_auth_function,
+        )
 
     @staticmethod
     def is_valid_function_name(name: str) -> bool:
