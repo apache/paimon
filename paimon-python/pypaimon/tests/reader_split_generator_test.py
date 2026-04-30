@@ -329,6 +329,7 @@ class SplitGeneratorTest(unittest.TestCase):
         # Note: SlicedSplit may or may not be created depending on data distribution
         # This test ensures that if SlicedSplit is created, merged_row_count() works correctly
 
+
 class ApplyPushDownLimitUnitTest(unittest.TestCase):
     """Direct, mock-driven coverage of ``FileScanner._apply_push_down_limit``.
 
