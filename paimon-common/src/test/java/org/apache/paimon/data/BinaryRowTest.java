@@ -550,6 +550,11 @@ public class BinaryRowTest {
         InternalVector vector2 = row.getVector(0);
         assertThat(vector2.size()).isEqualTo(vector.size());
         assertThat(vector2.toFloatArray()).isEqualTo(vector.toFloatArray());
+        assertThat(
+                        DataFormatTestUtil.toStringNoRowKind(
+                                row,
+                                RowType.of(DataTypes.VECTOR(vector.size(), DataTypes.FLOAT()))))
+                .isEqualTo(Arrays.toString(vector.toFloatArray()));
     }
 
     @Test

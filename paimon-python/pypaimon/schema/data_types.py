@@ -132,6 +132,66 @@ class ArrayType(DataType):
 
 
 @dataclass
+class VectorType(DataType):
+    element: DataType
+    length: int
+
+    VALID_ELEMENT_TYPES = {
+        "BOOLEAN",
+        "TINYINT",
+        "SMALLINT",
+        "INT",
+        "INTEGER",
+        "BIGINT",
+        "FLOAT",
+        "DOUBLE",
+    }
+
+    def __init__(self, nullable: bool, element_type: DataType, length: int):
+        super().__init__(nullable)
+        if length < 1:
+            raise ValueError("Vector length must be greater than or equal to 1.")
+        if not self.is_valid_element_type(element_type):
+            raise ValueError("Invalid element type for vector: {}".format(element_type))
+        self.element = element_type
+        self.length = length
+
+    @classmethod
+    def is_valid_element_type(cls, element_type: DataType) -> bool:
+        if not isinstance(element_type, AtomicType):
+            return False
+        return element_type.type.upper() in cls.VALID_ELEMENT_TYPES
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, VectorType):
+            return False
+        return (self.element == other.element
+                and self.length == other.length
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.element, self.length, self.nullable))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "VECTOR" + (" NOT NULL" if not self.nullable else ""),
+            "element": self.element.to_dict() if self.element else None,
+            "length": self.length,
+            "nullable": self.nullable
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "VectorType":
+        return DataTypeParser.parse_data_type(data)
+
+    def __str__(self) -> str:
+        null_suffix = "" if self.nullable else " NOT NULL"
+        return "VECTOR<{}, {}>{}".format(self.element, self.length, null_suffix)
+
+
+@dataclass
 class MultisetType(DataType):
     element: DataType
 
@@ -387,6 +447,14 @@ class DataTypeParser:
                 nullable = "NOT NULL" not in type_string
                 return ArrayType(nullable, element)
 
+            elif type_string.startswith("VECTOR"):
+                element = DataTypeParser.parse_data_type(
+                    json_data.get("element"), field_id
+                )
+                length = int(json_data.get("length"))
+                nullable = "NOT NULL" not in type_string
+                return VectorType(nullable, element, length)
+
             elif type_string.startswith("MULTISET"):
                 element = DataTypeParser.parse_data_type(
                     json_data.get("element"), field_id
@@ -536,6 +604,8 @@ class PyarrowFieldParser:
                 return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
+        elif isinstance(data_type, VectorType):
+            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element), data_type.length)
         elif isinstance(data_type, MapType):
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
@@ -603,6 +673,10 @@ class PyarrowFieldParser:
             type_name = 'DATE'
         elif types.is_time(pa_type):
             type_name = 'TIME(0)'
+        elif types.is_fixed_size_list(pa_type):
+            pa_type: pyarrow.FixedSizeListType
+            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, pa_type.value_field.nullable)
+            return VectorType(nullable, element_type, pa_type.list_size)
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
             element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
@@ -697,7 +771,9 @@ class PyarrowFieldParser:
                     return {"type": "long", "logicalType": "local-timestamp-micros"}
                 else:
                     raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
-        elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):
+        elif pyarrow.types.is_fixed_size_list(field_type) or \
+                pyarrow.types.is_list(field_type) or \
+                pyarrow.types.is_large_list(field_type):
             value_field = field_type.value_field
             return {
                 "type": "array",

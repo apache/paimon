@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -796,6 +797,58 @@ public class JavaPyE2ETest {
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
             assertThat(res).hasSize(3);
         }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteVectorAppendTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_vector_append_tablej_avro");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .column("label", DataTypes.STRING())
+                        .option("file.format", "avro")
+                        .option("bucket", "-1")
+                        .build();
+
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f}),
+                            BinaryString.fromString("first")));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryVector.fromPrimitiveArray(new float[] {4.0f, 5.0f, 6.0f}),
+                            BinaryString.fromString("second")));
+            write.write(
+                    GenericRow.of(
+                            3,
+                            BinaryVector.fromPrimitiveArray(new float[] {-1.0f, 0.5f, 2.5f}),
+                            BinaryString.fromString("third")));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "1, [1.0, 2.0, 3.0], first",
+                        "2, [4.0, 5.0, 6.0], second",
+                        "3, [-1.0, 0.5, 2.5], third");
     }
 
     @Test
