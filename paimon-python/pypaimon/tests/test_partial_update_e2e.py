@@ -56,18 +56,22 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _create_pk_table(self, table_name, merge_engine='partial-update'):
+    def _create_pk_table(self, table_name, merge_engine='partial-update',
+                         extra_options=None):
         # bucket=1 so all rows for any PK land in the same bucket; this is
         # what forces the read path through SortMergeReader instead of the
         # raw_convertible / single-file fast path. partial-update merging
         # only happens inside SortMergeReader.
+        options = {
+            'bucket': '1',
+            'merge-engine': merge_engine,
+        }
+        if extra_options:
+            options.update(extra_options)
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             primary_keys=['id'],
-            options={
-                'bucket': '1',
-                'merge-engine': merge_engine,
-            },
+            options=options,
         )
         full = 'default.{}'.format(table_name)
         self.catalog.create_table(full, schema, False)
@@ -213,6 +217,89 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         with self.assertRaises(NotImplementedError) as cm:
             rb.new_read().to_arrow(splits)
         self.assertIn('first-row', str(cm.exception))
+
+    # -- partial-update + out-of-scope option combinations ---------------
+    #
+    # When a user pairs ``merge-engine: partial-update`` with any option
+    # this port doesn't implement (sequence-group, per-field aggregator
+    # override, ignore-delete, partial-update.remove-record-on-*), we
+    # must raise rather than silently run the simple last-non-null merge
+    # — otherwise we'd reproduce the same silent-corruption pattern this
+    # PR exists to close.
+
+    def _assert_partial_update_unsupported(self, table_name, extra_options,
+                                           expected_keys):
+        table = self._create_pk_table(
+            table_name, extra_options=extra_options)
+        self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
+        self._write(table, [{'id': 1, 'a': None, 'b': 'B', 'c': None}])
+
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        with self.assertRaises(NotImplementedError) as cm:
+            rb.new_read().to_arrow(splits)
+        msg = str(cm.exception)
+        self.assertIn("partial-update", msg)
+        for key in expected_keys:
+            self.assertIn(key, msg,
+                          "expected option key '{}' in error: {}".format(key, msg))
+
+    def test_partial_update_with_sequence_group_raises(self):
+        self._assert_partial_update_unsupported(
+            'pu_seq_group',
+            {'fields.b.sequence-group': 'a'},
+            ['fields.b.sequence-group'],
+        )
+
+    def test_partial_update_with_field_aggregate_function_raises(self):
+        self._assert_partial_update_unsupported(
+            'pu_field_agg',
+            {'fields.a.aggregate-function': 'last_non_null_value'},
+            ['fields.a.aggregate-function'],
+        )
+
+    def test_partial_update_with_default_aggregate_function_raises(self):
+        self._assert_partial_update_unsupported(
+            'pu_default_agg',
+            {'fields.default-aggregate-function': 'last_non_null_value'},
+            ['fields.default-aggregate-function'],
+        )
+
+    def test_partial_update_with_ignore_delete_raises(self):
+        self._assert_partial_update_unsupported(
+            'pu_ignore_delete',
+            {'ignore-delete': 'true'},
+            ['ignore-delete'],
+        )
+
+    def test_partial_update_with_remove_record_on_delete_raises(self):
+        self._assert_partial_update_unsupported(
+            'pu_rrod',
+            {'partial-update.remove-record-on-delete': 'true'},
+            ['partial-update.remove-record-on-delete'],
+        )
+
+    def test_partial_update_with_remove_record_on_sequence_group_raises(self):
+        self._assert_partial_update_unsupported(
+            'pu_rrosg',
+            {'partial-update.remove-record-on-sequence-group': 'true'},
+            ['partial-update.remove-record-on-sequence-group'],
+        )
+
+    def test_partial_update_with_explicit_ignore_delete_false_does_not_raise(self):
+        """Explicitly setting ignore-delete=false is equivalent to leaving
+        it unset and must not trip the guard."""
+        table = self._create_pk_table(
+            'pu_ignore_delete_false',
+            extra_options={'ignore-delete': 'false'},
+        )
+        self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
+        self._write(table, [{'id': 1, 'a': None, 'b': 'B', 'c': None}])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'A', 'b': 'B', 'c': None}],
+        )
 
 
 if __name__ == '__main__':
