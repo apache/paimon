@@ -31,7 +31,8 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (remove_row_id_filter,
+from pypaimon.read.push_down_utils import (_get_all_fields,
+                                           remove_row_id_filter,
                                            trim_and_transform_predicate)
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
@@ -366,34 +367,37 @@ class FileScanner:
         return self
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
+        # Line-for-line port of Java
+        # ``DataTableBatchScan.applyPushDownLimit``
+        # (paimon-core/.../source/DataTableBatchScan.java:128-165).
+
+        # Java L129-131: if (pushDownLimit == null || hasNonPartitionFilter())
+        #                return Optional.empty();  // skip pushdown
+        # Java skips limit pushdown entirely whenever the predicate touches
+        # any non-partition column, because per-split row counts (which the
+        # accumulator below sums) are pre-filter and would over-count
+        # against the actual filtered output. Mirror that here: when the
+        # predicate references a column outside ``partition_keys`` we
+        # bail out and return the splits untouched.
         if self.limit is None:
             return splits
-        scanned_row_count = 0
-        limited_splits = []
+        if self._has_non_partition_filter():
+            return splits
 
-        # Line-for-line port of Java
-        # ``DataTableBatchScan.applyPushDownLimit`` (paimon-core/.../source/
-        # DataTableBatchScan.java:128-165):
-        #
-        #   for each split:
-        #       if mergedRowCount.isPresent():
-        #           limitedSplits.add(split)
-        #           scanned += mergedRowCount.getAsLong()
-        #           if scanned >= limit: return limitedSplits
-        #   return result  // == original splits
-        #
-        # The previous Python code accumulated ``split.row_count`` (the
-        # pre-DV upper bound) and over-counted when DV was enabled,
-        # causing the early return to fire before the reader could
-        # actually produce ``limit`` rows. Java avoids that by using
-        # ``mergedRowCount`` (DV-aware); we use the same source via
-        # ``DataSplit.merged_row_count()``.
-        #
-        # Splits whose merged count is unknown (non-raw, or data-evolution
-        # layouts where ``first_row_id`` is missing) are skipped — they
-        # cannot meaningfully contribute to the budget. They still reach
-        # the reader via the fall-through ``return splits`` when the
-        # accumulator never reaches the limit, mirroring Java's behaviour.
+        # Java L138, L146: scannedRowCount=0; limitedSplits = new ArrayList<>().
+        scanned_row_count = 0
+        limited_splits: List[DataSplit] = []
+
+        # Java L147-163: iterate, only count splits whose mergedRowCount
+        # is present, accumulate that DV-aware count, early-return the
+        # collected sublist as soon as the budget is met. The previous
+        # Python code accumulated ``split.row_count`` (DV-blind upper
+        # bound) and over-counted when DV was on, causing the early
+        # return to fire before the reader could actually produce the
+        # limit rows; Java uses ``mergedRowCount`` for exactly this
+        # reason. Splits whose merged count is unknown (non-raw, or
+        # data-evolution layouts where ``first_row_id`` is missing) are
+        # skipped — same as Java's ``isPresent()`` gate.
         for split in splits:
             merged = split.merged_row_count()
             if merged is not None:
@@ -402,7 +406,26 @@ class FileScanner:
                 if scanned_row_count >= self.limit:
                     return limited_splits
 
+        # Java L164: return Optional.of(result);  // result wraps the
+        # original splits when the loop never reaches the budget.
         return splits
+
+    def _has_non_partition_filter(self) -> bool:
+        """Mirror Java ``SnapshotReaderImpl.hasNonPartitionFilter``
+        (paimon-core/.../source/snapshot/SnapshotReaderImpl.java:235-248):
+        when the user-provided predicate references any column outside
+        the partition keys, the non-partition portion is non-empty and
+        the flag is true. The Java ``applyPushDownLimit`` short-circuits
+        on this flag so per-split row counts (pre-filter) never act as
+        the limit budget.
+
+        Python equivalent: collect the predicate's referenced field set
+        and check whether it has any element outside ``partition_keys``.
+        """
+        if self.predicate is None:
+            return False
+        partition_keys = set(self.table.partition_keys or [])
+        return not _get_all_fields(self.predicate).issubset(partition_keys)
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
         if not self.partition_key_predicate:

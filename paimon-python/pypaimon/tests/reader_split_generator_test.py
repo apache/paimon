@@ -348,15 +348,18 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
     """
 
     @staticmethod
-    def _apply(splits, limit):
+    def _apply(splits, limit, has_non_partition_filter=False):
         from pypaimon.read.scanner.file_scanner import FileScanner
 
-        # Stand in for ``self`` — only ``self.limit`` is read by the method.
+        # Stand in for ``self`` — only ``self.limit`` and the
+        # ``_has_non_partition_filter`` short-circuit are exercised by
+        # the method under test.
         class _FakeScanner:
             pass
 
         scanner = _FakeScanner()
         scanner.limit = limit
+        scanner._has_non_partition_filter = lambda: has_non_partition_filter
         return FileScanner._apply_push_down_limit(scanner, splits)
 
     @staticmethod
@@ -435,6 +438,21 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
         s = self._split(raw_convertible=True, row_count=10, merged_row_count=10)
         result = self._apply([s], limit=None)
         self.assertEqual(result, [s])
+
+    def test_non_partition_filter_short_circuits_pushdown(self):
+        """Java ``applyPushDownLimit`` (DataTableBatchScan.java:129) bails
+        out when ``hasNonPartitionFilter()`` is true: per-split row counts
+        are pre-filter, so summing them against ``limit`` would
+        over-count when the predicate further filters rows. The Python
+        port must do the same — return the splits untouched and let the
+        reader apply both filter and limit."""
+        s_raw = self._split(raw_convertible=True, row_count=10, merged_row_count=10)
+        # With a non-partition filter, the early-return branch trips
+        # before we even look at merged_row_count, so the budget never
+        # narrows the plan.
+        result = self._apply(
+            [s_raw, s_raw, s_raw], limit=5, has_non_partition_filter=True)
+        self.assertEqual(len(result), 3)
 
 
 if __name__ == '__main__':
