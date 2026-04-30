@@ -55,9 +55,20 @@ class PartialUpdateMergeFunction:
     exhausted).
     """
 
-    def __init__(self, key_arity: int, value_arity: int):
+    def __init__(self, key_arity: int, value_arity: int,
+                 nullables: Optional[List[bool]] = None):
         self._key_arity = key_arity
         self._value_arity = value_arity
+        # Per-value-field nullable flags, parallel to value indices. When
+        # ``None``, no nullability check runs (preserves the contract for
+        # direct callers that don't have schema info handy). When given,
+        # mirrors Java's ``updateNonNullFields`` check: a null input on a
+        # NOT NULL field raises rather than being silently absorbed.
+        if nullables is not None and len(nullables) != value_arity:
+            raise ValueError(
+                "nullables length {} does not match value_arity {}".format(
+                    len(nullables), value_arity))
+        self._nullables = nullables
         # Lazily allocated on first add(); ``None`` means "no rows yet".
         self._accumulator: Optional[List[Any]] = None
         # Reference to the most recently added kv. We use it only to
@@ -85,15 +96,19 @@ class PartialUpdateMergeFunction:
                 "UPDATE_BEFORE rows.".format(RowKind(row_kind_byte).to_string())
             )
 
+        # Mirror Java's reset() + updateNonNullFields(): the accumulator
+        # starts as all-null (equivalent to ``new GenericRow(arity)``) and
+        # each add() writes non-null inputs; null inputs are absorbed —
+        # except when the schema marks the field NOT NULL, in which case
+        # we raise to match Java's IllegalArgumentException check.
         if self._accumulator is None:
-            self._accumulator = [
-                kv.value.get_field(i) for i in range(self._value_arity)
-            ]
-        else:
-            for i in range(self._value_arity):
-                v = kv.value.get_field(i)
-                if v is not None:
-                    self._accumulator[i] = v
+            self._accumulator = [None] * self._value_arity
+        for i in range(self._value_arity):
+            v = kv.value.get_field(i)
+            if v is not None:
+                self._accumulator[i] = v
+            elif self._nullables is not None and not self._nullables[i]:
+                raise ValueError("Field {} can not be null".format(i))
         self._latest_kv = kv
 
     def get_result(self) -> Optional[KeyValue]:
