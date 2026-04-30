@@ -20,7 +20,6 @@ Tests for Identifier parsing, including backtick support for database names with
 """
 
 import unittest
-import warnings
 
 from pypaimon.common.identifier import Identifier
 
@@ -63,9 +62,9 @@ class IdentifierTest(unittest.TestCase):
         identifier = Identifier.create("mydb", "mytable")
         self.assertEqual(identifier.get_full_name(), "mydb.mytable")
 
-    def test_get_full_name_with_branch_encoded_in_object(self):
-        """A branch is encoded into ``object`` (Java-compatible)."""
-        identifier = Identifier.create("mydb", "mytable", branch="feature")
+    def test_constructor_with_branch_encodes_into_object(self):
+        """``Identifier(db, table, branch=...)`` mirrors Java's 3-arg constructor."""
+        identifier = Identifier("mydb", "mytable", branch="feature")
         self.assertEqual(identifier.object, "mytable$branch_feature")
         self.assertEqual(identifier.get_full_name(), "mydb.mytable$branch_feature")
         self.assertEqual(identifier.get_table_name(), "mytable")
@@ -74,18 +73,12 @@ class IdentifierTest(unittest.TestCase):
         self.assertFalse(identifier.is_system_table())
 
     def test_main_branch_is_not_encoded_into_object(self):
-        """``main`` (case-insensitive) is the default branch and is not encoded into ``object``.
-
-        Note: matching Java semantics, the cached branch value passed to
-        ``create`` is preserved on the instance, so ``get_branch_name()``
-        returns the supplied string. The identifier is still wire-equal to
-        a no-branch one because only ``object`` round-trips through JSON.
-        """
+        """``main`` (case-insensitive) is the default branch and is not encoded into ``object``."""
         for branch in ("main", "MAIN", "Main"):
-            identifier = Identifier.create("mydb", "mytable", branch=branch)
+            identifier = Identifier("mydb", "mytable", branch=branch)
             self.assertEqual(identifier.object, "mytable")
             # Wire-equal to a no-branch identifier.
-            self.assertEqual(identifier, Identifier.create("mydb", "mytable"))
+            self.assertEqual(identifier, Identifier("mydb", "mytable"))
 
     def test_get_branch_name_or_default_when_unset(self):
         """``get_branch_name_or_default`` falls back to 'main'."""
@@ -131,7 +124,7 @@ class IdentifierTest(unittest.TestCase):
         """object name '<base>$snapshots' is a system table."""
         self.assertTrue(Identifier("mydb", "orders$snapshots").is_system_table())
         self.assertTrue(
-            Identifier.create("mydb", "orders", system_table="snapshots").is_system_table())
+            Identifier("mydb", "orders", system_table="snapshots").is_system_table())
 
     def test_is_system_table_schemas_suffix(self):
         """object name '<base>$schemas' is a system table."""
@@ -163,9 +156,9 @@ class IdentifierTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             identifier.is_system_table()
 
-    def test_create_with_branch_and_system_table(self):
-        """``create`` encodes both branch and system_table into the object name."""
-        identifier = Identifier.create(
+    def test_constructor_with_branch_and_system_table(self):
+        """``Identifier(db, table, branch=..., system_table=...)`` mirrors Java's 4-arg constructor."""
+        identifier = Identifier(
             "mydb", "orders", branch="dev", system_table="snapshots"
         )
         self.assertEqual(identifier.object, "orders$branch_dev$snapshots")
@@ -173,131 +166,101 @@ class IdentifierTest(unittest.TestCase):
         self.assertEqual(identifier.get_branch_name(), "dev")
         self.assertEqual(identifier.get_system_table_name(), "snapshots")
 
-    def test_create_with_system_table_only(self):
-        """``create`` with system_table but no branch."""
-        identifier = Identifier.create("mydb", "orders", system_table="files")
+    def test_constructor_with_system_table_only(self):
+        """Constructor with system_table but no branch."""
+        identifier = Identifier("mydb", "orders", system_table="files")
         self.assertEqual(identifier.object, "orders$files")
         self.assertEqual(identifier.get_table_name(), "orders")
         self.assertIsNone(identifier.get_branch_name())
         self.assertEqual(identifier.get_system_table_name(), "files")
 
+    def test_create_is_two_arg_alias(self):
+        """``Identifier.create(db, object)`` is a 2-arg alias of the JSON constructor (matches Java)."""
+        identifier = Identifier.create("db", "orders$snapshots")
+        self.assertEqual(identifier.object, "orders$snapshots")
+        self.assertEqual(identifier.get_table_name(), "orders")
+        self.assertEqual(identifier.get_system_table_name(), "snapshots")
+        self.assertTrue(identifier.is_system_table())
+
+    def test_constructor_forms_are_wire_equivalent(self):
+        """The encoding constructor and the @JsonCreator form produce wire-equal identifiers."""
+        encoded = Identifier(
+            "mydb", "orders", branch="dev", system_table="snapshots"
+        )
+        from_wire = Identifier("mydb", "orders$branch_dev$snapshots")
+        self.assertEqual(encoded, from_wire)
+        self.assertEqual(hash(encoded), hash(from_wire))
+
+    def test_branch_property_reads_decoded_branch(self):
+        """``identifier.branch`` is a read-only alias for ``get_branch_name()``."""
+        self.assertEqual(Identifier("db", "tbl", branch="dev").branch, "dev")
+        self.assertEqual(Identifier("db", "tbl$branch_dev").branch, "dev")
+        self.assertIsNone(Identifier("db", "tbl").branch)
+
     def test_equality_and_hash_ignore_cached_fields(self):
         """Equality and hash depend only on (database, object), matching Java JSON shape."""
         a = Identifier("mydb", "orders$branch_dev$snapshots")
-        b = Identifier.create(
+        b = Identifier(
             "mydb", "orders", branch="dev", system_table="snapshots"
         )
         self.assertEqual(a, b)
         self.assertEqual(hash(a), hash(b))
 
 
-class IdentifierBackwardCompatibilityShimTest(unittest.TestCase):
-    """Locks in the backward-compat shim for the previous Identifier shape.
+class IdentifierBackwardCompatibilityTest(unittest.TestCase):
+    """Locks in that the public surface from before this PR keeps working.
 
-    The shim is intentionally narrow: it covers the three concrete API
-    breaks that escaped pre-review (constructor ``branch=`` kwarg,
-    ``identifier.branch`` attribute, ``Identifier.create(db, object)``
-    two-arg form with ``$`` in the second arg). It is scheduled for
-    removal in the next minor release; tests below assert both the
-    behavioural compatibility AND the ``DeprecationWarning`` so the
-    shim doesn't get silently dropped before users have a chance to
-    migrate.
+    Pre-PR ``Identifier`` exposed three signatures that this PR's
+    encoding-into-object refactor risked breaking. They must continue to
+    run without raising; semantics may shift to the wire-correct form
+    (branches encoded into ``object``), but no caller should hit a
+    TypeError / AttributeError on an unchanged call site.
     """
 
-    def test_constructor_branch_kwarg_still_works_with_warning(self):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            identifier = Identifier(database="db", object="tbl",
-                                    branch="feature")
-
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertEqual(len(depr), 1, "exactly one DeprecationWarning expected")
-        self.assertIn("Identifier(..., branch=...)", str(depr[0].message))
-
-        # Branch must be encoded into the object field, matching the
-        # behaviour of the new ``Identifier.create(..., branch=...)`` form.
+    def test_constructor_branch_kwarg_still_accepted(self):
+        # ``Identifier(db, obj, branch=...)`` was the old dataclass init
+        # signature. It must still construct without error; the branch is
+        # now encoded into ``object`` so the wire is Java-compatible.
+        identifier = Identifier(database="db", object="tbl", branch="feature")
         self.assertEqual(identifier.object, "tbl$branch_feature")
         self.assertEqual(identifier.get_branch_name(), "feature")
-        self.assertEqual(
-            identifier,
-            Identifier.create("db", "tbl", branch="feature"),
-            "shim must produce a wire-equal Identifier",
-        )
 
-    def test_constructor_branch_kwarg_main_is_not_encoded(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            identifier = Identifier("db", "tbl", branch="main")
-        # main is the default branch; encoding rule matches Java/create().
+    def test_constructor_branch_kwarg_none_is_accepted(self):
+        # Explicit ``branch=None`` (e.g. from JSON deserialization paths)
+        # must remain a no-op rather than triggering the encoding path.
+        identifier = Identifier("db", "tbl", branch=None)
         self.assertEqual(identifier.object, "tbl")
+        self.assertIsNone(identifier.get_branch_name())
 
-    def test_constructor_branch_kwarg_none_is_no_op(self):
-        # Explicit branch=None must still trigger the warning (it's the
-        # deprecated kwarg form) but produce the un-encoded object.
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            identifier = Identifier("db", "tbl", branch=None)
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertEqual(len(depr), 1)
+    def test_branch_attribute_read(self):
+        # Old code that read ``identifier.branch`` keeps reading the
+        # branch name (now decoded from ``object``).
+        self.assertEqual(Identifier("db", "tbl", branch="dev").branch, "dev")
+        self.assertEqual(Identifier("db", "tbl$branch_dev").branch, "dev")
+        self.assertIsNone(Identifier("db", "tbl").branch)
+
+    def test_branch_attribute_write(self):
+        # Old code that assigned to ``identifier.branch`` keeps working.
+        # The setter re-encodes ``object`` so the wire is consistent.
+        identifier = Identifier("db", "tbl")
+        identifier.branch = "feature"
+        self.assertEqual(identifier.branch, "feature")
+        self.assertEqual(identifier.object, "tbl$branch_feature")
+        self.assertEqual(identifier.get_branch_name(), "feature")
+        # Clearing back to None drops the encoded branch segment.
+        identifier.branch = None
         self.assertEqual(identifier.object, "tbl")
+        self.assertIsNone(identifier.branch)
 
-    def test_branch_property_delegates_to_get_branch_name(self):
-        identifier = Identifier.create("db", "tbl", branch="dev")
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            value = identifier.branch
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertEqual(len(depr), 1)
-        self.assertIn("Identifier.branch is deprecated", str(depr[0].message))
-        self.assertEqual(value, "dev")
-        self.assertEqual(value, identifier.get_branch_name())
-
-    def test_branch_property_returns_none_when_no_branch(self):
-        identifier = Identifier.create("db", "tbl")
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.assertIsNone(identifier.branch)
-
-    def test_create_two_arg_form_with_dollar_falls_back_to_raw(self):
-        # ``create("db", "orders$snapshots")`` used to mean "store
-        # orders$snapshots as the object". Honour that shape with a
-        # warning so existing callers keep working.
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            identifier = Identifier.create("db", "orders$snapshots")
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertEqual(len(depr), 1)
-        self.assertIn("Identifier.create(database, object)",
-                      str(depr[0].message))
+    def test_create_two_arg_form_with_dollar_object(self):
+        # ``Identifier.create(db, "tbl$snapshots")`` was the documented
+        # way to construct system-table identifiers pre-PR. It must keep
+        # producing an equivalent system-table identifier.
+        identifier = Identifier.create("db", "orders$snapshots")
         self.assertEqual(identifier.object, "orders$snapshots")
         self.assertTrue(identifier.is_system_table())
         self.assertEqual(identifier.get_table_name(), "orders")
         self.assertEqual(identifier.get_system_table_name(), "snapshots")
-
-    def test_create_two_arg_form_without_dollar_does_not_warn(self):
-        # The new shape — ``create("db", "tbl")`` — must NOT trigger the
-        # legacy fallback (no ``$`` in the table name).
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            identifier = Identifier.create("db", "tbl")
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertEqual(len(depr), 0,
-                         "non-legacy create() must not warn")
-        self.assertEqual(identifier.object, "tbl")
-
-    def test_create_with_kwargs_skips_legacy_fallback(self):
-        # When branch=/system_table= are explicitly passed, the second
-        # arg is the table name even if it contains ``$``: do NOT route
-        # through the legacy raw-object fallback.
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            identifier = Identifier.create("db", "weird$table",
-                                           branch="dev")
-        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-        self.assertEqual(len(depr), 0)
-        self.assertEqual(identifier.object, "weird$table$branch_dev")
-        self.assertEqual(identifier.get_branch_name(), "dev")
-        self.assertEqual(identifier.get_table_name(), "weird$table")
 
 
 if __name__ == '__main__':
