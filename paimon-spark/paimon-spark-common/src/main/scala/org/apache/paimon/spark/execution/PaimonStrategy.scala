@@ -29,7 +29,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ReplaceTableAsSelect, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
@@ -50,6 +50,9 @@ case class PaimonStrategy(spark: SparkSession)
 
     case ctas: CreateTableAsSelect =>
       PaimonCreateTableAsSelectStrategy(spark)(ctas)
+
+    case rtas: ReplaceTableAsSelect =>
+      PaimonCreateTableAsSelectStrategy(spark)(rtas)
 
     case c @ PaimonCallCommand(procedure, args) =>
       val input = buildInternalRow(args)
