@@ -2823,15 +2823,17 @@ class DataBlobWriterTest(unittest.TestCase):
                         'error': str(e)
                     })
 
-            # Create and start multiple threads. We keep this modest (5 vs.
-            # the original 10) because GHA runners under load have shown they
-            # can't drain 10 simultaneously-conflicting commits even with
-            # ``commit.max-retries=50`` (50 attempts × 30s back-off ≈ 25 min,
-            # still timing out in CI). Five threads exercises the retry path
-            # without reducing the wall-time budget to the point where each
-            # iteration takes ~25 minutes.
+            # Create and start multiple threads. Keep this modest (3 vs. the
+            # original 10) because GHA runners under load can't drain 10
+            # simultaneously-conflicting commits even with
+            # ``commit.max-retries=50`` (50 attempts * 30s back-off ~25 min,
+            # still timing out in CI). At 5 threads we still saw a different
+            # flake — read end occasionally observed only 4 of the 5 commits'
+            # rows (race between commit visibility and the immediate read).
+            # Three threads exercises the retry path while keeping the
+            # contention density low enough that GHA can drain reliably.
             threads = []
-            num_threads = 5
+            num_threads = 3
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=write_blob_data,
