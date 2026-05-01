@@ -16,16 +16,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import os
-import shutil
-import tempfile
 import unittest
 
 from pypaimon.api.api_response import GetTagResponse
 from pypaimon.catalog.catalog_exception import (TableNotExistException,
                                                 TagAlreadyExistException,
                                                 TagNotExistException)
-from pypaimon import CatalogFactory
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
@@ -128,47 +124,10 @@ class RESTCatalogTagCRUDTest(RESTBaseTest):
             self.rest_catalog.delete_tag(identifier, "absent")
 
 
-class FilesystemCatalogTagInheritsNotImplementedTest(unittest.TestCase):
-    """The filesystem catalog inherits the abstract NotImplementedError stubs.
-
-    A concrete tag implementation requires a Python-side TagManager port and
-    is tracked separately. The point of this test is to confirm the
-    abstract API gap is closed: ``FileSystemCatalog().create_tag(...)``
-    raises ``NotImplementedError`` rather than ``AttributeError``.
-    """
-
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="unittest_tag_")
-        warehouse = os.path.join(self.temp_dir, "warehouse")
-        os.makedirs(warehouse, exist_ok=True)
-        # Use the default (filesystem) catalog. Without a ``metastore`` option
-        # CatalogFactory returns FileSystemCatalog, which inherits the abstract
-        # ``NotImplementedError`` tag stubs.
-        self.catalog = CatalogFactory.create({"warehouse": warehouse})
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_create_tag_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError) as cm:
-            self.catalog.create_tag(
-                Identifier.from_string("default.tbl"), "t1")
-        self.assertIn("create_tag", str(cm.exception))
-
-    def test_delete_tag_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            self.catalog.delete_tag(
-                Identifier.from_string("default.tbl"), "t1")
-
-    def test_get_tag_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            self.catalog.get_tag(
-                Identifier.from_string("default.tbl"), "t1")
-
-    def test_list_tags_paged_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            self.catalog.list_tags_paged(
-                Identifier.from_string("default.tbl"))
+# Note: the previous ``FilesystemCatalogTagInheritsNotImplementedTest`` class
+# has been removed because FileSystemCatalog now overrides the tag CRUD
+# methods (no longer raises NotImplementedError). The new behavior is
+# covered by ``pypaimon/tests/filesystem_catalog_tag_test.py``.
 
 
 if __name__ == "__main__":

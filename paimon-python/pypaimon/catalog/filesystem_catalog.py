@@ -18,13 +18,16 @@
 
 from typing import List, Optional, Union
 
+from pypaimon.api.api_response import GetTagResponse, PagedList
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_exception import (
     DatabaseAlreadyExistException,
     DatabaseNotExistException,
     TableAlreadyExistException,
-    TableNotExistException
+    TableNotExistException,
+    TagAlreadyExistException,
+    TagNotExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.common.options import Options
@@ -343,3 +346,105 @@ class FileSystemCatalog(Catalog):
             next_page_token = str(end_index)
 
         return PagedList(elements=result_partitions, next_page_token=next_page_token)
+
+    # ===================== Tag CRUD =====================
+    # Thin wrappers that delegate to FileStoreTable's existing tag helpers
+    # (which in turn use the Python-side TagManager). The catalog layer is
+    # responsible for translating ValueError messages from TagManager into
+    # the typed Catalog exceptions used by the rest of the API.
+
+    def create_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+            ignore_if_exists: bool = False,
+    ) -> None:
+        if time_retained is not None:
+            # Python's Tag dataclass does not yet carry tag_create_time /
+            # tag_time_retained fields; supporting TTL on FileSystemCatalog
+            # requires extending Tag + TagManager and is tracked as a
+            # follow-up. Raise here instead of silently dropping the option,
+            # so callers cannot mistakenly believe the TTL took effect.
+            raise NotImplementedError(
+                "FileSystemCatalog does not yet support `time_retained` on "
+                "create_tag (requires extending the Python Tag dataclass + "
+                "TagManager).")
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.create_tag(tag_name, snapshot_id, ignore_if_exists)
+        except ValueError as e:
+            # ``table.create_tag`` honors ``ignore_if_exists`` internally, so
+            # any "already exists" message that bubbles up here means the
+            # caller asked us to fail on conflict.
+            if "already exists" in str(e):
+                raise TagAlreadyExistException(tag_name) from e
+            raise
+
+    def delete_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        # ``table.delete_tag`` returns False (no exception) when the tag is
+        # missing — surface that as a typed catalog exception to match the
+        # RESTCatalog behavior.
+        if not table.delete_tag(tag_name):
+            raise TagNotExistException(tag_name)
+
+    def get_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ) -> GetTagResponse:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        tag = table.tag_manager().get(tag_name)
+        if tag is None:
+            raise TagNotExistException(tag_name)
+        # tag_create_time / tag_time_retained are not tracked on the
+        # filesystem side yet — the Python Tag dataclass inherits only
+        # Snapshot fields. Returning ``None`` for both keeps the response
+        # shape compatible with the Java contract while making the gap
+        # visible to callers.
+        return GetTagResponse(
+            tag_name=tag_name,
+            snapshot=tag.trim_to_snapshot(),
+            tag_create_time=None,
+            tag_time_retained=None,
+        )
+
+    def list_tags_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            tag_name_prefix: Optional[str] = None,
+    ) -> PagedList:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+
+        # TagManager.list_tags() returns the full list with no built-in
+        # pagination, so we filter + paginate client-side. Sort
+        # lexicographically so ``page_token`` (the previous page's last
+        # entry) gives a stable continuation cursor.
+        tags = sorted(table.list_tags())
+        if tag_name_prefix:
+            tags = [t for t in tags if t.startswith(tag_name_prefix)]
+        if page_token:
+            tags = [t for t in tags if t > page_token]
+        if max_results is not None and max_results > 0 and len(tags) > max_results:
+            page = tags[:max_results]
+            next_token = page[-1]
+        else:
+            page = tags
+            next_token = None
+        return PagedList(elements=page, next_page_token=next_token)
