@@ -23,11 +23,14 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -139,5 +142,66 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.create_global_index(`table` => 'default.%s', index_column => '%s', index_type => 'btree')",
                 tableName, indexColumn);
+    }
+
+    @Test
+    void testChainedUnionOverflowAndFlatUnionFix() throws InterruptedException {
+        int totalUnions = 8 * 200; // 8 index columns × 200 partitions
+        long stackSize = 512 * 1024; // Flink JM default
+
+        // Chained union: result = result.union(new) — causes StackOverflowError
+        AtomicReference<Throwable> chainedError = new AtomicReference<>();
+        Thread chainedThread =
+                new Thread(
+                        null,
+                        () -> {
+                            try {
+                                StreamExecutionEnvironment env =
+                                        StreamExecutionEnvironment.getExecutionEnvironment();
+                                DataStream<String> all = null;
+                                for (int i = 0; i < totalUnions; i++) {
+                                    DataStream<String> s = env.fromElements("item-" + i);
+                                    all = all == null ? s : all.union(s);
+                                }
+                                all.print();
+                                env.getExecutionPlan();
+                            } catch (Throwable t) {
+                                chainedError.set(t);
+                            }
+                        },
+                        "chained-union-test",
+                        stackSize);
+        chainedThread.start();
+        chainedThread.join();
+        assertThat(chainedError.get()).isInstanceOf(StackOverflowError.class);
+
+        // Flat union: first.union(rest...) — no overflow at same stack size
+        AtomicReference<Throwable> flatError = new AtomicReference<>();
+        Thread flatThread =
+                new Thread(
+                        null,
+                        () -> {
+                            try {
+                                StreamExecutionEnvironment env =
+                                        StreamExecutionEnvironment.getExecutionEnvironment();
+                                @SuppressWarnings("unchecked")
+                                DataStream<String>[] streams = new DataStream[totalUnions];
+                                for (int i = 0; i < totalUnions; i++) {
+                                    streams[i] = env.fromElements("item-" + i);
+                                }
+                                @SuppressWarnings("unchecked")
+                                DataStream<String>[] rest = new DataStream[totalUnions - 1];
+                                System.arraycopy(streams, 1, rest, 0, totalUnions - 1);
+                                streams[0].union(rest).print();
+                                env.getExecutionPlan();
+                            } catch (Throwable t) {
+                                flatError.set(t);
+                            }
+                        },
+                        "flat-union-test",
+                        stackSize);
+        flatThread.start();
+        flatThread.join();
+        assertThat(flatError.get()).isNull();
     }
 }

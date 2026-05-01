@@ -85,7 +85,7 @@ public class BTreeIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        DataStream<Committable> allCommitMessages = null;
+        List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
             BTreeGlobalIndexBuilder indexBuilder =
                     indexBuilderSupplier.get().withIndexField(indexColumn);
@@ -160,15 +160,15 @@ public class BTreeIndexTopoBuilder {
                                     recordsPerRange,
                                     maxParallelism);
 
-                    allCommitMessages =
-                            allCommitMessages == null
-                                    ? commitMessages
-                                    : allCommitMessages.union(commitMessages);
+                    allStreams.add(commitMessages);
                 }
             }
         }
-        if (allCommitMessages != null) {
-            commit(table, allCommitMessages);
+        if (!allStreams.isEmpty()) {
+            @SuppressWarnings("unchecked")
+            DataStream<Committable>[] rest =
+                    allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
+            commit(table, allStreams.get(0).union(rest));
         }
 
         return true;
