@@ -314,7 +314,8 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
     def _assert_partial_update_unsupported(self, table_name, extra_options,
                                            expected_keys):
         # Shared dispatch runs at write time too, so the unsupported-
-        # option error surfaces on the first ``write_arrow`` flush
+        # option error surfaces inside the first ``write_arrow`` call
+        # (when ``FileStoreWrite._create_data_writer`` first runs)
         # rather than waiting for read.
         table = self._create_pk_table(
             table_name, extra_options=extra_options)
