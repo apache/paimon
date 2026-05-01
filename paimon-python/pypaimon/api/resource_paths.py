@@ -31,6 +31,9 @@ class ResourcePaths:
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
     TAGS = "tags"
+    BRANCHES = "branches"
+    RENAME = "rename"
+    FORWARD = "forward"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -111,3 +114,22 @@ class ResourcePaths:
             self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
             self.TABLES, RESTUtil.encode_string(table_name), self.TAGS,
             RESTUtil.encode_string(tag_name))
+
+    def branches(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES)
+
+    def branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES,
+            RESTUtil.encode_string(branch_name))
+
+    def rename_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}".format(
+            self.branch(database_name, table_name, branch_name), self.RENAME)
+
+    def forward_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}".format(
+            self.branch(database_name, table_name, branch_name), self.FORWARD)

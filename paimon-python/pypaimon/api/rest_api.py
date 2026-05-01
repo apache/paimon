@@ -22,13 +22,16 @@ import re
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest,
                                       AlterTableRequest, CommitTableRequest,
-                                      CreateDatabaseRequest, CreateFunctionRequest,
-                                      CreateTableRequest, CreateTagRequest,
-                                      RenameTableRequest, RollbackTableRequest)
+                                      CreateBranchRequest, CreateDatabaseRequest,
+                                      CreateFunctionRequest, CreateTableRequest,
+                                      CreateTagRequest, ForwardBranchRequest,
+                                      RenameBranchRequest, RenameTableRequest,
+                                      RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
                                        GetTableResponse,
                                        GetTableTokenResponse, GetTagResponse,
+                                       ListBranchesResponse,
                                        ListDatabasesResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
@@ -438,7 +441,7 @@ class RESTApi:
         partitions = response.data() or []
         return PagedList(partitions, response.get_next_page_token())
 
-    # Tag CRUD wrappers — mirror Java RESTApi.java:1062-1123.
+    # Tag CRUD wrappers — mirror Java RESTApi tag methods.
     def create_tag(
             self,
             identifier: Identifier,
@@ -493,6 +496,63 @@ class RESTApi:
             self.resource_paths.tag(database_name, table_name, tag_name),
             self.rest_auth_function,
         )
+
+    # Branch CRUD wrappers — mirror Java RESTApi branch methods.
+    def create_branch(
+            self,
+            identifier: Identifier,
+            branch_name: str,
+            tag_name: Optional[str] = None,
+    ) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not branch_name or not branch_name.strip():
+            raise ValueError("Branch name cannot be empty")
+        request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
+        self.client.post(
+            self.resource_paths.branches(database_name, table_name),
+            request,
+            self.rest_auth_function,
+        )
+
+    def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        self.client.delete(
+            self.resource_paths.branch(database_name, table_name, branch_name),
+            self.rest_auth_function,
+        )
+
+    def rename_branch(
+            self,
+            identifier: Identifier,
+            from_branch: str,
+            to_branch: str,
+    ) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not to_branch or not to_branch.strip():
+            raise ValueError("Target branch name cannot be empty")
+        request = RenameBranchRequest(to_branch=to_branch)
+        self.client.post(
+            self.resource_paths.rename_branch(database_name, table_name, from_branch),
+            request,
+            self.rest_auth_function,
+        )
+
+    def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        self.client.post(
+            self.resource_paths.forward_branch(database_name, table_name, branch_name),
+            ForwardBranchRequest(),
+            self.rest_auth_function,
+        )
+
+    def list_branches(self, identifier: Identifier) -> List[str]:
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get(
+            self.resource_paths.branches(database_name, table_name),
+            ListBranchesResponse,
+            self.rest_auth_function,
+        )
+        return response.branches or []
 
     @staticmethod
     def is_valid_function_name(name: str) -> bool:

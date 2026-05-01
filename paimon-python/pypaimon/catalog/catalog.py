@@ -294,6 +294,27 @@ class Catalog(ABC):
             "list_branches is not supported by this catalog."
         )
 
+    def rename_branch(
+            self,
+            identifier: Identifier,
+            from_branch: str,
+            to_branch: str
+    ) -> None:
+        """
+        Rename a branch for the table.
+
+        Args:
+            identifier: Table identifier
+            from_branch: Existing branch name to rename
+            to_branch: New branch name
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "rename_branch is not supported by this catalog."
+        )
+
     def create_tag(
             self,
             identifier: Union[str, Identifier],
