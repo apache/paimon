@@ -331,29 +331,12 @@ class SplitGeneratorTest(unittest.TestCase):
 
 
 class ApplyPushDownLimitUnitTest(unittest.TestCase):
-    """Direct, mock-driven coverage of ``FileScanner._apply_push_down_limit``.
-
-    Pypaimon's writer doesn't compact L0 → L1+, and the DV-enabled
-    PK-table read path skips L0 files, so a true DV-aware
-    ``raw_convertible`` split (where ``merged_row_count < row_count``)
-    is hard to produce from a pure-Python end-to-end fixture. The
-    accumulator semantics, however, are a simple loop on the splits
-    list — exercise it directly with synthetic split stand-ins.
-
-    These cases pin down the correctness contract without depending on
-    storage layout: the accumulator must use ``merged_row_count``
-    (matching Java's ``partialMergedRowCount``) and must keep every
-    split it has visited up to and including the one that meets the
-    budget.
-    """
+    """Mock-driven coverage of ``FileScanner._apply_push_down_limit``."""
 
     @staticmethod
     def _apply(splits, limit, has_non_partition_filter=False):
         from pypaimon.read.scanner.file_scanner import FileScanner
 
-        # Stand in for ``self`` — only ``self.limit`` and the
-        # ``_has_non_partition_filter`` short-circuit are exercised by
-        # the method under test.
         class _FakeScanner:
             pass
 
@@ -371,61 +354,31 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
         s.raw_convertible = raw_convertible
         s.row_count = row_count
         s._merged = merged_row_count
-
-        def _merged_fn():
-            return s._merged
-
-        s.merged_row_count = _merged_fn
+        s.merged_row_count = lambda: s._merged
         return s
 
     def test_dv_aware_accumulator_uses_merged_row_count(self):
-        """[raw(row_count=10, dv→merged=4), non-raw, non-raw] + limit=5.
-
-        Pre-fix accumulator (``+= row_count``): the raw split's pre-DV
-        count of 10 already meets ``limit=5``, the loop early-returns
-        with just ``[raw]`` and the two non-raw splits are dropped. The
-        reader can then only see 4 rows from the DV split — silently
-        less than ``limit``.
-
-        Post-fix accumulator (``+= merged_row_count``): only 4 rows of
-        budget after the raw split, so 4 < 5; the loop keeps walking,
-        adds the two non-raw splits without changing the accumulator,
-        and falls through to ``return splits`` with all three. The
-        reader then has enough material across three splits to produce
-        ``limit`` rows.
-        """
+        """DV-aware raw split + trailing non-raw splits, ``limit > merged``:
+        pre-fix (``+= row_count``) early-returns ``[raw]``; post-fix
+        (``+= merged_row_count``) leaves the budget at 4 < 5, the loop
+        completes, and the fall-through returns all three splits."""
         s_raw = self._split(raw_convertible=True, row_count=10, merged_row_count=4)
         s_nr1 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
         s_nr2 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
 
         result = self._apply([s_raw, s_nr1, s_nr2], limit=5)
-        self.assertEqual(
-            len(result), 3,
-            "merged_row_count accumulator must NOT early-return after a "
-            "DV-aware raw split whose post-DV count is below the limit; "
-            "got {}".format([id(s) for s in result]),
-        )
+        self.assertEqual(len(result), 3)
 
     def test_accumulator_skips_splits_with_unknown_merged_count(self):
-        """``merged_row_count`` returns ``None`` for layouts where the
-        DV cardinality / data-evolution range isn't recorded yet (e.g.
-        a non-raw split, or a raw split missing DV cardinality in the
-        manifest). Such splits cannot meaningfully contribute to the
-        budget — Java's ``applyPushDownLimit`` skips them in the
-        accumulator loop and falls through to the full split list when
-        the loop completes without reaching the limit. We mirror that:
-        with a single split whose ``merged_row_count`` is unavailable,
-        the loop never accumulates anything and we return the input
-        unchanged."""
+        """A split whose ``merged_row_count()`` returns ``None`` does not
+        contribute to the budget; the loop completes and returns the
+        input via the fall-through."""
         s = self._split(raw_convertible=True, row_count=10, merged_row_count=None)
         result = self._apply([s], limit=5)
-        self.assertEqual(len(result), 1)
-        self.assertIs(result[0], s)
+        self.assertEqual(result, [s])
 
     def test_no_raw_splits_falls_through_to_full_list(self):
-        """No raw splits → accumulator never moves → loop completes →
-        fallback returns the full list (matching Java's behaviour for
-        the all-non-raw case)."""
+        """No split contributes to the budget → fall-through returns all."""
         s1 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
         s2 = self._split(raw_convertible=False, row_count=10, merged_row_count=None)
         result = self._apply([s1, s2], limit=5)
@@ -440,16 +393,9 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
         self.assertEqual(result, [s])
 
     def test_non_partition_filter_short_circuits_pushdown(self):
-        """Java ``applyPushDownLimit`` (DataTableBatchScan.java:129) bails
-        out when ``hasNonPartitionFilter()`` is true: per-split row counts
-        are pre-filter, so summing them against ``limit`` would
-        over-count when the predicate further filters rows. The Python
-        port must do the same — return the splits untouched and let the
-        reader apply both filter and limit."""
+        """Predicate touching a non-partition column → no pushdown,
+        regardless of how many DV-aware splits the plan contains."""
         s_raw = self._split(raw_convertible=True, row_count=10, merged_row_count=10)
-        # With a non-partition filter, the early-return branch trips
-        # before we even look at merged_row_count, so the budget never
-        # narrows the plan.
         result = self._apply(
             [s_raw, s_raw, s_raw], limit=5, has_non_partition_filter=True)
         self.assertEqual(len(result), 3)
