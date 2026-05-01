@@ -599,10 +599,10 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     def test_read_lumina_vector_index(self):
         """Test reading a Lumina vector index built by Java (orc and lance formats)."""
-        for table_name, label in [
-            ('default.test_lumina_vector', 'orc'),
-            ('default.test_lumina_vector_lance', 'lance'),
-        ]:
+        test_cases = [('default.test_lumina_vector', 'orc')]
+        if sys.version_info[:2] != (3, 6):
+            test_cases.append(('default.test_lumina_vector_lance', 'lance'))
+        for table_name, label in test_cases:
             with self.subTest(file_format=label):
                 table = self.catalog.get_table(table_name)
 
