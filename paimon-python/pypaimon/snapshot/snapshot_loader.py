@@ -36,6 +36,20 @@ class SnapshotLoader:
         self.catalog_loader = catalog_loader
         self.identifier = identifier
 
+    def copy_with_branch(self, branch: str) -> 'SnapshotLoader':
+        """Return a new loader whose identifier carries ``branch``.
+
+        Mirrors Java ``SnapshotLoaderImpl.copyWithBranch``
+        (tag/SnapshotLoaderImpl.java).
+        """
+        from pypaimon.common.identifier import Identifier
+        rebranched = Identifier(
+            database=self.identifier.database,
+            object=self.identifier.object,
+            branch=branch,
+        )
+        return SnapshotLoader(self.catalog_loader, rebranched)
+
     def load(self) -> Optional[str]:
         """Load the latest snapshot from the catalog.
         

@@ -51,12 +51,14 @@ class SnapshotManager:
         self.latest_file = f"{self.snapshot_dir}/LATEST"
 
     def copy_with_branch(self, branch_name: str) -> 'SnapshotManager':
-        # Mirrors Java SnapshotManager.copyWithBranch for the local
-        # filesystem path. SnapshotLoader rebranching (REST path) is
-        # not implemented yet -- the new manager re-fetches a loader
-        # from catalog_environment, which on the FileSystemCatalog
-        # path is None and therefore inert.
-        return SnapshotManager(self.table, branch_name)
+        # Mirrors Java SnapshotManager.copyWithBranch: the new manager
+        # carries a SnapshotLoader rebranched to ``branch_name`` so REST
+        # loads target the correct branch instead of falling back to the
+        # main-branch identifier.
+        new_manager = SnapshotManager(self.table, branch_name)
+        if self.snapshot_loader is not None:
+            new_manager.snapshot_loader = self.snapshot_loader.copy_with_branch(branch_name)
+        return new_manager
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
         """

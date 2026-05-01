@@ -224,6 +224,33 @@ class SnapshotManagerBranchAwarenessTest(unittest.TestCase):
         self.assertEqual(branch_sm.get_snapshot_path(7), f"{expected_dir}/snapshot-7")
         self.assertNotEqual(sm.get_snapshot_path(7), branch_sm.get_snapshot_path(7))
 
+    def test_copy_with_branch_rebranches_snapshot_loader(self):
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.snapshot.snapshot_loader import SnapshotLoader
+
+        sm = self.table.snapshot_manager()
+        # FileSystem path has no loader; inject one to exercise the
+        # rebranch code path. Mirrors Java SnapshotLoaderImpl.copyWithBranch.
+        sm.snapshot_loader = SnapshotLoader(
+            catalog_loader=object(),
+            identifier=Identifier(database="default",
+                                  object="snapshot_branch_table"),
+        )
+
+        branch_sm = sm.copy_with_branch("b1")
+
+        self.assertIsNotNone(branch_sm.snapshot_loader)
+        self.assertIsNot(branch_sm.snapshot_loader, sm.snapshot_loader)
+        self.assertEqual(branch_sm.snapshot_loader.identifier.branch, "b1")
+        self.assertEqual(
+            branch_sm.snapshot_loader.identifier.database,
+            sm.snapshot_loader.identifier.database)
+        self.assertEqual(
+            branch_sm.snapshot_loader.identifier.object,
+            sm.snapshot_loader.identifier.object)
+        # Original loader's identifier untouched.
+        self.assertIsNone(sm.snapshot_loader.identifier.branch)
+
 
 class FileSystemBranchManagerEndToEndTest(unittest.TestCase):
     """Catalog-driven end-to-end tests that exercise ``_copy_with_branch``.
