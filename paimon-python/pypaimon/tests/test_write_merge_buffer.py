@@ -109,8 +109,10 @@ class WriteMergeBufferTest(unittest.TestCase):
     # -- partial-update ---------------------------------------------------
 
     def _partial_update(self):
-        # 4 value-side columns (id, a, b — but the layout has id duplicated
-        # so value_arity is 3 here: id + a + b).
+        # Value-side carries 3 columns (id, a, b). The PK column ``id``
+        # is duplicated into the value side so partial-update can apply
+        # last-non-null semantics uniformly across every original
+        # user column.
         return PartialUpdateMergeFunction(
             key_arity=1, value_arity=3, nullables=[True, True, True])
 

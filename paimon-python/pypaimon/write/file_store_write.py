@@ -98,19 +98,32 @@ class FileStoreWrite:
         with no out-of-scope options) cannot drift between sides.
 
         For wholly unsupported engines (``aggregation`` / ``first-row``)
-        we fall back to ``DeduplicateMergeFunction`` here so the writer
-        still maintains the LSM "PK unique within a file" invariant.
-        The read path's dispatch still raises ``NotImplementedError``,
-        so the user gets an explicit error before they observe wrong-
-        engine data; the fallback only narrows the damage to "file is
-        deduped, not aggregated" rather than the silent multi-row-per-
-        PK corruption that existed pre-PR.
+        the writer falls back to ``DeduplicateMergeFunction`` so the
+        flushed file still maintains the LSM "PK unique within a file"
+        invariant. The read path's dispatch still raises
+        ``NotImplementedError``, so the user gets an explicit error
+        before they observe wrong-engine data; the fallback only
+        narrows the damage to "file is deduped, not aggregated"
+        rather than the silent multi-row-per-PK corruption that
+        existed pre-PR.
 
         Partial-update with out-of-scope options (sequence-group,
         per-field aggregator, ignore-delete, remove-record-on-*) does
-        **not** fall back -- silently degrading to dedupe there is a
-        live corruption pattern this PR exists to close, so we re-raise
-        and let the writer fail explicitly at flush time.
+        **not** fall back: ``partial_update_unsupported_options`` sees
+        the configured keys and re-raises, so the first
+        ``write_arrow`` call (where ``_create_data_writer`` first runs)
+        surfaces the error. Silently degrading to dedupe there is the
+        same live corruption pattern this PR exists to close.
+
+        ``with_write_type`` (column-subset writes) on a PK table is
+        also rejected here. The buffer layout
+        ``_add_system_fields`` produces would carry only the subset
+        on the value side, while a ``MergeFunction`` such as
+        ``PartialUpdateMergeFunction`` is built against the full table
+        arity -- the two sides would mismatch on
+        ``KeyValue.value.get_field`` and raise ``IndexError`` at
+        flush time. Refusing it explicitly avoids that obscure failure
+        and keeps the supported surface narrow.
 
         The value-side schema must match the layout
         ``KeyValueDataWriter`` flushes -- ``_add_system_fields`` keeps
@@ -128,9 +141,18 @@ class FileStoreWrite:
         engine = self.options.merge_engine()
         raw_options = self.options.options.to_map()
 
+        if self.write_cols is not None:
+            raise NotImplementedError(
+                "with_write_type is not yet supported on primary-key "
+                "tables: the writer-side merge buffer assumes the "
+                "input batch carries the full table schema. Drop the "
+                "with_write_type call or write the missing columns as "
+                "nulls in the input batch."
+            )
+
         # PARTIAL_UPDATE + out-of-scope option: never silently fall
         # back -- forward the read-side error verbatim so writes fail
-        # at flush time rather than corrupt the file.
+        # before the first flush rather than corrupt the file.
         if engine == MergeEngine.PARTIAL_UPDATE \
                 and partial_update_unsupported_options(raw_options):
             return build_merge_function(
@@ -141,19 +163,20 @@ class FileStoreWrite:
                     f.type.nullable for f in self.table.table_schema.fields],
             )
 
-        all_value_fields = self.table.table_schema.fields
-        try:
-            return build_merge_function(
-                engine=engine, raw_options=raw_options,
-                key_arity=len(self.table.trimmed_primary_keys),
-                value_arity=len(all_value_fields),
-                value_field_nullables=[
-                    f.type.nullable for f in all_value_fields],
-            )
-        except NotImplementedError:
-            # Wholly unsupported engine -- maintain PK uniqueness via
-            # dedupe; read-side will still raise.
+        # Catch the dispatch's "wholly unsupported engine" raise only
+        # for the engines we know are out of scope today; any other
+        # NotImplementedError is a bug we want to surface, not swallow.
+        if engine in (MergeEngine.AGGREGATE, MergeEngine.FIRST_ROW):
             return DeduplicateMergeFunction()
+
+        all_value_fields = self.table.table_schema.fields
+        return build_merge_function(
+            engine=engine, raw_options=raw_options,
+            key_arity=len(self.table.trimmed_primary_keys),
+            value_arity=len(all_value_fields),
+            value_field_nullables=[
+                f.type.nullable for f in all_value_fields],
+        )
 
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""
