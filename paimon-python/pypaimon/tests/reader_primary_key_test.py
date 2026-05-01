@@ -26,7 +26,6 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class PkReaderTest(unittest.TestCase):
@@ -339,7 +338,7 @@ class PkReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
@@ -386,7 +385,7 @@ class PkReaderTest(unittest.TestCase):
             table_write.close()
             table_commit.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
         t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
 
@@ -412,7 +411,7 @@ class PkReaderTest(unittest.TestCase):
 
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
@@ -575,7 +574,7 @@ class PkReaderTest(unittest.TestCase):
                              f"Iteration {test_iteration}: User IDs mismatch")
 
             # Verify snapshot count (should have num_threads snapshots)
-            snapshot_manager = SnapshotManager(table)
+            snapshot_manager = table.snapshot_manager()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")

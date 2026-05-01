@@ -2748,7 +2748,6 @@ class DataBlobWriterTest(unittest.TestCase):
         """Test concurrent blob writes to verify retry mechanism works correctly."""
         import threading
         from pypaimon import Schema
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
         # Run the test 10 times to verify stability
         iter_num = 2
@@ -2873,7 +2872,7 @@ class DataBlobWriterTest(unittest.TestCase):
                 self.assertIn(b'BLOB_PATTERN_', blob, f"Blob {i} should contain pattern")
 
             # Verify snapshot count (should have num_threads snapshots)
-            snapshot_manager = SnapshotManager(table)
+            snapshot_manager = table.snapshot_manager()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")

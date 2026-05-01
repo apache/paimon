@@ -33,64 +33,47 @@ def _create_mock_snapshot(snapshot_id: int, commit_kind: str = "APPEND"):
     return snapshot
 
 
+def _build_manager(file_io):
+    from pypaimon.snapshot.snapshot_manager import SnapshotManager
+    return SnapshotManager(file_io, "/tmp/test_table")
+
+
 class SnapshotManagerTest(unittest.TestCase):
     """Tests for SnapshotManager batch lookahead methods."""
 
     def test_find_next_scannable_returns_first_matching(self):
         """find_next_scannable should return the first snapshot that passes should_scan."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.current_branch.return_value = "main"
-        table.file_io = Mock()
-        table.file_io.exists_batch.return_value = {
+        file_io = Mock()
+        file_io.exists_batch.return_value = {
             "/tmp/test_table/snapshot/snapshot-5": True,
             "/tmp/test_table/snapshot/snapshot-6": True,
             "/tmp/test_table/snapshot/snapshot-7": True,
         }
-        table.catalog_environment = Mock()
-        table.catalog_environment.snapshot_loader.return_value = None
 
-        # Create mock snapshots with different commit kinds
         snapshots = {
             5: _create_mock_snapshot(5, "COMPACT"),
             6: _create_mock_snapshot(6, "COMPACT"),
             7: _create_mock_snapshot(7, "APPEND"),
         }
 
-        manager = SnapshotManager(table)
+        manager = _build_manager(file_io)
+        manager.get_snapshot_by_id = lambda sid: snapshots.get(sid)
 
-        # Mock get_snapshot_by_id to return our test snapshots
-        def mock_get_snapshot(sid):
-            return snapshots.get(sid)
-
-        manager.get_snapshot_by_id = mock_get_snapshot
-
-        # should_scan only accepts APPEND commits
         def should_scan(snapshot):
             return snapshot.commit_kind == "APPEND"
 
         result, next_id, skipped_count = manager.find_next_scannable(5, should_scan, lookahead_size=5)
 
-        self.assertEqual(result.id, 7)  # First APPEND snapshot
-        self.assertEqual(next_id, 8)    # Next ID to check
-        self.assertEqual(skipped_count, 2)  # Skipped snapshots 5 and 6
+        self.assertEqual(result.id, 7)
+        self.assertEqual(next_id, 8)
+        self.assertEqual(skipped_count, 2)
 
     def test_find_next_scannable_returns_none_when_no_snapshot_exists(self):
         """find_next_scannable should return None when no snapshot exists at start_id."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+        file_io = Mock()
+        file_io.exists_batch.return_value = {}
 
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.current_branch.return_value = "main"
-        table.file_io = Mock()
-        # All paths return False (no files exist)
-        table.file_io.exists_batch.return_value = {}
-        table.catalog_environment = Mock()
-        table.catalog_environment.snapshot_loader.return_value = None
-
-        manager = SnapshotManager(table)
+        manager = _build_manager(file_io)
 
         def should_scan(snapshot):
             return True
@@ -98,26 +81,17 @@ class SnapshotManagerTest(unittest.TestCase):
         result, next_id, skipped_count = manager.find_next_scannable(5, should_scan, lookahead_size=5)
 
         self.assertIsNone(result)
-        self.assertEqual(next_id, 5)  # Still at start_id
+        self.assertEqual(next_id, 5)
         self.assertEqual(skipped_count, 0)
 
     def test_find_next_scannable_continues_when_all_skipped(self):
         """When all lookahead snapshots are skipped, next_id should be start+lookahead."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.current_branch.return_value = "main"
-        table.file_io = Mock()
-
-        # All 3 snapshots exist but are COMPACT (will be skipped)
-        table.file_io.exists_batch.return_value = {
+        file_io = Mock()
+        file_io.exists_batch.return_value = {
             "/tmp/test_table/snapshot/snapshot-5": True,
             "/tmp/test_table/snapshot/snapshot-6": True,
             "/tmp/test_table/snapshot/snapshot-7": True,
         }
-        table.catalog_environment = Mock()
-        table.catalog_environment.snapshot_loader.return_value = None
 
         snapshots = {
             5: _create_mock_snapshot(5, "COMPACT"),
@@ -125,21 +99,17 @@ class SnapshotManagerTest(unittest.TestCase):
             7: _create_mock_snapshot(7, "COMPACT"),
         }
 
-        manager = SnapshotManager(table)
-
-        def mock_get_snapshot(sid):
-            return snapshots.get(sid)
-
-        manager.get_snapshot_by_id = mock_get_snapshot
+        manager = _build_manager(file_io)
+        manager.get_snapshot_by_id = lambda sid: snapshots.get(sid)
 
         def should_scan(snapshot):
             return snapshot.commit_kind == "APPEND"
 
         result, next_id, skipped_count = manager.find_next_scannable(5, should_scan, lookahead_size=3)
 
-        self.assertIsNone(result)  # No APPEND found
-        self.assertEqual(next_id, 8)  # 5 + 3 = 8, continue from here
-        self.assertEqual(skipped_count, 3)  # All 3 were skipped
+        self.assertIsNone(result)
+        self.assertEqual(next_id, 8)
+        self.assertEqual(skipped_count, 3)
 
 
 if __name__ == '__main__':

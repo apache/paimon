@@ -38,7 +38,6 @@ from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.incremental_diff_scanner import \
     IncrementalDiffScanner
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class IncrementalDiffAcceptanceTest(unittest.TestCase):
@@ -94,7 +93,7 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
 
     def _read_via_diff(self, table, start_snap_id, end_snap_id):
         """Read data using IncrementalDiffScanner between two snapshots."""
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         start_snapshot = snapshot_manager.get_snapshot_by_id(start_snap_id)
         end_snapshot = snapshot_manager.get_snapshot_by_id(end_snap_id)
 
@@ -106,7 +105,7 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
 
     def _read_via_delta(self, table, start_snap_id, end_snap_id):
         """Read data by iterating delta_manifest_lists between two snapshots."""
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         manifest_list_manager = ManifestListManager(table)
         manifest_file_manager = ManifestFileManager(table)
 

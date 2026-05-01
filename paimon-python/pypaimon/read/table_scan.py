@@ -23,7 +23,6 @@ from pypaimon.common.predicate import Predicate
 
 from pypaimon.read.plan import Plan
 from pypaimon.read.scanner.file_scanner import FileScanner
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
 
@@ -48,7 +47,7 @@ class TableScan:
 
     def _create_file_scanner(self) -> FileScanner:
         options = self.table.options.options
-        snapshot_manager = SnapshotManager(self.table)
+        snapshot_manager = self.table.snapshot_manager()
         manifest_list_manager = ManifestListManager(self.table)
         if options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
             ts = options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP).split(",")
