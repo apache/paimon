@@ -145,8 +145,36 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
     }
 
     @Test
-    void testChainedUnionOverflowAndFlatUnionFix() throws InterruptedException {
-        int totalUnions = 8 * 200; // 8 index columns × 200 partitions
+    public void testBTreeIndexWithManyPartitions() throws Catalog.TableNotExistException {
+        // Regression test: building a btree index on a table with many partitions
+        // previously caused StackOverflowError due to deeply nested DataStream.union() calls.
+        int numPartitions = 50;
+        sql(
+                "CREATE TABLE T_MANY_PT (pt INT, id INT, name STRING) PARTITIONED BY (pt) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        for (int p = 0; p < numPartitions; p++) {
+            insertPartitionRows("T_MANY_PT", p, p * 2, 2, "r_");
+        }
+
+        buildBTreeIndexForTable("T_MANY_PT", "id");
+
+        FileStoreTable table = paimonTable("T_MANY_PT");
+        long totalRowCount =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> "btree".equals(e.indexFile().indexType()))
+                        .map(IndexManifestEntry::indexFile)
+                        .mapToLong(IndexFileMeta::rowCount)
+                        .sum();
+        assertThat(totalRowCount).isEqualTo((long) numPartitions * 2);
+    }
+
+    @Test
+    void testUnionDoesNotStackOverflow() throws InterruptedException {
+        int totalUnions = 1000;
         long stackSize = 512 * 1024; // Flink JM default
 
         // Chained union: result = result.union(new) — causes StackOverflowError
