@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
@@ -110,7 +109,6 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     protected final ObjectIdentifier tableIdentifier;
     protected final boolean unbounded;
     protected final DynamicTableFactory.Context context;
-    @Nullable protected final Catalog catalog;
     @Nullable private BucketShufflePartitioner bucketShufflePartitioner;
     @Nullable protected WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable protected Long countPushed;
@@ -124,14 +122,12 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
-            @Nullable Long countPushed,
-            @Nullable Catalog catalog) {
+            @Nullable Long countPushed) {
         super(table, predicate, projectFields, limit);
 
         this.tableIdentifier = tableIdentifier;
         this.unbounded = unbounded;
         this.context = context;
-        this.catalog = catalog;
 
         this.watermarkStrategy = watermarkStrategy;
         this.countPushed = countPushed;
@@ -211,8 +207,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                                 .env(env)
                                 .build(),
                 tableIdentifier.asSummaryString(),
-                table,
-                catalog);
+                table);
     }
 
     private ScanRuntimeProvider createCountStarScan() {

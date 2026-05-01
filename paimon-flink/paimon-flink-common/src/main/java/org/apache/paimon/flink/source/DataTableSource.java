@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
@@ -57,20 +56,8 @@ public class DataTableSource extends BaseDataTableSource
             ObjectIdentifier tableIdentifier,
             Table table,
             boolean unbounded,
-            DynamicTableFactory.Context context,
-            @Nullable Catalog catalog) {
-        this(
-                tableIdentifier,
-                table,
-                unbounded,
-                context,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                catalog);
+            DynamicTableFactory.Context context) {
+        this(tableIdentifier, table, unbounded, context, null, null, null, null, null, null);
     }
 
     public DataTableSource(
@@ -83,8 +70,7 @@ public class DataTableSource extends BaseDataTableSource
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
             @Nullable List<String> dynamicPartitionFilteringFields,
-            @Nullable Long countPushed,
-            @Nullable Catalog catalog) {
+            @Nullable Long countPushed) {
         super(
                 tableIdentifier,
                 table,
@@ -94,8 +80,7 @@ public class DataTableSource extends BaseDataTableSource
                 projectFields,
                 limit,
                 watermarkStrategy,
-                countPushed,
-                catalog);
+                countPushed);
         this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
@@ -111,8 +96,7 @@ public class DataTableSource extends BaseDataTableSource
                 limit,
                 watermarkStrategy,
                 dynamicPartitionFilteringFields,
-                countPushed,
-                catalog);
+                countPushed);
     }
 
     @Override

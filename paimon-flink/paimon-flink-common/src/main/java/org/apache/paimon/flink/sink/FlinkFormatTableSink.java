@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.table.FormatTable;
 
@@ -28,8 +27,6 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
-
-import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -41,19 +38,16 @@ public class FlinkFormatTableSink
     private final ObjectIdentifier tableIdentifier;
     private final FormatTable table;
     private final DynamicTableFactory.Context context;
-    @Nullable private final Catalog catalog;
     private Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
 
     public FlinkFormatTableSink(
             ObjectIdentifier tableIdentifier,
             FormatTable table,
-            DynamicTableFactory.Context context,
-            @Nullable Catalog catalog) {
+            DynamicTableFactory.Context context) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.context = context;
-        this.catalog = catalog;
     }
 
     @Override
@@ -68,14 +62,12 @@ public class FlinkFormatTableSink
                         new FlinkFormatTableDataStreamSink(table, overwrite, staticPartitions)
                                 .sinkFrom(dataStream),
                 tableIdentifier.asSummaryString(),
-                table,
-                catalog);
+                table);
     }
 
     @Override
     public DynamicTableSink copy() {
-        FlinkFormatTableSink copied =
-                new FlinkFormatTableSink(tableIdentifier, table, context, catalog);
+        FlinkFormatTableSink copied = new FlinkFormatTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         return copied;

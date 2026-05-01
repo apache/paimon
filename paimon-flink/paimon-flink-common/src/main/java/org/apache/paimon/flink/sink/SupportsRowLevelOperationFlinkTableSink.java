@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.options.Options;
@@ -66,16 +65,13 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Nullable protected Predicate deletePredicate;
 
     public SupportsRowLevelOperationFlinkTableSink(
-            ObjectIdentifier tableIdentifier,
-            Table table,
-            DynamicTableFactory.Context context,
-            @Nullable Catalog catalog) {
-        super(tableIdentifier, table, context, catalog);
+            ObjectIdentifier tableIdentifier, Table table, DynamicTableFactory.Context context) {
+        super(tableIdentifier, table, context);
     }
 
     @Override
     public DynamicTableSink copy() {
-        FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context, catalog);
+        FlinkTableSink copied = new FlinkTableSink(tableIdentifier, table, context);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.deletePredicate = deletePredicate;

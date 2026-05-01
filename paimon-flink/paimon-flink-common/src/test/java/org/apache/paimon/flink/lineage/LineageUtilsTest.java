@@ -19,9 +19,7 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.fs.Path;
@@ -87,63 +85,23 @@ class LineageUtilsTest {
     }
 
     @Test
-    void testGetNamespaceWithNullCatalog() {
-        // null catalog falls back to default namespace
+    void testGetNamespaceWithNullCatalogContext() {
         assertThat(LineageUtils.getNamespace(null)).isEqualTo("paimon");
     }
 
     @Test
-    void testGetNamespaceWithCatalog() throws Exception {
+    void testGetNamespaceWithCatalogContext() {
         Options options = new Options();
         options.set(CatalogOptions.WAREHOUSE, warehouse.toString());
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
+        CatalogContext ctx = CatalogContext.create(options);
 
-        assertThat(LineageUtils.getNamespace(catalog)).isEqualTo(warehouse.toString());
-        catalog.close();
+        assertThat(LineageUtils.getNamespace(ctx)).isEqualTo(warehouse.toString());
     }
 
     @Test
-    void testConfigFacetIncludesCatalogOptions() throws Exception {
-        Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE, warehouse.toString());
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
-
-        FileStoreTable table =
-                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
-
-        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table, catalog);
-        LineageDataset dataset = vertex.datasets().get(0);
-
-        assertThat(dataset.namespace()).isEqualTo(warehouse.toString());
-
-        DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
-        Map<String, String> config = configFacet.config();
-        assertThat(config).containsEntry("catalog.warehouse", warehouse.toString());
-
-        catalog.close();
-    }
-
-    @Test
-    void testConfigFacetExcludesNonAllowlistedCatalogOptions() throws Exception {
-        Options options = new Options();
-        options.set(CatalogOptions.WAREHOUSE, warehouse.toString());
-        options.setString("s3.access-key", "SECRET_KEY");
-        options.setString("s3.secret-key", "SECRET_VALUE");
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
-
-        FileStoreTable table =
-                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
-
-        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table, catalog);
-        LineageDataset dataset = vertex.datasets().get(0);
-
-        DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
-        Map<String, String> config = configFacet.config();
-        assertThat(config).containsEntry("catalog.warehouse", warehouse.toString());
-        assertThat(config).doesNotContainKey("catalog.s3.access-key");
-        assertThat(config).doesNotContainKey("catalog.s3.secret-key");
-
-        catalog.close();
+    void testGetNamespaceWithCatalogContextNoWarehouse() {
+        CatalogContext ctx = CatalogContext.create(new Options());
+        assertThat(LineageUtils.getNamespace(ctx)).isEqualTo("paimon");
     }
 
     @Test
@@ -151,8 +109,7 @@ class LineageUtilsTest {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
-        SourceLineageVertex vertex =
-                LineageUtils.sourceLineageVertex("paimon.db.src", true, table, null);
+        SourceLineageVertex vertex = LineageUtils.sourceLineageVertex("paimon.db.src", true, table);
 
         assertThat(vertex).isInstanceOf(PaimonSourceLineageVertex.class);
         assertThat(vertex.boundedness()).isEqualTo(Boundedness.BOUNDED);
@@ -169,7 +126,7 @@ class LineageUtilsTest {
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
         SourceLineageVertex vertex =
-                LineageUtils.sourceLineageVertex("paimon.db.src", false, table, null);
+                LineageUtils.sourceLineageVertex("paimon.db.src", false, table);
 
         assertThat(vertex.boundedness()).isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
     }
@@ -179,7 +136,7 @@ class LineageUtilsTest {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
-        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.sink", table, null);
+        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.sink", table);
 
         assertThat(vertex).isInstanceOf(PaimonSinkLineageVertex.class);
         assertThat(vertex.datasets()).hasSize(1);
@@ -194,7 +151,7 @@ class LineageUtilsTest {
         FileStoreTable table =
                 createTable(new HashMap<>(), Arrays.asList("f2"), Arrays.asList("f0", "f2"));
 
-        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table, null);
+        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table);
         LineageDataset dataset = vertex.datasets().get(0);
 
         Map<String, LineageDatasetFacet> facets = dataset.facets();
@@ -214,8 +171,7 @@ class LineageUtilsTest {
 
         FileStoreTable table = createTable(options, Collections.emptyList(), Arrays.asList("f0"));
 
-        SourceLineageVertex vertex =
-                LineageUtils.sourceLineageVertex("paimon.db.t", true, table, null);
+        SourceLineageVertex vertex = LineageUtils.sourceLineageVertex("paimon.db.t", true, table);
         LineageDataset dataset = vertex.datasets().get(0);
 
         DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
@@ -228,7 +184,7 @@ class LineageUtilsTest {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Collections.emptyList());
 
-        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table, null);
+        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table);
         LineageDataset dataset = vertex.datasets().get(0);
 
         DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
@@ -243,7 +199,7 @@ class LineageUtilsTest {
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
         PaimonDataStreamScanProvider provider =
-                new PaimonDataStreamScanProvider(true, env -> null, "paimon.db.src", table, null);
+                new PaimonDataStreamScanProvider(true, env -> null, "paimon.db.src", table);
 
         assertThat(provider).isInstanceOf(LineageVertexProvider.class);
         LineageVertex vertex = provider.getLineageVertex();
@@ -258,7 +214,7 @@ class LineageUtilsTest {
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
         PaimonDataStreamSinkProvider provider =
-                new PaimonDataStreamSinkProvider(dataStream -> null, "paimon.db.sink", table, null);
+                new PaimonDataStreamSinkProvider(dataStream -> null, "paimon.db.sink", table);
 
         assertThat(provider).isInstanceOf(LineageVertexProvider.class);
         LineageVertex vertex = provider.getLineageVertex();
