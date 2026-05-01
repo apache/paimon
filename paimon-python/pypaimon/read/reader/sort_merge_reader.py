@@ -18,6 +18,8 @@
 import heapq
 from typing import Any, Callable, List, Optional
 
+from pypaimon.read.reader.deduplicate_merge_function import \
+    DeduplicateMergeFunction
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.schema.data_types import DataField, Keyword
@@ -127,22 +129,6 @@ class SortMergeIterator(RecordIterator):
             self.polled.append(entry.element)
 
         return True
-
-
-class DeduplicateMergeFunction:
-    """A MergeFunction where key is primary key (unique) and value is the full record, only keep the latest one."""
-
-    def __init__(self):
-        self.latest_kv = None
-
-    def reset(self) -> None:
-        self.latest_kv = None
-
-    def add(self, kv: KeyValue):
-        self.latest_kv = kv
-
-    def get_result(self) -> Optional[KeyValue]:
-        return self.latest_kv
 
 
 class Element:
