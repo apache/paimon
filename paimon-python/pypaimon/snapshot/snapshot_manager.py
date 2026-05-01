@@ -29,16 +29,34 @@ from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 class SnapshotManager:
     """Manager for snapshot files using unified FileIO."""
 
-    def __init__(self, table):
+    def __init__(self, table, branch: Optional[str] = None):
+        # Lazy imports to avoid a cycle: pypaimon.branch.__init__
+        # eagerly loads FileSystemBranchManager, which imports
+        # SnapshotManager.
+        from pypaimon.branch.branch_manager import BranchManager
+        from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.file_io: FileIO = self.table.file_io
         self.snapshot_loader: Optional[SnapshotLoader] = self.table.catalog_environment.snapshot_loader()
 
-        snapshot_path = self.table.table_path.rstrip('/')
-        self.snapshot_dir = f"{snapshot_path}/snapshot"
+        if branch is None:
+            branch = self.table.current_branch() or DEFAULT_MAIN_BRANCH
+        self.branch = BranchManager.normalize_branch(branch)
+
+        table_root = self.table.table_path.rstrip('/')
+        branch_root = BranchManager.branch_path(table_root, self.branch)
+        self.snapshot_dir = f"{branch_root}/snapshot"
         self.latest_file = f"{self.snapshot_dir}/LATEST"
+
+    def copy_with_branch(self, branch_name: str) -> 'SnapshotManager':
+        # Mirrors Java SnapshotManager.copyWithBranch for the local
+        # filesystem path. SnapshotLoader rebranching (REST path) is
+        # not implemented yet -- the new manager re-fetches a loader
+        # from catalog_environment, which on the FileSystemCatalog
+        # path is None and therefore inert.
+        return SnapshotManager(self.table, branch_name)
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
         """

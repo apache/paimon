@@ -20,8 +20,12 @@ import shutil
 import tempfile
 import unittest
 
+import pyarrow as pa
+
+from pypaimon import CatalogFactory, Schema
 from pypaimon.branch.branch_manager import BranchManager, DEFAULT_MAIN_BRANCH
 from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+from pypaimon.common.identifier import Identifier
 
 
 class BranchManagerTest(unittest.TestCase):
@@ -177,6 +181,116 @@ class FileSystemBranchManagerTest(unittest.TestCase):
 
         self.assertTrue(manager.branch_exists("feature"))
         self.assertFalse(manager.branch_exists("develop"))
+
+
+class SnapshotManagerBranchAwarenessTest(unittest.TestCase):
+    """Pin down SnapshotManager's branch-aware path computation.
+
+    Mirrors Java ``SnapshotManager.copyWithBranch`` (utils/SnapshotManager.java):
+    a non-main branch must produce paths under
+    ``{table_path}/branch/branch-{name}/snapshot/...``.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="unittest_snapshot_branch_")
+        warehouse = os.path.join(self.temp_dir, "warehouse")
+        os.makedirs(warehouse, exist_ok=True)
+        self.catalog = CatalogFactory.create({"warehouse": warehouse})
+        self.catalog.create_database("default", True)
+
+        self.pa_schema = pa.schema([("id", pa.int64()), ("value", pa.string())])
+        self.identifier = Identifier.from_string("default.snapshot_branch_table")
+        self.catalog.create_table(
+            self.identifier, Schema.from_pyarrow_schema(self.pa_schema), False)
+        self.table = self.catalog.get_table(self.identifier)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_default_constructor_targets_main_branch(self):
+        sm = self.table.snapshot_manager()
+        self.assertEqual(sm.branch, "main")
+        self.assertEqual(sm.snapshot_dir, f"{self.table.table_path.rstrip('/')}/snapshot")
+
+    def test_copy_with_branch_returns_branch_aware_paths(self):
+        sm = self.table.snapshot_manager()
+        branch_sm = sm.copy_with_branch("b1")
+
+        self.assertIsNot(branch_sm, sm)
+        self.assertEqual(branch_sm.branch, "b1")
+
+        expected_dir = f"{self.table.table_path.rstrip('/')}/branch/branch-b1/snapshot"
+        self.assertEqual(branch_sm.snapshot_dir, expected_dir)
+        self.assertEqual(branch_sm.get_snapshot_path(7), f"{expected_dir}/snapshot-7")
+        self.assertNotEqual(sm.get_snapshot_path(7), branch_sm.get_snapshot_path(7))
+
+
+class FileSystemBranchManagerEndToEndTest(unittest.TestCase):
+    """Catalog-driven end-to-end tests that exercise ``_copy_with_branch``.
+
+    These regress the from-tag and fast-forward paths that previously
+    raised ``SameFileError``: the SnapshotManager produced by
+    ``_copy_with_branch`` still pointed at the main-branch snapshot dir,
+    so ``copy_file(src, dst)`` collapsed to ``src == dst``.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="unittest_fs_branch_e2e_")
+        warehouse = os.path.join(self.temp_dir, "warehouse")
+        os.makedirs(warehouse, exist_ok=True)
+        self.catalog = CatalogFactory.create({"warehouse": warehouse})
+        self.catalog.create_database("default", True)
+
+        self.pa_schema = pa.schema([("id", pa.int64()), ("value", pa.string())])
+        self.identifier = Identifier.from_string("default.fs_branch_e2e_table")
+        self.catalog.create_table(
+            self.identifier, Schema.from_pyarrow_schema(self.pa_schema), False)
+
+        table = self.catalog.get_table(self.identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"id": [1, 2, 3], "value": ["a", "b", "c"]}, schema=self.pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        self.table = self.catalog.get_table(self.identifier)
+        self.table_root = self.table.table_path.rstrip('/')
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _latest_snapshot_id(self) -> int:
+        latest = self.table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(latest)
+        return latest.id
+
+    def test_create_branch_from_tag_lands_files_under_branch_dir(self):
+        snapshot_id = self._latest_snapshot_id()
+
+        self.table.create_tag("t1")
+        bm = self.table.branch_manager()
+        bm.create_branch("b1", tag_name="t1")
+
+        branch_root = f"{self.table_root}/branch/branch-b1"
+        self.assertTrue(os.path.isdir(branch_root))
+        self.assertTrue(
+            os.path.isfile(f"{branch_root}/snapshot/snapshot-{snapshot_id}"))
+        self.assertTrue(os.path.isfile(f"{branch_root}/tag/tag-t1"))
+        # At least one schema file (schema-0) must have been copied.
+        schema_dir = f"{branch_root}/schema"
+        self.assertTrue(os.path.isdir(schema_dir))
+        self.assertTrue(
+            any(name.startswith("schema-") for name in os.listdir(schema_dir)))
+
+    def test_fast_forward_after_create_branch_from_tag(self):
+        self.table.create_tag("t1")
+        bm = self.table.branch_manager()
+        bm.create_branch("b1", tag_name="t1")
+        # Must not raise: previously fast_forward's copy_files(src=branch_dir,
+        # dst=main_dir) collapsed to src == dst because the branch-side
+        # SnapshotManager still pointed at the main snapshot dir.
+        bm.fast_forward("b1")
 
 
 if __name__ == '__main__':
