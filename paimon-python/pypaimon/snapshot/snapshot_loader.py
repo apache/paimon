@@ -44,8 +44,8 @@ class SnapshotLoader:
         """
         from pypaimon.common.identifier import Identifier
         rebranched = Identifier(
-            database=self.identifier.database,
-            object=self.identifier.object,
+            database=self.identifier.get_database_name(),
+            object=self.identifier.get_table_name(),
             branch=branch,
         )
         return SnapshotLoader(self.catalog_loader, rebranched)
