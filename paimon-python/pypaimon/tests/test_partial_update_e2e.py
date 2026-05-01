@@ -88,6 +88,24 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             w.close()
             c.close()
 
+    def _write_many(self, table, batches):
+        """Multiple ``write_arrow`` calls inside a single ``prepare_commit``.
+
+        Mirrors the reviewer's question: rows that land in the same
+        underlying data file must still go through the merge-engine
+        dispatch; in-writer merging cannot silently degrade to dedupe.
+        """
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        c = wb.new_commit()
+        try:
+            for rows in batches:
+                w.write_arrow(pa.Table.from_pylist(rows, schema=self.pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
     def _read(self, table):
         rb = table.new_read_builder()
         splits = rb.new_scan().plan().splits()
@@ -167,6 +185,76 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         table = self._create_pk_table('null_no_clobber')
         self._write(table, [{'id': 1, 'a': 'A', 'b': 'B', 'c': 'C'}])
         self._write(table, [{'id': 1, 'a': None, 'b': None, 'c': None}])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'A', 'b': 'B', 'c': 'C'}],
+        )
+
+    # -- single-commit, multiple write_arrow calls -----------------------
+    #
+    # Reviewer concern (#7745): rows from multiple ``write_arrow`` calls
+    # inside a single ``prepare_commit`` may land in the same data file
+    # and bypass the merge-engine dispatch we added in
+    # ``MergeFileSplitRead._build_merge_function``. Verified: they do.
+    #
+    # Root cause is upstream of this PR. ``KeyValueDataWriter._merge_data``
+    # simply ``concat + sort``s incoming batches without applying any
+    # merge function, so the flushed file holds multiple rows for the
+    # same primary key -- violating the Java LSM invariant "PK is unique
+    # within a file". On the read side, ``_build_split_from_pack`` then
+    # marks any single-file group as ``raw_convertible=True``
+    # (split_generator.py:99-100), which routes the split through the
+    # raw-convertible fast path and skips ``SortMergeReader`` entirely.
+    # The merge-engine dispatch this PR adds only fires inside
+    # ``SortMergeReader``, so partial-update semantics are lost.
+    #
+    # Fixing this requires either (a) giving ``KeyValueDataWriter`` a
+    # merge buffer that applies the merge function during flush
+    # (mirrors Java ``SortBufferWriteBuffer`` / ``MergeTreeWriter``),
+    # or (b) tightening ``raw_convertible`` to require proof that the
+    # file contains no duplicate keys. Both are write-/scan-path
+    # restructuring, well outside the scope of this read-side
+    # merge-engine port. Tracked for a follow-up PR.
+    #
+    # The two cases below are kept as ``expectedFailure`` so the gap
+    # is visible and will turn into a passing regression once the
+    # writer-side fix lands.
+
+    @unittest.expectedFailure
+    def test_partial_update_two_write_arrows_single_commit(self):
+        """Two ``write_arrow`` calls + one ``prepare_commit``: each
+        carries a disjoint non-null field; result must be the per-field
+        merge.
+
+        Currently fails: see module-level note above. The flushed file
+        keeps both rows verbatim and the read split goes through the
+        raw-convertible fast path, so neither dedupe nor partial-update
+        merge runs.
+        """
+        table = self._create_pk_table('two_writes_single_commit')
+        self._write_many(table, [
+            [{'id': 1, 'a': 'A', 'b': None, 'c': None}],
+            [{'id': 1, 'a': None, 'b': 'B', 'c': None}],
+        ])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'A', 'b': 'B', 'c': None}],
+        )
+
+    @unittest.expectedFailure
+    def test_partial_update_three_write_arrows_single_commit(self):
+        """Three ``write_arrow`` calls in a single commit must compose
+        into the union of non-null fields. Same expected-failure
+        condition as the two-write case above.
+        """
+        table = self._create_pk_table('three_writes_single_commit')
+        self._write_many(table, [
+            [{'id': 1, 'a': 'A', 'b': None, 'c': None}],
+            [{'id': 1, 'a': None, 'b': 'B', 'c': None}],
+            [{'id': 1, 'a': None, 'b': None, 'c': 'C'}],
+        ])
 
         self.assertEqual(
             self._read(table),
