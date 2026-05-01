@@ -226,12 +226,15 @@ class PkReaderTest(unittest.TestCase):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        # TODO support pk merge feature when multiple write
+        # The in-memory merge buffer in KeyValueDataWriter folds the
+        # two writes for user_id=2 down to the latest row before flush
+        # (default merge engine is deduplicate), so the PK appears once
+        # with the second batch's value.
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 2, 3, 4, 5, 7, 8],
-            'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
-            'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
-            'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
+            'user_id': [1, 2, 3, 4, 5, 7, 8],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
+            'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 

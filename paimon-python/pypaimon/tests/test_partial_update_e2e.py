@@ -193,44 +193,16 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
 
     # -- single-commit, multiple write_arrow calls -----------------------
     #
-    # Reviewer concern (#7745): rows from multiple ``write_arrow`` calls
-    # inside a single ``prepare_commit`` may land in the same data file
-    # and bypass the merge-engine dispatch we added in
-    # ``MergeFileSplitRead._build_merge_function``. Verified: they do.
-    #
-    # Root cause is upstream of this PR. ``KeyValueDataWriter._merge_data``
-    # simply ``concat + sort``s incoming batches without applying any
-    # merge function, so the flushed file holds multiple rows for the
-    # same primary key -- violating the Java LSM invariant "PK is unique
-    # within a file". On the read side, ``_build_split_from_pack`` then
-    # marks any single-file group as ``raw_convertible=True``
-    # (split_generator.py:99-100), which routes the split through the
-    # raw-convertible fast path and skips ``SortMergeReader`` entirely.
-    # The merge-engine dispatch this PR adds only fires inside
-    # ``SortMergeReader``, so partial-update semantics are lost.
-    #
-    # Fixing this requires either (a) giving ``KeyValueDataWriter`` a
-    # merge buffer that applies the merge function during flush
-    # (mirrors Java ``SortBufferWriteBuffer`` / ``MergeTreeWriter``),
-    # or (b) tightening ``raw_convertible`` to require proof that the
-    # file contains no duplicate keys. Both are write-/scan-path
-    # restructuring, well outside the scope of this read-side
-    # merge-engine port. Tracked for a follow-up PR.
-    #
-    # The two cases below are kept as ``expectedFailure`` so the gap
-    # is visible and will turn into a passing regression once the
-    # writer-side fix lands.
+    # The in-memory merge buffer added to ``KeyValueDataWriter`` runs
+    # the merge function on flush, so rows from multiple ``write_arrow``
+    # calls that share a primary key are folded into a single row before
+    # the data file is written. The flushed file therefore satisfies the
+    # LSM "PK unique within a file" invariant the read-side
+    # ``raw_convertible`` fast path relies on.
 
-    @unittest.expectedFailure
     def test_partial_update_two_write_arrows_single_commit(self):
         """Two ``write_arrow`` calls + one ``prepare_commit``: each
-        carries a disjoint non-null field; result must be the per-field
-        merge.
-
-        Currently fails: see module-level note above. The flushed file
-        keeps both rows verbatim and the read split goes through the
-        raw-convertible fast path, so neither dedupe nor partial-update
-        merge runs.
+        carries a disjoint non-null field; result is the per-field merge.
         """
         table = self._create_pk_table('two_writes_single_commit')
         self._write_many(table, [
@@ -243,11 +215,9 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'A', 'b': 'B', 'c': None}],
         )
 
-    @unittest.expectedFailure
     def test_partial_update_three_write_arrows_single_commit(self):
-        """Three ``write_arrow`` calls in a single commit must compose
-        into the union of non-null fields. Same expected-failure
-        condition as the two-write case above.
+        """Three ``write_arrow`` calls in a single commit compose into
+        the union of non-null fields.
         """
         table = self._create_pk_table('three_writes_single_commit')
         self._write_many(table, [
@@ -276,11 +246,38 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'new', 'b': None, 'c': None}],
         )
 
+    def test_deduplicate_two_write_arrows_single_commit(self):
+        """Pre-PR master silently returned both rows because the
+        flushed file held two records sharing a primary key. With the
+        in-memory merge buffer in place, ``deduplicate`` collapses
+        same-PK rows in a single commit too -- LSM "PK unique within a
+        file" invariant restored.
+        """
+        table = self._create_pk_table(
+            'dedupe_two_writes_single_commit',
+            merge_engine='deduplicate',
+        )
+        self._write_many(table, [
+            [{'id': 1, 'a': 'first', 'b': 'old', 'c': None}],
+            [{'id': 1, 'a': 'second', 'b': 'new', 'c': None}],
+        ])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'second', 'b': 'new', 'c': None}],
+        )
+
     # -- engines we don't support yet ------------------------------------
 
     def test_aggregation_engine_raises_not_implemented(self):
-        """Until ``aggregation`` is ported, reading an aggregation table
-        must raise rather than silently produce dedupe results."""
+        """Until ``aggregation`` is ported, reading from an aggregation
+        table must raise rather than silently produce dedupe results.
+
+        The write path's in-memory merge buffer falls back to dedupe
+        for wholly unsupported engines so the file still keeps the LSM
+        "PK unique within a file" invariant -- but the read-side
+        dispatch still raises explicitly, which is what protects users.
+        """
         table = self._create_pk_table('agg_unsupported',
                                       merge_engine='aggregation')
         self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
@@ -293,8 +290,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         self.assertIn('aggregation', str(cm.exception))
 
     def test_first_row_engine_raises_not_implemented(self):
-        """Until ``first-row`` is ported, reading a first-row table must
-        raise rather than silently produce dedupe results."""
+        """Same as the aggregation case above for ``first-row``."""
         table = self._create_pk_table('first_row_unsupported',
                                       merge_engine='first-row')
         self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
@@ -317,15 +313,13 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
 
     def _assert_partial_update_unsupported(self, table_name, extra_options,
                                            expected_keys):
+        # Shared dispatch runs at write time too, so the unsupported-
+        # option error surfaces on the first ``write_arrow`` flush
+        # rather than waiting for read.
         table = self._create_pk_table(
             table_name, extra_options=extra_options)
-        self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
-        self._write(table, [{'id': 1, 'a': None, 'b': 'B', 'c': None}])
-
-        rb = table.new_read_builder()
-        splits = rb.new_scan().plan().splits()
         with self.assertRaises(NotImplementedError) as cm:
-            rb.new_read().to_arrow(splits)
+            self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
         msg = str(cm.exception)
         self.assertIn("partial-update", msg)
         for key in expected_keys:
