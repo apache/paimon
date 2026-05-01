@@ -487,7 +487,8 @@ public class SchemaValidation {
                 .forEach(
                         k -> {
                             if (k.startsWith(FIELDS_PREFIX)) {
-                                String[] fields = k.split("\\.")[1].split(FIELDS_SEPARATOR);
+                                String[] segments = k.split("\\.");
+                                String[] fields = segments[1].split(FIELDS_SEPARATOR);
                                 for (String field : fields) {
                                     checkArgument(
                                             DEFAULT_AGG_FUNCTION.equals(field)
@@ -495,6 +496,23 @@ public class SchemaValidation {
                                             String.format(
                                                     "Field %s can not be found in table schema.",
                                                     field));
+                                }
+                                // PAIMON-6471: dot paths into a ROW field's members
+                                // (e.g. fields.row.inner.aggregate-function) are silently
+                                // dropped today and produce wrong results. This check
+                                // rejects them.
+                                if (segments.length > 3 && fields.length == 1) {
+                                    String parent = fields[0];
+                                    schema.fields().stream()
+                                            .filter(f -> f.name().equals(parent))
+                                            .findFirst()
+                                            .ifPresent(
+                                                    f ->
+                                                            checkArgument(
+                                                                    !(f.type() instanceof RowType),
+                                                                    "Nested-field path is not supported on ROW field '%s': %s",
+                                                                    parent,
+                                                                    k));
                                 }
                             }
                         });
