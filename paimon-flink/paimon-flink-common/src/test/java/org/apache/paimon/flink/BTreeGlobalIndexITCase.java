@@ -145,9 +145,7 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBTreeIndexWithManyPartitions() throws Catalog.TableNotExistException {
-        // Regression test: building a btree index on a table with many partitions
-        // previously caused StackOverflowError due to deeply nested DataStream.union() calls.
+    void testBTreeIndexWithManyPartitions() throws Catalog.TableNotExistException {
         int numPartitions = 50;
         sql(
                 "CREATE TABLE T_MANY_PT (pt INT, id INT, name STRING) PARTITIONED BY (pt) WITH ("
