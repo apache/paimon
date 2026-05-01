@@ -367,18 +367,10 @@ class FileScanner:
         return self
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
-        """Mirror Java ``DataTableBatchScan.applyPushDownLimit``.
-
-        Bail out when there's no limit or the predicate touches any
-        non-partition column (per-split row counts are pre-filter, so
-        summing them against a filtered-row budget would early-return
-        the loop too soon). Otherwise accumulate ``merged_row_count``
-        — the DV-aware count, equivalent to Java's
-        ``Split.mergedRowCount`` — and return the collected sublist
-        once the budget is met. Splits whose merged count is unknown
-        (non-raw, or data-evolution layouts missing ``first_row_id``)
-        are skipped from the accumulator and reach the reader via the
-        fall-through return.
+        """Mirror Java ``DataTableBatchScan.applyPushDownLimit``: sum the
+        DV-aware ``merged_row_count`` (== Java ``partialMergedRowCount``)
+        until the limit is met. Splits with unknown merged count fall
+        through to the reader unchanged.
         """
         if self.limit is None:
             return splits
@@ -397,10 +389,7 @@ class FileScanner:
         return splits
 
     def _has_non_partition_filter(self) -> bool:
-        """Mirror Java ``SnapshotReaderImpl.hasNonPartitionFilter``:
-        true when the predicate references any column outside the
-        partition keys (i.e. its non-partition portion is non-empty).
-        """
+        """Mirror Java ``SnapshotReaderImpl.hasNonPartitionFilter``."""
         if self.predicate is None:
             return False
         partition_keys = set(self.table.partition_keys or [])
