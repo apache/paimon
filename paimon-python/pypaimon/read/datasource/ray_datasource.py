@@ -40,30 +40,6 @@ RAY_VERSION_SCHEMA_IN_READ_TASK = "2.48.0"  # Schema moved from BlockMetadata to
 RAY_VERSION_PER_TASK_ROW_LIMIT = "2.52.0"  # per_task_row_limit parameter introduced
 
 
-def _paimon_read_task(splits, table, predicate, read_type, schema):
-    """Module-level read function that yields Arrow tables per batch.
-
-    Using a generator avoids loading every split's rows into memory at once —
-    memory usage stays proportional to one batch rather than the whole chunk.
-    """
-    from pypaimon.read.table_read import TableRead
-    worker_table_read = TableRead(table, predicate, read_type)
-    batch_reader = worker_table_read.to_arrow_batch_reader(splits)
-
-    has_data = False
-    for batch in iter(batch_reader.read_next_batch, None):
-        if batch.num_rows == 0:
-            continue
-        has_data = True
-        yield pyarrow.Table.from_batches([batch], schema=schema)
-
-    if not has_data:
-        yield pyarrow.Table.from_arrays(
-            [pyarrow.array([], type=field.type) for field in schema],
-            schema=schema,
-        )
-
-
 class RayDatasource(Datasource):
     """Ray Data ``Datasource`` implementation for reading Paimon tables.
 
@@ -162,6 +138,35 @@ class RayDatasource(Datasource):
                 f"Reducing the parallelism to {parallelism}, as that is the number of splits"
             )
 
+        # Define the read function inside the method but bind state via
+        # default-arg early binding so it does NOT capture self in its
+        # closure (see ray-project/ray#49107). The generator yields one
+        # Arrow table per batch to keep memory proportional to one batch
+        # rather than the whole chunk.
+        def _read_task(
+                splits,
+                table=table,
+                predicate=predicate,
+                read_type=read_type,
+                schema=schema,
+        ):
+            from pypaimon.read.table_read import TableRead
+            worker_table_read = TableRead(table, predicate, read_type)
+            batch_reader = worker_table_read.to_arrow_batch_reader(splits)
+
+            has_data = False
+            for batch in iter(batch_reader.read_next_batch, None):
+                if batch.num_rows == 0:
+                    continue
+                has_data = True
+                yield pyarrow.Table.from_batches([batch], schema=schema)
+
+            if not has_data:
+                yield pyarrow.Table.from_arrays(
+                    [pyarrow.array([], type=field.type) for field in schema],
+                    schema=schema,
+                )
+
         read_tasks = []
 
         # Distribute splits across tasks using load balancing algorithm
@@ -210,14 +215,7 @@ class RayDatasource(Datasource):
 
             metadata = BlockMetadata(**metadata_kwargs)
 
-            read_fn = partial(
-                _paimon_read_task,
-                chunk_splits,
-                table=table,
-                predicate=predicate,
-                read_type=read_type,
-                schema=schema,
-            )
+            read_fn = partial(_read_task, chunk_splits)
             read_task_kwargs = {
                 'read_fn': read_fn,
                 'metadata': metadata,
