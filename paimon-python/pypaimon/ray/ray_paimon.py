@@ -63,6 +63,7 @@ def read_paimon(
         A ``ray.data.Dataset`` containing the table data.
     """
     from pypaimon.read.datasource.ray_datasource import RayDatasource
+    from pypaimon.read.datasource.split_provider import CatalogSplitProvider
 
     if override_num_blocks is not None and override_num_blocks < 1:
         raise ValueError(
@@ -70,11 +71,13 @@ def read_paimon(
         )
 
     datasource = RayDatasource(
-        table_identifier,
-        catalog_options,
-        predicate=filter,
-        projection=projection,
-        limit=limit,
+        CatalogSplitProvider(
+            table_identifier=table_identifier,
+            catalog_options=catalog_options,
+            predicate=filter,
+            projection=projection,
+            limit=limit,
+        )
     )
     return ray.data.read_datasource(
         datasource,
