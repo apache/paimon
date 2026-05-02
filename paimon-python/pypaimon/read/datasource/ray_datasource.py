@@ -22,18 +22,14 @@ import heapq
 import itertools
 import logging
 from functools import partial
-from typing import Dict, Iterable, List, Optional
+from typing import Iterable, List, Optional
 
 import pyarrow
 from packaging.version import parse
 import ray
 from ray.data.datasource import Datasource
 
-from pypaimon.read.datasource.split_provider import (
-    CatalogSplitProvider,
-    PreResolvedSplitProvider,
-    SplitProvider,
-)
+from pypaimon.read.datasource.split_provider import SplitProvider
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import PyarrowFieldParser
 
@@ -73,51 +69,29 @@ class RayDatasource(Datasource):
 
     Holds a :class:`SplitProvider` that supplies the four planning artefacts
     needed to build read tasks (table, splits, read_type, predicate). Two
-    constructors cover the two ways callers obtain those artefacts:
+    provider implementations exist today:
 
-    * :meth:`__init__` — accepts ``table_identifier`` + ``catalog_options``
-      (and optional scan args) and uses :class:`CatalogSplitProvider`. This
-      mirrors Iceberg's ``IcebergDatasource``.
-    * :meth:`_from_table_read` — accepts an already-resolved ``TableRead``
-      and ``splits`` (used by the legacy ``TableRead.to_ray()`` bridge) and
-      uses :class:`PreResolvedSplitProvider`.
+    * :class:`CatalogSplitProvider` — resolves a fully-qualified table
+      identifier through the catalog and runs the ``ReadBuilder`` plan.
+      Used by the public :func:`pypaimon.ray.read_paimon` facade.
+    * :class:`PreResolvedSplitProvider` — wraps an already-resolved
+      ``(table, splits, read_type, predicate)`` tuple. Used by the legacy
+      ``TableRead.to_ray()`` bridge to skip a second catalog round-trip.
 
-    Both paths are cheap to instantiate: the catalog round-trip and split
-    planning happen on first access, not in the constructor.
+    Both providers are cheap to instantiate; they defer the catalog
+    round-trip and split planning until the first read.
     """
 
-    def __init__(
-        self,
-        table_identifier: Optional[str] = None,
-        catalog_options: Optional[Dict[str, str]] = None,
-        predicate=None,
-        projection: Optional[List[str]] = None,
-        limit: Optional[int] = None,
-        *,
-        split_provider: Optional[SplitProvider] = None,
-    ):
+    def __init__(self, split_provider: SplitProvider):
         """Initialize a RayDatasource.
 
         Args:
-            table_identifier: Fully qualified table name (``"db.table"``).
-                Required unless ``split_provider`` is given.
-            catalog_options: Options passed to ``CatalogFactory.create()``.
-                Required unless ``split_provider`` is given.
-            predicate: Optional ``Predicate`` for scan-time filtering.
-            projection: Optional list of column names to read.
-            limit: Optional row limit for the scan.
-            split_provider: Internal hook that lets callers (e.g.
-                ``TableRead.to_ray()``) inject a pre-built provider — bypasses
-                the catalog/identifier path. Not part of the public API.
+            split_provider: The :class:`SplitProvider` that supplies the
+                table, splits, read_type, and predicate. Construct one with
+                :class:`CatalogSplitProvider` (from a table identifier +
+                catalog options) or :class:`PreResolvedSplitProvider` (from
+                an already-resolved ``TableRead``).
         """
-        if split_provider is None:
-            split_provider = CatalogSplitProvider(
-                table_identifier=table_identifier,
-                catalog_options=catalog_options,
-                predicate=predicate,
-                projection=projection,
-                limit=limit,
-            )
         self._split_provider = split_provider
         self._schema = None
 
@@ -140,23 +114,6 @@ class RayDatasource(Datasource):
     @property
     def predicate(self):
         return self._split_provider.predicate()
-
-    @classmethod
-    def _from_table_read(cls, table_read, splits) -> "RayDatasource":
-        """Bridge for ``TableRead.to_ray()``.
-
-        Wraps an already-resolved ``(table_read, splits)`` pair in a
-        :class:`PreResolvedSplitProvider` so we don't do a second catalog
-        round-trip.
-        """
-        return cls(
-            split_provider=PreResolvedSplitProvider(
-                table=table_read.table,
-                splits=splits,
-                read_type=table_read.read_type,
-                predicate=table_read.predicate,
-            )
-        )
 
     def get_name(self) -> str:
         return f"PaimonTable({self._split_provider.display_name()})"
