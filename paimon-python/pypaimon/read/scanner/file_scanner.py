@@ -368,7 +368,7 @@ class FileScanner:
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
         """Mirror Java ``DataTableBatchScan.applyPushDownLimit``: sum the
-        DV-aware ``merged_row_count`` (== Java ``partialMergedRowCount``)
+        DV-aware ``merged_row_count`` (== Java ``Split.mergedRowCount()``)
         until the limit is met. Splits with unknown merged count fall
         through to the reader unchanged.
         """
