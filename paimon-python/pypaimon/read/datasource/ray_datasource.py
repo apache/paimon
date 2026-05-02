@@ -138,22 +138,20 @@ class RayDatasource(Datasource):
                 f"Reducing the parallelism to {parallelism}, as that is the number of splits"
             )
 
-        # Define the read function inside the method but bind state via
-        # default-arg early binding so it does NOT capture self in its
-        # closure (see ray-project/ray#49107). The generator yields one
-        # Arrow table per batch to keep memory proportional to one batch
-        # rather than the whole chunk.
-        def _read_task(
-                splits,
+        # Create a partial function to avoid capturing self in closure
+        # This reduces serialization overhead (see https://github.com/ray-project/ray/issues/49107)
+        def _get_read_task(
+                splits: List[Split],
                 table=table,
                 predicate=predicate,
                 read_type=read_type,
                 schema=schema,
-        ):
+        ) -> Iterable[pyarrow.Table]:
+            """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
             worker_table_read = TableRead(table, predicate, read_type)
-            batch_reader = worker_table_read.to_arrow_batch_reader(splits)
 
+            batch_reader = worker_table_read.to_arrow_batch_reader(splits)
             has_data = False
             for batch in iter(batch_reader.read_next_batch, None):
                 if batch.num_rows == 0:
@@ -164,8 +162,17 @@ class RayDatasource(Datasource):
             if not has_data:
                 yield pyarrow.Table.from_arrays(
                     [pyarrow.array([], type=field.type) for field in schema],
-                    schema=schema,
+                    schema=schema
                 )
+
+        # Use partial to create read function without capturing self
+        get_read_task = partial(
+            _get_read_task,
+            table=table,
+            predicate=predicate,
+            read_type=read_type,
+            schema=schema,
+        )
 
         read_tasks = []
 
@@ -215,7 +222,7 @@ class RayDatasource(Datasource):
 
             metadata = BlockMetadata(**metadata_kwargs)
 
-            read_fn = partial(_read_task, chunk_splits)
+            read_fn = partial(get_read_task, chunk_splits)
             read_task_kwargs = {
                 'read_fn': read_fn,
                 'metadata': metadata,
