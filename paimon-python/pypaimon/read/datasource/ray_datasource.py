@@ -95,31 +95,11 @@ class RayDatasource(Datasource):
         self._split_provider = split_provider
         self._schema = None
 
-    @property
-    def split_provider(self) -> SplitProvider:
-        return self._split_provider
-
-    @property
-    def table(self):
-        return self._split_provider.table()
-
-    @property
-    def splits(self) -> List[Split]:
-        return self._split_provider.splits()
-
-    @property
-    def read_type(self):
-        return self._split_provider.read_type()
-
-    @property
-    def predicate(self):
-        return self._split_provider.predicate()
-
     def get_name(self) -> str:
         return f"PaimonTable({self._split_provider.display_name()})"
 
     def estimate_inmemory_data_size(self) -> Optional[int]:
-        splits = self.splits
+        splits = self._split_provider.splits()
         if not splits:
             return 0
 
@@ -162,26 +142,25 @@ class RayDatasource(Datasource):
         if parallelism < 1:
             raise ValueError(f"parallelism must be at least 1, got {parallelism}")
 
-        splits = self.splits
+        # Pull provider state into locals once: avoids capturing self in the
+        # ReadTask closure (see ray-project/ray#49107) and amortises the
+        # provider-method dispatch over all chunks.
+        table = self._split_provider.table()
+        predicate = self._split_provider.predicate()
+        read_type = self._split_provider.read_type()
+        splits = self._split_provider.splits()
         if not splits:
             return []
 
         if self._schema is None:
-            self._schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            self._schema = PyarrowFieldParser.from_paimon_schema(read_type)
+        schema = self._schema
 
         if parallelism > len(splits):
             parallelism = len(splits)
             logger.warning(
                 f"Reducing the parallelism to {parallelism}, as that is the number of splits"
             )
-
-        # Store necessary information for creating readers in Ray workers.
-        # Pulling them into locals avoids closure-over-self and reduces
-        # serialization overhead (see ray-project/ray#49107).
-        table = self.table
-        predicate = self.predicate
-        read_type = self.read_type
-        schema = self._schema
 
         read_tasks = []
 
@@ -197,14 +176,9 @@ class RayDatasource(Datasource):
             for split in chunk_splits:
                 if predicate is None:
                     # Only estimate rows if no predicate (predicate filtering changes row count)
-                    row_count = None
-                    if hasattr(split, 'merged_row_count'):
-                        merged_count = split.merged_row_count()
-                        if merged_count is not None:
-                            row_count = merged_count
-                    if row_count is None and hasattr(split, 'row_count') and split.row_count > 0:
-                        row_count = split.row_count
-                    if row_count is not None and row_count > 0:
+                    merged = split.merged_row_count()
+                    row_count = merged if merged is not None else split.row_count
+                    if row_count > 0:
                         total_rows += row_count
                 if hasattr(split, 'file_size') and split.file_size > 0:
                     total_size += split.file_size
