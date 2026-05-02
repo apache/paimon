@@ -29,6 +29,11 @@ from packaging.version import parse
 import ray
 from ray.data.datasource import Datasource
 
+from pypaimon.read.datasource.split_provider import (
+    CatalogSplitProvider,
+    PreResolvedSplitProvider,
+    SplitProvider,
+)
 from pypaimon.read.split import Split
 from pypaimon.schema.data_types import PyarrowFieldParser
 
@@ -64,13 +69,21 @@ def _paimon_read_task(splits, table, predicate, read_type, schema):
 
 
 class RayDatasource(Datasource):
-    """
-    Ray Data Datasource implementation for reading Paimon tables.
+    """Ray Data ``Datasource`` implementation for reading Paimon tables.
 
-    Self-contained: only requires a fully-qualified table identifier and the
-    catalog options. The catalog, table, and splits are loaded lazily so the
-    datasource is cheap to instantiate and easy to serialize across Ray workers
-    (mirrors Iceberg's ``IcebergDatasource``).
+    Holds a :class:`SplitProvider` that supplies the four planning artefacts
+    needed to build read tasks (table, splits, read_type, predicate). Two
+    constructors cover the two ways callers obtain those artefacts:
+
+    * :meth:`__init__` — accepts ``table_identifier`` + ``catalog_options``
+      (and optional scan args) and uses :class:`CatalogSplitProvider`. This
+      mirrors Iceberg's ``IcebergDatasource``.
+    * :meth:`_from_table_read` — accepts an already-resolved ``TableRead``
+      and ``splits`` (used by the legacy ``TableRead.to_ray()`` bridge) and
+      uses :class:`PreResolvedSplitProvider`.
+
+    Both paths are cheap to instantiate: the catalog round-trip and split
+    planning happen on first access, not in the constructor.
     """
 
     def __init__(
@@ -80,115 +93,73 @@ class RayDatasource(Datasource):
         predicate=None,
         projection: Optional[List[str]] = None,
         limit: Optional[int] = None,
-        _resolved=None,
+        *,
+        split_provider: Optional[SplitProvider] = None,
     ):
-        """
-        Initialize RayDatasource.
+        """Initialize a RayDatasource.
 
         Args:
-            table_identifier: Fully qualified table name, e.g. ``"db.table"``.
-                Required unless ``_resolved`` is provided.
+            table_identifier: Fully qualified table name (``"db.table"``).
+                Required unless ``split_provider`` is given.
             catalog_options: Options passed to ``CatalogFactory.create()``.
-                Required unless ``_resolved`` is provided.
+                Required unless ``split_provider`` is given.
             predicate: Optional ``Predicate`` for scan-time filtering.
             projection: Optional list of column names to read.
             limit: Optional row limit for the scan.
-            _resolved: Internal sentinel used by ``TableRead.to_ray()``. When
-                supplied, must be a ``(table, splits, read_type)`` tuple of
-                already-resolved values; the catalog/identifier path is then
-                skipped. Not part of the public API.
+            split_provider: Internal hook that lets callers (e.g.
+                ``TableRead.to_ray()``) inject a pre-built provider — bypasses
+                the catalog/identifier path. Not part of the public API.
         """
-        if _resolved is None:
-            if not table_identifier:
-                raise ValueError(
-                    "table_identifier is required (or pass _resolved=...).")
-            if catalog_options is None:
-                raise ValueError(
-                    "catalog_options is required (or pass _resolved=...).")
-            self.table_identifier = table_identifier
-            self.catalog_options = catalog_options
-            self.predicate = predicate
-            self.projection = projection
-            self.limit = limit
-            self._table = None
-            self._splits = None
-            self._read_type = None
-        else:
-            # Pre-resolved bridge path used by ``TableRead.to_ray()`` — the
-            # caller has already loaded the table and planned splits, so we
-            # short-circuit the catalog lookup and ``ReadBuilder`` planning.
-            table, splits, read_type = _resolved
-            self.table_identifier = None
-            self.catalog_options = None
-            self.predicate = predicate
-            self.projection = projection
-            self.limit = limit
-            self._table = table
-            self._splits = splits
-            self._read_type = read_type
+        if split_provider is None:
+            split_provider = CatalogSplitProvider(
+                table_identifier=table_identifier,
+                catalog_options=catalog_options,
+                predicate=predicate,
+                projection=projection,
+                limit=limit,
+            )
+        self._split_provider = split_provider
         self._schema = None
 
     @property
-    def table(self):
-        """Lazily load the table from the catalog."""
-        if self._table is None:
-            from pypaimon.catalog.catalog_factory import CatalogFactory
-            catalog = CatalogFactory.create(self.catalog_options)
-            self._table = catalog.get_table(self.table_identifier)
-        return self._table
+    def split_provider(self) -> SplitProvider:
+        return self._split_provider
 
     @property
-    def splits(self):
-        """Lazily plan splits from the table."""
-        self._ensure_planned()
-        return self._splits
+    def table(self):
+        return self._split_provider.table()
+
+    @property
+    def splits(self) -> List[Split]:
+        return self._split_provider.splits()
 
     @property
     def read_type(self):
-        """Lazily resolve the scan read type from filter / projection / limit."""
-        self._ensure_planned()
-        return self._read_type
+        return self._split_provider.read_type()
 
-    def _ensure_planned(self):
-        """Run the scan plan if either ``_splits`` or ``_read_type`` is missing.
-
-        Both are populated together by a single ``ReadBuilder`` plan, so the
-        ``splits`` / ``read_type`` properties share this entry point instead
-        of duplicating the ``if x is None`` check.
-        """
-        if self._splits is not None and self._read_type is not None:
-            return
-        from pypaimon.read.read_builder import ReadBuilder
-        rb = ReadBuilder(self.table)
-        if self.predicate is not None:
-            rb = rb.with_filter(self.predicate)
-        if self.projection is not None:
-            rb = rb.with_projection(self.projection)
-        if self.limit is not None:
-            rb = rb.with_limit(self.limit)
-        self._read_type = rb.read_type()
-        self._splits = rb.new_scan().plan().splits()
+    @property
+    def predicate(self):
+        return self._split_provider.predicate()
 
     @classmethod
-    def _from_table_read(cls, table_read, splits):
-        """Bridge for ``TableRead.to_ray()`` — wraps an already-resolved
-        ``(table_read, splits)`` pair without going back through the catalog.
+    def _from_table_read(cls, table_read, splits) -> "RayDatasource":
+        """Bridge for ``TableRead.to_ray()``.
 
-        Forwards through ``__init__`` via the ``_resolved`` sentinel so any
-        future field added to ``__init__`` is automatically initialized for
-        this path too.
+        Wraps an already-resolved ``(table_read, splits)`` pair in a
+        :class:`PreResolvedSplitProvider` so we don't do a second catalog
+        round-trip.
         """
         return cls(
-            predicate=table_read.predicate,
-            _resolved=(table_read.table, splits, table_read.read_type),
+            split_provider=PreResolvedSplitProvider(
+                table=table_read.table,
+                splits=splits,
+                read_type=table_read.read_type,
+                predicate=table_read.predicate,
+            )
         )
 
     def get_name(self) -> str:
-        if self.table_identifier:
-            return f"PaimonTable({self.table_identifier})"
-        identifier = self.table.identifier
-        table_name = identifier.get_full_name() if hasattr(identifier, 'get_full_name') else str(identifier)
-        return f"PaimonTable({table_name})"
+        return f"PaimonTable({self._split_provider.display_name()})"
 
     def estimate_inmemory_data_size(self) -> Optional[int]:
         splits = self.splits
