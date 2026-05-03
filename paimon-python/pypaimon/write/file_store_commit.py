@@ -111,7 +111,12 @@ class FileStoreCommit:
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        """Commit the given commit messages in normal append mode."""
+        """Commit the given commit messages in normal append mode.
+
+        new_files in each message generate ADD entries; compact_before/compact_after
+        generate DELETE/ADD entries respectively. If only compact_* fields are present
+        across all messages (no new_files), commit_kind becomes COMPACT.
+        """
         if not commit_messages:
             return
 
@@ -126,21 +131,12 @@ class FileStoreCommit:
             self.table.identifier,
             len(commit_messages),
         )
-        commit_entries = []
-        for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.new_files:
-                commit_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+        commit_entries = self._build_commit_entries(commit_messages)
+        has_new_files = any(msg.new_files for msg in commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries", len(commit_entries))
 
-        commit_kind = "APPEND"
+        commit_kind = "APPEND" if has_new_files else "COMPACT"
         detect_conflicts = False
         allow_rollback = False
         if self.conflict_detection.should_be_overwrite_commit():
@@ -156,6 +152,70 @@ class FileStoreCommit:
                          commit_entries_plan=lambda snapshot: commit_entries,
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback)
+
+    def commit_compact(self, commit_messages: List[CommitMessage], commit_identifier: int):
+        """Commit compaction results (compact_before/compact_after only).
+
+        Each message must carry no new_files. compact_before generate DELETE entries,
+        compact_after generate ADD entries. Snapshot kind is COMPACT.
+        """
+        if not commit_messages:
+            return
+
+        for msg in commit_messages:
+            if msg.new_files:
+                raise ValueError(
+                    "commit_compact rejects messages with new_files; use commit() instead."
+                )
+
+        logger.info(
+            "Ready to commit compact to table %s, number of commit messages: %d",
+            self.table.identifier,
+            len(commit_messages),
+        )
+        commit_entries = self._build_commit_entries(commit_messages)
+        if not commit_entries:
+            return
+
+        logger.info("Finished collecting compact changes: %d entries", len(commit_entries))
+
+        self._try_commit(
+            commit_kind="COMPACT",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: commit_entries,
+            detect_conflicts=False,
+            allow_rollback=False,
+        )
+
+    def _build_commit_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        entries: List[ManifestEntry] = []
+        for msg in commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            for file in msg.new_files:
+                entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file,
+                ))
+            for file in msg.compact_before:
+                entries.append(ManifestEntry(
+                    kind=1,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file,
+                ))
+            for file in msg.compact_after:
+                entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file,
+                ))
+        return entries
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
