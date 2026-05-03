@@ -91,10 +91,12 @@ class MergeTreeRollingWriter(DataWriter):
 
     @staticmethod
     def _count_retract_rows(data: pa.Table) -> int:
-        # _VALUE_KIND == 0 → INSERT; anything else (UPDATE_AFTER/DELETE/...) is
-        # treated as a retract for the purposes of the file-level counter.
+        # Match RowKind.is_add_byte: INSERT(0) and UPDATE_AFTER(2) are "add",
+        # UPDATE_BEFORE(1) and DELETE(3) are retracts. Counting != 0 here would
+        # wrongly include UPDATE_AFTER and inflate delete_row_count.
         kind = data.column("_VALUE_KIND")
-        return int(pc.sum(pc.cast(pc.not_equal(kind, 0), pa.int64())).as_py() or 0)
+        is_retract = pc.or_(pc.equal(kind, 1), pc.equal(kind, 3))
+        return int(pc.sum(pc.cast(is_retract, pa.int64())).as_py() or 0)
 
     @staticmethod
     def _patch(

@@ -46,10 +46,9 @@ from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.merge_function import MergeFunctionFactory
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
-from pypaimon.read.split_read import (KEY_FIELD_ID_START, KEY_PREFIX,
+from pypaimon.read.split_read import (KEY_PREFIX, build_kv_file_fields,
                                       format_identifier)
 from pypaimon.schema.data_types import DataField
-from pypaimon.table.special_fields import SpecialFields
 
 # Buffer KVs from the merge stream this many at a time before handing the
 # resulting RecordBatch to the writer. Sized to amortize per-row Python
@@ -207,21 +206,13 @@ class MergeTreeCompactRewriter(CompactRewriter):
         return KeyValueWrapReader(file_batch_reader, self._key_arity, self._value_arity)
 
     def _build_kv_fields(self) -> List[DataField]:
-        all_fields = self.table.fields
-        trimmed_pk = self.table.trimmed_primary_keys
-        out: List[DataField] = []
-        for field in all_fields:
-            if field.name in trimmed_pk:
-                out.append(DataField(
-                    field.id + KEY_FIELD_ID_START,
-                    f"{KEY_PREFIX}{field.name}",
-                    field.type,
-                ))
-        out.append(SpecialFields.SEQUENCE_NUMBER)
-        out.append(SpecialFields.VALUE_KIND)
-        for field in all_fields:
-            out.append(field)
-        return out
+        # Same helper SplitRead._create_key_value_fields uses, so the on-disk
+        # KV file schema cannot drift between read and compact paths.
+        return build_kv_file_fields(
+            table_fields=self.table.fields,
+            trimmed_primary_keys=self.table.trimmed_primary_keys,
+            value_fields=self.table.fields,
+        )
 
     def _build_arrow_schema(self) -> pa.Schema:
         from pypaimon.schema.data_types import PyarrowFieldParser

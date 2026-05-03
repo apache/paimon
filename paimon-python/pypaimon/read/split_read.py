@@ -66,6 +66,31 @@ KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
 NULL_FIELD_INDEX = -1
 
+
+def build_kv_file_fields(
+    table_fields: List[DataField],
+    trimmed_primary_keys: List[str],
+    value_fields: List[DataField],
+) -> List[DataField]:
+    """Build the on-disk KV file schema: [_KEY_pk*, _SEQUENCE_NUMBER, _VALUE_KIND, value_cols].
+
+    Centralizes the layout so that read (split_read) and write/compact paths
+    cannot drift. Field ids for key columns are derived from each PK field's
+    id offset by KEY_FIELD_ID_START (matches Java KeyValueFieldsExtractor).
+    """
+    fields: List[DataField] = []
+    for f in table_fields:
+        if f.name in trimmed_primary_keys:
+            fields.append(DataField(
+                f.id + KEY_FIELD_ID_START,
+                f"{KEY_PREFIX}{f.name}",
+                f.type,
+            ))
+    fields.append(SpecialFields.SEQUENCE_NUMBER)
+    fields.append(SpecialFields.VALUE_KIND)
+    fields.extend(value_fields)
+    return fields
+
 _COMPRESS_EXTENSIONS = frozenset(['gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'])
 
 
@@ -281,23 +306,11 @@ class SplitRead(ABC):
         return read_data_fields
 
     def _create_key_value_fields(self, value_field: List[DataField]):
-        all_fields: List[DataField] = self.table.fields
-        all_data_fields = []
-
-        for field in all_fields:
-            if field.name in self.trimmed_primary_key:
-                key_field_name = f"{KEY_PREFIX}{field.name}"
-                key_field_id = field.id + KEY_FIELD_ID_START
-                key_field = DataField(key_field_id, key_field_name, field.type)
-                all_data_fields.append(key_field)
-
-        all_data_fields.append(SpecialFields.SEQUENCE_NUMBER)
-        all_data_fields.append(SpecialFields.VALUE_KIND)
-
-        for field in value_field:
-            all_data_fields.append(field)
-
-        return all_data_fields
+        return build_kv_file_fields(
+            table_fields=self.table.fields,
+            trimmed_primary_keys=self.trimmed_primary_key,
+            value_fields=value_field,
+        )
 
     def create_index_mapping(self):
         base_index_mapping = self._create_base_index_mapping(self.read_fields, self._get_read_data_fields())

@@ -157,6 +157,22 @@ class Levels:
             before_by_level[f.level].append(f)
         for f in after:
             after_by_level[f.level].append(f)
+
+        # Reject out-of-range levels with a clear error instead of letting a
+        # downstream IndexError leak. Constructor handles the auto-grow case
+        # for files restored from manifest; runtime updates must stay within
+        # the levels we already know about.
+        max_seen = max(
+            (lvl for lvl in list(before_by_level.keys()) + list(after_by_level.keys())),
+            default=-1,
+        )
+        if max_seen >= self.number_of_levels():
+            raise ValueError(
+                f"Cannot update Levels with file at level {max_seen}; "
+                f"current number_of_levels={self.number_of_levels()}. "
+                f"Strategies must not select an output_level above the existing top."
+            )
+
         for level in range(self.number_of_levels()):
             self._update_level(
                 level,
