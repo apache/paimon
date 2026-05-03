@@ -21,7 +21,8 @@ from typing import Any, Dict, List, Tuple
 from pypaimon.compact.rewriter.merge_tree_compact_rewriter import \
     MergeTreeCompactRewriter
 from pypaimon.compact.task.compact_task import CompactTask, register_compact_task
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.data_file_meta import (DataFileMeta, decode_value,
+                                                     encode_value)
 from pypaimon.read.interval_partition import IntervalPartition
 from pypaimon.read.reader.merge_function import \
     create_merge_function_factory
@@ -61,11 +62,7 @@ class MergeTreeCompactTask(CompactTask):
         return self
 
     def run(self) -> CommitMessage:
-        if self._table is None:
-            raise RuntimeError(
-                "MergeTreeCompactTask has no table attached. The CompactJob/driver "
-                "must call with_table(table) before handing tasks to an executor."
-            )
+        table = self._resolve_table()
 
         # IntervalPartition reproduces split_read.MergeFileSplitRead.create_reader's
         # section grouping so the rewriter sees the same "non-overlapping
@@ -73,8 +70,8 @@ class MergeTreeCompactTask(CompactTask):
         sections = IntervalPartition(self.files).partition()
 
         rewriter = MergeTreeCompactRewriter(
-            table=self._table,
-            mf_factory=create_merge_function_factory(self._table.options),
+            table=table,
+            mf_factory=create_merge_function_factory(table.options),
         )
         after = rewriter.rewrite(
             partition=self.partition,
@@ -91,15 +88,26 @@ class MergeTreeCompactTask(CompactTask):
             compact_after=list(after),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        raise NotImplementedError(
-            "MergeTreeCompactTask.to_dict() is reserved for Phase 4 distributed "
-            "execution."
-        )
+    def _to_payload(self) -> Dict[str, Any]:
+        return {
+            "partition": [encode_value(v) for v in self.partition],
+            "bucket": self.bucket,
+            "files": [f.to_dict() for f in self.files],
+            "output_level": self.output_level,
+            "drop_delete": self.drop_delete,
+        }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MergeTreeCompactTask":
-        raise NotImplementedError(
-            "MergeTreeCompactTask.from_dict() is reserved for Phase 4 distributed "
-            "execution."
+    def _from_payload(cls, payload: Dict[str, Any]) -> "MergeTreeCompactTask":
+        return cls(
+            partition=tuple(decode_value(v) for v in payload.get("partition") or []),
+            bucket=payload["bucket"],
+            files=[DataFileMeta.from_dict(f) for f in payload.get("files") or []],
+            output_level=payload["output_level"],
+            drop_delete=payload["drop_delete"],
         )
+
+    def _resolve_table(self):
+        if self._table is not None:
+            return self._table
+        return self._resolve_table_via_loader()

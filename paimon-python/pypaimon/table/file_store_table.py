@@ -372,11 +372,15 @@ class FileStoreTable(Table):
             executor=None,
             partition_predicate=None,
             commit_user: Optional[str] = None,
+            catalog_options=None,
+            table_identifier: Optional[str] = None,
     ):
         """Create a CompactJob bound to this table.
 
         Args mirror CompactJob — passed through so callers can construct
         coordinators/executors elsewhere when they need cross-table sharing.
+        Pass catalog_options + table_identifier when using a distributed
+        executor (RayExecutor) so workers can rebuild the table.
         """
         from pypaimon.compact.job.compact_job import CompactJob
         return CompactJob(
@@ -385,6 +389,8 @@ class FileStoreTable(Table):
             executor=executor,
             partition_predicate=partition_predicate,
             commit_user=commit_user,
+            catalog_options=catalog_options,
+            table_identifier=table_identifier,
         )
 
     def new_stream_write_builder(self) -> StreamWriteBuilder:

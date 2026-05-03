@@ -18,7 +18,7 @@
 
 import logging
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.compact.coordinator.append_compact_coordinator import \
@@ -54,12 +54,22 @@ class CompactJob:
         executor: Optional[CompactExecutor] = None,
         partition_predicate: Optional[Predicate] = None,
         commit_user: Optional[str] = None,
+        catalog_options: Optional[Dict[str, Any]] = None,
+        table_identifier: Optional[str] = None,
     ):
+        """Construct a CompactJob.
+
+        catalog_options + table_identifier are required when using a
+        distributed executor (RayExecutor) — workers need them to rebuild
+        the table on the worker process. LocalExecutor never reads them.
+        """
         self.table = table
         self.compact_options = compact_options or CompactOptions()
         self.executor = executor or LocalExecutor()
         self.partition_predicate = partition_predicate
         self.commit_user = commit_user or str(uuid.uuid4())
+        self.catalog_options = dict(catalog_options) if catalog_options else None
+        self.table_identifier = table_identifier or str(table.identifier)
 
     def execute(self) -> List[CommitMessage]:
         """Run the compaction job and return the messages that were committed.
@@ -74,6 +84,14 @@ class CompactJob:
                 self.table.identifier,
             )
             return []
+
+        # Distributed executors can't share the in-process FileStoreTable, so
+        # attach the loader spec when caller provided one. LocalExecutor
+        # ignores it and uses the in-process table the coordinator already
+        # baked into each task.
+        if self.catalog_options is not None:
+            for task in tasks:
+                task.with_table_loader(self.catalog_options, self.table_identifier)
 
         logger.info(
             "Compacting table %s: %d task(s) via %s",

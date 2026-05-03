@@ -20,7 +20,8 @@ from typing import Any, Dict, List, Tuple
 
 from pypaimon.compact.rewriter.append_compact_rewriter import AppendCompactRewriter
 from pypaimon.compact.task.compact_task import CompactTask, register_compact_task
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.data_file_meta import (DataFileMeta, decode_value,
+                                                     encode_value)
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -63,27 +64,22 @@ class AppendCompactTask(CompactTask):
             compact_after=list(after),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        # Distributed executors will be wired up in Phase 4 (Ray). At that
-        # point we'll replace this stub with catalog-options + identifier so
-        # workers can rebuild the table; until then the LocalExecutor path
-        # never serializes a task and this method should raise loudly.
-        raise NotImplementedError(
-            "AppendCompactTask.to_dict() is reserved for Phase 4 distributed "
-            "execution; LocalExecutor runs tasks in-process without serialization."
-        )
+    def _to_payload(self) -> Dict[str, Any]:
+        return {
+            "partition": [encode_value(v) for v in self.partition],
+            "bucket": self.bucket,
+            "files": [f.to_dict() for f in self.files],
+        }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AppendCompactTask":
-        raise NotImplementedError(
-            "AppendCompactTask.from_dict() is reserved for Phase 4 distributed "
-            "execution; LocalExecutor runs tasks in-process without serialization."
+    def _from_payload(cls, payload: Dict[str, Any]) -> "AppendCompactTask":
+        return cls(
+            partition=tuple(decode_value(v) for v in payload.get("partition") or []),
+            bucket=payload["bucket"],
+            files=[DataFileMeta.from_dict(f) for f in payload.get("files") or []],
         )
 
     def _resolve_table(self):
-        if self._table is None:
-            raise RuntimeError(
-                "AppendCompactTask has no table attached. The CompactJob/driver "
-                "must call with_table(table) before handing tasks to an executor."
-            )
-        return self._table
+        if self._table is not None:
+            return self._table
+        return self._resolve_table_via_loader()

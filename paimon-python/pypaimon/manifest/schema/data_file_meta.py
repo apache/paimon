@@ -353,13 +353,21 @@ def decode_value(value: Any) -> Any:
     raise ValueError(f"Unknown tagged value type: {tag}")
 
 
-def _generic_row_to_dict(row: Optional[GenericRow]) -> Optional[Dict[str, Any]]:
+def _generic_row_to_dict(row) -> Optional[Dict[str, Any]]:
     if row is None:
         return None
+    # GenericRow exposes .values directly; BinaryRow lazily decodes per field
+    # via get_field(i). Normalize both into a list of decoded Python values
+    # so the dict format stays uniform.
+    if hasattr(row, "values"):
+        values = row.values
+    else:
+        values = [row.get_field(i) for i in range(len(row))]
+    fields = getattr(row, "fields", None)
     return {
-        "values": [encode_value(v) for v in row.values],
-        "fields": [f.to_dict() for f in row.fields] if row.fields else [],
-        "row_kind": row.row_kind.value,
+        "values": [encode_value(v) for v in values],
+        "fields": [f.to_dict() for f in fields] if fields else [],
+        "row_kind": row.get_row_kind().value if hasattr(row, "get_row_kind") else 0,
     }
 
 
@@ -375,10 +383,19 @@ def _generic_row_from_dict(data: Optional[Dict[str, Any]]) -> Optional[GenericRo
 def _simple_stats_to_dict(stats: Optional[SimpleStats]) -> Optional[Dict[str, Any]]:
     if stats is None:
         return None
+    # null_counts may be a Python list (writer path) or a pyarrow Array-like
+    # (manifest reader path). Normalize to a plain list of ints.
+    nc = stats.null_counts
+    if nc is None:
+        null_counts = []
+    elif hasattr(nc, "to_pylist"):
+        null_counts = nc.to_pylist()
+    else:
+        null_counts = list(nc)
     return {
         "min_values": _generic_row_to_dict(stats.min_values),
         "max_values": _generic_row_to_dict(stats.max_values),
-        "null_counts": list(stats.null_counts) if stats.null_counts is not None else [],
+        "null_counts": null_counts,
     }
 
 
