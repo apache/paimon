@@ -69,10 +69,13 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
     @Override
     public int bucket() {
-        BinaryRow bucketKey = bucketKey();
         if (reuseBucket == null) {
-            reuseBucket = bucketFunction.bucket(bucketKey, numBuckets);
+            reuseBucket = bucket(numBuckets);
         }
         return reuseBucket;
+    }
+
+    public int bucket(int numBuckets) {
+        return bucketFunction.bucket(bucketKey(), numBuckets);
     }
 }

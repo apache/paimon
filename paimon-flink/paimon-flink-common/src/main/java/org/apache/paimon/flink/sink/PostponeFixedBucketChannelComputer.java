@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 
 import java.util.Map;
 
@@ -38,7 +38,7 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
     private final Map<BinaryRow, Integer> knownNumBuckets;
 
     private transient int numChannels;
-    private transient RowPartitionKeyExtractor partitionKeyExtractor;
+    private transient FixedBucketRowKeyExtractor keyExtractor;
 
     public PostponeFixedBucketChannelComputer(
             TableSchema schema, Map<BinaryRow, Integer> knownNumBuckets) {
@@ -49,18 +49,15 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
+        this.keyExtractor = new FixedBucketRowKeyExtractor(schema);
     }
 
     @Override
     public int channel(InternalRow record) {
-        BinaryRow partition = partitionKeyExtractor.partition(record);
+        keyExtractor.setRecord(record);
+        BinaryRow partition = keyExtractor.partition();
         int numBuckets = knownNumBuckets.computeIfAbsent(partition, p -> numChannels);
-        int hash = partitionKeyExtractor.trimmedPrimaryKey(record).hashCode();
-        if (hash == Integer.MIN_VALUE) {
-            hash = Integer.MAX_VALUE;
-        }
-        int bucket = Math.abs(hash) % numBuckets;
+        int bucket = keyExtractor.bucket(numBuckets);
         return ChannelComputer.select(partition, bucket, numChannels);
     }
 
