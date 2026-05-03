@@ -383,7 +383,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: tableNamePattern
@@ -659,7 +659,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -785,7 +785,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -830,7 +830,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -882,7 +882,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1137,7 +1137,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1357,7 +1357,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1659,7 +1659,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: viewNamePattern
@@ -1957,7 +1957,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: functionNamePattern
@@ -2146,7 +2146,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given database does not exist",
@@ -2160,7 +2160,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given table does not exist",
@@ -2174,7 +2174,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given snapshot does not exist",
@@ -2188,7 +2188,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given branch does not exist",
@@ -2202,7 +2202,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given tag does not exist",
@@ -2216,7 +2216,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given view does not exist",
@@ -2230,7 +2230,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given function does not exist",
@@ -2256,7 +2256,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given database already exists",
@@ -2269,7 +2269,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given table already exists",
@@ -2282,7 +2282,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given branch already exists",
@@ -2295,7 +2295,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given tag already exists",
@@ -2308,7 +2308,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given view already exists",
@@ -2321,7 +2321,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given function already exists",
