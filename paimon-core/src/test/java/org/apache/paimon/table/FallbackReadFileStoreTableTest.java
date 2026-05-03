@@ -26,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -34,7 +35,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -42,10 +45,13 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -53,6 +59,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SchemaEvolutionTableTestBase.rowData;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FallbackReadFileStoreTable}. */
 public class FallbackReadFileStoreTableTest {
@@ -240,6 +247,89 @@ public class FallbackReadFileStoreTableTest {
                         .map(row -> row.getInt(0))
                         .collect(Collectors.toList());
         assertThat(mergedPartitions).containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    @Test
+    public void testFallbackReadFailFastDefaultSwallowsException() throws Exception {
+        FallbackReadFileStoreTable table = setUpTableWithThrowingFallback(false);
+        Split split = onlyFallbackSplit(table);
+
+        // Default behavior: the failing fallback read is swallowed and the reader
+        // falls through to the main branch, which has no data for partition 3 and
+        // either returns an empty reader or throws something other than the
+        // injected fallback exception.
+        try {
+            table.newRead().createReader(split);
+        } catch (Exception e) {
+            assertThat(e.getMessage())
+                    .as("fallback exception must not propagate when fail-fast is disabled")
+                    .doesNotContain("injected fallback failure");
+        }
+    }
+
+    @Test
+    public void testFallbackReadFailFastPropagatesException() throws Exception {
+        FallbackReadFileStoreTable table = setUpTableWithThrowingFallback(true);
+        Split split = onlyFallbackSplit(table);
+
+        assertThatThrownBy(() -> table.newRead().createReader(split))
+                .hasMessageContaining("injected fallback failure");
+    }
+
+    private FallbackReadFileStoreTable setUpTableWithThrowingFallback(boolean failFast)
+            throws Exception {
+        String branchName = "bc";
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch(branchName);
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+        writeDataIntoTable(branchTable, 0, rowData(3, 60));
+
+        Options overrides = new Options();
+        overrides.set(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST, failFast);
+        FileStoreTable mainWithOption = mainTable.copy(overrides.toMap());
+
+        FileStoreTable spyBranch = Mockito.spy(branchTable);
+        InnerTableRead throwing = throwingInnerTableRead();
+        Mockito.doReturn(throwing).when(spyBranch).newRead();
+
+        return new FallbackReadFileStoreTable(mainWithOption, spyBranch, true);
+    }
+
+    private static Split onlyFallbackSplit(FallbackReadFileStoreTable table) {
+        DataTableScan scan = table.newScan();
+        scan.withFilter(new PredicateBuilder(ROW_TYPE).equal(0, 3));
+        List<Split> splits = scan.plan().splits();
+        assertThat(splits).hasSize(1);
+        FallbackReadFileStoreTable.FallbackSplit fs =
+                (FallbackReadFileStoreTable.FallbackSplit) splits.get(0);
+        assertThat(fs.isFallback()).isTrue();
+        return splits.get(0);
+    }
+
+    private static InnerTableRead throwingInnerTableRead() {
+        return new InnerTableRead() {
+            @Override
+            public InnerTableRead withFilter(Predicate predicate) {
+                return this;
+            }
+
+            @Override
+            public InnerTableRead withReadType(RowType readType) {
+                return this;
+            }
+
+            @Override
+            public TableRead withIOManager(org.apache.paimon.disk.IOManager ioManager) {
+                return this;
+            }
+
+            @Override
+            public org.apache.paimon.reader.RecordReader<InternalRow> createReader(Split split)
+                    throws IOException {
+                throw new IOException("injected fallback failure");
+            }
+        };
     }
 
     private void writeDataIntoTable(
