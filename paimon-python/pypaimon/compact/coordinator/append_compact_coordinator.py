@@ -108,8 +108,13 @@ class AppendCompactCoordinator(CompactCoordinator):
         # if the executor later relies on file ordering for something.
         candidates.sort(key=lambda f: f.min_sequence_number)
 
+        # NOTE: under non-full compaction, the trailing chunk may have fewer
+        # than min_file_num files and is dropped here — those files stay live
+        # and will be picked up next time more small files accumulate. This is
+        # a deliberate trade-off (vs. Java, which always picks them up); a
+        # future change can revisit it.
         chunks: List[List[DataFileMeta]] = []
-        max_per_task = max(self.options.max_file_num, self.options.min_file_num)
+        max_per_task = self.options.max_file_num
         for start in range(0, len(candidates), max_per_task):
             chunk = candidates[start:start + max_per_task]
             if len(chunk) >= self.options.min_file_num or self.options.full_compaction:

@@ -41,6 +41,16 @@ class CompactOptions:
     max_file_num: int = DEFAULT_MAX_FILE_NUM
     full_compaction: bool = DEFAULT_FORCE_FULL
 
+    def __post_init__(self):
+        if self.min_file_num < 1:
+            raise ValueError(f"min_file_num must be >= 1, got {self.min_file_num}")
+        if self.max_file_num < self.min_file_num:
+            raise ValueError(
+                f"max_file_num ({self.max_file_num}) must be >= "
+                f"min_file_num ({self.min_file_num}); silently raising it would "
+                f"hide the misconfiguration."
+            )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "min_file_num": self.min_file_num,

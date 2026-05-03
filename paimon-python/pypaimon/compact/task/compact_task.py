@@ -26,10 +26,16 @@ from pypaimon.write.commit_message import CommitMessage
 class CompactTask(ABC):
     """A self-contained compaction unit dispatched to a worker.
 
-    Implementations must be JSON-serializable so the same payload can be
-    shipped to a Ray task in Phase 4 without touching the executor side.
     The constructor argument list is the contract: anything captured here
     is what the worker has to rebuild its execution context.
+
+    JSON serialization (to_dict / from_dict / serialize / deserialize) is
+    declared on the base class so distributed executors have a single hook
+    to call, but concrete subclasses are free to defer the implementation
+    until distributed execution actually arrives — Phase 4 will fill in the
+    AppendCompactTask serialization once Ray is the executor. Until then
+    those methods may raise NotImplementedError; LocalExecutor never
+    serializes a task and is unaffected.
     """
 
     TYPE: str = ""
