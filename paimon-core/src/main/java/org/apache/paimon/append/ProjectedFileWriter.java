@@ -19,10 +19,14 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.FileWriter;
+import org.apache.paimon.io.ProjectableBundleRecords;
+import org.apache.paimon.io.ReplayableBundleRecords;
 import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 /**
  * A delegating {@link FileWriter} which applies a field projection to each incoming {@link
@@ -35,17 +39,37 @@ public class ProjectedFileWriter<T extends FileWriter<InternalRow, R>, R>
         implements FileWriter<InternalRow, R> {
 
     private final T writer;
+    private final int[] projection;
     private final ProjectedRow projectedRow;
 
     public ProjectedFileWriter(T writer, int[] projection) {
         this.writer = writer;
-        this.projectedRow = ProjectedRow.from(projection);
+        this.projection = Arrays.copyOf(projection, projection.length);
+        this.projectedRow = ProjectedRow.from(this.projection);
     }
 
     @Override
     public void write(InternalRow record) throws IOException {
         projectedRow.replaceRow(record);
         writer.write(projectedRow);
+    }
+
+    public void writeBundle(BundleRecords bundle) throws IOException {
+        if (writer instanceof BundlePassThroughWriter
+                && ((BundlePassThroughWriter) writer).supportsBundlePassThrough()
+                && bundle instanceof ReplayableBundleRecords) {
+            ReplayableBundleRecords projectedBundle =
+                    bundle instanceof ProjectableBundleRecords
+                            ? ((ProjectableBundleRecords) bundle).project(projection)
+                            : new ProjectedBundleRecords(
+                                    (ReplayableBundleRecords) bundle, projection);
+            ((BundlePassThroughWriter) writer).writeReplayableBundle(projectedBundle);
+            return;
+        }
+
+        for (InternalRow row : bundle) {
+            write(row);
+        }
     }
 
     @Override

@@ -43,9 +43,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -146,8 +148,30 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
-    public void testBundleWriting() throws IOException {
-        // Create a bundle of records
+    public void testBundleWritingPreservesMainFileIndexSideEffects() throws IOException {
+        Options options = new Options();
+        options.set("file-index.bloom-filter.columns", "f0");
+        options.set("file-index.in-manifest-threshold", "1 MB");
+        CoreOptions coreOptions = new CoreOptions(options);
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        SCHEMA,
+                        pathFactory,
+                        () -> seqNumCounter,
+                        COMPRESSION,
+                        new StatsCollectorFactories(coreOptions),
+                        new FileIndexOptions(coreOptions),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, coreOptions));
+
         List<InternalRow> rows =
                 Arrays.asList(
                         GenericRow.of(
@@ -157,10 +181,67 @@ public class DedicatedFormatRollingFileWriterTest {
                         GenericRow.of(
                                 3, BinaryString.fromString("test3"), new BlobData(testBlobData)));
 
-        // Write bundle
-        writer.writeBundle(new TestBundleRecords(rows));
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+
+        DataFileMeta mainFile =
+                writer.result().stream()
+                        .filter(file -> "parquet".equals(file.fileFormat()))
+                        .findFirst()
+                        .get();
+
+        assertThat(mainFile.rowCount()).isEqualTo(rows.size());
+        assertThat(mainFile.embeddedIndex()).isNotNull();
+        assertThat(mainFile.embeddedIndex()).isNotEmpty();
+        assertThat(mainFile.extraFiles()).isEmpty();
+    }
+
+    @Test
+    public void testBundleWritingWithExternalStorageFallback() throws IOException {
+        Options options = new Options();
+        options.set(CoreOptions.BLOB_DESCRIPTOR_FIELD, "f2");
+        options.set(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, "f2");
+        java.nio.file.Path externalStoragePath = tempDir.resolve("external-storage-blob-path");
+        options.set(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, externalStoragePath.toString());
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        TARGET_FILE_SIZE,
+                        SCHEMA,
+                        pathFactory,
+                        () -> seqNumCounter,
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(options)),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, new CoreOptions(options)));
+
+        List<InternalRow> rows =
+                Arrays.asList(
+                        GenericRow.of(
+                                1, BinaryString.fromString("test1"), new BlobData(testBlobData)),
+                        GenericRow.of(
+                                2, BinaryString.fromString("test2"), new BlobData(testBlobData)),
+                        GenericRow.of(
+                                3, BinaryString.fromString("test3"), new BlobData(testBlobData)));
+
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+        List<DataFileMeta> metasResult = writer.result();
 
         assertThat(writer.recordCount()).isEqualTo(3);
+        assertThat(metasResult).hasSize(1);
+        assertThat(metasResult.get(0).rowCount()).isEqualTo(3);
+        assertThat(Files.exists(externalStoragePath)).isTrue();
+        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
+            assertThat(stream.anyMatch(p -> p.getFileName().toString().endsWith(".blob"))).isTrue();
+        }
     }
 
     @Test
@@ -494,17 +575,20 @@ public class DedicatedFormatRollingFileWriterTest {
 
     @Test
     void testSequenceNumberIncrementInBlobWritePathBatch() throws IOException {
-        // Write multiple rows as a batch and verify sequence-number continuity in blob files
         int numRows = 10;
+        List<InternalRow> rows = new java.util.ArrayList<>();
         for (int i = 0; i < numRows; i++) {
-            InternalRow row =
+            rows.add(
                     GenericRow.of(
-                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData));
-            writer.write(row);
+                            i, BinaryString.fromString("test" + i), new BlobData(testBlobData)));
         }
+        writer.writeBundle(new SingleUseBundleRecords(rows));
 
         writer.close();
         List<DataFileMeta> metasResult = writer.result();
+
+        assertThat(metasResult).hasSize(2);
+        assertThat(metasResult.get(0).rowCount()).isEqualTo(metasResult.get(1).rowCount());
 
         // Extract blob files (skip the first normal file)
         List<DataFileMeta> blobFiles =
@@ -616,16 +700,21 @@ public class DedicatedFormatRollingFileWriterTest {
         assertThat(writer.recordCount()).isEqualTo(3);
     }
 
-    /** Simple implementation of BundleRecords for testing. */
-    private static class TestBundleRecords implements BundleRecords {
+    /** Bundle implementation that can only be iterated once. */
+    private static class SingleUseBundleRecords implements BundleRecords {
         private final List<InternalRow> rows;
+        private boolean iterated;
 
-        public TestBundleRecords(List<InternalRow> rows) {
+        private SingleUseBundleRecords(List<InternalRow> rows) {
             this.rows = rows;
         }
 
         @Override
         public java.util.Iterator<InternalRow> iterator() {
+            if (iterated) {
+                throw new IllegalStateException("Bundle should only be consumed once.");
+            }
+            iterated = true;
             return rows.iterator();
         }
 
