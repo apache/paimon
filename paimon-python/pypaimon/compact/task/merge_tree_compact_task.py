@@ -34,9 +34,9 @@ class MergeTreeCompactTask(CompactTask):
     """Compact a single (partition, bucket) of a primary-key table.
 
     Carries the picked CompactUnit's files plus the strategy-decided
-    output_level and drop_delete flag. The driver attaches the in-process
-    FileStoreTable; Phase 4 will plumb the loader fields for distributed
-    execution.
+    output_level and drop_delete flag. The driver attaches either the
+    in-process FileStoreTable (LocalExecutor) or a catalog loader spec via
+    with_table_loader (RayExecutor); _resolve_table picks whichever is set.
     """
 
     TYPE = "merge-tree-compact"

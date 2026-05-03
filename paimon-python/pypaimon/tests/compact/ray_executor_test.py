@@ -101,11 +101,14 @@ class RayExecutorE2ETest(unittest.TestCase):
         table = self.catalog.get_table("ray_db.ray_append")
         before_data = self._read_sorted(table)
 
+        # Note: deliberately omit table_identifier — exercises the default
+        # path (table.identifier.get_full_name()) which the worker uses
+        # via Identifier.from_string. A regression here would surface as
+        # "Cannot get splits from 'Identifier(...)'" inside the Ray task.
         job = table.new_compact_job(
             compact_options=CompactOptions(min_file_num=5),
             executor=RayExecutor(),
             catalog_options=self.catalog_options,
-            table_identifier="ray_db.ray_append",
         )
         messages = job.execute()
 

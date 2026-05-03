@@ -34,6 +34,14 @@ from typing import Any, Dict, List, Optional
 
 from pypaimon.compact.executor.executor import CompactExecutor
 from pypaimon.compact.task.compact_task import CompactTask
+# Side-effect imports: each task subclass registers itself in the task
+# registry at import time. Ray workers are fresh processes with an empty
+# registry, so we must guarantee these modules get imported in the worker —
+# importing them here means `import ray_executor` (which the worker does
+# implicitly when unpickling _run_task_payload) brings the registrations
+# along for the ride.
+from pypaimon.compact.task import append_compact_task as _append_task  # noqa: F401
+from pypaimon.compact.task import merge_tree_compact_task as _mt_task  # noqa: F401
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.commit_message_serializer import CommitMessageSerializer
 

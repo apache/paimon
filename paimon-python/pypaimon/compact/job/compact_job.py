@@ -69,7 +69,11 @@ class CompactJob:
         self.partition_predicate = partition_predicate
         self.commit_user = commit_user or str(uuid.uuid4())
         self.catalog_options = dict(catalog_options) if catalog_options else None
-        self.table_identifier = table_identifier or str(table.identifier)
+        # Identifier is a dataclass with no custom __str__; str(...) would
+        # return its repr ("Identifier(database=...)") and Identifier.from_string
+        # would refuse to parse that. Use get_full_name() so the worker can
+        # round-trip the identifier through CatalogFactory.
+        self.table_identifier = table_identifier or table.identifier.get_full_name()
 
     def execute(self) -> List[CommitMessage]:
         """Run the compaction job and return the messages that were committed.
