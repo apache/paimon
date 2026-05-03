@@ -24,6 +24,8 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.compact.coordinator.append_compact_coordinator import \
     AppendCompactCoordinator
 from pypaimon.compact.coordinator.coordinator import CompactCoordinator
+from pypaimon.compact.coordinator.merge_tree_compact_coordinator import \
+    MergeTreeCompactCoordinator
 from pypaimon.compact.executor.executor import CompactExecutor
 from pypaimon.compact.executor.local_executor import LocalExecutor
 from pypaimon.compact.options import CompactOptions
@@ -85,9 +87,10 @@ class CompactJob:
 
     def _build_coordinator(self) -> CompactCoordinator:
         if self.table.is_primary_key_table:
-            # Phase 3 will plug in the merge-tree coordinator here.
-            raise NotImplementedError(
-                "Primary-key compaction is not implemented yet (Phase 3)."
+            return MergeTreeCompactCoordinator(
+                table=self.table,
+                compact_options=self.compact_options,
+                partition_predicate=self.partition_predicate,
             )
         return AppendCompactCoordinator(
             table=self.table,

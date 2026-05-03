@@ -55,3 +55,12 @@ class KeyValue:
     @property
     def value_row_kind_byte(self) -> int:
         return self._row_tuple[self.key_arity + 1]
+
+    @property
+    def row_tuple(self) -> tuple:
+        """The underlying physical row tuple (key_cols, seq, kind, value_cols).
+
+        Compaction writers consume this verbatim when buffering KVs back into
+        a RecordBatch — the column order matches the on-disk KV file schema.
+        """
+        return self._row_tuple
