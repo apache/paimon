@@ -42,6 +42,7 @@ class SnapshotManagerTest(unittest.TestCase):
 
         table = Mock()
         table.table_path = "/tmp/test_table"
+        table.current_branch.return_value = "main"
         table.file_io = Mock()
         table.file_io.exists_batch.return_value = {
             "/tmp/test_table/snapshot/snapshot-5": True,
@@ -82,6 +83,7 @@ class SnapshotManagerTest(unittest.TestCase):
 
         table = Mock()
         table.table_path = "/tmp/test_table"
+        table.current_branch.return_value = "main"
         table.file_io = Mock()
         # All paths return False (no files exist)
         table.file_io.exists_batch.return_value = {}
@@ -105,6 +107,7 @@ class SnapshotManagerTest(unittest.TestCase):
 
         table = Mock()
         table.table_path = "/tmp/test_table"
+        table.current_branch.return_value = "main"
         table.file_io = Mock()
 
         # All 3 snapshots exist but are COMPACT (will be skipped)
