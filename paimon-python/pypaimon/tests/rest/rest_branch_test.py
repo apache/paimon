@@ -16,12 +16,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import os
-import shutil
-import tempfile
 import unittest
 
-from pypaimon import CatalogFactory
 from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 BranchNotExistException,
                                                 TableNotExistException)
@@ -117,30 +113,10 @@ class RESTCatalogBranchCRUDTest(RESTBaseTest):
         self.rest_catalog.fast_forward(identifier, "b1")
 
 
-class FilesystemCatalogBranchInheritsNotImplementedTest(unittest.TestCase):
-    """The filesystem catalog inherits the abstract ``NotImplementedError`` stubs.
-
-    A concrete filesystem branch implementation requires a Python-side
-    BranchManager and is tracked separately. The point of this test is to
-    confirm the new ``rename_branch`` abstract stub closes the API gap:
-    on master ``Catalog.rename_branch`` did not exist (AttributeError),
-    after this PR it raises ``NotImplementedError``.
-    """
-
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="unittest_branch_")
-        warehouse = os.path.join(self.temp_dir, "warehouse")
-        os.makedirs(warehouse, exist_ok=True)
-        self.catalog = CatalogFactory.create({"warehouse": warehouse})
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_rename_branch_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError) as cm:
-            self.catalog.rename_branch(
-                Identifier.from_string("default.tbl"), "b1", "b2")
-        self.assertIn("rename_branch", str(cm.exception))
+# Note: the previous ``FilesystemCatalogBranchInheritsNotImplementedTest``
+# class has been removed because FileSystemCatalog now overrides the
+# branch CRUD methods (no longer raises NotImplementedError). The new
+# behavior is covered by ``pypaimon/tests/filesystem_catalog_branch_test.py``.
 
 
 if __name__ == "__main__":

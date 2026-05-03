@@ -22,6 +22,8 @@ from pypaimon.api.api_response import GetTagResponse, PagedList
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.catalog.catalog_exception import (
+    BranchAlreadyExistException,
+    BranchNotExistException,
     DatabaseAlreadyExistException,
     DatabaseNotExistException,
     TableAlreadyExistException,
@@ -448,3 +450,95 @@ class FileSystemCatalog(Catalog):
             page = tags
             next_token = None
         return PagedList(elements=page, next_page_token=next_token)
+
+    # ===================== Branch CRUD =====================
+    # Thin wrappers that delegate to FileSystemBranchManager (returned by
+    # FileStoreTable.branch_manager() in the local-catalog case). Mirrors
+    # the RESTCatalog branch overrides added in #7747; the only difference
+    # is that the manager raises ValueError / RuntimeError instead of REST
+    # exceptions, so the catalog layer translates the messages back into
+    # the typed Catalog exception hierarchy.
+
+    def create_branch(
+            self,
+            identifier: Union[str, Identifier],
+            branch_name: str,
+            tag_name: Optional[str] = None,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().create_branch(branch_name, tag_name)
+        except ValueError as e:
+            msg = str(e)
+            # ``tag_manager.get_or_throw`` raises ValueError("Tag '...' doesn't exist.")
+            if tag_name is not None and "Tag" in msg and "doesn't exist" in msg:
+                raise TagNotExistException(tag_name) from e
+            # ``_validate_branch`` raises ValueError("Branch name '...' already exists.")
+            if "already exists" in msg:
+                raise BranchAlreadyExistException(branch_name) from e
+            raise
+
+    def drop_branch(
+            self,
+            identifier: Union[str, Identifier],
+            branch_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().drop_branch(branch_name)
+        except ValueError as e:
+            # FileSystemBranchManager.drop_branch raises
+            # ValueError("Branch name '...' doesn't exist.") when missing.
+            if "doesn't exist" in str(e):
+                raise BranchNotExistException(branch_name) from e
+            raise
+
+    def rename_branch(
+            self,
+            identifier: Union[str, Identifier],
+            from_branch: str,
+            to_branch: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().rename_branch(from_branch, to_branch)
+        except ValueError as e:
+            msg = str(e)
+            if "Source branch" in msg and "doesn't exist" in msg:
+                raise BranchNotExistException(from_branch) from e
+            if "Target branch" in msg and "already exists" in msg:
+                raise BranchAlreadyExistException(to_branch) from e
+            # Other ValueErrors (rename-main rejection, blank/invalid names)
+            # propagate as-is — they are user-facing argument errors that
+            # the catalog API does not have a typed equivalent for.
+            raise
+
+    def fast_forward(
+            self,
+            identifier: Union[str, Identifier],
+            branch_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().fast_forward(branch_name)
+        except ValueError as e:
+            if "doesn't exist" in str(e):
+                raise BranchNotExistException(branch_name) from e
+            raise
+
+    def list_branches(
+            self,
+            identifier: Union[str, Identifier],
+    ) -> List[str]:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        return table.branch_manager().branches()
