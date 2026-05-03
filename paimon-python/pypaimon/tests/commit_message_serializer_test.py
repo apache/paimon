@@ -172,6 +172,30 @@ class CommitMessageSerializerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             CommitMessageSerializer.from_dict(payload_dict)
 
+    def test_serialize_supports_partition_with_non_json_native_types(self):
+        # Partitions can carry DATE/DECIMAL/bytes columns; serializer must round-trip them.
+        message = CommitMessage(
+            partition=(date(2024, 1, 2), Decimal("99.50"), b"raw"),
+            bucket=0,
+            compact_after=[_build_data_file_meta()],
+        )
+
+        rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
+
+        self.assertEqual((date(2024, 1, 2), Decimal("99.50"), b"raw"), rebuilt.partition)
+
+    def test_serialize_supports_timestamp_partition(self):
+        ts = Timestamp.from_epoch_millis(1_700_000_000_000, 500_000)
+        message = CommitMessage(
+            partition=(ts,),
+            bucket=0,
+            compact_after=[_build_data_file_meta()],
+        )
+
+        rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
+
+        self.assertEqual((ts,), rebuilt.partition)
+
     def test_serialize_list_round_trip(self):
         messages = [
             CommitMessage(partition=(f"p{i}",), bucket=i, new_files=[_build_data_file_meta(f"f{i}.parquet")])

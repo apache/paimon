@@ -19,7 +19,8 @@
 import json
 from typing import Any, Dict, List
 
-from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.data_file_meta import (DataFileMeta, decode_value,
+                                                      encode_value)
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -43,9 +44,10 @@ class CommitMessageSerializer:
 
     @classmethod
     def to_dict(cls, message: CommitMessage) -> Dict[str, Any]:
+        partition = message.partition if message.partition is not None else ()
         return {
             "version": cls.VERSION,
-            "partition": list(message.partition) if message.partition is not None else [],
+            "partition": [encode_value(v) for v in partition],
             "bucket": message.bucket,
             "new_files": [f.to_dict() for f in message.new_files],
             "compact_before": [f.to_dict() for f in message.compact_before],
@@ -60,8 +62,9 @@ class CommitMessageSerializer:
             raise ValueError(
                 f"Unsupported CommitMessage payload version: {version} (expected {cls.VERSION})"
             )
+        partition_values = data.get("partition") or []
         return CommitMessage(
-            partition=tuple(data.get("partition") or ()),
+            partition=tuple(decode_value(v) for v in partition_values),
             bucket=data["bucket"],
             new_files=[DataFileMeta.from_dict(f) for f in data.get("new_files", [])],
             compact_before=[DataFileMeta.from_dict(f) for f in data.get("compact_before", [])],

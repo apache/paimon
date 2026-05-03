@@ -231,7 +231,7 @@ class DataFileMeta:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a JSON-friendly dict for cross-process transport (e.g. Ray task payloads).
 
-        Field types preserved via tagged objects (see _encode_value/_decode_value).
+        Field types preserved via tagged objects (see encode_value/decode_value).
         """
         return {
             "file_name": self.file_name,
@@ -308,10 +308,12 @@ def _timestamp_from_dict(data: Optional[Dict[str, int]]) -> Optional[Timestamp]:
     return Timestamp(data["ms"], data.get("ns", 0))
 
 
-def _encode_value(value: Any) -> Any:
-    """Encode a GenericRow / SimpleStats field value into a JSON-friendly form.
+def encode_value(value: Any) -> Any:
+    """Encode a GenericRow / SimpleStats / partition field value into a JSON-friendly form.
 
-    Tagged dicts mark non-JSON-native types so _decode_value can round-trip them.
+    Tagged dicts mark non-JSON-native types so decode_value can round-trip them.
+    Public so that callers serializing other field-bearing structures (e.g. partitions
+    in CommitMessage) can reuse the same tagged encoding.
     """
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -332,7 +334,7 @@ def _encode_value(value: Any) -> Any:
     )
 
 
-def _decode_value(value: Any) -> Any:
+def decode_value(value: Any) -> Any:
     if not isinstance(value, dict) or "__t__" not in value:
         return value
     tag = value["__t__"]
@@ -355,7 +357,7 @@ def _generic_row_to_dict(row: Optional[GenericRow]) -> Optional[Dict[str, Any]]:
     if row is None:
         return None
     return {
-        "values": [_encode_value(v) for v in row.values],
+        "values": [encode_value(v) for v in row.values],
         "fields": [f.to_dict() for f in row.fields] if row.fields else [],
         "row_kind": row.row_kind.value,
     }
@@ -365,7 +367,7 @@ def _generic_row_from_dict(data: Optional[Dict[str, Any]]) -> Optional[GenericRo
     if data is None:
         return None
     fields = [DataField.from_dict(f) for f in data.get("fields", [])]
-    values = [_decode_value(v) for v in data.get("values", [])]
+    values = [decode_value(v) for v in data.get("values", [])]
     row_kind = RowKind(data.get("row_kind", RowKind.INSERT.value))
     return GenericRow(values, fields, row_kind)
 
