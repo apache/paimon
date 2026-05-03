@@ -125,4 +125,20 @@ class IcebergConversionsTimestampTest {
     private static Stream<Arguments> provideInvalidTimestampCases() {
         return Stream.of(Arguments.of(0, 1698686153L), Arguments.of(9, 1698686153123456789L));
     }
+
+    @ParameterizedTest
+    @MethodSource("provideTimestampToPaimonCases")
+    @DisplayName("toPaimonObject decodes TIMESTAMP_WITH_LOCAL_TIME_ZONE without ClassCastException")
+    void testToPaimonObjectForTimestampWithLocalTimeZone(
+            int precision, long serializedMicros, String expectedTs) {
+        byte[] bytes = new byte[8];
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putLong(serializedMicros);
+
+        Timestamp actual =
+                (Timestamp)
+                        IcebergConversions.toPaimonObject(
+                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision), bytes);
+
+        assertThat(actual.toString()).isEqualTo(expectedTs);
+    }
 }
