@@ -108,23 +108,27 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertEqual(min_snapshot, 5)
 
     def test_consumer_manager_with_branch(self):
-        """Test consumer_manager with branch option."""
-        # Create table with branch option
+        """Test consumer_manager when branch is encoded in the identifier."""
         branch_name = "feature_branch"
+
+        # Create a regular table; the branch is supplied later via the
+        # branch-encoded identifier (Java-aligned routing).
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             partition_keys=['dt'],
-            options={
-                CoreOptions.BUCKET.key(): "2",
-                "branch": branch_name
-            }
+            options={CoreOptions.BUCKET.key(): "2"},
         )
-        self.catalog.create_table('default.test_branch_table', schema, False)
-        branch_table = self.catalog.get_table('default.test_branch_table')
+        self.catalog.create_table('default.test_branch_table', schema, True)
 
-        # Get consumer_manager and verify it has correct branch
-        branch_consumer_manager = branch_table.consumer_manager()
+        # Access the table with a branch-encoded identifier.
+        branch_table = self.catalog.get_table(
+            'default.test_branch_table$branch_{}'.format(branch_name))
+
+        # current_branch() reads from the identifier.
         self.assertEqual(branch_table.current_branch(), branch_name)
+
+        # Get consumer_manager and exercise it on the branched view.
+        branch_consumer_manager = branch_table.consumer_manager()
 
         # Test consumer operations on branch
         from pypaimon.consumer.consumer import Consumer
@@ -254,19 +258,16 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertEqual(changelog_manager.branch, DEFAULT_MAIN_BRANCH)
 
     def test_changelog_manager_with_branch(self):
-        """Test changelog_manager with branch option."""
-        # Create table with branch option
+        """Test changelog_manager when branch is encoded into the identifier."""
         branch_name = "feature"
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             partition_keys=['dt'],
-            options={
-                CoreOptions.BUCKET.key(): "2",
-                "branch": branch_name
-            }
+            options={CoreOptions.BUCKET.key(): "2"},
         )
         self.catalog.create_table('default.test_changelog_branch_table', schema, False)
-        branch_table = self.catalog.get_table('default.test_changelog_branch_table')
+        branch_table = self.catalog.get_table(
+            'default.test_changelog_branch_table$branch_{}'.format(branch_name))
 
         # Get changelog_manager and verify it has correct branch
         branch_changelog_manager = branch_table.changelog_manager()
@@ -299,28 +300,27 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIsNone(changelog_manager.earliest_long_lived_changelog_id())
 
     def test_current_branch(self):
-        """Test that current_branch returns the branch from options."""
+        """Test that current_branch reads from the identifier."""
         from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
 
         # Default table should have main branch
         self.assertEqual(self.table.current_branch(), DEFAULT_MAIN_BRANCH)
 
-        # Table with branch option should return that branch
+        # Access a table with a branch-encoded identifier — current_branch
+        # decodes from the object name (Java-aligned).
         branch_name = "feature_branch"
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             partition_keys=['dt'],
-            options={
-                CoreOptions.BUCKET.key(): "2",
-                "branch": branch_name
-            }
+            options={CoreOptions.BUCKET.key(): "2"},
         )
         self.catalog.create_table('default.test_current_branch', schema, False)
-        branch_table = self.catalog.get_table('default.test_current_branch')
+        branch_table = self.catalog.get_table(
+            'default.test_current_branch$branch_{}'.format(branch_name))
         self.assertEqual(branch_table.current_branch(), branch_name)
 
     def test_copy_with_branch(self):
-        """Test copy method with branch option."""
+        """copy() with a branch option re-encodes branch into the identifier."""
         branch_name = "test_branch"
 
         # Copy table with branch option
@@ -335,8 +335,12 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertEqual(self.table.schema_manager.branch, DEFAULT_MAIN_BRANCH)
         self.assertEqual(copied_table.schema_manager.branch, branch_name)
 
-        # Verify other properties are preserved
-        self.assertEqual(copied_table.identifier, self.table.identifier)
+        # The copied table's identifier carries the encoded branch, so it is
+        # NOT equal to the source identifier (Java-aligned wire shape).
+        self.assertEqual(copied_table.identifier.get_table_name(),
+                         self.table.identifier.get_table_name())
+        self.assertEqual(copied_table.identifier.get_branch_name(), branch_name)
+        self.assertIsNone(self.table.identifier.get_branch_name())
         self.assertEqual(copied_table.table_path, self.table.table_path)
 
     def test_rename_branch_basic(self):

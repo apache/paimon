@@ -320,8 +320,8 @@ class TestRESTCommit(RESTBaseTest):
 
         real_commit = tc.file_store_commit.snapshot_commit.commit
 
-        def commit_then_raise(sn, br, st):
-            real_commit(sn, br, st)
+        def commit_then_raise(sn, st):
+            real_commit(sn, st)
             raise RuntimeError("simulated")
 
         with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):

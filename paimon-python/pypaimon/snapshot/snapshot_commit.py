@@ -73,13 +73,12 @@ class SnapshotCommit(ABC):
     """Interface to commit snapshot atomically."""
 
     @abstractmethod
-    def commit(self, snapshot: Snapshot, branch: str, statistics: List[PartitionStatistics]) -> bool:
+    def commit(self, snapshot: Snapshot, statistics: List[PartitionStatistics]) -> bool:
         """
         Commit the given snapshot.
 
         Args:
             snapshot: The snapshot to commit
-            branch: The branch name to commit to
             statistics: List of partition statistics
 
         Returns:
