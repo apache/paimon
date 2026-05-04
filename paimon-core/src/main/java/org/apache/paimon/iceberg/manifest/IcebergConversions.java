@@ -142,6 +142,10 @@ public class IcebergConversions {
             case INTEGER:
             case DATE:
                 return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            case TINYINT:
+                return (byte) ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            case SMALLINT:
+                return (short) ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
             case BIGINT:
                 return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
             case FLOAT:
