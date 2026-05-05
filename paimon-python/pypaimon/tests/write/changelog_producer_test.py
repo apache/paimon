@@ -28,6 +28,7 @@ import json
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.schema.data_types import DataField, AtomicType
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -278,6 +279,21 @@ class ChangelogProducerTest(unittest.TestCase):
                 Schema.from_pyarrow_schema(
                     append_schema,
                     partition_keys=['dt'],
+                    options={'changelog-producer': mode, 'bucket': '1'}
+                )
+
+    def test_reject_changelog_producer_on_direct_schema_construction(self):
+        for mode in ['input', 'full-compaction', 'lookup']:
+            with self.assertRaises(ValueError, msg=f"Should reject changelog-producer={mode} without PKs"):
+                Schema(
+                    fields=[
+                        DataField(0, 'user_id', AtomicType('INT')),
+                        DataField(1, 'item_id', AtomicType('BIGINT')),
+                        DataField(2, 'behavior', AtomicType('STRING')),
+                        DataField(3, 'dt', AtomicType('STRING')),
+                    ],
+                    partition_keys=['dt'],
+                    primary_keys=[],
                     options={'changelog-producer': mode, 'bucket': '1'}
                 )
 
