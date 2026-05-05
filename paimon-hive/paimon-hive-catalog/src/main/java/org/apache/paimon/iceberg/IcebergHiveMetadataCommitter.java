@@ -161,6 +161,10 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
             hiveTable = createTable(databaseName, tableName, newMetadataPath);
         }
 
+        // Iceberg readers (e.g. iceberg.spark.SparkSessionCatalog) only load tables where
+        // table_type=ICEBERG, so stamp it on every commit, existing entries created by Paimon's
+        // HiveCatalog as table_type=PAIMON are migrated here.
+        hiveTable.getParameters().put("table_type", "ICEBERG");
         hiveTable.getParameters().put("metadata_location", newMetadataPath.toString());
         if (baseMetadataPath != null) {
             hiveTable

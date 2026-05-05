@@ -321,6 +321,53 @@ public abstract class IcebergHiveMetadataCommitterITCaseBase {
                                 "SELECT * FROM my_iceberg.iceberg_db2.t2 ORDER BY pt, id")));
     }
 
+    /**
+     * Verifies that when a Paimon table is created via Paimon's HiveCatalog with Iceberg
+     * compatibility enabled, the resulting Hive entry has {@code table_type=ICEBERG} after the
+     * first commit so Iceberg readers can recognize it and partition-prune correctly.
+     */
+    @Test
+    public void testIcebergCommitSetsHiveTableTypeToIceberg() throws Exception {
+        TableEnvironment tEnv =
+                TableEnvironmentImpl.create(
+                        EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv.executeSql(
+                "CREATE CATALOG my_paimon_hive WITH ( 'type' = 'paimon', 'metastore' = 'hive', "
+                        + "'uri' = '', 'warehouse' = '"
+                        + path
+                        + "' )");
+        tEnv.executeSql("CREATE DATABASE my_paimon_hive.test_db");
+        tEnv.executeSql(
+                "CREATE TABLE my_paimon_hive.test_db.t ( pt INT, id INT, data STRING ) "
+                        + "PARTITIONED BY (pt) WITH "
+                        + "( 'metadata.iceberg.storage' = 'hive-catalog', "
+                        + " 'metadata.iceberg.uri' = '', 'file.format' = 'avro' )");
+        tEnv.executeSql(
+                        "INSERT INTO my_paimon_hive.test_db.t VALUES "
+                                + "(1, 1, 'apple'), (1, 2, 'pear'), "
+                                + "(2, 1, 'cat'), (2, 2, 'dog')")
+                .await();
+
+        List<String> tblPropRows = hiveShell.executeQuery("SHOW TBLPROPERTIES test_db.t");
+        String tableTypeRow =
+                tblPropRows.stream()
+                        .filter(r -> r.toLowerCase().startsWith("table_type"))
+                        .findFirst()
+                        .orElse("(table_type row missing)");
+        boolean metadataLocationPresent =
+                tblPropRows.stream().anyMatch(r -> r.toLowerCase().startsWith("metadata_location"));
+        assertTrue(
+                metadataLocationPresent,
+                "metadata_location must be written on commit; rows=" + tblPropRows);
+        assertTrue(
+                tableTypeRow.toUpperCase().contains("ICEBERG"),
+                "Expected table_type=ICEBERG so Iceberg readers can load the table; "
+                        + "got row: '"
+                        + tableTypeRow
+                        + "'; full props: "
+                        + tblPropRows);
+    }
+
     @Test
     public void testCustomMetastoreClass() {
         TableEnvironment tEnv =
