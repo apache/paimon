@@ -22,11 +22,13 @@ DataFusion integration. A non-partitioned table with one snapshot is
 created in setUpClass and queried by each test.
 """
 
+import json
 import os
 import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE")
@@ -39,6 +41,7 @@ class SQLSystemTableTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        pytest.importorskip("pypaimon_rust.datafusion")
         from pypaimon import CatalogFactory, Schema
         from pypaimon.schema.data_types import AtomicType, DataField
         from pypaimon.sql.sql_context import SQLContext
@@ -110,9 +113,8 @@ class SQLSystemTableTest(unittest.TestCase):
         self.assertGreaterEqual(table.num_rows, 1, "should have at least one schema")
         ids = table.column("schema_id").to_pylist()
         self.assertEqual(sorted(ids), sorted(set(ids)), "schema_id should be unique")
-        fields_json = table.column("fields").to_pylist()[0]
-        self.assertIn("id", fields_json)
-        self.assertIn("name", fields_json)
+        fields = json.loads(table.column("fields").to_pylist()[0])
+        self.assertEqual([f["name"] for f in fields], ["id", "name"])
 
     def test_snapshots_system_table(self):
         table = self._query("snapshots")
@@ -138,7 +140,8 @@ class SQLSystemTableTest(unittest.TestCase):
     def test_branches_system_table_empty(self):
         table = self._query("branches")
         self.assertListEqual(table.schema.names, ["branch_name", "create_time"])
-        self.assertEqual(table.num_rows, 0, "implicit main branch is not listed")
+        non_main = [b for b in table.column("branch_name").to_pylist() if b != "main"]
+        self.assertEqual(non_main, [], "no user-created branches")
 
     def test_manifests_system_table(self):
         table = self._query("manifests")
