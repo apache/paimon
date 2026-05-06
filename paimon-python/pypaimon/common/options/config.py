@@ -42,6 +42,22 @@ class S3Options:
     S3_REGION = ConfigOptions.key("fs.s3.region").string_type().no_default_value().with_description("S3 region")
 
 
+class GcsOptions:
+    GCS_ACCESS_TOKEN = (
+        ConfigOptions.key("gcs.access-token").string_type().no_default_value()
+        .with_description(
+            "GCS access token. If not set, ADC (Application Default Credentials) is used "
+            "automatically."))
+    GCS_ACCESS_TOKEN_EXPIRATION = (
+        ConfigOptions.key("gcs.access-token.expiration").string_type().no_default_value()
+        .with_description(
+            "ISO 8601 expiration datetime for the GCS access token. "
+            "Required when gcs.access-token is set."))
+    GCS_PROJECT_ID = (
+        ConfigOptions.key("gcs.project-id").string_type().no_default_value()
+        .with_description("GCP project ID for GCS requests."))
+
+
 class PVFSOptions:
     CACHE_ENABLED = ConfigOptions.key("cache-enabled").boolean_type().default_value("true").with_description(
         "Enable cache")
