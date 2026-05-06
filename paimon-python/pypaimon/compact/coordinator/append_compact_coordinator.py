@@ -30,16 +30,29 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 class AppendCompactCoordinator(CompactCoordinator):
     """Plan compaction tasks for append-only tables (HASH_FIXED or BUCKET_UNAWARE).
 
-    For each (partition, bucket) we compact files smaller than the table's
-    target_file_size. A bucket is eligible only when it has at least
-    `min_file_num` such files (default 5) — matching the Java
-    AppendCompactCoordinator threshold and avoiding pointless rewrites of a
-    single small file. `full_compaction=True` overrides the threshold and
-    rewrites every file in every bucket regardless of size.
+    Per (partition, bucket) we filter to files smaller than the table's
+    target_file_size and bin-pack them into compaction tasks using the same
+    algorithm as Java AppendCompactCoordinator.SubCoordinator.pack:
 
-    The coordinator caps each task at `max_file_num` files; oversized buckets
-    produce multiple tasks so an executor can spread the work in parallel
-    instead of hot-spotting one worker on a huge bucket.
+    1. Sort candidates by file size ascending (smaller files lead, so the
+       packer has the most flexibility to grow a bin without immediately
+       overshooting).
+    2. Walk the sorted list adding each file to the current bin, accruing
+       (file_size + open_file_cost) — open_file_cost mirrors Java's per-file
+       IO weight so a bin of many tiny files drains earlier than naive
+       size accounting would suggest.
+    3. Drain a bin as soon as it has >1 file AND its weighted size hits
+       target_file_size * 2. The ×2 is Java's hardcoded constant: each
+       task should produce roughly two target-sized output files, which
+       amortizes task setup cost while keeping output sizes predictable.
+    4. The trailing bin is emitted only if it has at least min_file_num
+       files; smaller tails are dropped to avoid spending an entire task
+       on a couple of files that will collect company on the next plan.
+
+    full_compaction=True relaxes both the size filter (large files also
+    enter packing) and the trailing-bin threshold (any non-empty tail
+    is emitted), matching the user-level intent of "rewrite this bucket
+    regardless of current shape".
     """
 
     def __init__(
@@ -71,10 +84,11 @@ class AppendCompactCoordinator(CompactCoordinator):
             bucket_files[key].append(entry.file)
 
         target_file_size = self.table.options.target_file_size(False)
+        open_file_cost = self.table.options.source_split_open_file_cost()
 
         tasks: List[AppendCompactTask] = []
         for (partition, bucket), files in bucket_files.items():
-            for chunk in self._pick_files_for_bucket(files, target_file_size):
+            for chunk in self._pick_files_for_bucket(files, target_file_size, open_file_cost):
                 tasks.append(
                     AppendCompactTask(
                         partition=partition,
@@ -89,36 +103,45 @@ class AppendCompactCoordinator(CompactCoordinator):
         self,
         files: List[DataFileMeta],
         target_file_size: int,
+        open_file_cost: int,
     ) -> List[List[DataFileMeta]]:
-        """Choose which files in a single bucket get compacted, batching if needed.
+        """Bin-pack one bucket's files into compaction tasks.
 
-        Files >= target_file_size are skipped (they're already at output size and
-        rewriting them only spends IO). full_compaction overrides this skip.
+        Mirrors org.apache.paimon.append.AppendCompactCoordinator
+        .SubCoordinator.pack — see class docstring for the reasoning behind
+        the size-based packing, the open_file_cost weight, and the
+        target_file_size * 2 drain threshold.
         """
         if self.options.full_compaction:
             candidates = list(files)
-            if not candidates:
-                return []
         else:
+            # Files already at or above target size aren't worth rewriting —
+            # the output would be near-identical and we'd burn IO for it.
             candidates = [f for f in files if f.file_size < target_file_size]
-            if len(candidates) < self.options.min_file_num:
-                return []
 
-        # Stable order: oldest sequence first so rewrites preserve append order
-        # if the executor later relies on file ordering for something.
-        candidates.sort(key=lambda f: f.min_sequence_number)
+        if not candidates:
+            return []
 
-        # NOTE: under non-full compaction, the trailing chunk may have fewer
-        # than min_file_num files and is dropped here — those files stay live
-        # and will be picked up next time more small files accumulate. This is
-        # a deliberate trade-off (vs. Java, which always picks them up); a
-        # future change can revisit it.
+        candidates.sort(key=lambda f: f.file_size)
+
         chunks: List[List[DataFileMeta]] = []
-        max_per_task = self.options.max_file_num
-        for start in range(0, len(candidates), max_per_task):
-            chunk = candidates[start:start + max_per_task]
-            if len(chunk) >= self.options.min_file_num or self.options.full_compaction:
-                chunks.append(chunk)
+        bin_files: List[DataFileMeta] = []
+        bin_size = 0
+        drain_threshold = target_file_size * 2
+        for f in candidates:
+            bin_files.append(f)
+            bin_size += f.file_size + open_file_cost
+            if len(bin_files) > 1 and bin_size >= drain_threshold:
+                chunks.append(bin_files)
+                bin_files = []
+                bin_size = 0
+
+        # Trailing bin: under full_compaction any non-empty tail ships;
+        # otherwise we require min_file_num files so a tiny tail waits for
+        # company on the next plan instead of paying task overhead now.
+        min_tail = 1 if self.options.full_compaction else self.options.min_file_num
+        if len(bin_files) >= min_tail:
+            chunks.append(bin_files)
         return chunks
 
     def _scan_live_files(self):

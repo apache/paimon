@@ -21,10 +21,9 @@ from typing import Any, Dict, Optional
 
 # Defaults mirror Java's append-only compaction options where possible. Only the
 # subset that drives append/PK planning is exposed here; per-table options
-# (file format, compression, target_file_size) still come from CoreOptions on
-# the table itself.
+# (file format, compression, target_file_size, open_file_cost) still come from
+# CoreOptions on the table itself.
 DEFAULT_MIN_FILE_NUM = 5
-DEFAULT_MAX_FILE_NUM = 50
 DEFAULT_FORCE_FULL = False
 
 
@@ -32,29 +31,28 @@ DEFAULT_FORCE_FULL = False
 class CompactOptions:
     """Knobs that drive compaction planning.
 
-    target_file_size is intentionally absent — it is sourced from the table's
-    own CoreOptions (via DataWriter rolling) so a job inherits whatever the
-    writer would use, keeping output sizes consistent across write/compact.
+    target_file_size and open_file_cost are intentionally absent — they are
+    sourced from the table's own CoreOptions (target_file_size via DataWriter
+    rolling, open_file_cost as the per-file overhead added when computing
+    bin size). This keeps a job's output and packing decisions consistent
+    with what the regular write path would produce.
+
+    The Java AppendCompactCoordinator's `compactionFileNumLimit` /
+    per-task max-file-count knobs aren't surfaced here: the size-based
+    bin-packing in `_pick_files_for_bucket` naturally caps each task at
+    ~2x target_file_size of input, which is the same shape Java produces.
     """
 
     min_file_num: int = DEFAULT_MIN_FILE_NUM
-    max_file_num: int = DEFAULT_MAX_FILE_NUM
     full_compaction: bool = DEFAULT_FORCE_FULL
 
     def __post_init__(self):
         if self.min_file_num < 1:
             raise ValueError(f"min_file_num must be >= 1, got {self.min_file_num}")
-        if self.max_file_num < self.min_file_num:
-            raise ValueError(
-                f"max_file_num ({self.max_file_num}) must be >= "
-                f"min_file_num ({self.min_file_num}); silently raising it would "
-                f"hide the misconfiguration."
-            )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "min_file_num": self.min_file_num,
-            "max_file_num": self.max_file_num,
             "full_compaction": self.full_compaction,
         }
 
@@ -64,6 +62,5 @@ class CompactOptions:
             return cls()
         return cls(
             min_file_num=data.get("min_file_num", DEFAULT_MIN_FILE_NUM),
-            max_file_num=data.get("max_file_num", DEFAULT_MAX_FILE_NUM),
             full_compaction=data.get("full_compaction", DEFAULT_FORCE_FULL),
         )

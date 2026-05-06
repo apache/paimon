@@ -51,6 +51,7 @@ class AppendCompactRewriterTest(unittest.TestCase):
         opts = {
             CoreOptions.BUCKET.key(): "-1",
             CoreOptions.TARGET_FILE_SIZE.key(): "10mb",
+            CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): "0",
         }
         pa_schema = pa.schema([("id", pa.int32()), ("name", pa.string())])
         schema = Schema.from_pyarrow_schema(pa_schema, options=opts)

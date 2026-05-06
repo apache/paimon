@@ -52,10 +52,15 @@ class AppendCompactCoordinatorTest(unittest.TestCase):
         except Exception:
             pass
         # Force a small target_file_size so a few rows are already "small enough"
-        # to be candidates without writing thousands of rows per test.
+        # to be candidates without writing thousands of rows per test. We also
+        # zero out source.split.open-file-cost so the size-based packer's bin
+        # accounting degenerates to raw file_size — keeps test assertions
+        # crisp instead of having to reason about a 4 MB per-file overhead
+        # dwarfing the 1 KB test files.
         opts = {
             CoreOptions.BUCKET.key(): "-1",
             CoreOptions.TARGET_FILE_SIZE.key(): "1mb",
+            CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): "0",
         }
         if options:
             opts.update(options)
@@ -123,22 +128,19 @@ class AppendCompactCoordinatorTest(unittest.TestCase):
                          "full_compaction should produce a task even below min_file_num")
         self.assertEqual(2, len(tasks[0].files))
 
-    def test_chunks_when_exceeding_max_file_num(self):
-        table = self._create_unaware_table("chunked")
+    def test_many_small_files_pack_into_single_task(self):
+        # Real parquet files written here are ~1KB (well under the 1MB target
+        # set in setUp), so the size-based packer never reaches its drain
+        # threshold and emits a single trailing chunk containing every file.
+        table = self._create_unaware_table("packed_single")
         self._write_n_files(table, n=12)
-        table = self.catalog.get_table("compact_db.chunked")
+        table = self.catalog.get_table("compact_db.packed_single")
 
-        coordinator = AppendCompactCoordinator(
-            table,
-            CompactOptions(min_file_num=5, max_file_num=5),
-        )
+        coordinator = AppendCompactCoordinator(table, CompactOptions(min_file_num=5))
         tasks = coordinator.plan()
 
-        # 12 files, 5 per chunk → chunks of [5, 5, 2]; the last chunk (2) is
-        # below min_file_num so it should be dropped.
-        self.assertEqual(2, len(tasks))
-        for t in tasks:
-            self.assertLessEqual(len(t.files), 5)
+        self.assertEqual(1, len(tasks))
+        self.assertEqual(12, len(tasks[0].files))
 
     def test_pk_table_rejected(self):
         full_name = "compact_db.pk_rejected"

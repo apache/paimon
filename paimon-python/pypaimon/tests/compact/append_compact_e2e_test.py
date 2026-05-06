@@ -50,6 +50,11 @@ class AppendCompactE2ETest(unittest.TestCase):
         opts = {
             CoreOptions.BUCKET.key(): "-1",  # unaware bucket
             CoreOptions.TARGET_FILE_SIZE.key(): "10mb",  # plenty of headroom for small writes
+            # Zero open-file-cost so the size-based packer doesn't drain
+            # mid-loop on these tiny test files (each ~1 KB; with the 4 MB
+            # default cost a couple of files would already weigh more than
+            # 2x target and trigger a premature drain).
+            CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): "0",
         }
         if partitioned:
             pa_schema = pa.schema([

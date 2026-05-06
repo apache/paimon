@@ -26,20 +26,14 @@ class CompactOptionsTest(unittest.TestCase):
     def test_defaults(self):
         opts = CompactOptions()
         self.assertEqual(5, opts.min_file_num)
-        self.assertEqual(50, opts.max_file_num)
         self.assertFalse(opts.full_compaction)
-
-    def test_max_below_min_rejected(self):
-        # Silently raising max to min would mask user misconfiguration.
-        with self.assertRaises(ValueError):
-            CompactOptions(min_file_num=5, max_file_num=3)
 
     def test_min_zero_rejected(self):
         with self.assertRaises(ValueError):
             CompactOptions(min_file_num=0)
 
     def test_to_from_dict_roundtrip(self):
-        opts = CompactOptions(min_file_num=2, max_file_num=10, full_compaction=True)
+        opts = CompactOptions(min_file_num=2, full_compaction=True)
         rebuilt = CompactOptions.from_dict(opts.to_dict())
         self.assertEqual(opts, rebuilt)
 
