@@ -22,16 +22,25 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.tag.Tag;
+import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.Answers;
 
+import java.lang.reflect.Field;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link IcebergCommitCallback}. */
@@ -51,6 +60,46 @@ public class IcebergCommitCallbackTest {
 
         mockConfig = mock(Options.class);
         when(mockCoreOptions.toConfiguration()).thenReturn(mockConfig);
+    }
+
+    @Test
+    void testNotifyCreationWithoutSnapshotIdSkipsWhenTagMissing() throws Exception {
+        FileStoreTable table = mock(FileStoreTable.class);
+        TagManager tagManager = mock(TagManager.class);
+        when(table.tagManager()).thenReturn(tagManager);
+        when(tagManager.get("missing")).thenReturn(Optional.empty());
+
+        IcebergCommitCallback callback =
+                mock(IcebergCommitCallback.class, Answers.CALLS_REAL_METHODS);
+        setField(callback, "table", table);
+
+        assertThatCode(() -> callback.notifyCreation("missing")).doesNotThrowAnyException();
+        verify(tagManager).get("missing");
+    }
+
+    @Test
+    void testNotifyCreationWithoutSnapshotIdDelegatesUsingTagManagerSnapshotId() throws Exception {
+        FileStoreTable table = mock(FileStoreTable.class);
+        TagManager tagManager = mock(TagManager.class);
+        Tag tag = mock(Tag.class);
+        when(tag.id()).thenReturn(42L);
+        when(table.tagManager()).thenReturn(tagManager);
+        when(tagManager.get("v1")).thenReturn(Optional.of(tag));
+
+        IcebergCommitCallback callback =
+                mock(IcebergCommitCallback.class, Answers.CALLS_REAL_METHODS);
+        setField(callback, "table", table);
+        doNothing().when(callback).notifyCreation("v1", 42L);
+
+        callback.notifyCreation("v1");
+
+        verify(callback).notifyCreation("v1", 42L);
+    }
+
+    private static void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = IcebergCommitCallback.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     @ParameterizedTest(name = "StorageType: {0}")
