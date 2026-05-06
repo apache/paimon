@@ -32,13 +32,13 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     private static final long serialVersionUID = 1L;
 
-    private final FileStoreTable table;
+    protected final FileStoreTable table;
 
-    private PartitionPredicate partitionFilter;
-    private Predicate filter;
-    private int limit;
-    private DataField vectorColumn;
-    private float[] vector;
+    protected PartitionPredicate partitionFilter;
+    protected Predicate filter;
+    protected int limit;
+    protected DataField vectorColumn;
+    protected float[] vector;
 
     public VectorSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
