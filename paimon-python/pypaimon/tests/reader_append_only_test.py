@@ -738,7 +738,16 @@ class AoReaderTest(unittest.TestCase):
         for test_iteration in range(iter_num):
             # Create a unique table for each iteration
             table_name = f'default.test_concurrent_writes_{test_iteration}'
-            schema = Schema.from_pyarrow_schema(self.pa_schema)
+            # Concurrent commits are expected here; enlarge the retry budget so the
+            # default (commit.max-retries=10, commit.max-retry-wait=1s) does not
+            # exhaust under heavy CI load and produce a flaky failure.
+            schema = Schema.from_pyarrow_schema(
+                self.pa_schema,
+                options={
+                    'commit.max-retries': '50',
+                    'commit.max-retry-wait': '30s',
+                },
+            )
             self.catalog.create_table(table_name, schema, False)
             table = self.catalog.get_table(table_name)
 
@@ -780,9 +789,15 @@ class AoReaderTest(unittest.TestCase):
                         'error': str(e)
                     })
 
-            # Create and start multiple threads
+            # Create and start multiple threads. Keep this modest (3 vs. the
+            # original 10) because GHA runners under load can't drain 10
+            # simultaneously-conflicting commits even with
+            # ``commit.max-retries=50`` (50 attempts * 30s back-off ~25 min,
+            # still timing out in CI). Three threads exercises the retry path
+            # without pushing each iteration past the per-test wall-time
+            # budget.
             threads = []
-            num_threads = 10
+            num_threads = 3
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=write_data,
