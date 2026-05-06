@@ -149,16 +149,18 @@ class ExponentialRetry:
 
     adapter: HTTPAdapter
 
-    def __init__(self, max_retries: int = 5):
-        retry = self.__create_retry_strategy(max_retries)
+    def __init__(self, connect_retries: int = 3, read_retries: int = 3):
+        retry = self.__create_retry_strategy(connect_retries, read_retries)
         self.adapter = HTTPAdapter(max_retries=retry)
 
     @staticmethod
-    def __create_retry_strategy(max_retries: int) -> Retry:
+    def __create_retry_strategy(connect_retries: int, read_retries: int) -> Retry:
         retry_kwargs = {
-            'total': max_retries,
-            'read': max_retries,
-            'connect': 0,
+            # total=None means no overall cap; per-type counters govern independently
+            'total': None,
+            'connect': connect_retries,
+            'read': read_retries,
+            'status': read_retries,
             'backoff_factor': 1,
             'status_forcelist': [429, 502, 503, 504],
             'raise_on_status': False,
@@ -264,18 +266,36 @@ class HttpClient(RESTClient):
     REQUEST_ID_KEY = "x-request-id"
     DEFAULT_REQUEST_ID = "unknown"
 
-    def __init__(self, uri: str):
+    def __init__(self, uri: str, options=None):
+        from pypaimon.common.options.config import CatalogOptions
+
         self.logger = logging.getLogger(self.__class__.__name__)
         self.uri = _normalize_uri(uri)
         self.error_handler = DefaultErrorHandler.get_instance()
         self.session = requests.Session()
 
-        retry_interceptor = ExponentialRetry(max_retries=3)
+        if options is not None:
+            connect_timeout = options.get(CatalogOptions.HTTP_CONNECT_TIMEOUT)
+            read_timeout = options.get(CatalogOptions.HTTP_READ_TIMEOUT)
+            connect_retries = options.get(CatalogOptions.HTTP_MAX_CONNECT_RETRIES)
+            read_retries = options.get(CatalogOptions.HTTP_MAX_READ_RETRIES)
+            keep_alive = options.get(CatalogOptions.HTTP_KEEP_ALIVE)
+        else:
+            connect_timeout = CatalogOptions.HTTP_CONNECT_TIMEOUT.default_value()
+            read_timeout = CatalogOptions.HTTP_READ_TIMEOUT.default_value()
+            connect_retries = CatalogOptions.HTTP_MAX_CONNECT_RETRIES.default_value()
+            read_retries = CatalogOptions.HTTP_MAX_READ_RETRIES.default_value()
+            keep_alive = CatalogOptions.HTTP_KEEP_ALIVE.default_value()
 
+        self._timeout = (connect_timeout, read_timeout)
+
+        retry_interceptor = ExponentialRetry(
+            connect_retries=connect_retries, read_retries=read_retries)
         self.session.mount("http://", retry_interceptor.adapter)
         self.session.mount("https://", retry_interceptor.adapter)
 
-        self.session.timeout = (180, 180)
+        if not keep_alive:
+            self.session.headers.update({"Connection": "close"})
 
         self.session.headers.update({
             'Accept': 'application/json'
@@ -361,7 +381,8 @@ class HttpClient(RESTClient):
                 method=method,
                 url=url,
                 data=data.encode('utf-8') if data else None,
-                headers=headers
+                headers=headers,
+                timeout=self._timeout,
             )
             duration_ms = (int(time.time() * 1_000_000_000) - start_time) // 1_000_000
             response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)

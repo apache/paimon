@@ -16,7 +16,9 @@
 
 import unittest
 
-from pypaimon.api.client import _parse_error_response
+from pypaimon.api.client import HttpClient, _parse_error_response
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 
 
 class HttpClientTest(unittest.TestCase):
@@ -56,6 +58,45 @@ class HttpClientTest(unittest.TestCase):
         self.assertEqual(error.code, 500)
         self.assertEqual(error.resource_type, '')
         self.assertEqual(error.resource_name, '')
+
+
+class HttpClientHttpOptionsTest(unittest.TestCase):
+    """HttpClient honours CatalogOptions for timeout / retries / keep-alive."""
+
+    def test_defaults_when_options_is_none(self):
+        client = HttpClient("http://localhost:8080")
+        self.assertEqual(
+            client._timeout,
+            (CatalogOptions.HTTP_CONNECT_TIMEOUT.default_value(),
+             CatalogOptions.HTTP_READ_TIMEOUT.default_value()))
+        self.assertNotEqual(
+            client.session.headers.get("Connection", ""), "close",
+            "keep-alive defaults to True; no Connection: close header expected")
+
+    def test_custom_timeouts_applied(self):
+        opts = Options({
+            "http.connect-timeout": "30",
+            "http.read-timeout": "45",
+        })
+        client = HttpClient("http://localhost:8080", opts)
+        self.assertEqual(client._timeout, (30, 45))
+
+    def test_keep_alive_disabled_sets_connection_close(self):
+        opts = Options({"http.keep-alive": "false"})
+        client = HttpClient("http://localhost:8080", opts)
+        self.assertEqual(client.session.headers.get("Connection"), "close")
+
+    def test_custom_retry_counts_applied(self):
+        opts = Options({
+            "http.max-connect-retries": "7",
+            "http.max-read-retries": "9",
+        })
+        client = HttpClient("http://localhost:8080", opts)
+        adapter = client.session.get_adapter("http://localhost:8080")
+        retry = adapter.max_retries
+        self.assertEqual(retry.connect, 7)
+        self.assertEqual(retry.read, 9)
+        self.assertEqual(retry.status, 9)
 
 
 if __name__ == '__main__':
