@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.catalog.Identifier;
+
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -29,7 +31,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * Serialized metadata for a BLOB view field.
  *
  * <p>A blob view only stores the coordinates needed to locate the original blob value in the
- * upstream table: {@code tableName}, {@code fieldId} and {@code rowId}. The actual blob data is
+ * upstream table: {@code identifier}, {@code fieldId} and {@code rowId}. The actual blob data is
  * resolved at read time by scanning the upstream table.
  */
 public class BlobViewStruct implements Serializable {
@@ -39,18 +41,18 @@ public class BlobViewStruct implements Serializable {
     private static final long MAGIC = 0x424C4F4256494557L; // "BLOBVIEW"
     private static final byte CURRENT_VERSION = 1;
 
-    private final String tableName;
+    private final Identifier identifier;
     private final int fieldId;
     private final long rowId;
 
-    public BlobViewStruct(String tableName, int fieldId, long rowId) {
-        this.tableName = tableName;
+    public BlobViewStruct(Identifier identifier, int fieldId, long rowId) {
+        this.identifier = Objects.requireNonNull(identifier, "identifier");
         this.fieldId = fieldId;
         this.rowId = rowId;
     }
 
-    public String tableName() {
-        return tableName;
+    public Identifier identifier() {
+        return identifier;
     }
 
     public int fieldId() {
@@ -62,14 +64,14 @@ public class BlobViewStruct implements Serializable {
     }
 
     public byte[] serialize() {
-        byte[] tableBytes = tableName.getBytes(UTF_8);
+        byte[] identifierBytes = identifier.getFullName().getBytes(UTF_8);
 
-        int totalSize = 1 + 8 + 4 + tableBytes.length + 4 + 8;
+        int totalSize = 1 + 8 + 4 + identifierBytes.length + 4 + 8;
         ByteBuffer buffer = ByteBuffer.allocate(totalSize).order(ByteOrder.LITTLE_ENDIAN);
         buffer.put(CURRENT_VERSION);
         buffer.putLong(MAGIC);
-        buffer.putInt(tableBytes.length);
-        buffer.put(tableBytes);
+        buffer.putInt(identifierBytes.length);
+        buffer.put(identifierBytes);
         buffer.putInt(fieldId);
         buffer.putLong(rowId);
         return buffer.array();
@@ -97,12 +99,13 @@ public class BlobViewStruct implements Serializable {
                             + magic);
         }
 
-        byte[] tableBytes = new byte[buffer.getInt()];
-        buffer.get(tableBytes);
+        byte[] identifierBytes = new byte[buffer.getInt()];
+        buffer.get(identifierBytes);
 
         int fieldId = buffer.getInt();
         long rowId = buffer.getLong();
-        return new BlobViewStruct(new String(tableBytes, UTF_8), fieldId, rowId);
+        return new BlobViewStruct(
+                Identifier.fromString(new String(identifierBytes, UTF_8)), fieldId, rowId);
     }
 
     public static boolean isBlobViewStruct(byte[] bytes) {
@@ -122,18 +125,18 @@ public class BlobViewStruct implements Serializable {
         BlobViewStruct that = (BlobViewStruct) o;
         return fieldId == that.fieldId
                 && rowId == that.rowId
-                && Objects.equals(tableName, that.tableName);
+                && Objects.equals(identifier, that.identifier);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(tableName, fieldId, rowId);
+        return Objects.hash(identifier, fieldId, rowId);
     }
 
     @Override
     public String toString() {
-        return "BlobViewStruct{table="
-                + tableName
+        return "BlobViewStruct{identifier="
+                + identifier.getFullName()
                 + ", fieldId="
                 + fieldId
                 + ", rowId="

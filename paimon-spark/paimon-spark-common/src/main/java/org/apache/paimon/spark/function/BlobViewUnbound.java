@@ -32,7 +32,8 @@ public class BlobViewUnbound implements UnboundFunction {
     public BoundFunction bind(StructType inputType) {
         if (inputType.fields().length != 3) {
             throw new UnsupportedOperationException(
-                    "Function 'blob_view' requires 3 arguments (tableName STRING, fieldId INT, rowId BIGINT), but found "
+                    "Function 'blob_view' requires 3 arguments "
+                            + "(identifier STRING, fieldId INT, rowId BIGINT), but found "
                             + inputType.fields().length);
         }
         if (!(inputType.fields()[0].dataType() instanceof StringType)) {
@@ -52,7 +53,7 @@ public class BlobViewUnbound implements UnboundFunction {
 
     @Override
     public String description() {
-        return "Construct a serialized BlobViewStruct from tableName, fieldId and rowId";
+        return "Construct a serialized BlobViewStruct from identifier, fieldId and rowId";
     }
 
     @Override

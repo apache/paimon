@@ -73,7 +73,7 @@ public class BlobViewLookup {
             CatalogLoader catalogLoader) {
         Map<BlobViewStruct, BlobDescriptor> cached =
                 preloadDescriptors(catalogContext, viewStructs, catalogLoader);
-        Map<String, UriReader> cache = new HashMap<>();
+        Map<Identifier, UriReader> cache = new HashMap<>();
         return blobView -> {
             BlobViewStruct viewStruct = blobView.viewStruct();
             BlobDescriptor descriptor = cached.get(viewStruct);
@@ -86,12 +86,11 @@ public class BlobViewLookup {
             }
             UriReader uriReader =
                     cache.computeIfAbsent(
-                            viewStruct.tableName(),
-                            tableName -> {
+                            viewStruct.identifier(),
+                            identifier -> {
                                 try (Catalog catalog = catalogLoader.create(catalogContext)) {
                                     return UriReader.fromFile(
-                                            catalog.getTable(Identifier.fromString(tableName))
-                                                    .fileIO());
+                                            catalog.getTable(identifier).fileIO());
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
@@ -108,7 +107,7 @@ public class BlobViewLookup {
             return Collections.emptyMap();
         }
 
-        Map<String, TableReferences> grouped = groupReferencesByTable(viewStructs);
+        Map<Identifier, TableReferences> grouped = groupReferencesByTable(viewStructs);
         try {
             return loadReferencedDescriptors(
                     catalogContext, grouped.values(), PRELOAD_DESCRIPTOR_EXECUTOR, catalogLoader);
@@ -140,11 +139,11 @@ public class BlobViewLookup {
                 (totalRows + PRELOAD_DESCRIPTOR_THREAD_NUM - 1) / PRELOAD_DESCRIPTOR_THREAD_NUM);
     }
 
-    private static Map<String, TableReferences> groupReferencesByTable(
+    private static Map<Identifier, TableReferences> groupReferencesByTable(
             Collection<BlobViewStruct> viewStructs) {
-        Map<String, TableReferences> grouped = new HashMap<>();
+        Map<Identifier, TableReferences> grouped = new HashMap<>();
         for (BlobViewStruct viewStruct : viewStructs) {
-            grouped.computeIfAbsent(viewStruct.tableName(), TableReferences::new).add(viewStruct);
+            grouped.computeIfAbsent(viewStruct.identifier(), TableReferences::new).add(viewStruct);
         }
         return grouped;
     }
@@ -177,7 +176,7 @@ public class BlobViewLookup {
                                     try {
                                         return loadTableDescriptorChunk(
                                                 catalogContext,
-                                                plan.tableName,
+                                                plan.identifier,
                                                 plan.fields,
                                                 plan.readType,
                                                 rangeChunk,
@@ -211,7 +210,7 @@ public class BlobViewLookup {
             throws Exception {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
             List<FieldRead> fields = new ArrayList<>(tableReferences.referencesByField.size());
-            Table table = catalog.getTable(Identifier.fromString(tableReferences.tableName));
+            Table table = catalog.getTable(tableReferences.identifier);
             for (Map.Entry<Integer, List<BlobViewStruct>> entry :
                     tableReferences.referencesByField.entrySet()) {
                 int fieldId = entry.getKey();
@@ -220,7 +219,7 @@ public class BlobViewLookup {
                             "Cannot find blob fieldId "
                                     + fieldId
                                     + " in upstream table "
-                                    + tableReferences.tableName
+                                    + tableReferences.identifier.getFullName()
                                     + ".");
                 }
                 int fieldPos = table.rowType().getFieldIndexByFieldId(fieldId);
@@ -237,7 +236,7 @@ public class BlobViewLookup {
             }
 
             return new TableReadPlan(
-                    tableReferences.tableName,
+                    tableReferences.identifier,
                     fields,
                     SpecialFields.rowTypeWithRowId(new RowType(readFields)),
                     toSortedDistinctRanges(tableReferences.rowIds));
@@ -246,7 +245,7 @@ public class BlobViewLookup {
 
     private static Map<BlobViewStruct, BlobDescriptor> loadTableDescriptorChunk(
             CatalogContext catalogContext,
-            String tableName,
+            Identifier identifier,
             List<FieldRead> fields,
             RowType readType,
             List<Range> rowRanges,
@@ -255,7 +254,7 @@ public class BlobViewLookup {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
             Map<BlobViewStruct, BlobDescriptor> resolved = new HashMap<>();
             Table table =
-                    catalog.getTable(Identifier.fromString(tableName))
+                    catalog.getTable(identifier)
                             .copy(
                                     Collections.singletonMap(
                                             CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true"));
@@ -276,7 +275,7 @@ public class BlobViewLookup {
                                 if (blob != null) {
                                     resolved.put(
                                             new BlobViewStruct(
-                                                    tableName, fields.get(i).fieldId, rowId),
+                                                    identifier, fields.get(i).fieldId, rowId),
                                             blob.toDescriptor());
                                 }
                             }
@@ -355,12 +354,12 @@ public class BlobViewLookup {
     }
 
     private static class TableReferences {
-        private final String tableName;
+        private final Identifier identifier;
         private final Map<Integer, List<BlobViewStruct>> referencesByField = new HashMap<>();
         private final List<Long> rowIds = new ArrayList<>();
 
-        private TableReferences(String tableName) {
-            this.tableName = tableName;
+        private TableReferences(Identifier identifier) {
+            this.identifier = identifier;
         }
 
         private void add(BlobViewStruct viewStruct) {
@@ -384,14 +383,17 @@ public class BlobViewLookup {
     }
 
     private static class TableReadPlan {
-        private final String tableName;
+        private final Identifier identifier;
         private final List<FieldRead> fields;
         private final RowType readType;
         private final List<Range> rowRanges;
 
         private TableReadPlan(
-                String tableName, List<FieldRead> fields, RowType readType, List<Range> rowRanges) {
-            this.tableName = tableName;
+                Identifier identifier,
+                List<FieldRead> fields,
+                RowType readType,
+                List<Range> rowRanges) {
+            this.identifier = identifier;
             this.fields = fields;
             this.readType = readType;
             this.rowRanges = rowRanges;

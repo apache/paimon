@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.catalog.Identifier;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,18 +30,20 @@ public class BlobViewStructTest {
 
     @Test
     public void testSerializeAndDeserialize() {
-        BlobViewStruct viewStruct = new BlobViewStruct("default.source", 7, 5L);
+        BlobViewStruct viewStruct =
+                new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L);
 
         BlobViewStruct deserialized = BlobViewStruct.deserialize(viewStruct.serialize());
 
-        assertThat(deserialized.tableName()).isEqualTo("default.source");
+        assertThat(deserialized.identifier()).isEqualTo(Identifier.fromString("default.source"));
         assertThat(deserialized.fieldId()).isEqualTo(7);
         assertThat(deserialized.rowId()).isEqualTo(5L);
     }
 
     @Test
     public void testRejectUnexpectedVersion() {
-        BlobViewStruct viewStruct = new BlobViewStruct("default.source", 7, 5L);
+        BlobViewStruct viewStruct =
+                new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L);
         byte[] bytes = viewStruct.serialize();
         bytes[0] = 3;
 
@@ -50,9 +54,9 @@ public class BlobViewStructTest {
 
     @Test
     public void testEquality() {
-        BlobViewStruct a = new BlobViewStruct("default.source", 7, 5L);
-        BlobViewStruct b = new BlobViewStruct("default.source", 7, 5L);
-        BlobViewStruct c = new BlobViewStruct("default.source", 8, 5L);
+        BlobViewStruct a = new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L);
+        BlobViewStruct b = new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L);
+        BlobViewStruct c = new BlobViewStruct(Identifier.fromString("default.source"), 8, 5L);
 
         assertThat(a).isEqualTo(b);
         assertThat(a.hashCode()).isEqualTo(b.hashCode());
@@ -61,7 +65,8 @@ public class BlobViewStructTest {
 
     @Test
     public void testDecodeBlobView() {
-        BlobViewStruct viewStruct = new BlobViewStruct("default.source", 7, 5L);
+        BlobViewStruct viewStruct =
+                new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L);
         byte[] bytes = viewStruct.serialize();
 
         assertThat(BlobViewStruct.isBlobViewStruct(bytes)).isTrue();

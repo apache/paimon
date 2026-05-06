@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.function;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobViewStruct;
 
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
@@ -40,11 +41,12 @@ public class BlobViewSparkFunction implements ScalarFunction<byte[]>, Serializab
         return DataTypes.BinaryType;
     }
 
-    public byte[] invoke(UTF8String tableName, int fieldId, long rowId) {
-        if (tableName == null) {
+    public byte[] invoke(UTF8String identifier, int fieldId, long rowId) {
+        if (identifier == null) {
             return null;
         }
-        return new BlobViewStruct(tableName.toString(), fieldId, rowId).serialize();
+        return new BlobViewStruct(Identifier.fromString(identifier.toString()), fieldId, rowId)
+                .serialize();
     }
 
     @Override

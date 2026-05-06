@@ -21,6 +21,7 @@ package org.apache.paimon.append;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
@@ -874,13 +875,15 @@ public class BlobTableTest extends TableTestBase {
                                 BinaryString.fromString("label1"),
                                 Blob.fromView(
                                         new BlobViewStruct(
-                                                upstreamFullName, imageFieldId, idToRowId.get(1)))),
+                                                Identifier.fromString(upstreamFullName),
+                                                imageFieldId,
+                                                idToRowId.get(1)))),
                         GenericRow.of(
                                 2,
                                 BinaryString.fromString("label2"),
                                 Blob.fromView(
                                         new BlobViewStruct(
-                                                upstreamFullName,
+                                                Identifier.fromString(upstreamFullName),
                                                 imageFieldId,
                                                 idToRowId.get(2))))));
 

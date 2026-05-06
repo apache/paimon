@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.function;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobViewStruct;
 
 import org.apache.flink.table.functions.ScalarFunction;
@@ -25,10 +26,10 @@ import org.apache.flink.table.functions.ScalarFunction;
 /** Flink scalar function that constructs a serialized {@link BlobViewStruct}. */
 public class BlobViewFunction extends ScalarFunction {
 
-    public byte[] eval(String tableName, int fieldId, long rowId) {
-        if (tableName == null) {
+    public byte[] eval(String identifier, int fieldId, long rowId) {
+        if (identifier == null) {
             return null;
         }
-        return new BlobViewStruct(tableName, fieldId, rowId).serialize();
+        return new BlobViewStruct(Identifier.fromString(identifier), fieldId, rowId).serialize();
     }
 }
