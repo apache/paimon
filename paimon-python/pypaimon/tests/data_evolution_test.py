@@ -29,7 +29,6 @@ import pyarrow.dataset as ds
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.offset_row import OffsetRow
 
 
@@ -192,7 +191,7 @@ class DataEvolutionTest(unittest.TestCase):
 
         # Assert manifest file meta contains min and max row id
         manifest_list_manager = ManifestListManager(table)
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         all_manifests = manifest_list_manager.read_all(snapshot_manager.get_latest_snapshot())
         first_commit = next((m for m in all_manifests if m.min_row_id == 0 and m.max_row_id == 1), None)
         self.assertIsNotNone(first_commit, "Should have a manifest with min_row_id=0, max_row_id=1")

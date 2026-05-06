@@ -96,7 +96,6 @@ def _manifest_entry(partition_values):
     )
 
 
-@patch('pypaimon.read.scanner.file_scanner.SnapshotManager')
 @patch('pypaimon.read.scanner.file_scanner.ManifestFileManager')
 @patch('pypaimon.read.scanner.file_scanner.ManifestListManager')
 class TestFileScannerPartitionPredicate(unittest.TestCase):
@@ -154,7 +153,6 @@ class TestFileScannerPartitionPredicate(unittest.TestCase):
             _manifest_entry(['2024-01-15', 'us-west-2'])))
 
 
-@patch('pypaimon.write.file_store_commit.SnapshotManager')
 @patch('pypaimon.write.file_store_commit.ManifestFileManager')
 @patch('pypaimon.write.file_store_commit.ManifestListManager')
 class TestOverwritePartitionPredicate(unittest.TestCase):

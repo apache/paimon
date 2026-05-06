@@ -38,7 +38,6 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
                                         MapType, PyarrowFieldParser)
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -226,7 +225,7 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(actual_data, expect_data)
 
         # to test GenericRow ability
-        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
         manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
@@ -517,7 +516,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         pk_read_builder = pk_table.new_read_builder()
         pk_table_scan = pk_read_builder.new_scan()
-        latest_snapshot = SnapshotManager(pk_table).get_latest_snapshot()
+        latest_snapshot = pk_table.snapshot_manager().get_latest_snapshot()
         pk_manifest_files = pk_table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
         pk_manifest_entries = pk_table_scan.file_scanner.manifest_file_manager.read(
             pk_manifest_files[0].file_name,
@@ -592,7 +591,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
-        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
         manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
@@ -1105,7 +1104,7 @@ class ReaderBasicTest(unittest.TestCase):
         # Read manifest to verify value_stats_cols is None (all fields included)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
-        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
         manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,

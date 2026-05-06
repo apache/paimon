@@ -53,10 +53,9 @@ class FullTextScanImpl(FullTextScan):
 
     def scan(self) -> FullTextScanPlan:
         from pypaimon.index.index_file_handler import IndexFileHandler
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
         text_column = self._text_column
-        snapshot = SnapshotManager(self._table).get_latest_snapshot()
+        snapshot = self._table.snapshot_manager().get_latest_snapshot()
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         from pypaimon.common.options.options import Options

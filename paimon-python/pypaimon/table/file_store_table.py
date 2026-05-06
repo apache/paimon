@@ -98,7 +98,12 @@ class FileStoreTable(Table):
     def snapshot_manager(self):
         """Get the snapshot manager for this table."""
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
-        return SnapshotManager(self)
+        return SnapshotManager(
+            self.file_io,
+            self.table_path,
+            self.current_branch(),
+            self.catalog_environment.snapshot_loader(),
+        )
 
     def tag_manager(self):
         """Get the tag manager for this table."""

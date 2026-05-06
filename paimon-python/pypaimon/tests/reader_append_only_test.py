@@ -31,7 +31,6 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.file_store_commit import RetryResult
 
@@ -137,7 +136,7 @@ class AoReaderTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         snapshot = snapshot_manager.get_latest_snapshot()
         table_inc = table.copy({
             CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key():
@@ -478,7 +477,7 @@ class AoReaderTest(unittest.TestCase):
         table_commit.commit(messages)
         table_write.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         commit_entries = []
         for msg in messages:
@@ -673,7 +672,7 @@ class AoReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
@@ -713,7 +712,7 @@ class AoReaderTest(unittest.TestCase):
             table_write.close()
             table_commit.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
         t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
 
@@ -820,7 +819,7 @@ class AoReaderTest(unittest.TestCase):
                              f"Iteration {test_iteration}: User IDs mismatch")
 
             # Verify snapshot count (should have num_threads snapshots)
-            snapshot_manager = SnapshotManager(table)
+            snapshot_manager = table.snapshot_manager()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")

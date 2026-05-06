@@ -121,9 +121,8 @@ class TestChangelogManager(unittest.TestCase):
 
     def test_changelog_from_snapshot(self):
         """Test that Changelog can be created from a Snapshot."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
-        snapshot_manager = SnapshotManager(self.table)
+        snapshot_manager = self.table.snapshot_manager()
         snapshot = snapshot_manager.get_latest_snapshot()
 
         if snapshot:

@@ -41,7 +41,6 @@ from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.source.deletion_file import DeletionFile
 
@@ -179,7 +178,7 @@ class FileScanner:
         self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
         self.limit = limit
 
-        self.snapshot_manager = SnapshotManager(table)
+        self.snapshot_manager = table.snapshot_manager()
         self.manifest_list_manager = ManifestListManager(table)
         self.manifest_file_manager = ManifestFileManager(table)
 

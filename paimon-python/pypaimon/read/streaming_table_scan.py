@@ -48,7 +48,6 @@ from pypaimon.read.scanner.incremental_diff_scanner import \
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class AsyncStreamingTableScan:
@@ -103,7 +102,7 @@ class AsyncStreamingTableScan:
         self._lookahead_size = 10  # How many snapshots to look ahead
 
         # Initialize managers
-        self._snapshot_manager = SnapshotManager(table)
+        self._snapshot_manager = table.snapshot_manager()
         self._manifest_list_manager = ManifestListManager(table)
         self._manifest_file_manager = ManifestFileManager(table)
 

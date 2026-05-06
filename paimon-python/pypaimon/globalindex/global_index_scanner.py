@@ -111,8 +111,7 @@ class GlobalIndexScanner:
                 return False
             return global_index_meta.index_field_id in filter_field_ids
 
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-        snapshot = SnapshotManager(table).get_latest_snapshot()
+        snapshot = table.snapshot_manager().get_latest_snapshot()
         index_file_handler = IndexFileHandler(table=table)
         entries = index_file_handler.scan(snapshot, index_file_filter)
         scanned_index_files = [entry.index_file for entry in entries]
