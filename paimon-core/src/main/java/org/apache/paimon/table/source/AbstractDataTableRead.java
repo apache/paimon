@@ -184,6 +184,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return reader.filter(finalFilter::test);
     }
 
+    /** Split with auth context. */
     protected static class QueryAuthContext {
 
         private final Split split;
