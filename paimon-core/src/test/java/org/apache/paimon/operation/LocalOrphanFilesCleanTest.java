@@ -547,6 +547,55 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
+    public void testCleanAfterSnapshotExpiration() throws Exception {
+        // write data to create multiple snapshots
+        List<List<TestPojo>> committedData = new ArrayList<>();
+        Map<Long, List<TestPojo>> snapshotData = new HashMap<>();
+        SnapshotManager snapshotManager = table.snapshotManager();
+        int commitTimes = 10;
+        writeData(snapshotManager, committedData, snapshotData, new HashMap<>(), commitTimes);
+
+        int snapshotCount = (int) snapshotManager.snapshotCount();
+
+        // expire some old snapshots
+        int expired = snapshotCount / 2;
+        Options expireOptions = new Options();
+        expireOptions.set(CoreOptions.SNAPSHOT_EXPIRE_LIMIT, snapshotCount);
+        expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, snapshotCount - expired);
+        expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, snapshotCount - expired);
+        table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
+
+        // add orphan files to snapshot, changelog, manifest, and data directories
+        int shouldBeDeleted = 0;
+        int fileNum = RANDOM.nextInt(5) + 1;
+
+        addNonUsedFiles(
+                new Path(tablePath, "snapshot"), fileNum, Collections.singletonList("UNKNOWN"));
+        shouldBeDeleted += fileNum;
+
+        addNonUsedFiles(
+                new Path(tablePath, "changelog"), fileNum, Collections.singletonList("UNKNOWN"));
+        shouldBeDeleted += fileNum;
+
+        addNonUsedFiles(
+                manifestDir,
+                fileNum,
+                Arrays.asList("manifest-list-", "manifest-", "index-manifest-", "UNKNOWN-"));
+        shouldBeDeleted += fileNum;
+
+        shouldBeDeleted += randomlyAddNonUsedDataFiles(tablePath);
+
+        assertThat(manuallyAddedFiles.size()).isEqualTo(shouldBeDeleted);
+
+        // run orphan clean and verify only orphan files are deleted
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
+        validate(deleted, snapshotData, new HashMap<>());
+    }
+
+    @Test
     public void testRemovingEmptyDirectories() throws Exception {
         List<List<TestPojo>> committedData = new ArrayList<>();
         Map<Long, List<TestPojo>> snapshotData = new HashMap<>();

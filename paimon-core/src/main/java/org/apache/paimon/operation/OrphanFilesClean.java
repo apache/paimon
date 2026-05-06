@@ -26,6 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.schema.SchemaManager;
@@ -234,10 +236,60 @@ public abstract class OrphanFilesClean implements Serializable {
         SnapshotManager snapshotManager = branchTable.snapshotManager();
         ChangelogManager changelogManager = branchTable.changelogManager();
         TagManager tagManager = branchTable.tagManager();
-        Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
+
+        Set<Snapshot> readSnapshots = new HashSet<>();
+        try {
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot != null) {
+                readSnapshots.add(latestSnapshot);
+                Long earliestId = snapshotManager.earliestSnapshotId();
+                if (earliestId != null) {
+                    for (long id = earliestId; id < latestSnapshot.id(); id++) {
+                        try {
+                            readSnapshots.add(snapshotManager.snapshot(id));
+                        } catch (Exception ignored) {
+                            // snapshot may have been expired by concurrent operations
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to read latest snapshot, it might have been expired.", e);
+        }
         readSnapshots.addAll(tagManager.taggedSnapshots());
         readSnapshots.addAll(changelogManager.safelyGetAllChangelogs());
         return readSnapshots;
+    }
+
+    /** Collect all files referenced by the latest snapshot of each branch. */
+    protected Set<String> collectLatestSnapshotFiles(List<String> branches) {
+        Set<String> files = new HashSet<>();
+        for (String branch : branches) {
+            try {
+                FileStoreTable branchTable = table.switchToBranch(branch);
+                Snapshot latest = branchTable.snapshotManager().latestSnapshot();
+                if (latest != null) {
+                    Set<String> manifests = new HashSet<>();
+                    collectWithoutDataFile(branch, latest, files::add, manifests::add);
+                    ManifestFile manifestFile = branchTable.store().manifestFileFactory().create();
+                    for (String manifest : manifests) {
+                        retryReadingFiles(
+                                        () -> manifestFile.readWithIOException(manifest),
+                                        Collections.<ManifestEntry>emptyList())
+                                .stream()
+                                .map(ManifestEntry::file)
+                                .forEach(
+                                        f -> {
+                                            files.add(f.fileName());
+                                            f.extraFiles().forEach(files::add);
+                                        });
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to re-read latest snapshot for branch {}", branch, e);
+            }
+        }
+        return files;
     }
 
     protected void collectWithoutDataFile(

@@ -116,6 +116,10 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
 
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
+
+        // protect files referenced by the latest snapshot
+        candidateDeletes.removeAll(collectLatestSnapshotFiles(branches));
+
         candidateDeletes.stream()
                 .map(candidates::get)
                 .forEach(

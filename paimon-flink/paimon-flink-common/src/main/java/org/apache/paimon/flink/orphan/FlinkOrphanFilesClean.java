@@ -243,6 +243,34 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
 
         usedFiles = usedFiles.union(usedManifestFiles);
 
+        // protect files referenced by the latest snapshot
+        DataStream<String> latestSnapshotFiles =
+                env.fromCollection(branches)
+                        .name("branch-source-protect")
+                        .process(
+                                new ProcessFunction<String, String>() {
+                                    @Override
+                                    public void processElement(
+                                            String branch,
+                                            ProcessFunction<String, String>.Context ctx,
+                                            Collector<String> out) {
+                                        try {
+                                            for (String file :
+                                                    collectLatestSnapshotFiles(
+                                                            Collections.singletonList(branch))) {
+                                                out.collect(file);
+                                            }
+                                        } catch (Exception e) {
+                                            LOG.warn(
+                                                    "Failed to collect latest snapshot files for branch {}",
+                                                    branch,
+                                                    e);
+                                        }
+                                    }
+                                })
+                        .name("protect-latest-snapshot");
+        usedFiles = usedFiles.union(latestSnapshotFiles);
+
         final OutputTag<Path> emptyDirOutputTag = new OutputTag<Path>("empty-dir-output") {};
         SingleOutputStreamOperator<Tuple2<String, Long>> candidates =
                 env.fromCollection(Collections.singletonList(1), TypeInformation.of(Integer.class))
