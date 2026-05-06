@@ -176,12 +176,7 @@ public class RESTTokenFileIO implements FileIO {
             Options options = catalogContext.options();
             options = new Options(RESTUtil.merge(options.toMap(), token.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
-            CatalogContext context =
-                    CatalogContext.create(
-                            options,
-                            catalogContext.hadoopConf(),
-                            catalogContext.preferIO(),
-                            catalogContext.fallbackIO());
+            CatalogContext context = catalogContext.copy(options);
             try {
                 fileIO = FileIO.get(path, context);
             } catch (IOException e) {

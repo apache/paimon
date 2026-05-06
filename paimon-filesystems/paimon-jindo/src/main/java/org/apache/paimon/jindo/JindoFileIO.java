@@ -19,6 +19,7 @@
 package org.apache.paimon.jindo;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.HadoopAware;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
@@ -128,9 +129,10 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
             // Misalignment can greatly affect performance, so the maximum buffer is set here
             hadoopOptions.set("fs.oss.read.position.buffer.size", "8388608");
             hadoopOptions.set("fs.oss.credentials.provider", SimpleCredentialsProvider.NAME);
-        } else {
+        } else if (context instanceof HadoopAware) {
             LOG.info("Using hadoop conf init Jindo.");
-            context.hadoopConf()
+            ((HadoopAware) context)
+                    .hadoopConf()
                     .iterator()
                     .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
         }
