@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.data_blob_writer import DataBlobWriter
 from pypaimon.write.writer.data_writer import DataWriter
@@ -109,7 +110,8 @@ class FileStoreWrite:
                 commit_message = CommitMessage(
                     partition=partition,
                     bucket=bucket,
-                    new_files=committed_files
+                    total_buckets=self.table.total_buckets,
+                    data_increment=DataIncrement(new_files=committed_files),
                 )
                 commit_messages.append(commit_message)
         return commit_messages
