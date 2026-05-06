@@ -21,7 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -65,16 +64,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
             Supplier<MergeFileSplitRead> mergeReadSupplier,
             Supplier<RawFileSplitRead> batchRawReadSupplier,
             TableSchema schema) {
-        this(mergeReadSupplier, batchRawReadSupplier, schema, null, null);
-    }
-
-    public KeyValueTableRead(
-            Supplier<MergeFileSplitRead> mergeReadSupplier,
-            Supplier<RawFileSplitRead> batchRawReadSupplier,
-            TableSchema schema,
-            @Nullable CatalogContext catalogContext,
-            @Nullable Supplier<InnerTableRead> readFactory) {
-        super(schema, catalogContext, readFactory);
+        super(schema);
         this.readProviders =
                 Arrays.asList(
                         new PrimaryKeyTableRawFileSplitReadProvider(

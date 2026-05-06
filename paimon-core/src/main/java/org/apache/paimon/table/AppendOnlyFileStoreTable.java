@@ -33,6 +33,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.AppendTableRead;
 import org.apache.paimon.table.source.DataEvolutionSplitGenerator;
+import org.apache.paimon.table.source.DataEvolutionTableRead;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.splitread.AppendTableRawFileSplitReadProvider;
@@ -123,11 +124,13 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             new AppendTableRawFileSplitReadProvider(
                                     () -> store().newRead(), config));
         }
-        return new AppendTableRead(
-                providerFactories,
-                schema(),
-                catalogEnvironment.catalogContext(),
-                () -> new AppendTableRead(providerFactories, schema()));
+        return coreOptions().dataEvolutionEnabled()
+                ? new DataEvolutionTableRead(
+                        providerFactories,
+                        schema(),
+                        catalogEnvironment.catalogContext(),
+                        () -> new AppendTableRead(providerFactories, schema()))
+                : new AppendTableRead(providerFactories, schema());
     }
 
     @Override

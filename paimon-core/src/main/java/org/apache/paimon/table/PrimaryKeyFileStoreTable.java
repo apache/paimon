@@ -151,12 +151,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                 () -> store().newRead();
         Supplier<org.apache.paimon.operation.RawFileSplitRead> batchRawReadSupplier =
                 () -> store().newBatchRawFileRead();
-        return new KeyValueTableRead(
-                mergeReadSupplier,
-                batchRawReadSupplier,
-                schema(),
-                catalogEnvironment.catalogContext(),
-                () -> new KeyValueTableRead(mergeReadSupplier, batchRawReadSupplier, schema()));
+        return new KeyValueTableRead(mergeReadSupplier, batchRawReadSupplier, schema());
     }
 
     @Override
