@@ -124,9 +124,29 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
+        // Second write with overlapping keys creates a second level-0 file.
+        // The two overlapping level-0 files form a non-rawConvertible split,
+        // so Iceberg can no longer see either file. Verify that total-records
+        // in the snapshot summary tracks the Iceberg-visible count, not
+        // paimon's totalRecordCount (which includes all levels).
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        List<String> icebergRecords = getIcebergResult();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + snapshotId + ".metadata.json"));
+        String totalRecords =
+                metadata.currentSnapshot().summary().getSummary().get("total-records");
+        assertThat(totalRecords).isEqualTo(String.valueOf(icebergRecords.size()));
+
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
-        commit.commit(2, write.prepareCommit(true, 2));
-        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+        commit.commit(3, write.prepareCommit(true, 3));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
 
         write.close();
         commit.close();
