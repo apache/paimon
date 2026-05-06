@@ -152,12 +152,17 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         searcher = self._searcher
         query = self._index.parse_query(query_text, ["text"])
+
         results = searcher.search(query, limit)
+        if not results.hits:
+            return DictBasedScoredIndexResult({})
+
+        doc_addresses = [addr for score, addr in results.hits]
+        scores = [score for score, addr in results.hits]
+        row_ids = searcher.fast_field_values("row_id", doc_addresses)
 
         id_to_scores: Dict[int, float] = {}
-        for score, doc_address in results.hits:
-            doc = searcher.doc(doc_address)
-            row_id = doc["row_id"][0]
+        for row_id, score in zip(row_ids, scores):
             id_to_scores[row_id] = score
 
         return DictBasedScoredIndexResult(id_to_scores)
@@ -180,7 +185,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
             # Open tantivy index from stream-backed directory
             schema_builder = tantivy.SchemaBuilder()
-            schema_builder.add_unsigned_field("row_id", stored=True, indexed=True, fast=True)
+            schema_builder.add_unsigned_field("row_id", stored=False, indexed=True, fast=True)
             schema_builder.add_text_field("text", stored=False)
             schema = schema_builder.build()
 
