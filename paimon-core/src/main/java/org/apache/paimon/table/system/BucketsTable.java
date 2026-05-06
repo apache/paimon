@@ -234,7 +234,8 @@ public class BucketsTable implements ReadonlyTable {
                             snapshotReader,
                             bucketsSplit.partitionPredicate,
                             partitionKeys,
-                            partitionType);
+                            partitionType,
+                            fileStoreTable.coreOptions().partitionDefaultName());
             if (!hasResults) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }

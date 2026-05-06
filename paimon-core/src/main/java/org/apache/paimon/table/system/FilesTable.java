@@ -196,7 +196,11 @@ public class FilesTable implements ReadonlyTable {
             RowType partitionType = fileStoreTable.schema().logicalPartitionType();
             boolean hasResults =
                     PartitionPredicateHelper.applyPartitionFilter(
-                            snapshotReader, partitionPredicate, partitionKeys, partitionType);
+                            snapshotReader,
+                            partitionPredicate,
+                            partitionKeys,
+                            partitionType,
+                            fileStoreTable.coreOptions().partitionDefaultName());
             if (!hasResults) {
                 return Collections::emptyList;
             }
