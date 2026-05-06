@@ -35,6 +35,8 @@ from pypaimon.read.push_down_utils import (remove_row_id_filter,
                                            trim_and_transform_predicate)
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
+from pypaimon.read.scanner.bucket_select_converter import \
+    create_bucket_selector
 from pypaimon.read.scanner.data_evolution_split_generator import \
     DataEvolutionSplitGenerator
 from pypaimon.read.scanner.primary_key_table_split_generator import \
@@ -207,6 +209,12 @@ class FileScanner:
         self._global_index_result = None
         self._scanned_snapshot = None
         self._scanned_snapshot_id = None
+
+        # Predicate-driven bucket pruning (HASH_FIXED only). Mirrors Java
+        # BucketSelectConverter. Set on demand and reused across all
+        # _filter_manifest_entry calls; the inner _Selector caches the
+        # bucket set per ``total_buckets`` value.
+        self._bucket_selector = self._init_bucket_selector()
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -387,8 +395,57 @@ class FileScanner:
             file.partition_stats,
             file.num_added_files + file.num_deleted_files)
 
+    def _init_bucket_selector(self):
+        """Build the predicate-driven bucket selector if (and only if) the
+        table is in HASH_FIXED mode and the predicate pins all bucket-key
+        fields to Equal/In literals. Anything else returns None — the
+        caller treats None as "no bucket-level pruning".
+
+        Bucket-key fields are derived by instantiating the *writer's*
+        ``FixedBucketRowKeyExtractor`` and reading back its resolved
+        fields. Reusing the writer class (rather than re-deriving the
+        list here) is what guarantees the reader always hashes against
+        the same fields the writer used at insert time — any future
+        change to the writer's bucket-key resolution propagates
+        automatically.
+
+        Sound across rescale: ``_Selector`` caches per ``total_buckets``,
+        which can vary between manifest entries after a bucket rescale.
+        """
+        if self.predicate is None:
+            return None
+        # ``bucket_mode()`` returns HASH_FIXED only when ``options.bucket()
+        # > 0``; other modes (DYNAMIC / POSTPONE / UNAWARE / CROSS_PARTITION)
+        # have no fixed hash → bucket mapping at write time and must NOT
+        # be pruned here.
+        try:
+            if self.table.bucket_mode() != BucketMode.HASH_FIXED:
+                return None
+        except Exception:
+            # Defensive: any catalog/proxy table that fails the mode check
+            # falls back to no pruning rather than crashing the scan.
+            return None
+        from pypaimon.write.row_key_extractor import \
+            FixedBucketRowKeyExtractor
+        try:
+            extractor = FixedBucketRowKeyExtractor(self.table.table_schema)
+        except Exception:
+            return None
+        bucket_key_fields = list(extractor._bucket_key_fields)
+        if not bucket_key_fields:
+            return None
+        return create_bucket_selector(self.predicate, bucket_key_fields)
+
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
         if self.only_read_real_buckets and entry.bucket < 0:
+            return False
+        # Predicate-driven bucket pruning. Cheapest possible discriminator
+        # for PK point queries (``pk = 'X'``) — short-circuits before any
+        # stats decoding. Stays sound across rescale because the selector
+        # keys its internal cache on ``total_buckets``.
+        if (self._bucket_selector is not None
+                and entry.bucket >= 0
+                and not self._bucket_selector(entry.bucket, entry.total_buckets)):
             return False
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
