@@ -246,8 +246,8 @@ class SnapshotManagerBranchAwarenessTest(unittest.TestCase):
             branch_sm.snapshot_loader.identifier.database,
             sm.snapshot_loader.identifier.database)
         self.assertEqual(
-            branch_sm.snapshot_loader.identifier.object,
-            sm.snapshot_loader.identifier.object)
+            branch_sm.snapshot_loader.identifier.get_table_name(),
+            sm.snapshot_loader.identifier.get_table_name())
         # Original loader's identifier untouched.
         self.assertIsNone(sm.snapshot_loader.identifier.branch)
 
