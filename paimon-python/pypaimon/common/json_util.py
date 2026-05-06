@@ -48,6 +48,14 @@ class JSON:
     @staticmethod
     def __to_dict(obj: Any) -> Dict[str, Any]:
         """Convert to dictionary with custom field names"""
+        if isinstance(obj, list):
+            return [
+                item.to_dict() if hasattr(item, "to_dict")
+                else JSON.__to_dict(item) if is_dataclass(item)
+                else item
+                for item in obj
+            ]
+
         # If object has custom to_dict method, use it
         if hasattr(obj, "to_dict") and callable(getattr(obj, "to_dict")):
             return obj.to_dict()
