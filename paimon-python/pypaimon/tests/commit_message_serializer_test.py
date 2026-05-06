@@ -28,6 +28,8 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.internal_row import RowKind
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.commit_message_serializer import CommitMessageSerializer
+from pypaimon.write.compact_increment import CompactIncrement
+from pypaimon.write.data_increment import DataIncrement
 
 
 def _key_field(idx: int, name: str, type_str: str) -> DataField:
@@ -132,9 +134,11 @@ class CommitMessageSerializerTest(unittest.TestCase):
         message = CommitMessage(
             partition=("2024-01-01", "us"),
             bucket=2,
-            new_files=[],
-            compact_before=before_files,
-            compact_after=after_files,
+            total_buckets=8,
+            compact_increment=CompactIncrement(
+                compact_before=before_files,
+                compact_after=after_files,
+            ),
             check_from_snapshot=42,
         )
 
@@ -144,6 +148,7 @@ class CommitMessageSerializerTest(unittest.TestCase):
         self.assertIsInstance(payload, bytes)
         self.assertEqual(message.partition, rebuilt.partition)
         self.assertEqual(message.bucket, rebuilt.bucket)
+        self.assertEqual(message.total_buckets, rebuilt.total_buckets)
         self.assertEqual(message.new_files, rebuilt.new_files)
         self.assertEqual(message.compact_before, rebuilt.compact_before)
         self.assertEqual(message.compact_after, rebuilt.compact_after)
@@ -153,7 +158,7 @@ class CommitMessageSerializerTest(unittest.TestCase):
         message = CommitMessage(
             partition=(),
             bucket=0,
-            new_files=[_build_data_file_meta("append-1.parquet")],
+            data_increment=DataIncrement(new_files=[_build_data_file_meta("append-1.parquet")]),
         )
 
         rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
@@ -165,7 +170,11 @@ class CommitMessageSerializerTest(unittest.TestCase):
         self.assertEqual([], rebuilt.compact_after)
 
     def test_unsupported_version_is_rejected(self):
-        message = CommitMessage(partition=(), bucket=0, new_files=[_build_data_file_meta()])
+        message = CommitMessage(
+            partition=(),
+            bucket=0,
+            data_increment=DataIncrement(new_files=[_build_data_file_meta()]),
+        )
         payload_dict = CommitMessageSerializer.to_dict(message)
         payload_dict["version"] = CommitMessageSerializer.VERSION + 1
 
@@ -177,7 +186,7 @@ class CommitMessageSerializerTest(unittest.TestCase):
         message = CommitMessage(
             partition=(date(2024, 1, 2), Decimal("99.50"), b"raw"),
             bucket=0,
-            compact_after=[_build_data_file_meta()],
+            compact_increment=CompactIncrement(compact_after=[_build_data_file_meta()]),
         )
 
         rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
@@ -189,7 +198,7 @@ class CommitMessageSerializerTest(unittest.TestCase):
         message = CommitMessage(
             partition=(ts,),
             bucket=0,
-            compact_after=[_build_data_file_meta()],
+            compact_increment=CompactIncrement(compact_after=[_build_data_file_meta()]),
         )
 
         rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
@@ -198,7 +207,11 @@ class CommitMessageSerializerTest(unittest.TestCase):
 
     def test_serialize_list_round_trip(self):
         messages = [
-            CommitMessage(partition=(f"p{i}",), bucket=i, new_files=[_build_data_file_meta(f"f{i}.parquet")])
+            CommitMessage(
+                partition=(f"p{i}",),
+                bucket=i,
+                data_increment=DataIncrement(new_files=[_build_data_file_meta(f"f{i}.parquet")]),
+            )
             for i in range(3)
         ]
         payloads = CommitMessageSerializer.serialize_list(messages)

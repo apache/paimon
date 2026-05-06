@@ -27,6 +27,7 @@ from pypaimon.read.interval_partition import IntervalPartition
 from pypaimon.read.reader.merge_function import \
     create_merge_function_factory
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.compact_increment import CompactIncrement
 
 
 @register_compact_task
@@ -84,8 +85,11 @@ class MergeTreeCompactTask(CompactTask):
         return CommitMessage(
             partition=self.partition,
             bucket=self.bucket,
-            compact_before=list(self.files),
-            compact_after=list(after),
+            total_buckets=table.total_buckets,
+            compact_increment=CompactIncrement(
+                compact_before=list(self.files),
+                compact_after=list(after),
+            ),
         )
 
     def _to_payload(self) -> Dict[str, Any]:

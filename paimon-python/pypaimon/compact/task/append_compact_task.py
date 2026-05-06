@@ -23,6 +23,7 @@ from pypaimon.compact.task.compact_task import CompactTask, register_compact_tas
 from pypaimon.manifest.schema.data_file_meta import (DataFileMeta, decode_value,
                                                      encode_value)
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.compact_increment import CompactIncrement
 
 
 @register_compact_task
@@ -60,8 +61,11 @@ class AppendCompactTask(CompactTask):
         return CommitMessage(
             partition=self.partition,
             bucket=self.bucket,
-            compact_before=list(self.files),
-            compact_after=list(after),
+            total_buckets=table.total_buckets,
+            compact_increment=CompactIncrement(
+                compact_before=list(self.files),
+                compact_after=list(after),
+            ),
         )
 
     def _to_payload(self) -> Dict[str, Any]:

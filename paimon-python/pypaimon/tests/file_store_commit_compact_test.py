@@ -26,6 +26,8 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.compact_increment import CompactIncrement
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
@@ -79,7 +81,7 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         msg = CommitMessage(
             partition=('2024-01-15',),
             bucket=2,
-            new_files=[_make_file('a.parquet')],
+            data_increment=DataIncrement(new_files=[_make_file('a.parquet')]),
         )
 
         entries = commit._build_commit_entries([msg])
@@ -95,8 +97,10 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         msg = CommitMessage(
             partition=('2024-01-15',),
             bucket=1,
-            compact_before=[_make_file('old-1.parquet'), _make_file('old-2.parquet')],
-            compact_after=[_make_file('merged.parquet')],
+            compact_increment=CompactIncrement(
+                compact_before=[_make_file('old-1.parquet'), _make_file('old-2.parquet')],
+                compact_after=[_make_file('merged.parquet')],
+            ),
         )
 
         entries = commit._build_commit_entries([msg])
@@ -113,8 +117,10 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         msg = CommitMessage(
             partition=('p1',),
             bucket=0,
-            compact_before=[_make_file('old.parquet')],
-            compact_after=[_make_file('new.parquet')],
+            compact_increment=CompactIncrement(
+                compact_before=[_make_file('old.parquet')],
+                compact_after=[_make_file('new.parquet')],
+            ),
         )
 
         commit.commit([msg], commit_identifier=100)
@@ -130,9 +136,11 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         msg = CommitMessage(
             partition=('p1',),
             bucket=0,
-            new_files=[_make_file('new.parquet')],
-            compact_before=[_make_file('old.parquet')],
-            compact_after=[_make_file('merged.parquet')],
+            data_increment=DataIncrement(new_files=[_make_file('new.parquet')]),
+            compact_increment=CompactIncrement(
+                compact_before=[_make_file('old.parquet')],
+                compact_after=[_make_file('merged.parquet')],
+            ),
         )
 
         commit.commit([msg], commit_identifier=200)
@@ -146,8 +154,10 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         msg = CommitMessage(
             partition=('p1',),
             bucket=3,
-            compact_before=[_make_file('old.parquet')],
-            compact_after=[_make_file('new.parquet')],
+            compact_increment=CompactIncrement(
+                compact_before=[_make_file('old.parquet')],
+                compact_after=[_make_file('new.parquet')],
+            ),
         )
 
         commit.commit_compact([msg], commit_identifier=300)
@@ -164,9 +174,11 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         msg = CommitMessage(
             partition=('p1',),
             bucket=0,
-            new_files=[_make_file('append.parquet')],
-            compact_before=[_make_file('old.parquet')],
-            compact_after=[_make_file('new.parquet')],
+            data_increment=DataIncrement(new_files=[_make_file('append.parquet')]),
+            compact_increment=CompactIncrement(
+                compact_before=[_make_file('old.parquet')],
+                compact_after=[_make_file('new.parquet')],
+            ),
         )
 
         with self.assertRaises(ValueError):
