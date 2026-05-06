@@ -232,7 +232,16 @@ class TableRead:
             raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
 
         from pypaimon.read.datasource.ray_datasource import RayDatasource
-        datasource = RayDatasource(self, splits)
+        from pypaimon.read.datasource.split_provider import PreResolvedSplitProvider
+
+        datasource = RayDatasource(
+            PreResolvedSplitProvider(
+                table=self.table,
+                splits=splits,
+                read_type=self.read_type,
+                predicate=self.predicate,
+            )
+        )
         return ray.data.read_datasource(
             datasource,
             ray_remote_args=ray_remote_args,
