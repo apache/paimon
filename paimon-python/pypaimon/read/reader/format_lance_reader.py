@@ -41,6 +41,7 @@ class FormatLanceReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024,
                  row_indices: Optional[List[int]] = None,
                  shard_range: Optional[Tuple[int, int]] = None):
+        """Initialize Lance reader."""
         import lance
 
         self._read_field_names = [f.name for f in read_fields]
