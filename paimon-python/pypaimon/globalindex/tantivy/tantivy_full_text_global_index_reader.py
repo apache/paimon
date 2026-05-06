@@ -153,26 +153,17 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         searcher = self._searcher
         query = self._index.parse_query(query_text, ["text"])
 
-        scored_results = searcher.search(query, limit)
-        if not scored_results.hits:
+        results = searcher.search(query, limit)
+        if not results.hits:
             return DictBasedScoredIndexResult({})
 
-        addr_to_score: Dict[tuple, float] = {
-            (addr.segment_ord, addr.doc): score
-            for score, addr in scored_results.hits
-        }
+        doc_addresses = [addr for score, addr in results.hits]
+        scores = [score for score, addr in results.hits]
+        row_ids = searcher.fast_field_values("row_id", doc_addresses)
 
-        # This can be replaced by https://github.com/quickwit-oss/tantivy-py/pull/641 when it's released
-        all_by_rowid = searcher.search(query, searcher.num_docs, order_by_field='row_id')
         id_to_scores: Dict[int, float] = {}
-        remaining = len(addr_to_score)
-        for row_id, addr in all_by_rowid.hits:
-            score = addr_to_score.get((addr.segment_ord, addr.doc))
-            if score is not None:
-                id_to_scores[row_id] = score
-                remaining -= 1
-                if remaining == 0:
-                    break
+        for row_id, score in zip(row_ids, scores):
+            id_to_scores[row_id] = score
 
         return DictBasedScoredIndexResult(id_to_scores)
 
