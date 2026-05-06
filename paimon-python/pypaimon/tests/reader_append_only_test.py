@@ -227,6 +227,25 @@ class AoReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id'])
         self.assertEqual(actual, expected)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_ao_reader_with_shard(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'vortex'})
+        self.catalog.create_table('default.test_append_only_vortex_shard', schema, False)
+        table = self.catalog.get_table('default.test_append_only_vortex_shard')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+
+        shard_tables = []
+        total_shards = 3
+        for i in range(total_shards):
+            splits = read_builder.new_scan().with_shard(i, total_shards).plan().splits()
+            shard_tables.append(table_read.to_arrow(splits))
+
+        actual = pa.concat_tables(shard_tables).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
         self.catalog.create_table('default.test_append_only_lance_filter', schema, False)
@@ -247,6 +266,24 @@ class AoReaderTest(unittest.TestCase):
             self.expected.slice(5, 1)  # 6/f
         ])
         self.assertEqual(actual.sort_by('user_id'), expected)
+
+    def test_lance_ao_reader_with_shard(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
+        self.catalog.create_table('default.test_append_only_lance_shard', schema, False)
+        table = self.catalog.get_table('default.test_append_only_lance_shard')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+
+        shard_tables = []
+        total_shards = 3
+        for i in range(total_shards):
+            splits = read_builder.new_scan().with_shard(i, total_shards).plan().splits()
+            shard_tables.append(table_read.to_arrow(splits))
+
+        actual = pa.concat_tables(shard_tables).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
 
     def test_lance_sliced_split_row_range_pushdown(self):
         """

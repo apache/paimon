@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional, Any, Set
+from typing import List, Optional, Any, Set, Tuple
 
 import pyarrow as pa
 from pyarrow import RecordBatch
@@ -33,9 +33,12 @@ class FormatVortexReader(RecordBatchReader):
     and filters it based on the provided predicate and projection.
     """
 
+    # row_indices: from IndexedSplit (ANN vector search), discrete local row offsets within the file.
+    # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
-                 row_indices: Optional[Any] = None,
+                 row_indices: Optional[List[int]] = None,
+                 shard_range: Optional[Tuple[int, int]] = None,
                  predicate_fields: Optional[Set[str]] = None):
         import vortex
 
@@ -72,6 +75,8 @@ class FormatVortexReader(RecordBatchReader):
         indices = None
         if row_indices is not None:
             indices = vortex.array(row_indices)
+        elif shard_range is not None:
+            indices = vortex.array(range(shard_range[0], shard_range[1]))
 
         self.record_batch_reader = vortex_file.scan(
             columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()

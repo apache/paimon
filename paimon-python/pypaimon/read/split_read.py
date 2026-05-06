@@ -142,10 +142,12 @@ class SplitRead(ABC):
     def create_reader(self) -> RecordReader:
         """Create a record reader for the given split."""
 
+    # row_ranges: from IndexedSplit (ANN vector search), a list of discrete global row ID ranges.
+    # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool,
                              read_fields: List[str], row_tracking_enabled: bool,
-                             row_ranges=None,
-                             row_range: Optional[Tuple[int, int]] = None) -> RecordBatchReader:
+                             row_ranges: Optional[List[Range]] = None,
+                             shard_range: Optional[Tuple[int, int]] = None) -> RecordBatchReader:
         (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         # Use external_path if available, otherwise use file_path
@@ -154,7 +156,7 @@ class SplitRead(ABC):
 
         batch_size = self.table.options.read_batch_size()
 
-        # Compute effective row ranges and Vortex row_indices from row_ranges
+        # Convert global row_ranges (IndexedSplit) to local row_indices for Vortex/Lance native pushdown
         row_indices = None
         if row_ranges is not None:
             effective_row_ranges = Range.and_(row_ranges, [file.row_id_range()])
@@ -182,7 +184,8 @@ class SplitRead(ABC):
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
                                               read_arrow_predicate, batch_size=batch_size,
-                                              row_range=row_range, row_indices=row_indices)
+                                              row_indices=row_indices,
+                                              shard_range=shard_range)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
@@ -190,6 +193,7 @@ class SplitRead(ABC):
             format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
                                                read_arrow_predicate, batch_size=batch_size,
                                                row_indices=row_indices,
+                                               shard_range=shard_range,
                                                predicate_fields=predicate_fields)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             name_to_field = {f.name: f for f in self.read_fields}
@@ -247,6 +251,11 @@ class SplitRead(ABC):
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
         if row_ranges is not None and row_indices is None:
             reader = RowIdFilterRecordBatchReader(reader, file.first_row_id, effective_row_ranges)
+
+        # For formats without native shard support, wrap with ShardBatchReader
+        if shard_range is not None and file_format not in (
+                CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
+            reader = ShardBatchReader(reader, shard_range[0], shard_range[1])
 
         return reader
 
@@ -426,7 +435,6 @@ class SplitRead(ABC):
 class RawFileSplitRead(SplitRead):
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
-        # If the current file needs to be further divided for reading, use ShardBatchReader
         # Check if this is a SlicedSplit to get shard_file_idx_map
         shard_file_idx_map = (
             self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
@@ -435,21 +443,12 @@ class RawFileSplitRead(SplitRead):
             (start_pos, end_pos) = shard_file_idx_map[file.file_name]
             if (start_pos, end_pos) == (-1, -1):
                 return None
-            file_path = file.external_path if file.external_path else file.file_path
-            file_format = format_identifier(os.path.basename(file_path))
-            if file_format == CoreOptions.FILE_FORMAT_LANCE:
-                file_batch_reader = self.file_reader_supplier(
-                    file=file,
-                    for_merge_read=False,
-                    read_fields=read_fields,
-                    row_tracking_enabled=True,
-                    row_range=(start_pos, end_pos))
-            else:
-                file_batch_reader = ShardBatchReader(self.file_reader_supplier(
-                    file=file,
-                    for_merge_read=False,
-                    read_fields=read_fields,
-                    row_tracking_enabled=True), start_pos, end_pos)
+            file_batch_reader = self.file_reader_supplier(
+                file=file,
+                for_merge_read=False,
+                read_fields=read_fields,
+                row_tracking_enabled=True,
+                shard_range=(start_pos, end_pos))
         else:
             file_batch_reader = self.file_reader_supplier(
                 file=file,
