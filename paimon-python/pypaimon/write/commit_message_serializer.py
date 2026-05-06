@@ -43,7 +43,7 @@ class CommitMessageSerializer:
     not need a new payload version.
     """
 
-    VERSION = 2
+    VERSION = 1
 
     @classmethod
     def serialize(cls, message: CommitMessage) -> bytes:
