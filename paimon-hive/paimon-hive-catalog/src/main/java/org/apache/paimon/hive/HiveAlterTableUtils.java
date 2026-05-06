@@ -29,20 +29,22 @@ import org.apache.thrift.TException;
 /** Utils for hive alter table. */
 public class HiveAlterTableUtils {
 
-    public static void alterTable(IMetaStoreClient client, Identifier identifier, Table table)
+    public static void alterTable(
+            IMetaStoreClient client, Identifier identifier, Table table, boolean skipUpdateStats)
             throws TException {
         try {
-            alterTableWithEnv(client, identifier, table);
+            alterTableWithEnv(client, identifier, table, skipUpdateStats);
         } catch (NoClassDefFoundError | NoSuchMethodError e) {
             alterTableWithoutEnv(client, identifier, table);
         }
     }
 
     private static void alterTableWithEnv(
-            IMetaStoreClient client, Identifier identifier, Table table) throws TException {
+            IMetaStoreClient client, Identifier identifier, Table table, boolean skipUpdateStats)
+            throws TException {
         boolean skipHiveUpdateStats =
-                Boolean.parseBoolean(
-                        table.getParameters().get(StatsSetupConst.DO_NOT_UPDATE_STATS));
+                Boolean.parseBoolean(table.getParameters().get(StatsSetupConst.DO_NOT_UPDATE_STATS))
+                        || skipUpdateStats;
         EnvironmentContext environmentContext = new EnvironmentContext();
         environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
         environmentContext.putToProperties(
