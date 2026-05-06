@@ -193,6 +193,88 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     }
   }
 
+  private def getCodahaleRegistry: com.codahale.metrics.MetricRegistry = {
+    val sourceClass = Class.forName("org.apache.spark.sql.paimon.PaimonMetricsSource$")
+    val companion = sourceClass.getField("MODULE$").get(null)
+    val source = sourceClass.getMethod("getOrCreate").invoke(companion)
+    source.getClass
+      .getMethod("metricRegistry")
+      .invoke(source)
+      .asInstanceOf[com.codahale.metrics.MetricRegistry]
+  }
+
+  test("Paimon Metric: commit metrics registered in Codahale registry after write") {
+    withTable("T") {
+      sql("CREATE TABLE T (id INT, name STRING)")
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+
+      val gauges = getCodahaleRegistry.getGauges
+      val commitGauges =
+        gauges.keySet().toArray.map(_.toString).filter(_.startsWith("paimon.T.commit."))
+
+      Assertions.assertTrue(
+        commitGauges.nonEmpty,
+        s"Expected commit metrics in Codahale registry but found none. " +
+          s"All metrics: ${gauges.keySet()}")
+
+      Assertions.assertTrue(
+        commitGauges.exists(_.endsWith(".lastCommitDuration")),
+        "Missing lastCommitDuration metric")
+      Assertions.assertTrue(
+        commitGauges.exists(_.endsWith(".lastTableFilesAdded")),
+        "Missing lastTableFilesAdded metric")
+      Assertions.assertTrue(
+        commitGauges.exists(_.endsWith(".lastDeltaRecordsAppended")),
+        "Missing lastDeltaRecordsAppended metric")
+    }
+  }
+
+  test("Paimon Metric: Codahale metrics reflect actual commit values") {
+    withTable("T") {
+      sql("CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
+      sql("INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+
+      val gauges = getCodahaleRegistry.getGauges
+      val tableMetrics = gauges
+        .entrySet()
+        .toArray
+        .map(_.asInstanceOf[java.util.Map.Entry[String, com.codahale.metrics.Gauge[_]]])
+        .filter(_.getKey.startsWith("paimon.T.commit."))
+
+      val recordsAppended = tableMetrics
+        .find(_.getKey.endsWith(".lastDeltaRecordsAppended"))
+      Assertions.assertTrue(recordsAppended.isDefined, "Missing lastDeltaRecordsAppended metric")
+      Assertions.assertEquals(2L, recordsAppended.get.getValue.getValue)
+
+      val partitionsWritten = tableMetrics
+        .find(_.getKey.endsWith(".lastPartitionsWritten"))
+      Assertions.assertTrue(partitionsWritten.isDefined, "Missing lastPartitionsWritten metric")
+      Assertions.assertEquals(2L, partitionsWritten.get.getValue.getValue)
+    }
+  }
+
+  test("Paimon Metric: Codahale metrics update on subsequent commits") {
+    withTable("T") {
+      sql("CREATE TABLE T (id INT, name STRING)")
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      def getGaugeValue(suffix: String): Long = {
+        val gauges = getCodahaleRegistry.getGauges
+        val entry = gauges
+          .entrySet()
+          .toArray
+          .map(_.asInstanceOf[java.util.Map.Entry[String, com.codahale.metrics.Gauge[_]]])
+          .find(e => e.getKey.startsWith("paimon.T.commit.") && e.getKey.endsWith(suffix))
+        entry.map(_.getValue.getValue.asInstanceOf[Long]).getOrElse(-1L)
+      }
+
+      Assertions.assertEquals(3L, getGaugeValue(".lastDeltaRecordsAppended"))
+
+      sql("INSERT INTO T VALUES (4, 'd'), (5, 'e')")
+      Assertions.assertEquals(2L, getGaugeValue(".lastDeltaRecordsAppended"))
+    }
+  }
+
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {
     metrics.find(_.name() == name).get.value()
   }
