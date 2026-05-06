@@ -25,11 +25,10 @@ import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, Phys
 import org.apache.spark.sql.types.StructType
 
 /**
- * Spark-4.0 shadow wrapper. Source-identical to the `paimon-spark4-common` version but compiled
- * against Spark 4.0.2; the maven shade order picks `paimon-spark-4.0/target/classes` ahead of the
- * shaded 4-common copy, so the class metadata loaded at runtime does not include the 4.1-only
- * `BatchWrite.commit(.., WriteSummary)` signature that triggers `ClassNotFoundException` via
- * `ObjectStreamClass.getPrivateMethod` during Spark task serialization.
+ * Spark-4.x thin wrapper that mixes `BatchWrite` into [[PaimonBatchWriteBase]]. See the base class
+ * scaladoc for why the inheritance lives here rather than in `paimon-spark-common`. A duplicate of
+ * this file lives at `paimon-spark-4.0/src/main` so that a 4.0.2 compile target produces a class
+ * file whose method table does not reference `WriteSummary` (4.1-only).
  */
 class PaimonBatchWrite(
     table: FileStoreTable,

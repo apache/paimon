@@ -18,89 +18,38 @@
 
 package org.apache.paimon.spark.format
 
-import org.apache.paimon.format.csv.CsvOptions
-import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
-import org.apache.paimon.spark.write.{BaseV2WriteBuilder, FormatTableWriteTaskResult, V2DataWrite, WriteTaskResult}
+import org.apache.paimon.spark.SparkInternalRowWrapper
+import org.apache.paimon.spark.write.{FormatTableWriteTaskResult, V2DataWrite, WriteTaskResult}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage}
-import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog}
-import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
-import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write._
-import org.apache.spark.sql.connector.write.streaming.StreamingWrite
+import org.apache.spark.sql.connector.write.{DataWriterFactory, WriterCommitMessage}
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
-import java.util
-import java.util.Locale
 
 import scala.collection.JavaConverters._
 
-case class PaimonFormatTable(table: FormatTable)
-  extends BaseTable
-  with SupportsRead
-  with SupportsWrite {
-
-  override def capabilities(): util.Set[TableCapability] = {
-    util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
-  }
-
-  override def properties: util.Map[String, String] = {
-    val properties = new util.HashMap[String, String](table.options())
-    properties.put(TableCatalog.PROP_PROVIDER, table.format.name().toLowerCase(Locale.ROOT))
-    if (table.comment.isPresent) {
-      properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
-    }
-    if (FormatTable.Format.CSV == table.format) {
-      properties.put(
-        "sep",
-        properties.getOrDefault(
-          CsvOptions.FIELD_DELIMITER.key(),
-          CsvOptions.FIELD_DELIMITER.defaultValue()))
-    }
-    properties
-  }
-
-  override def newScanBuilder(caseInsensitiveStringMap: CaseInsensitiveStringMap): ScanBuilder = {
-    val scanBuilder = FormatTableScanBuilder(table.copy(caseInsensitiveStringMap))
-    scanBuilder.pruneColumns(schema)
-    scanBuilder
-  }
-
-  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
-    PaimonFormatTableWriterBuilder(table, info.schema)
-  }
-}
-
-case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: StructType)
-  extends BaseV2WriteBuilder(table) {
-
-  override def partitionRowType(): RowType = table.partitionType
-
-  override def build: Write = new Write() {
-    override def toBatch: BatchWrite = {
-      FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
-    }
-
-    override def toStreaming: StreamingWrite = {
-      throw new UnsupportedOperationException("FormatTable doesn't support streaming write")
-    }
-  }
-}
-
-private case class FormatTableBatchWrite(
+/**
+ * Business logic for `FormatTable` batch writes, deliberately *not* extending
+ * `org.apache.spark.sql.connector.write.BatchWrite`. See
+ * [[org.apache.paimon.spark.write.PaimonBatchWriteBase]] for the full rationale: Spark 4.1 added a
+ * default method `BatchWrite.commit(.., WriteSummary)` whose `WriteSummary` parameter type is
+ * unavailable on Spark 4.0, so a class compiled against 4.1 that mixes in `BatchWrite` triggers
+ * `ClassNotFoundException: WriteSummary` lazy-linking on 4.0 runtimes during Spark task
+ * serialization. Keeping this base off `BatchWrite` lets common ship the implementation once;
+ * per-version `paimon-spark{3,4}-common` modules supply a thin wrapper that mixes in `BatchWrite`,
+ * and `paimon-spark-4.0/src/main` shadows that wrapper at the 4.0.2 compile target.
+ */
+abstract class FormatTableBatchWriteBase(
     table: FormatTable,
     overwriteDynamic: Option[Boolean],
     overwritePartitions: Option[Map[String, String]],
     writeSchema: StructType)
-  extends BatchWrite
-  with Logging {
+  extends Logging
+  with Serializable {
 
-  private val batchWriteBuilder = {
+  protected val batchWriteBuilder: BatchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
     // todo: add test for static overwrite the whole table
     if (overwriteDynamic.contains(true)) {
@@ -111,13 +60,11 @@ private case class FormatTableBatchWrite(
     builder
   }
 
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+  protected def createFormatTableDataWriterFactory(): DataWriterFactory = {
     (_: Int, _: Long) => new FormatTableDataWriter(batchWriteBuilder, writeSchema)
   }
 
-  override def useCommitCoordinator(): Boolean = false
-
-  override def commit(messages: Array[WriterCommitMessage]): Unit = {
+  protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Committing to FormatTable ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava
@@ -132,7 +79,7 @@ private case class FormatTableBatchWrite(
     }
   }
 
-  override def abort(messages: Array[WriterCommitMessage]): Unit = {
+  protected def abortMessages(messages: Array[WriterCommitMessage]): Unit = {
     logInfo(s"Aborting write to FormatTable ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     val commitMessages = WriteTaskResult.merge(messages).asJava

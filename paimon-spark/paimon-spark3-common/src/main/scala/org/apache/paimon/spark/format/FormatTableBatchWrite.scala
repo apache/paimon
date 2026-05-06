@@ -16,39 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.write
+package org.apache.paimon.spark.format
 
-import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
 import org.apache.spark.sql.types.StructType
 
 /**
- * Spark-4.0 shadow wrapper. Source-identical to the `paimon-spark4-common` version but compiled
- * against Spark 4.0.2; the maven shade order picks `paimon-spark-4.0/target/classes` ahead of the
- * shaded 4-common copy, so the class metadata loaded at runtime does not include the 4.1-only
- * `BatchWrite.commit(.., WriteSummary)` signature that triggers `ClassNotFoundException` via
- * `ObjectStreamClass.getPrivateMethod` during Spark task serialization.
+ * Spark-3.x thin wrapper that mixes `BatchWrite` into [[FormatTableBatchWriteBase]]. See the base
+ * class scaladoc for why the inheritance lives here rather than in `paimon-spark-common`.
  */
-class PaimonBatchWrite(
-    table: FileStoreTable,
-    writeSchema: StructType,
-    dataSchema: StructType,
+class FormatTableBatchWrite(
+    table: FormatTable,
+    overwriteDynamic: Option[Boolean],
     overwritePartitions: Option[Map[String, String]],
-    copyOnWriteScan: Option[PaimonCopyOnWriteScan])
-  extends PaimonBatchWriteBase(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+    writeSchema: StructType)
+  extends FormatTableBatchWriteBase(table, overwriteDynamic, overwritePartitions, writeSchema)
   with BatchWrite
   with Serializable {
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    createPaimonDataWriterFactory(info)
+    createFormatTableDataWriterFactory()
 
   override def useCommitCoordinator(): Boolean = false
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = commitMessages(messages)
 
-  override def abort(messages: Array[WriterCommitMessage]): Unit = {
-    // TODO clean uncommitted files
-  }
+  override def abort(messages: Array[WriterCommitMessage]): Unit = abortMessages(messages)
 }
