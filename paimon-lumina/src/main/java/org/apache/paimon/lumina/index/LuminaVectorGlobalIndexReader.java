@@ -51,6 +51,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <p>Each shard has exactly one Lumina index file. This reader loads the single index and performs
  * vector similarity search.
+ *
+ * <p>On {@link #close()}, the index is returned to the {@link LuminaSearcherPool} rather than
+ * destroyed, so the native graph stays warm across queries and avoids repeated object storage GETs.
  */
 public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
@@ -65,22 +68,24 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final LuminaVectorIndexOptions options;
+    private final LuminaSearcherPool searcherPool;
+    private final String poolKey;
 
-    private volatile LuminaIndexMeta indexMeta;
-    private volatile LuminaIndex index;
-    private SeekableInputStream openStream;
-    private InputStreamFileInput inputStreamFileInput;
+    private volatile LuminaSearcherPool.PooledEntry borrowed;
 
     public LuminaVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
-            LuminaVectorIndexOptions options) {
+            LuminaVectorIndexOptions options,
+            LuminaSearcherPool searcherPool) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
         this.options = options;
+        this.searcherPool = searcherPool;
+        this.poolKey = this.ioMeta.filePath().toString() + "@" + this.ioMeta.fileSize();
     }
 
     @Override
@@ -101,9 +106,9 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
-        LuminaVectorMetric indexMetric = indexMeta.metric();
+        LuminaVectorMetric indexMetric = borrowed.indexMeta.metric();
 
-        int effectiveK = (int) Math.min(limit, index.size());
+        int effectiveK = (int) Math.min(limit, borrowed.index.size());
         if (effectiveK <= 0) {
             return null;
         }
@@ -132,18 +137,18 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             distances = new float[effectiveK];
             labels = new long[effectiveK];
             Map<String, String> searchOptions = options.toLuminaOptions();
-            searchOptions.putAll(indexMeta.options());
+            searchOptions.putAll(borrowed.indexMeta.options());
             searchOptions.put("search.thread_safe_filter", "true");
             ensureSearchListSize(searchOptions, effectiveK);
-            index.searchWithFilter(
+            borrowed.index.searchWithFilter(
                     queryVector, 1, effectiveK, distances, labels, scopedIds, searchOptions);
         } else {
             distances = new float[effectiveK];
             labels = new long[effectiveK];
             Map<String, String> searchOptions = options.toLuminaOptions();
-            searchOptions.putAll(indexMeta.options());
+            searchOptions.putAll(borrowed.indexMeta.options());
             ensureSearchListSize(searchOptions, effectiveK);
-            index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
+            borrowed.index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
         }
 
         // Min-heap: smallest score at head, so we can evict the weakest candidate efficiently.
@@ -217,128 +222,105 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                             + fieldType);
         }
         int queryDim = ((float[]) vector).length;
-        if (queryDim != indexMeta.dim()) {
+        if (queryDim != borrowed.indexMeta.dim()) {
             throw new IllegalArgumentException(
                     String.format(
                             "Query vector dimension mismatch: index expects %d, but got %d",
-                            indexMeta.dim(), queryDim));
+                            borrowed.indexMeta.dim(), queryDim));
         }
     }
 
     private void ensureLoaded() throws IOException {
-        if (index == null) {
+        if (borrowed == null) {
             synchronized (this) {
-                if (index == null) {
-                    indexMeta = LuminaIndexMeta.deserialize(ioMeta.metadata());
-                    SeekableInputStream in = fileReader.getInputStream(ioMeta);
-                    try {
-                        InputStreamFileInput fileInput = new InputStreamFileInput(in);
-                        Map<String, String> searcherOptions = options.toLuminaOptions();
-                        searcherOptions.putAll(indexMeta.options());
-                        index =
-                                LuminaIndex.fromStream(
-                                        indexMeta.indexType(),
-                                        fileInput,
-                                        ioMeta.fileSize(),
-                                        indexMeta.dim(),
-                                        indexMeta.metric(),
-                                        searcherOptions);
-                        fileInput.markOpenPhaseDone();
-                        openStream = in;
-                        inputStreamFileInput = fileInput;
-                    } catch (Exception e) {
-                        IOUtils.closeQuietly(in);
-                        throw e;
+                if (borrowed == null) {
+                    LuminaSearcherPool.PooledEntry entry = searcherPool.borrow(poolKey);
+                    if (entry == null) {
+                        entry = createEntry();
                     }
+                    borrowed = entry;
                 }
             }
+        }
+    }
+
+    private LuminaSearcherPool.PooledEntry createEntry() throws IOException {
+        LuminaIndexMeta indexMeta = LuminaIndexMeta.deserialize(ioMeta.metadata());
+        SeekableInputStream in = fileReader.getInputStream(ioMeta);
+        try {
+            InputStreamFileInput fileInput = new InputStreamFileInput(in);
+            Map<String, String> searcherOptions = options.toLuminaOptions();
+            searcherOptions.putAll(indexMeta.options());
+            LuminaIndex index =
+                    LuminaIndex.fromStream(
+                            indexMeta.indexType(),
+                            fileInput,
+                            ioMeta.fileSize(),
+                            indexMeta.dim(),
+                            indexMeta.metric(),
+                            searcherOptions);
+            fileInput.markOpenPhaseDone();
+            return new LuminaSearcherPool.PooledEntry(index, in, fileInput, indexMeta);
+        } catch (Exception e) {
+            IOUtils.closeQuietly(in);
+            throw e;
         }
     }
 
     /** Returns the total bytes read by the underlying {@link InputStreamFileInput}, or 0. */
     public long getTotalBytesRead() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getTotalBytesRead() : 0;
+        return borrowed != null ? borrowed.fileInput.getTotalBytesRead() : 0;
     }
 
     // =================== open-phase I/O stats =====================
 
     public long getOpenBytesRead() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getOpenBytesRead() : 0;
+        return borrowed != null ? borrowed.fileInput.getOpenBytesRead() : 0;
     }
 
     public long getOpenSeekCount() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getOpenSeekCount() : 0;
+        return borrowed != null ? borrowed.fileInput.getOpenSeekCount() : 0;
     }
 
     public long getOpenReadCount() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getOpenReadCount() : 0;
+        return borrowed != null ? borrowed.fileInput.getOpenReadCount() : 0;
     }
 
     public long getOpenReadTimeNanos() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getOpenReadTimeNanos() : 0;
+        return borrowed != null ? borrowed.fileInput.getOpenReadTimeNanos() : 0;
     }
 
     public long getOpenSeekTimeNanos() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getOpenSeekTimeNanos() : 0;
+        return borrowed != null ? borrowed.fileInput.getOpenSeekTimeNanos() : 0;
     }
 
     // =================== search-phase I/O stats =====================
 
     public long getSearchBytesRead() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getSearchBytesRead() : 0;
+        return borrowed != null ? borrowed.fileInput.getSearchBytesRead() : 0;
     }
 
     public long getSearchSeekCount() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getSearchSeekCount() : 0;
+        return borrowed != null ? borrowed.fileInput.getSearchSeekCount() : 0;
     }
 
     public long getSearchReadCount() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getSearchReadCount() : 0;
+        return borrowed != null ? borrowed.fileInput.getSearchReadCount() : 0;
     }
 
     public long getSearchReadTimeNanos() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getSearchReadTimeNanos() : 0;
+        return borrowed != null ? borrowed.fileInput.getSearchReadTimeNanos() : 0;
     }
 
     public long getSearchSeekTimeNanos() {
-        return inputStreamFileInput != null ? inputStreamFileInput.getSearchSeekTimeNanos() : 0;
+        return borrowed != null ? borrowed.fileInput.getSearchSeekTimeNanos() : 0;
     }
 
     @Override
     public void close() throws IOException {
-        Throwable firstException = null;
-
-        if (index != null) {
-            try {
-                index.close();
-            } catch (Throwable t) {
-                firstException = t;
-            }
-            index = null;
-        }
-
-        if (openStream != null) {
-            try {
-                openStream.close();
-            } catch (Throwable t) {
-                if (firstException == null) {
-                    firstException = t;
-                } else {
-                    firstException.addSuppressed(t);
-                }
-            }
-            openStream = null;
-        }
-
-        if (firstException != null) {
-            if (firstException instanceof IOException) {
-                throw (IOException) firstException;
-            } else if (firstException instanceof RuntimeException) {
-                throw (RuntimeException) firstException;
-            } else {
-                throw new RuntimeException(
-                        "Failed to close Lumina vector global index reader", firstException);
-            }
+        if (borrowed != null) {
+            searcherPool.returnEntry(poolKey, borrowed);
+            borrowed = null;
         }
     }
 
@@ -419,7 +401,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
      *
      * <p>This mirrors the C++ {@code LuminaFileReader} adapter that bridges Paimon's {@code
      * InputStream} to Lumina's {@code FileReader} interface. The stream lifecycle is managed by the
-     * enclosing reader, not by this adapter.
+     * enclosing pool entry, not by this adapter.
      */
     static class InputStreamFileInput implements LuminaFileInput {
         private final SeekableInputStream in;
@@ -520,7 +502,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         @Override
         public void close() {
-            // Stream lifecycle is managed by the enclosing Reader.
+            // Stream lifecycle is managed by the enclosing pool entry.
         }
     }
 

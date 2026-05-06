@@ -28,6 +28,8 @@ public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     public static final String IDENTIFIER = "lumina";
 
+    private volatile LuminaSearcherPool searcherPool;
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -35,6 +37,14 @@ public class LuminaVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new LuminaVectorGlobalIndexer(field.type(), options);
+        if (searcherPool == null) {
+            synchronized (this) {
+                if (searcherPool == null) {
+                    int maxSize = options.get(LuminaVectorIndexOptions.SEARCHER_POOL_MAX_SIZE);
+                    searcherPool = new LuminaSearcherPool(maxSize);
+                }
+            }
+        }
+        return new LuminaVectorGlobalIndexer(field.type(), options, searcherPool);
     }
 }
