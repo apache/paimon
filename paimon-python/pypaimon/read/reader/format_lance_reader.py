@@ -35,11 +35,12 @@ class FormatLanceReader(RecordBatchReader):
     and filters it based on the provided predicate and projection.
     """
 
+    # row_indices: from IndexedSplit (ANN vector search), discrete local row offsets within the file.
+    # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
                  row_indices: Optional[List[int]] = None,
                  shard_range: Optional[Tuple[int, int]] = None):
-        """Initialize Lance reader."""
         import lance
 
         self._read_field_names = [f.name for f in read_fields]
