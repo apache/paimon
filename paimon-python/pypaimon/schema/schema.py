@@ -48,6 +48,13 @@ class Schema:
         self.options = options if options is not None else {}
         self.comment = comment
 
+        changelog_producer = self.options.get(CoreOptions.CHANGELOG_PRODUCER.key(), 'none')
+        if changelog_producer != 'none' and not self.primary_keys:
+            raise ValueError(
+                f"Cannot set 'changelog-producer' to '{changelog_producer}' on a table without primary keys. "
+                f"Changelog producer requires primary keys to be defined."
+            )
+
     @staticmethod
     def from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
                             primary_keys: Optional[List[str]] = None, options: Optional[Dict] = None,
