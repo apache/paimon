@@ -20,7 +20,6 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -157,7 +156,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public Blob getBlob(int pos) {
-        return BlobUtils.fromBytes(getBinary(pos), null, fileIO, false);
+        return Blob.fromBytes(getBinary(pos), null, fileIO, false);
     }
 
     @Override

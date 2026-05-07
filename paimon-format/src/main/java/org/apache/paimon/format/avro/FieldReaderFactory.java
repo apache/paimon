@@ -20,7 +20,7 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
-import org.apache.paimon.data.BlobUtils;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -274,7 +274,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
             byte[] bytes = decoder.readBytes(null).array();
-            return BlobUtils.fromBytesWithReader(bytes, uriReader, null, false);
+            return Blob.fromBytesWithReader(bytes, uriReader, null, false);
         }
 
         @Override

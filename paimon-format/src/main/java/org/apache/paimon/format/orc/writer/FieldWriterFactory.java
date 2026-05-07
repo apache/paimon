@@ -19,7 +19,6 @@
 package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -251,7 +250,7 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             BytesColumnVector vector = (BytesColumnVector) column;
             Blob blob = getters.getBlob(columnId);
             try {
-                byte[] bytes = BlobUtils.serializeBlob(blob);
+                byte[] bytes = Blob.serializeBlob(blob);
                 vector.setVal(rowId, bytes, 0, bytes.length);
                 return bytes.length;
             } catch (Throwable t) {

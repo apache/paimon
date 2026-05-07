@@ -21,7 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -244,7 +243,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
             return null;
         }
-        return BlobUtils.fromBytes(internalRow.getBinary(actualPos), uriReaderFactory, null);
+        return Blob.fromBytes(internalRow.getBinary(actualPos), uriReaderFactory, null);
     }
 
     @Override
@@ -425,7 +424,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int pos) {
-            return BlobUtils.fromBytes(arrayData.getBinary(pos), null, null);
+            return Blob.fromBytes(arrayData.getBinary(pos), null, null);
         }
 
         @Override

@@ -21,7 +21,6 @@ package org.apache.paimon.format.parquet.writer;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobUtils;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -333,7 +332,7 @@ public class ParquetRowDataWriter {
 
         private void writeBlob(Blob blob) {
             try {
-                recordConsumer.addBinary(Binary.fromReusedByteArray(BlobUtils.serializeBlob(blob)));
+                recordConsumer.addBinary(Binary.fromReusedByteArray(Blob.serializeBlob(blob)));
             } catch (Throwable t) {
                 throw new IllegalArgumentException(
                         "BLOB inline fields configured by blob-descriptor-field or "

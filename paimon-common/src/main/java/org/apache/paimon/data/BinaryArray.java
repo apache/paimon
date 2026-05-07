@@ -247,7 +247,7 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
 
     @Override
     public Blob getBlob(int pos) {
-        return BlobUtils.fromBytes(getBinary(pos), null, null);
+        return Blob.fromBytes(getBinary(pos), null, null);
     }
 
     @Override

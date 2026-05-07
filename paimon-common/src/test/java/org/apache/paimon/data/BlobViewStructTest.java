@@ -72,6 +72,6 @@ public class BlobViewStructTest {
         assertThat(BlobViewStruct.isBlobViewStruct(bytes)).isTrue();
         assertThat(BlobViewStruct.isBlobViewStruct(null)).isFalse();
         assertThat(BlobViewStruct.isBlobViewStruct(new byte[] {1, 2, 3})).isFalse();
-        assertThat(BlobUtils.fromBytes(bytes, null, null)).isEqualTo(Blob.fromView(viewStruct));
+        assertThat(Blob.fromBytes(bytes, null, null)).isEqualTo(Blob.fromView(viewStruct));
     }
 }
