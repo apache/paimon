@@ -102,6 +102,11 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(noMergedRowCount).isEqualTo(2);
         assertThat(mergedRowCount).isEqualTo(1);
 
+        // assert record count tracked by snapshot. The second commit reuses rowId 0, so
+        // totalRecordCount should be 1 instead of 2.
+        assertThat(getTableDefault().snapshotManager().latestSnapshot().totalRecordCount())
+                .isEqualTo(1L);
+
         RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
         assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
         reader.forEachRemaining(
@@ -951,6 +956,10 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(entries.size()).isEqualTo(1);
         assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
+
+        // assert record count tracked by snapshot. Compact commit should not introduce new rowIds,
+        // and totalRecordCount should still match the total inserted records (5 * 100000).
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(500000L);
     }
 
     @Test

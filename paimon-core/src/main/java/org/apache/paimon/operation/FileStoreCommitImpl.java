@@ -932,8 +932,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaFiles = assigned.assignedEntries;
             }
 
-            // the added records subtract the deleted records from
-            long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            long deltaRecordCount;
+            if (options.dataEvolutionEnabled()) {
+                // for data evolution table, we use row id to track the inserted records num
+                deltaRecordCount = nextRowIdStart - firstRowIdStart;
+            } else {
+                // the added records subtract the deleted records from
+                deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            }
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files
