@@ -121,7 +121,10 @@ class CommitScanner:
         for partition_values in changed_partitions:
             sub_predicates = []
             for i, key in enumerate(partition_keys):
-                sub_predicates.append(predicate_builder.equal(key, partition_values[i]))
+                if partition_values[i] is None:
+                    sub_predicates.append(predicate_builder.is_null(key))
+                else:
+                    sub_predicates.append(predicate_builder.equal(key, partition_values[i]))
             partition_predicates.append(predicate_builder.and_predicates(sub_predicates))
 
         return predicate_builder.or_predicates(partition_predicates)

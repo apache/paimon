@@ -52,6 +52,7 @@ def _mock_table():
     table.fields = TABLE_FIELDS
     table.partition_keys = ['dt', 'region']
     table.partition_keys_fields = PARTITION_FIELDS
+    table.options.options.get = Mock(return_value="__DEFAULT_PARTITION__")
     return table
 
 
@@ -183,9 +184,9 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
             return mock_cls.call_args[1]['partition_predicate']
 
     def test_overwrite_rejects_mismatched_partition(self, *_):
-        commit = self._create_commit(stub_commit=False)
+        commit = self._create_commit()
         with self.assertRaises(RuntimeError) as ctx:
-            commit.overwrite(self._TARGET, [self._msg(('2024-01-15', 'us-west-2'))], 1)
+            commit._create_static_partition_filter(self._TARGET, [self._msg(('2024-01-15', 'us-west-2'))])
         self.assertIn('does not belong to this partition', str(ctx.exception))
 
     def test_overwrite_passes_partition_scoped_predicate(self, *_):
@@ -208,6 +209,89 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
         self.assertTrue(pred.test(OffsetRow(('2024-01-16', 'us-west-2'), 0, 2)))
         self.assertFalse(pred.test(OffsetRow(('2024-01-17', 'eu-west-1'), 0, 2)))
 
+    def test_overwrite_null_partition_value(self, *_):
+        """Test that overwrite with None partition value uses isNull predicate."""
+        commit = self._create_commit()
+        target = {'dt': None, 'region': 'us-east-1'}
+        commit.overwrite(target, [self._msg((None, 'us-east-1'))], 1)
+
+        pred = self._extract_partition_predicate(commit)
+        # Should match rows where dt is None and region is 'us-east-1'
+        self.assertTrue(pred.test(OffsetRow((None, 'us-east-1'), 0, 2)))
+        # Should not match rows where dt has a value
+        self.assertFalse(pred.test(OffsetRow(('2024-01-15', 'us-east-1'), 0, 2)))
+        # Should not match rows where region differs
+        self.assertFalse(pred.test(OffsetRow((None, 'us-west-2'), 0, 2)))
+
+    def test_overwrite_default_partition_name_treated_as_null(self, *_):
+        """Test that overwrite with default partition name string is treated as null."""
+        commit = self._create_commit()
+        target = {'dt': '__DEFAULT_PARTITION__', 'region': 'us-east-1'}
+        commit.overwrite(target, [self._msg((None, 'us-east-1'))], 1)
+
+        pred = self._extract_partition_predicate(commit)
+        # __DEFAULT_PARTITION__ should be treated like None (isNull)
+        self.assertTrue(pred.test(OffsetRow((None, 'us-east-1'), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow(('2024-01-15', 'us-east-1'), 0, 2)))
+
+    def test_overwrite_all_null_partition_values(self, *_):
+        """Test overwrite where all partition values are None."""
+        commit = self._create_commit()
+        target = {'dt': None, 'region': None}
+        commit.overwrite(target, [self._msg((None, None))], 1)
+
+        pred = self._extract_partition_predicate(commit)
+        self.assertTrue(pred.test(OffsetRow((None, None), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow((None, 'us-east-1'), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow(('2024-01-15', None), 0, 2)))
+
+    def test_overwrite_null_partition_rejects_mismatched(self, *_):
+        """Test that overwrite with null partition rejects rows that don't match."""
+        commit = self._create_commit()
+        target = {'dt': None, 'region': 'us-east-1'}
+        # Trying to overwrite null dt partition with data that has a non-null dt
+        with self.assertRaises(RuntimeError) as ctx:
+            commit._create_static_partition_filter(target, [self._msg(('2024-01-15', 'us-east-1'))])
+        self.assertIn('does not belong to this partition', str(ctx.exception))
+
+    def test_dynamic_overwrite_null_partition_value(self, *_):
+        """Test dynamic partition overwrite with None partition values."""
+        commit = self._create_commit()
+        self.table.options.dynamic_partition_overwrite.return_value = True
+        commit.overwrite({}, [self._msg((None, 'us-east-1'))], 1)
+
+        pred = self._extract_partition_predicate(commit)
+        self.assertTrue(pred.test(OffsetRow((None, 'us-east-1'), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow(('2024-01-15', 'us-east-1'), 0, 2)))
+
+    def test_dynamic_overwrite_mixed_null_and_nonnull(self, *_):
+        """Test dynamic partition overwrite with both null and non-null partitions."""
+        commit = self._create_commit()
+        self.table.options.dynamic_partition_overwrite.return_value = True
+        commit.overwrite({}, [
+            self._msg(('2024-01-15', 'us-east-1')),
+            self._msg((None, 'us-west-2')),
+        ], 1)
+
+        pred = self._extract_partition_predicate(commit)
+        self.assertTrue(pred.test(OffsetRow(('2024-01-15', 'us-east-1'), 0, 2)))
+        self.assertTrue(pred.test(OffsetRow((None, 'us-west-2'), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow(('2024-01-16', 'eu-west-1'), 0, 2)))
+
+    def test_drop_partitions_null_partition_value(self, *_):
+        """Test drop_partitions with default partition name string representing null."""
+        commit = self._create_commit()
+        commit.drop_partitions([
+            {'dt': '__DEFAULT_PARTITION__', 'region': 'us-east-1'},
+            {'dt': '2024-01-16', 'region': 'us-west-2'},
+        ], 1)
+
+        pred = self._extract_partition_predicate(commit)
+        self.assertTrue(pred.test(OffsetRow((None, 'us-east-1'), 0, 2)))
+        self.assertTrue(pred.test(OffsetRow(('2024-01-16', 'us-west-2'), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow(('2024-01-15', 'us-east-1'), 0, 2)))
+        self.assertFalse(pred.test(OffsetRow((None, 'us-west-2'), 0, 2)))
+
 
 class TestCommitScannerPartitionPredicate(unittest.TestCase):
 
@@ -224,6 +308,18 @@ class TestCommitScannerPartitionPredicate(unittest.TestCase):
         self.assertTrue(pred.test(GenericRow(['2024-01-15', 'us-east-1'], PARTITION_FIELDS)))
         self.assertTrue(pred.test(GenericRow(['2024-01-16', 'us-west-2'], PARTITION_FIELDS)))
         self.assertFalse(pred.test(GenericRow(['2024-01-17', 'eu-west-1'], PARTITION_FIELDS)))
+
+    def test_filter_handles_null_partition_values(self):
+        scanner = self._scanner()
+        pred = scanner._build_partition_filter_from_entries([
+            _manifest_entry([None, 'us-east-1']),
+            _manifest_entry(['2024-01-16', 'us-west-2']),
+        ])
+
+        self.assertTrue(pred.test(GenericRow([None, 'us-east-1'], PARTITION_FIELDS)))
+        self.assertTrue(pred.test(GenericRow(['2024-01-16', 'us-west-2'], PARTITION_FIELDS)))
+        self.assertFalse(pred.test(GenericRow(['2024-01-15', 'us-east-1'], PARTITION_FIELDS)))
+        self.assertFalse(pred.test(GenericRow([None, 'us-west-2'], PARTITION_FIELDS)))
 
     def test_filter_none_without_partition_keys(self):
         scanner = CommitScanner(Mock(partition_keys=[]), Mock())
