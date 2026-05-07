@@ -220,16 +220,6 @@ class CoreOptions:
         )
     )
 
-    BLOB_VIEW_FIELD: ConfigOption[str] = (
-        ConfigOptions.key("blob-view-field")
-        .string_type()
-        .no_default_value()
-        .with_description(
-            "Comma-separated BLOB field names that should be stored as serialized BlobViewStruct bytes "
-            "inline in normal data files."
-        )
-    )
-
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("target-file-size")
         .memory_type()
