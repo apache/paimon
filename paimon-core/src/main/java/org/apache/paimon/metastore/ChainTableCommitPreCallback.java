@@ -36,6 +36,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -43,6 +44,7 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -111,33 +113,59 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
                         partitionType,
                         table.schema().partitionKeys().toArray(new String[0]),
                         coreOptions.legacyPartitionName());
-        RecordComparator partitionComparator =
-                CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
+
+        List<String> chainKeys =
+                ChainTableUtils.chainPartitionKeys(coreOptions, table.schema().partitionKeys());
+        int chainFieldCount = chainKeys.size();
+        ChainPartitionProjector projector =
+                new ChainPartitionProjector(partitionType, chainFieldCount);
+        int groupFieldCount = projector.groupFieldCount();
+        RecordComparator chainComparator =
+                CodeGenUtils.newRecordComparator(projector.chainPartitionType().getFieldTypes());
+
         List<BinaryRow> snapshotPartitions =
                 table.newSnapshotReader().partitionEntries().stream()
                         .map(PartitionEntry::partition)
-                        .sorted(partitionComparator)
                         .collect(Collectors.toList());
         SnapshotReader deltaSnapshotReader = deltaTable.newSnapshotReader();
         PredicateBuilder builder = new PredicateBuilder(partitionType);
         for (BinaryRow partition : changedPartitions) {
+            BinaryRow partitionGroup = projector.extractGroupPartition(partition);
+            BinaryRow partitionChain = projector.extractChainPartition(partition);
+
+            List<BinaryRow> sameGroupSnapshots =
+                    filterSameGroup(snapshotPartitions, partitionGroup, projector);
+            sameGroupSnapshots.sort(
+                    (a, b) ->
+                            chainComparator.compare(
+                                    projector.extractChainPartition(a),
+                                    projector.extractChainPartition(b)));
+
             Optional<BinaryRow> preSnapshotPartition =
-                    findPreSnapshotPartition(snapshotPartitions, partition, partitionComparator);
+                    findPreSnapshotInGroup(
+                            sameGroupSnapshots, partitionChain, chainComparator, projector);
             Optional<BinaryRow> nextSnapshotPartition =
-                    findNextSnapshotPartition(snapshotPartitions, partition, partitionComparator);
+                    findNextSnapshotInGroup(
+                            sameGroupSnapshots, partitionChain, chainComparator, projector);
+
             Predicate deltaFollowingPredicate =
-                    ChainTableUtils.createTriangularPredicate(
-                            partition, partitionConverter, builder::equal, builder::greaterThan);
+                    ChainTableUtils.createGroupChainPredicate(
+                            partition,
+                            partitionConverter,
+                            groupFieldCount,
+                            builder::equal,
+                            builder::greaterThan);
             List<BinaryRow> deltaFollowingPartitions =
                     deltaSnapshotReader.withPartitionFilter(deltaFollowingPredicate)
                             .partitionEntries().stream()
                             .map(PartitionEntry::partition)
                             .filter(
                                     deltaPartition ->
-                                            isBeforeNextSnapshotPartition(
+                                            isBeforeNextSnapshotInGroup(
                                                     deltaPartition,
                                                     nextSnapshotPartition,
-                                                    partitionComparator))
+                                                    chainComparator,
+                                                    projector))
                             .collect(Collectors.toList());
             boolean canDrop =
                     deltaFollowingPartitions.isEmpty() || preSnapshotPartition.isPresent();
@@ -159,13 +187,26 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
                 && indexFiles.stream().allMatch(f -> f.kind() == FileKind.DELETE);
     }
 
-    private Optional<BinaryRow> findPreSnapshotPartition(
-            List<BinaryRow> snapshotPartitions,
-            BinaryRow partition,
-            RecordComparator partitionComparator) {
+    private List<BinaryRow> filterSameGroup(
+            List<BinaryRow> partitions, BinaryRow groupKey, ChainPartitionProjector projector) {
+        List<BinaryRow> result = new ArrayList<>();
+        for (BinaryRow partition : partitions) {
+            if (projector.extractGroupPartition(partition).equals(groupKey)) {
+                result.add(partition);
+            }
+        }
+        return result;
+    }
+
+    private Optional<BinaryRow> findPreSnapshotInGroup(
+            List<BinaryRow> sortedSameGroupPartitions,
+            BinaryRow targetChain,
+            RecordComparator chainComparator,
+            ChainPartitionProjector projector) {
         BinaryRow pre = null;
-        for (BinaryRow snapshotPartition : snapshotPartitions) {
-            if (partitionComparator.compare(snapshotPartition, partition) < 0) {
+        for (BinaryRow snapshotPartition : sortedSameGroupPartitions) {
+            BinaryRow chain = projector.extractChainPartition(snapshotPartition);
+            if (chainComparator.compare(chain, targetChain) < 0) {
                 pre = snapshotPartition;
             } else {
                 break;
@@ -174,24 +215,31 @@ public class ChainTableCommitPreCallback implements CommitPreCallback {
         return Optional.ofNullable(pre);
     }
 
-    private Optional<BinaryRow> findNextSnapshotPartition(
-            List<BinaryRow> snapshotPartitions,
-            BinaryRow partition,
-            RecordComparator partitionComparator) {
-        for (BinaryRow snapshotPartition : snapshotPartitions) {
-            if (partitionComparator.compare(snapshotPartition, partition) > 0) {
+    private Optional<BinaryRow> findNextSnapshotInGroup(
+            List<BinaryRow> sortedSameGroupPartitions,
+            BinaryRow targetChain,
+            RecordComparator chainComparator,
+            ChainPartitionProjector projector) {
+        for (BinaryRow snapshotPartition : sortedSameGroupPartitions) {
+            BinaryRow chain = projector.extractChainPartition(snapshotPartition);
+            if (chainComparator.compare(chain, targetChain) > 0) {
                 return Optional.of(snapshotPartition);
             }
         }
         return Optional.empty();
     }
 
-    private boolean isBeforeNextSnapshotPartition(
+    private boolean isBeforeNextSnapshotInGroup(
             BinaryRow partition,
             Optional<BinaryRow> nextSnapshotPartition,
-            RecordComparator partitionComparator) {
-        return !nextSnapshotPartition.isPresent()
-                || partitionComparator.compare(partition, nextSnapshotPartition.get()) < 0;
+            RecordComparator chainComparator,
+            ChainPartitionProjector projector) {
+        if (!nextSnapshotPartition.isPresent()) {
+            return true;
+        }
+        BinaryRow partitionChain = projector.extractChainPartition(partition);
+        BinaryRow nextChain = projector.extractChainPartition(nextSnapshotPartition.get());
+        return chainComparator.compare(partitionChain, nextChain) < 0;
     }
 
     private String generatePartitionValues(

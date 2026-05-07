@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.catalog.TableRollback;
@@ -38,10 +39,12 @@ import org.apache.paimon.metastore.ChainTableCommitPreCallback;
 import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.metastore.VisibilityWaitCallback;
+import org.apache.paimon.operation.ChainTablePartitionExpire;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.operation.NormalPartitionExpire;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
@@ -65,6 +68,7 @@ import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
@@ -440,6 +444,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             return null;
         }
 
+        if (options.isChainTable()) {
+            return newChainTablePartitionExpire(table);
+        }
+
         return newPartitionExpire(
                 commitUser,
                 table,
@@ -459,12 +467,16 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             Duration expirationTime,
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy) {
+        if (options.isChainTable()) {
+            return newChainTablePartitionExpire(table, expirationTime, checkInterval);
+        }
+
         PartitionModification partitionModification = null;
         if (options.partitionedTableInMetastore()) {
             partitionModification = catalogEnvironment.partitionModification();
         }
 
-        return new PartitionExpire(
+        return new NormalPartitionExpire(
                 expirationTime,
                 checkInterval,
                 expireStrategy,
@@ -474,6 +486,60 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.endInputCheckPartitionExpire(),
                 options.partitionExpireMaxNum(),
                 options.partitionExpireBatchSize());
+    }
+
+    @Nullable
+    private ChainTablePartitionExpire newChainTablePartitionExpire(FileStoreTable table) {
+        Duration partitionExpireTime = options.partitionExpireTime();
+        if (partitionExpireTime == null) {
+            return null;
+        }
+        return newChainTablePartitionExpire(
+                table, partitionExpireTime, options.partitionExpireCheckInterval());
+    }
+
+    @Nullable
+    private ChainTablePartitionExpire newChainTablePartitionExpire(
+            FileStoreTable table, Duration expirationTime, Duration checkInterval) {
+        if (partitionType().getFieldCount() == 0) {
+            return null;
+        }
+        FileStoreTable primaryTable = ChainTableUtils.resolveChainPrimaryTable(table);
+        FileStoreTable snapshotTable =
+                primaryTable.switchToBranch(options.scanFallbackSnapshotBranch());
+        FileStoreTable deltaTable = primaryTable.switchToBranch(options.scanFallbackDeltaBranch());
+        return new ChainTablePartitionExpire(
+                expirationTime,
+                checkInterval,
+                snapshotTable,
+                deltaTable,
+                options,
+                partitionType(),
+                options.endInputCheckPartitionExpire(),
+                options.partitionExpireMaxNum(),
+                options.partitionExpireBatchSize(),
+                newPartitionModificationForBranch(options.scanFallbackSnapshotBranch()),
+                newPartitionModificationForBranch(options.scanFallbackDeltaBranch()));
+    }
+
+    @Nullable
+    private PartitionModification newPartitionModificationForBranch(String branchName) {
+        if (!options.partitionedTableInMetastore()) {
+            return null;
+        }
+
+        Identifier identifier = catalogEnvironment.identifier();
+        if (identifier == null) {
+            return catalogEnvironment.partitionModification();
+        }
+
+        Identifier branchIdentifier =
+                new Identifier(
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        branchName,
+                        identifier.getSystemTableName());
+        return catalogEnvironment.copy(branchIdentifier).partitionModification();
     }
 
     @Override

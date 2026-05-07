@@ -23,6 +23,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TimeUtils;
 
 import java.time.Duration;
@@ -64,6 +65,7 @@ public class ExpirePartitionsAction extends TableActionBase implements LocalActi
     public void executeLocally() throws Exception {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore<?> fileStore = fileStoreTable.store();
+
         PartitionExpire partitionExpire =
                 fileStore.newPartitionExpire(
                         "",
@@ -76,7 +78,9 @@ public class ExpirePartitionsAction extends TableActionBase implements LocalActi
                                 catalogLoader(),
                                 new Identifier(
                                         identifier.getDatabaseName(), identifier.getTableName())));
-
+        Preconditions.checkNotNull(
+                partitionExpire,
+                "Both the partition expiration time and partition field can not be null.");
         partitionExpire.expire(Long.MAX_VALUE);
     }
 }
