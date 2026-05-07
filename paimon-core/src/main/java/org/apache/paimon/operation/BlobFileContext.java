@@ -34,6 +34,7 @@ import static org.apache.paimon.types.DataTypeRoot.BLOB;
 public class BlobFileContext {
 
     private final Set<String> blobDescriptorFields;
+    private final Set<String> blobInlineFields;
     private final Set<String> blobExternalStorageFields;
     @Nullable private final String blobExternalStoragePath;
 
@@ -41,9 +42,11 @@ public class BlobFileContext {
 
     private BlobFileContext(
             Set<String> blobDescriptorFields,
+            Set<String> blobInlineFields,
             Set<String> blobExternalStorageFields,
             @Nullable String blobExternalStoragePath) {
         this.blobDescriptorFields = blobDescriptorFields;
+        this.blobInlineFields = blobInlineFields;
         this.blobExternalStorageFields = blobExternalStorageFields;
         this.blobExternalStoragePath = blobExternalStoragePath;
     }
@@ -54,13 +57,14 @@ public class BlobFileContext {
             return null;
         }
         Set<String> descriptorFields = options.blobDescriptorField();
+        Set<String> inlineFields = options.blobInlineField();
         Set<String> externalStorageField = options.blobExternalStorageField();
         String externalStoragePath = options.blobExternalStoragePath();
         boolean requireBlobFile = false;
         for (DataField field : rowType.getFields()) {
             DataTypeRoot type = field.type().getTypeRoot();
             if (type == DataTypeRoot.BLOB
-                    && (!descriptorFields.contains(field.name())
+                    && (!inlineFields.contains(field.name())
                             || externalStorageField.contains(field.name()))) {
                 requireBlobFile = true;
                 break;
@@ -69,7 +73,8 @@ public class BlobFileContext {
         if (!requireBlobFile) {
             return null;
         }
-        return new BlobFileContext(descriptorFields, externalStorageField, externalStoragePath);
+        return new BlobFileContext(
+                descriptorFields, inlineFields, externalStorageField, externalStoragePath);
     }
 
     public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
@@ -86,6 +91,10 @@ public class BlobFileContext {
 
     public Set<String> blobDescriptorFields() {
         return blobDescriptorFields;
+    }
+
+    public Set<String> blobInlineFields() {
+        return blobInlineFields;
     }
 
     public Set<String> blobExternalStorageFields() {

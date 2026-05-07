@@ -18,18 +18,18 @@
 
 package org.apache.paimon.flink.function;
 
-import java.util.HashMap;
-import java.util.Map;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BlobViewStruct;
 
-/** Paimon flink built in functions. */
-public class BuiltInFunctions {
+import org.apache.flink.table.functions.ScalarFunction;
 
-    public static final Map<String, String> FUNCTIONS =
-            new HashMap<String, String>() {
-                {
-                    put("path_to_descriptor", PathToDescriptor.class.getName());
-                    put("descriptor_to_string", DescriptorToString.class.getName());
-                    put("blob_view", BlobViewFunction.class.getName());
-                }
-            };
+/** Flink scalar function that constructs a serialized {@link BlobViewStruct}. */
+public class BlobViewFunction extends ScalarFunction {
+
+    public byte[] eval(String identifier, int fieldId, long rowId) {
+        if (identifier == null) {
+            return null;
+        }
+        return new BlobViewStruct(Identifier.fromString(identifier), fieldId, rowId).serialize();
+    }
 }

@@ -18,10 +18,15 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.data.columnar.heap.HeapFloatVector;
+import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -74,6 +79,26 @@ public class ColumnarRowWithVectorTest {
         assertThatThrownBy(() -> row.getVector(0))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("refuse null elements");
+    }
+
+    @Test
+    public void testBlobAccessUsesReferenceBytes() throws IOException {
+        byte[] serialized =
+                IOUtils.readFully(
+                        ColumnarRowWithVectorTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatible/blob_descriptor_v1"),
+                        true);
+
+        HeapBytesVector vector = new HeapBytesVector(1);
+        vector.putByteArray(0, serialized, 0, serialized.length);
+        VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {vector});
+        batch.setNumRows(1);
+
+        ColumnarRow row = new ColumnarRow(batch);
+        row.setRowId(0);
+
+        assertThat(row.getBlob(0).toDescriptor()).isEqualTo(BlobDescriptor.deserialize(serialized));
     }
 
     private VectorizedColumnBatch makeColumnBatch(float[] values, int numRows, boolean[] nulls) {

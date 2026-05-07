@@ -1038,6 +1038,11 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
         List<String> blobFields = CoreOptions.blobField(options);
+        Set<String> blobDescriptorFields = new CoreOptions(options).blobDescriptorField();
+        List<String> blobViewFields = CoreOptions.blobViewField(options);
+        validateSecondaryBlobFields(
+                blobFields, blobDescriptorFields, CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        validateSecondaryBlobFields(blobFields, blobViewFields, CoreOptions.BLOB_VIEW_FIELD.key());
         if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
@@ -1070,6 +1075,18 @@ public class FlinkCatalog extends AbstractCatalog {
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();
+    }
+
+    private static void validateSecondaryBlobFields(
+            List<String> blobFields, Iterable<String> secondaryBlobFields, String optionKey) {
+        for (String secondaryBlobField : secondaryBlobFields) {
+            checkArgument(
+                    blobFields.contains(secondaryBlobField),
+                    "Field '%s' in '%s' must also be in '%s'.",
+                    secondaryBlobField,
+                    optionKey,
+                    CoreOptions.BLOB_FIELD.key());
+        }
     }
 
     private static org.apache.paimon.types.DataType resolveDataType(
