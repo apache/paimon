@@ -43,7 +43,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   import DataSourceV2Implicits._
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
-    case a @ PaimonV2WriteCommand(table) if !paimonWriteResolved(a.query, table) =>
+    case a @ PaimonV2WriteCommand(table) if !paimonWriteResolved(a.query, table, a.isByName) =>
       val mergeSchemaEnabled =
         writeOptions(a).get(SparkConnectorOptions.MERGE_SCHEMA.key()).contains("true") ||
           OptionUtils.writeMergeSchemaEnabled()
@@ -77,13 +77,16 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     }
   }
 
-  private def paimonWriteResolved(query: LogicalPlan, table: NamedRelation): Boolean = {
+  private def paimonWriteResolved(
+      query: LogicalPlan,
+      table: NamedRelation,
+      isByName: Boolean): Boolean = {
     query.output.size == table.output.size &&
     query.output.zip(table.output).forall {
       case (inAttr, outAttr) =>
         val inType = CharVarcharUtils.getRawType(inAttr.metadata).getOrElse(inAttr.dataType)
         val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
-        inAttr.name == outAttr.name && schemaCompatible(inType, outType)
+        inAttr.name == outAttr.name && schemaCompatible(inType, outType, isByName)
     }
   }
 
@@ -176,19 +179,40 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     Project(project, query)
   }
 
-  private def schemaCompatible(dataSchema: DataType, tableSchema: DataType): Boolean = {
+  private def schemaCompatible(
+      dataSchema: DataType,
+      tableSchema: DataType,
+      checkFieldNames: Boolean): Boolean = {
     (dataSchema, tableSchema) match {
       case (s1: StructType, s2: StructType) =>
-        s1.zip(s2).forall { case (d1, d2) => schemaCompatible(d1.dataType, d2.dataType) }
+        s1.length == s2.length &&
+        (!checkFieldNames ||
+          (!hasResolverConflicts(s1) &&
+            !hasResolverConflicts(s2) &&
+            structFieldsResolved(s1, s2))) &&
+        s1.zip(s2).forall {
+          case (d1, d2) => schemaCompatible(d1.dataType, d2.dataType, checkFieldNames)
+        }
       case (a1: ArrayType, a2: ArrayType) =>
         // todo: support array type nullable evaluation
-        schemaCompatible(a1.elementType, a2.elementType)
+        schemaCompatible(a1.elementType, a2.elementType, checkFieldNames)
       case (m1: MapType, m2: MapType) =>
         m1.valueContainsNull == m2.valueContainsNull &&
-        schemaCompatible(m1.keyType, m2.keyType) &&
-        schemaCompatible(m1.valueType, m2.valueType)
+        schemaCompatible(m1.keyType, m2.keyType, checkFieldNames) &&
+        schemaCompatible(m1.valueType, m2.valueType, checkFieldNames)
       case (d1, d2) => d1 == d2
     }
+  }
+
+  private def structFieldsResolved(source: StructType, target: StructType): Boolean = {
+    source.zip(target).forall {
+      case (sourceField, targetField) =>
+        conf.resolver(sourceField.name, targetField.name)
+    }
+  }
+
+  private def hasResolverConflicts(struct: StructType): Boolean = {
+    struct.fields.combinations(2).exists { case Array(a, b) => conf.resolver(a.name, b.name) }
   }
 
   private def addCastToColumn(
@@ -223,32 +247,74 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       parent: NamedExpression,
       source: StructType,
       target: StructType): NamedExpression = {
+    // Reject target fields that collide under the current resolver
+    // (e.g. `name` and `Name` with case-insensitive resolution), otherwise
+    // we would silently map both target fields to the same source field.
+    val targetConflicts = target.fields
+      .combinations(2)
+      .collect {
+        case Array(a, b) if conf.resolver(a.name, b.name) => (a.name, b.name)
+      }
+      .toSeq
+    if (targetConflicts.nonEmpty) {
+      throw new RuntimeException(
+        "Cannot write incompatible data: nested struct has conflicting target field names: " +
+          targetConflicts.map { case (a, b) => s"`$a` vs `$b`" }.mkString(", ") + ".")
+    }
+
+    // Single pass: resolve each target field to its source match(es) and track
+    // which source indices were consumed, so we can detect extras without
+    // rescanning source and target repeatedly.
+    val sourceWithIndex = source.fields.zipWithIndex
+    val consumed = mutable.BitSet.empty
+    val resolved = target.fields.map {
+      tgt =>
+        val matches = sourceWithIndex.filter { case (f, _) => conf.resolver(f.name, tgt.name) }
+        matches.foreach { case (_, i) => consumed += i }
+        (tgt, matches)
+    }
+
     // If source struct has fields not in target, reject so that merge-schema
     // can handle the evolution instead of silently dropping the extra fields.
-    val targetFieldNames = target.fieldNames.toSet
-    val extraFields = source.fieldNames.filterNot(targetFieldNames.contains)
+    val extraFields = sourceWithIndex.collect {
+      case (f, i) if !consumed(i) => f.name
+    }
     if (extraFields.nonEmpty) {
       throw new RuntimeException(
         s"Cannot write incompatible data: nested struct has extra fields: ${extraFields.mkString(", ")}.")
     }
 
-    val fields = target.map {
-      case targetField @ StructField(name, nested: StructType, _, _) =>
-        val sourceIndex = source.fieldIndex(name)
-        val sourceField = source(sourceIndex)
-        sourceField.dataType match {
-          case s: StructType =>
-            val subField = castStructField(parent, sourceIndex, sourceField.name, targetField)
+    val fields = resolved.map {
+      case (targetField, matches) =>
+        val (sourceIndex, sourceField) = resolveSingleSourceField(matches, targetField.name, source)
+        (targetField.dataType, sourceField.dataType) match {
+          case (nested: StructType, s: StructType) =>
+            val subField = extractStructField(parent, sourceIndex, sourceField.name, targetField)
             addCastToStructByName(subField, s, nested)
-          case o =>
+          case (_: StructType, o) =>
             throw new RuntimeException(s"Can not support to cast $o to StructType.")
+          case _ =>
+            castStructField(parent, sourceIndex, sourceField.name, targetField)
         }
-      case targetField =>
-        val sourceIndex = source.fieldIndex(targetField.name)
-        val sourceField = source(sourceIndex)
-        castStructField(parent, sourceIndex, sourceField.name, targetField)
     }
     structAlias(fields, parent)
+  }
+
+  private def resolveSingleSourceField(
+      matches: Array[(StructField, Int)],
+      name: String,
+      source: StructType): (Int, StructField) = {
+    if (matches.length == 1) {
+      val (field, index) = matches(0)
+      (index, field)
+    } else if (matches.isEmpty) {
+      throw new RuntimeException(
+        s"""Field "$name" does not exist in source struct type: ${source.simpleString}.""")
+    } else {
+      throw new RuntimeException(
+        s"""Cannot resolve nested field "$name" due to name conflicts: """ +
+          matches.map(_._1.name).mkString(", ") + ".")
+    }
   }
 
   private def addCastToStructByPosition(
@@ -298,6 +364,15 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
         targetField.metadata),
       targetField.name)(explicitMetadata = Option(targetField.metadata))
+  }
+
+  private def extractStructField(
+      parent: NamedExpression,
+      i: Int,
+      sourceFieldName: String,
+      targetField: StructField): NamedExpression = {
+    Alias(GetStructField(parent, i, Option(sourceFieldName)), targetField.name)(
+      explicitMetadata = Option(targetField.metadata))
   }
 
   private def castToArrayStruct(
