@@ -42,6 +42,11 @@ class S3Options:
     S3_REGION = ConfigOptions.key("fs.s3.region").string_type().no_default_value().with_description("S3 region")
 
 
+class JdbcCatalogOptions:
+    CATALOG_KEY = ConfigOptions.key("catalog-key").string_type().default_value("jdbc").with_description(
+        "Custom JDBC catalog store key.")
+
+
 class PVFSOptions:
     CACHE_ENABLED = ConfigOptions.key("cache-enabled").boolean_type().default_value("true").with_description(
         "Enable cache")
@@ -84,6 +89,8 @@ class CatalogOptions:
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+    SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
+        "Sync all table properties to the catalog metastore")
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
 
 
