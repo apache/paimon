@@ -543,7 +543,7 @@ class ReaderBasicTest(unittest.TestCase):
                                  f"value_stats_cols should not contain system field: {field_name}")
 
     def test_truncate_stats(self):
-        from pypaimon.write.writer.data_writer import _truncate_min, _truncate_max
+        from pypaimon.write.writer.data_writer import DataWriter, _truncate_min, _truncate_max
 
         self.assertEqual(_truncate_min('abcdefghij', 5), 'abcde')
         self.assertEqual(_truncate_min('abc', 5), 'abc')
@@ -557,6 +557,11 @@ class ReaderBasicTest(unittest.TestCase):
 
         self.assertEqual(_truncate_min(b'\x01\x02\x03\x04\x05\x06', 3), b'\x01\x02\x03\x04\x05\x06')
         self.assertEqual(_truncate_max(b'\x01\x02\x03\x04\x05\x06', 3), b'\x01\x02\x03\x04\x05\x06')
+
+        self.assertEqual(DataWriter._parse_truncate_length('truncate(10)'), ('TRUNCATE', 10))
+        for invalid_mode in ['truncate(+1)', 'truncate( 1)', 'truncate(10.1)', 'truncate()', 'truncate(0)']:
+            with self.assertRaises(ValueError):
+                DataWriter._parse_truncate_length(invalid_mode)
 
     def test_default_truncate_stats_e2e(self):
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
@@ -588,6 +593,41 @@ class ReaderBasicTest(unittest.TestCase):
         max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
         self.assertEqual(min_row.values[1], 'a' * 16)
         self.assertEqual(max_row.values[1], 'a' * 15 + 'b')
+
+    def test_default_stats_with_high_precision_decimal(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_decimal_stats", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('amount', pa.decimal128(38, 0))])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_decimal_stats.t", schema, False)
+        table = catalog.get_table("test_db_decimal_stats.t")
+
+        min_amount = Decimal('-123456789012345678901234567890')
+        max_amount = Decimal('123456789012345678901234567890')
+        data = pa.Table.from_pydict(
+            {'id': [1, 2], 'amount': [max_amount, min_amount]},
+            schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertEqual(min_row.values[1], min_amount)
+        self.assertEqual(max_row.values[1], max_amount)
+        self.assertEqual(rb.new_read().to_arrow(scan.plan().splits()), data)
 
     def test_value_stats_empty_when_stats_disabled(self):
         catalog = CatalogFactory.create({
