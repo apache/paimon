@@ -274,7 +274,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
             byte[] bytes = decoder.readBytes(null).array();
-            return BlobUtils.fromBytesWithReader(bytes, uriReader, null);
+            return BlobUtils.fromBytesWithReader(bytes, uriReader, null, false);
         }
 
         @Override

@@ -29,16 +29,39 @@ public class BlobUtils {
 
     public static Blob fromBytes(
             byte[] bytes, @Nullable UriReaderFactory uriReaderFactory, @Nullable FileIO fileIO) {
-        return fromBytes(bytes, uriReaderFactory == null ? null : uriReaderFactory::create, fileIO);
+        return fromBytes(bytes, uriReaderFactory, fileIO, true);
+    }
+
+    public static Blob fromBytes(
+            byte[] bytes,
+            @Nullable UriReaderFactory uriReaderFactory,
+            @Nullable FileIO fileIO,
+            boolean allowBlobData) {
+        return fromBytes(
+                bytes,
+                uriReaderFactory == null ? null : uriReaderFactory::create,
+                fileIO,
+                allowBlobData);
     }
 
     public static Blob fromBytesWithReader(
             byte[] bytes, @Nullable UriReader uriReader, @Nullable FileIO fileIO) {
-        return fromBytes(bytes, uri -> uriReader, fileIO);
+        return fromBytesWithReader(bytes, uriReader, fileIO, true);
+    }
+
+    public static Blob fromBytesWithReader(
+            byte[] bytes,
+            @Nullable UriReader uriReader,
+            @Nullable FileIO fileIO,
+            boolean allowBlobData) {
+        return fromBytes(bytes, uri -> uriReader, fileIO, allowBlobData);
     }
 
     private static Blob fromBytes(
-            byte[] bytes, @Nullable UriReaderCreator uriReaderCreator, @Nullable FileIO fileIO) {
+            byte[] bytes,
+            @Nullable UriReaderCreator uriReaderCreator,
+            @Nullable FileIO fileIO,
+            boolean allowBlobData) {
         if (bytes == null) {
             return null;
         }
@@ -47,7 +70,7 @@ public class BlobUtils {
             return Blob.fromView(BlobViewStruct.deserialize(bytes));
         }
 
-        if (BlobDescriptor.isBlobDescriptor(bytes)) {
+        if (BlobDescriptor.isBlobDescriptor(bytes) || !allowBlobData) {
             BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
             UriReader reader =
                     uriReaderCreator != null

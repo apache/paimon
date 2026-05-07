@@ -157,7 +157,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public Blob getBlob(int pos) {
-        return BlobUtils.fromBytes(getBinary(pos), null, fileIO);
+        return BlobUtils.fromBytes(getBinary(pos), null, fileIO, false);
     }
 
     @Override
