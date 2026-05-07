@@ -142,22 +142,6 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    protected void configurePrescanRead(InnerTableRead prescanRead) {
-        if (forceKeepDelete) {
-            prescanRead.forceKeepDelete();
-        }
-        if (topN != null) {
-            prescanRead.withTopN(topN);
-        }
-        if (limit != null) {
-            prescanRead.withLimit(limit);
-        }
-        if (ioManager != null) {
-            prescanRead.withIOManager(ioManager);
-        }
-    }
-
-    @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         for (SplitReadProvider readProvider : readProviders) {
             if (readProvider.match(split, new SplitReadProvider.Context(forceKeepDelete))) {

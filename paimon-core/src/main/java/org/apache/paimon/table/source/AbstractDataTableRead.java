@@ -90,8 +90,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return this;
     }
 
-    protected void configurePrescanRead(InnerTableRead prescanRead) {}
-
     protected TableSchema schema() {
         return schema;
     }

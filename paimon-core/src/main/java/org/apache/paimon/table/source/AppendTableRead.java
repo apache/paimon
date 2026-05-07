@@ -46,8 +46,8 @@ public class AppendTableRead extends AbstractDataTableRead {
 
     @Nullable private RowType readType = null;
     private Predicate predicate = null;
-    private TopN topN = null;
-    private Integer limit = null;
+    protected TopN topN = null;
+    protected Integer limit = null;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -103,16 +103,6 @@ public class AppendTableRead extends AbstractDataTableRead {
         initialized().forEach(r -> r.withLimit(limit));
         this.limit = limit;
         return this;
-    }
-
-    @Override
-    protected void configurePrescanRead(InnerTableRead prescanRead) {
-        if (topN != null) {
-            prescanRead.withTopN(topN);
-        }
-        if (limit != null) {
-            prescanRead.withLimit(limit);
-        }
     }
 
     @Override

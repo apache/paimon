@@ -104,7 +104,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
         if (predicate != null) {
             prescanRead.withFilter(predicate);
         }
-        configurePrescanRead(prescanRead);
+        configureBlobViewPrescanRead(prescanRead);
         Split prescanSplit = authResult != null ? new QueryAuthSplit(split, authResult) : split;
         LinkedHashSet<BlobViewStruct> viewStructs = new LinkedHashSet<>();
         RecordReader<InternalRow> prescanReader = prescanRead.createReader(prescanSplit);
@@ -137,5 +137,14 @@ public class DataEvolutionTableRead extends AppendTableRead {
             blobViewFieldSet.add(field);
         }
         return reader.transform(row -> new BlobViewResolvingRow(row, blobViewFieldSet, resolver));
+    }
+
+    private void configureBlobViewPrescanRead(InnerTableRead prescanRead) {
+        if (topN != null) {
+            prescanRead.withTopN(topN);
+        }
+        if (limit != null) {
+            prescanRead.withLimit(limit);
+        }
     }
 }
