@@ -29,6 +29,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, Logical
 import org.apache.spark.sql.connector.catalog.StagingTableCatalog
 import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
 
@@ -61,7 +62,8 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           val (tableOptions, writeOptions) = options.partition {
             case (key, _) => allTableOptionKeys.contains(key)
           }
-          val newTableSpec = tableSpec.copy(properties = tableSpec.properties ++ tableOptions)
+          val newTableSpec = SparkShimLoader.shim
+            .copyTableSpecProperties(tableSpec, tableSpec.properties ++ tableOptions)
 
           val isPartitionedFormatTable = {
             catalog match {
