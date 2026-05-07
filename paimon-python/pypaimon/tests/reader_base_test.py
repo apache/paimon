@@ -552,6 +552,8 @@ class ReaderBasicTest(unittest.TestCase):
 
         self.assertEqual(_truncate_max('abc', 5), 'abc')
         self.assertEqual(_truncate_max('abcdefghij', 5), 'abcdf')
+        self.assertIsNone(_truncate_max('\ud7ffx', 1))
+        self.assertEqual(_truncate_max('a\ud7ffx', 2), 'b')
         self.assertEqual(_truncate_max(None, 5), None)
         self.assertEqual(_truncate_max(42, 5), 42)
 
@@ -603,6 +605,37 @@ class ReaderBasicTest(unittest.TestCase):
         max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
         self.assertEqual(min_row.values[1], 'a' * 16)
         self.assertEqual(max_row.values[1], 'a' * 15 + 'b')
+
+    def test_default_truncate_skips_invalid_surrogate_max_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_truncate_surrogate_e2e", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_truncate_surrogate_e2e.t", schema, False)
+        table = catalog.get_table("test_db_truncate_surrogate_e2e.t")
+
+        high_boundary_str = 'a' * 15 + '\ud7ff' + 'tail'
+        data = pa.Table.from_pydict({'id': [1], 'name': [high_boundary_str]}, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertEqual(min_row.values[1], high_boundary_str[:16])
+        self.assertEqual(max_row.values[1], 'a' * 14 + 'b')
 
     def test_default_truncate_binary_stats_e2e(self):
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
