@@ -71,7 +71,8 @@ trait PaimonMergeIntoResolverBase extends ExpressionHelper {
         }
         val resolvedAssignments =
           resolveAssignments(resolve, assignments, merge, SOURCE_ONLY)
-        UpdateAction(resolvedCond, resolvedAssignments)
+        // Tag so merge-schema can distinguish `UPDATE *` from a fully-listed explicit clause.
+        PaimonMergeActionTags.markFromStar(UpdateAction(resolvedCond, resolvedAssignments))
       case action =>
         throw new RuntimeException(s"Can't recognize this action: $action")
     }
@@ -97,7 +98,7 @@ trait PaimonMergeIntoResolverBase extends ExpressionHelper {
         }
         val resolvedAssignments =
           resolveAssignments(resolve, assignments, merge, SOURCE_ONLY)
-        InsertAction(resolvedCond, resolvedAssignments)
+        PaimonMergeActionTags.markFromStar(InsertAction(resolvedCond, resolvedAssignments))
       case action =>
         throw new RuntimeException(s"Can't recognize this action: $action")
     }

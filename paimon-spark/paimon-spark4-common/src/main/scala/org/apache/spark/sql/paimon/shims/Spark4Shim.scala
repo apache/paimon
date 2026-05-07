@@ -29,10 +29,10 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.CTESubstitution
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, UnresolvedWith}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
@@ -40,6 +40,7 @@ import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table,
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.SparkFormatTable
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.internal.SQLConf
@@ -120,6 +121,25 @@ class Spark4Shim extends SparkShim {
       notMatchedActions,
       notMatchedBySourceActions,
       withSchemaEvolution)
+  }
+
+  override def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      table: Table,
+      output: Seq[AttributeReference]): DataSourceV2Relation = {
+    relation.copy(table = table, output = output)
+  }
+
+  override def copyUpdateAction(
+      action: UpdateAction,
+      assignments: Seq[Assignment]): UpdateAction = {
+    action.copy(assignments = assignments)
+  }
+
+  override def copyInsertAction(
+      action: InsertAction,
+      assignments: Seq[Assignment]): InsertAction = {
+    action.copy(assignments = assignments)
   }
 
   override def earlyBatchRules(): Seq[Rule[LogicalPlan]] = Seq(CTESubstitution)

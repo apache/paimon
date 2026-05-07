@@ -29,10 +29,10 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnresolvedOrdinals}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith, UpdateAction}
 // NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
 // reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
 // on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.8 at
@@ -43,6 +43,7 @@ import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.SparkFormatTable
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
@@ -117,6 +118,25 @@ class Spark3Shim extends SparkShim {
       matchedActions,
       notMatchedActions,
       notMatchedBySourceActions)
+  }
+
+  override def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      table: Table,
+      output: Seq[AttributeReference]): DataSourceV2Relation = {
+    relation.copy(table = table, output = output)
+  }
+
+  override def copyUpdateAction(
+      action: UpdateAction,
+      assignments: Seq[Assignment]): UpdateAction = {
+    action.copy(assignments = assignments)
+  }
+
+  override def copyInsertAction(
+      action: InsertAction,
+      assignments: Seq[Assignment]): InsertAction = {
+    action.copy(assignments = assignments)
   }
 
   override def earlyBatchRules(): Seq[Rule[LogicalPlan]] =

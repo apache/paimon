@@ -27,11 +27,12 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -87,6 +88,16 @@ trait SparkShim {
       notMatchedActions: Seq[MergeAction],
       notMatchedBySourceActions: Seq[MergeAction],
       withSchemaEvolution: Boolean): MergeIntoTable
+
+  def copyDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      table: Table,
+      output: Seq[org.apache.spark.sql.catalyst.expressions.AttributeReference])
+      : DataSourceV2Relation
+
+  def copyUpdateAction(action: UpdateAction, assignments: Seq[Assignment]): UpdateAction
+
+  def copyInsertAction(action: InsertAction, assignments: Seq[Assignment]): InsertAction
 
   /**
    * Returns the list of "early" substitution rules Paimon needs to apply on a parsed view plan.
