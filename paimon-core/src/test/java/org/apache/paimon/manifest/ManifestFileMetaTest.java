@@ -20,6 +20,8 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -49,7 +51,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -495,6 +501,38 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .collect(Collectors.toList()));
     }
 
+    @Test
+    public void testFullCompactionReadManifestsInParallel() throws Exception {
+        BlockingReadFileIO fileIO = new BlockingReadFileIO();
+        manifestFile = createManifestFile(tempDir.toString(), fileIO);
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            input.add(makeManifest(makeEntry(true, "parallel-" + i)));
+        }
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> fullCompacted;
+        fileIO.blockManifestReads();
+        try {
+            fullCompacted =
+                    ManifestFileMerger.tryFullCompaction(
+                            input,
+                            newMetas,
+                            manifestFile,
+                            Long.MAX_VALUE,
+                            1,
+                            getPartitionType(),
+                            2);
+        } finally {
+            fileIO.stopBlockingManifestReads();
+        }
+
+        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
+        assertThat(fullCompacted).isPresent();
+        assertEquivalentEntries(input, fullCompacted.get());
+    }
+
     @RepeatedTest(10)
     public void testRandomFullCompaction() throws Exception {
         List<ManifestFileMeta> input = new ArrayList<>();
@@ -692,5 +730,93 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     @Override
     ManifestFile getManifestFile() {
         return manifestFile;
+    }
+
+    private static class BlockingReadFileIO extends LocalFileIO {
+
+        private final AtomicBoolean blockManifestReads = new AtomicBoolean(false);
+        private final AtomicInteger activeManifestReads = new AtomicInteger(0);
+        private final AtomicInteger maxConcurrentManifestReads = new AtomicInteger(0);
+        private final CountDownLatch readersReady = new CountDownLatch(2);
+        private final CountDownLatch releaseReaders = new CountDownLatch(1);
+
+        private void blockManifestReads() {
+            blockManifestReads.set(true);
+        }
+
+        private void stopBlockingManifestReads() {
+            blockManifestReads.set(false);
+            releaseReaders.countDown();
+        }
+
+        private int maxConcurrentManifestReads() {
+            return maxConcurrentManifestReads.get();
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            SeekableInputStream inputStream = super.newInputStream(path);
+            if (!blockManifestReads.get() || !path.toString().contains("/manifest/")) {
+                return inputStream;
+            }
+            return new BlockingSeekableInputStream(inputStream);
+        }
+
+        private class BlockingSeekableInputStream extends SeekableInputStreamWrapper {
+
+            private boolean entered;
+            private boolean closed;
+
+            private BlockingSeekableInputStream(SeekableInputStream inputStream) {
+                super(inputStream);
+            }
+
+            @Override
+            public int read() throws IOException {
+                beforeFirstRead();
+                return super.read();
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                beforeFirstRead();
+                return super.read(b, off, len);
+            }
+
+            @Override
+            public void close() throws IOException {
+                try {
+                    super.close();
+                } finally {
+                    if (entered && !closed) {
+                        activeManifestReads.decrementAndGet();
+                    }
+                    closed = true;
+                }
+            }
+
+            private void beforeFirstRead() throws IOException {
+                if (entered) {
+                    return;
+                }
+
+                entered = true;
+                int activeReads = activeManifestReads.incrementAndGet();
+                maxConcurrentManifestReads.accumulateAndGet(activeReads, Math::max);
+                readersReady.countDown();
+                if (readersReady.getCount() == 0) {
+                    releaseReaders.countDown();
+                }
+
+                try {
+                    if (!releaseReaders.await(3, TimeUnit.SECONDS)) {
+                        throw new IOException("Manifest reads were not parallelized.");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(e);
+                }
+            }
+        }
     }
 }
