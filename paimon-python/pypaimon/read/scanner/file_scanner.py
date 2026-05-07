@@ -31,7 +31,8 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (remove_row_id_filter,
+from pypaimon.read.push_down_utils import (_get_all_fields,
+                                           remove_row_id_filter,
                                            trim_and_transform_predicate)
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
@@ -366,19 +367,33 @@ class FileScanner:
         return self
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
+        """Mirror Java ``DataTableBatchScan.applyPushDownLimit``: sum the
+        DV-aware ``merged_row_count`` (== Java ``Split.mergedRowCount()``)
+        until the limit is met. Splits with unknown merged count fall
+        through to the reader unchanged.
+        """
         if self.limit is None:
             return splits
-        scanned_row_count = 0
-        limited_splits = []
+        if self._has_non_partition_filter():
+            return splits
 
+        scanned_row_count = 0
+        limited_splits: List[DataSplit] = []
         for split in splits:
-            if split.raw_convertible:
+            merged = split.merged_row_count()
+            if merged is not None:
                 limited_splits.append(split)
-                scanned_row_count += split.row_count
+                scanned_row_count += merged
                 if scanned_row_count >= self.limit:
                     return limited_splits
-
         return splits
+
+    def _has_non_partition_filter(self) -> bool:
+        """Mirror Java ``SnapshotReaderImpl.hasNonPartitionFilter``."""
+        if self.predicate is None:
+            return False
+        partition_keys = set(self.table.partition_keys or [])
+        return not _get_all_fields(self.predicate).issubset(partition_keys)
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
         if not self.partition_key_predicate:
