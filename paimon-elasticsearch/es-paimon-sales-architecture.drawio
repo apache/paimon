@@ -1,0 +1,153 @@
+<mxfile host="drawio-plugin" modified="2026-04-23T10:40:16.956Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36" etag="hDZnT7nOg-qgl3v5SFKo" version="22.1.22" type="embed">
+  <diagram id="sales-1" name="方案对比">
+    <mxGraphModel dx="1944" dy="1398" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="&lt;b&gt;Paimon + ES 向量索引方案&lt;/b&gt;  —  构建一次索引，多引擎共用，ES 集群查询" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=20;fontFamily=system-ui;fontColor=#333333;" parent="1" vertex="1">
+          <mxGeometry x="200" y="10" width="1400" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="old-box" value="&lt;b&gt;❌ 传统方案(Paimon存储+向量查询引擎)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontStyle=1;fontSize=16;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=2;container=1;collapsible=0;fontFamily=system-ui;" parent="1" vertex="1">
+          <mxGeometry x="30" y="70" width="820" height="580" as="geometry" />
+        </mxCell>
+        <mxCell id="6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="old-box" source="old-lake" target="old-build1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="old-lake" value="&lt;b&gt;Paimon 数据湖&lt;/b&gt;&lt;br&gt;原始数据 + 向量嵌入" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="30" y="55" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="old-etl" value="&lt;b&gt;ETL 数据同步&lt;/b&gt;&lt;br&gt;持续同步 / 定时批量&lt;br&gt;❗ 一致性难保证" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="295" y="55" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="old-box" source="old-vecdb" target="old-build2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="old-vecdb" value="&lt;b&gt;Milvus / ES 集群&lt;/b&gt;&lt;br&gt;独立部署 + 独立存储&lt;br&gt;集群需要一直维护" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontFamily=system-ui;strokeWidth=2;" parent="old-box" vertex="1">
+          <mxGeometry x="550" y="55" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e-old-l2e" value="数据搬迁" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;fontSize=11;fontFamily=system-ui;strokeWidth=2;" parent="old-box" source="old-lake" target="old-etl" edge="1">
+          <mxGeometry x="-0.1111" y="10" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-old-e2v" value="写入" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;fontSize=11;fontFamily=system-ui;strokeWidth=2;" parent="old-box" source="old-etl" target="old-vecdb" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="old-build1" value="&lt;b&gt;索引构建 ①&lt;/b&gt;&lt;br&gt;Paimon 内置索引" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="30" y="170" width="220" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="old-build2" value="&lt;b&gt;索引构建 ②&lt;/b&gt;&lt;br&gt;向量库二次构建" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="550" y="170" width="230" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="old-query-label" value="&lt;b&gt;查询链路&lt;/b&gt;" style="text;html=1;align=left;fontSize=12;fontFamily=system-ui;fontColor=#666666;fontStyle=1;" parent="old-box" vertex="1">
+          <mxGeometry x="30" y="240" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="old-q-submit" value="&lt;b&gt;提交 Spark 作业&lt;/b&gt;&lt;br&gt;资源申请→调度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="30" y="265" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="old-q-scalar" value="&lt;b&gt;阶段一&lt;/b&gt;&lt;br&gt;标量过滤" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="200" y="265" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="old-q-wait" value="&lt;b&gt;串行等待&lt;/b&gt;&lt;br&gt;❗中间传输" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="350" y="265" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="old-q-vector" value="&lt;b&gt;阶段二&lt;/b&gt;&lt;br&gt;向量搜索" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="500" y="265" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="old-q-result" value="&lt;b&gt;返回结果&lt;/b&gt;&lt;br&gt;分钟级" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontFamily=system-ui;" parent="old-box" vertex="1">
+          <mxGeometry x="650" y="265" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="e-old-qs2sc" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=1.5;" parent="old-box" source="old-q-submit" target="old-q-scalar" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-old-sc2w" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=1.5;" parent="old-box" source="old-q-scalar" target="old-q-wait" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-old-w2v" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=1.5;" parent="old-box" source="old-q-wait" target="old-q-vector" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-old-v2r" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=1.5;" parent="old-box" source="old-q-vector" target="old-q-result" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="old-problem" value="&lt;b&gt;⚠️ 传统方案痛点&lt;/b&gt;&lt;br&gt;&lt;br&gt;1. &lt;b&gt;双重构建成本&lt;/b&gt;：同一份数据需要在 Paimon 和向量库，各构建一次索引，计算 + 存储成本翻倍&lt;br&gt;&lt;br&gt;2. &lt;b&gt;数据同步负担&lt;/b&gt;：需要维护 ETL 链路持续同步数据，一致性难以保证，数据可能产生偏差&lt;br&gt;&lt;br&gt;3. &lt;b&gt;集群常态维护&lt;/b&gt;：即使查询频次不高，Milvus / ES，集群也需要 7×24 运行，持续占用资源和运维精力&lt;br&gt;&lt;br&gt;4. &lt;b&gt;存储冗余&lt;/b&gt;：向量数据在数据湖和向量库各存一份&lt;br&gt;&lt;br&gt;5. &lt;b&gt;标量+向量串行开销&lt;/b&gt;：Paimon 执行标量+向量检索时，需要两阶段串行执行，存在中间结果传输开销&lt;br&gt;&lt;br&gt;6. &lt;b&gt;查询链路耗时高&lt;/b&gt;：通过 Spark / 脚本查询时，需经历资源申请→任务调度→拉起执行→返回结果，整体耗时秒级甚至分钟级" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;strokeWidth=2;fontSize=12;fontFamily=system-ui;align=left;spacingLeft=15;spacingTop=5;" parent="old-box" vertex="1">
+          <mxGeometry x="30" y="341" width="750" height="219" as="geometry" />
+        </mxCell>
+        <mxCell id="new-box" value="&lt;b&gt;✅ Paimon + ES 方案&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontStyle=1;fontSize=16;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;container=1;collapsible=0;fontFamily=system-ui;" parent="1" vertex="1">
+          <mxGeometry x="900" y="70" width="870" height="680" as="geometry" />
+        </mxCell>
+        <mxCell id="new-paimon" value="&lt;b&gt;Paimon 数据湖&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontStyle=1;fontSize=14;fillColor=#FFF3E0;strokeColor=#E65100;strokeWidth=2;container=1;collapsible=0;fontFamily=system-ui;" parent="new-box" vertex="1">
+          <mxGeometry x="30" y="50" width="500" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="new-data" value="&lt;b&gt;数据文件 (OSS)&lt;/b&gt;&lt;br&gt;原始数据 + 向量嵌入" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontFamily=system-ui;" parent="new-paimon" vertex="1">
+          <mxGeometry x="20" y="40" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="new-eslib" value="&lt;b&gt;ES Index Lib&lt;/b&gt;&lt;br&gt;索引构建 + 查询&lt;br&gt;（SPI 插件）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#1a73e8;strokeWidth=3;fontSize=13;fontFamily=system-ui;" parent="new-paimon" vertex="1">
+          <mxGeometry x="260" y="40" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="new-paimon" source="new-idx" target="new-eslib" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;" parent="new-paimon" source="new-idx" target="new-snap" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="new-idx" value="&lt;b&gt;索引文件 (OSS)&lt;/b&gt;&lt;br&gt;ES 格式，构建一次" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontFamily=system-ui;" parent="new-paimon" vertex="1">
+          <mxGeometry x="20" y="125" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="new-snap" value="&lt;b&gt;Snapshot 元数据&lt;/b&gt;&lt;br&gt;原子一致" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontFamily=system-ui;" parent="new-paimon" vertex="1">
+          <mxGeometry x="260" y="125" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="new-build-label" value="&lt;b&gt;🔑 构建一次索引&lt;/b&gt;&lt;br&gt;Flink / Spark 分布式构建" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;strokeWidth=2;fontSize=12;fontFamily=system-ui;" parent="new-paimon" vertex="1">
+          <mxGeometry x="100" y="210" width="280" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="new-paimon" source="new-data" target="new-idx" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="new-es" value="&lt;b&gt;ES 集群&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontStyle=1;fontSize=14;fillColor=#FFF8E1;strokeColor=#F57F17;strokeWidth=2;container=1;collapsible=0;fontFamily=system-ui;" parent="new-box" vertex="1">
+          <mxGeometry x="570" y="50" width="270" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="new-import" value="&lt;b&gt;索引元信息导入&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=12;fontFamily=system-ui;" parent="new-es" vertex="1">
+          <mxGeometry x="30" y="45" width="210" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="new-search" value="&lt;b&gt;多 Shard 并行查询&lt;/b&gt;&lt;br&gt;向量 KNN + 标量过滤&lt;br&gt;毫秒级响应" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#1a73e8;fontSize=12;fontFamily=system-ui;" parent="new-es" vertex="1">
+          <mxGeometry x="30" y="120" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="new-openstore" value="&lt;b&gt;OpenStore&lt;/b&gt;&lt;br&gt;直读 OSS 索引文件&lt;br&gt;热数据本地缓存" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=12;fontFamily=system-ui;" parent="new-es" vertex="1">
+          <mxGeometry x="30" y="200" width="210" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e-new-imp2s" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#F57F17;" parent="new-es" source="new-import" target="new-search" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-new-s2os" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#F57F17;" parent="new-es" source="new-search" target="new-openstore" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="new-query-label" value="&lt;b&gt;多入口查询&lt;/b&gt;" style="text;html=1;align=center;fontSize=13;fontFamily=system-ui;fontColor=#555555;" parent="new-box" vertex="1">
+          <mxGeometry x="30" y="335" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="new-q1" value="Flink SQL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontFamily=system-ui;" parent="new-box" vertex="1">
+          <mxGeometry x="30" y="365" width="110" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="new-q2" value="Spark SQL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontFamily=system-ui;" parent="new-box" vertex="1">
+          <mxGeometry x="155" y="365" width="110" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="new-q3" value="PyPaimon" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontFamily=system-ui;" parent="new-box" vertex="1">
+          <mxGeometry x="280" y="365" width="110" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="new-q4" value="ES KNN API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontFamily=system-ui;" parent="new-box" vertex="1">
+          <mxGeometry x="405" y="365" width="110" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="new-advantage" value="&lt;b&gt;✅ 方案优势&lt;/b&gt;&lt;br&gt;&lt;br&gt;1. &lt;b&gt;构建一次，双引擎共用&lt;/b&gt;：Paimon 内一次索引构建，同时支持 Paimon 框架查询和 ES 集群查询，节省一半构建成本&lt;br&gt;&lt;br&gt;2. &lt;b&gt;无需数据同步&lt;/b&gt;：ES 直接读 Paimon 的 OSS 存储，无 ETL、无数据搬迁、无一致性问题&lt;br&gt;&lt;br&gt;3. 查询&lt;b&gt;&amp;nbsp;ES 集群提供高性能的并发查询能力&lt;/b&gt;：查询频次不高时无需维护常驻集群，需要在线查询时随时拉起 ES 集群 + 零拷贝挂载，用完释放&lt;br&gt;&lt;br&gt;4. &lt;b&gt;零存储冗余&lt;/b&gt;：数据和索引只在 OSS 上存一份&lt;br&gt;&lt;br&gt;5. &lt;b&gt;标量+向量引擎内联合&lt;/b&gt;：ES Shard 内同步执行标量过滤，和向量搜索，实时剪枝，消除两阶段串行传输开销&lt;br&gt;&lt;br&gt;6. &lt;b&gt;在线服务级延迟&lt;/b&gt;：ES 常驻服务直接响应，无需资源申请、任务调度等批处理流程，毫秒级返回" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;strokeWidth=2;fontSize=12;fontFamily=system-ui;align=left;spacingLeft=15;spacingTop=5;" parent="new-box" vertex="1">
+          <mxGeometry x="30" y="420" width="810" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="new-box" source="new-snap" target="new-import" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="vs-arrow" value="&lt;b&gt;VS&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;fontSize=28;fontFamily=system-ui;fontColor=#b85450;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="850" y="300" width="50" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="bottom-summary" value="&lt;b&gt;一句话总结：&lt;/b&gt;Paimon 存数据 + 构建索引 → ES 直读 OSS 索引文件 → 按需拉起 ES 集群并行查询 → 不用时释放集群，零额外成本" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;strokeWidth=2;fontSize=15;fontFamily=system-ui;align=center;" parent="1" vertex="1">
+          <mxGeometry x="30" y="780" width="1740" height="45" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
