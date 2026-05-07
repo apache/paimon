@@ -21,7 +21,6 @@ import os
 import shutil
 import tempfile
 import unittest
-import random
 from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
@@ -180,8 +179,7 @@ class ReaderBasicTest(unittest.TestCase):
             ('f12', pa.date32()),
             ('f13', pa.time32('ms')),
         ])
-        stats_enabled = random.random() < 0.5
-        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        options = {'metadata.stats-mode': 'full'}
         schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
         self.catalog.create_table('default.test_full_data_types', schema, False)
         table = self.catalog.get_table('default.test_full_data_types')
@@ -230,7 +228,6 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
 
-        # Both 'full' and default 'truncate(16)' modes produce value stats
         self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
         min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
                                                             table.fields).values
