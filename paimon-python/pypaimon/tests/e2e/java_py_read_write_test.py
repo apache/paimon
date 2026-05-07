@@ -26,6 +26,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
 
@@ -528,6 +529,31 @@ class JavaPyReadWriteTest(unittest.TestCase):
             table_read.to_arrow(splits)
         self.assertIn(file_format, str(ctx.exception))
         self.assertIn("not yet supported", str(ctx.exception))
+
+    def test_read_vector_append_table(self):
+        table = self.catalog.get_table('default.mixed_test_vector_append_tablej_avro')
+        embedding_field = next(field for field in table.fields if field.name == 'embedding')
+        self.assertIsInstance(embedding_field.type, VectorType)
+        self.assertEqual(embedding_field.type.length, 3)
+        self.assertEqual(embedding_field.type.element.type, 'FLOAT')
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(table_scan.plan().splits())
+        pa_table = table_sort_by(pa_table, 'id')
+
+        embedding_type = pa_table.schema.field('embedding').type
+        self.assertTrue(pa.types.is_fixed_size_list(embedding_type))
+        self.assertEqual(embedding_type.list_size, 3)
+        self.assertTrue(pa.types.is_float32(embedding_type.value_type))
+
+        self.assertEqual(pa_table.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            pa_table.column('embedding').to_pylist(),
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.5, 2.5]]
+        )
+        self.assertEqual(pa_table.column('label').to_pylist(), ['first', 'second', 'third'])
 
     def test_read_tantivy_full_text_index(self):
         """Test reading a Tantivy full-text index built by Java."""

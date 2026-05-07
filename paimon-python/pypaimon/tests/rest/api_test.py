@@ -31,7 +31,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, DataTypeParser, MapType,
-                                        RowType)
+                                        RowType, VectorType)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
@@ -124,6 +124,17 @@ class ApiTest(unittest.TestCase):
         value_type: RowType = element_type.value
         self.assertEqual(value_type.fields[0].type.type, 'BIGINT')
         self.assertEqual(value_type.fields[1].type.type, 'DOUBLE')
+
+        vector_json = {
+            "type": "VECTOR",
+            "element": "BOOLEAN NOT NULL",
+            "length": 7
+        }
+        vector_type: VectorType = DataTypeParser.parse_data_type(vector_json, field_id)
+        self.assertTrue(vector_type.nullable)
+        self.assertEqual(vector_type.element.type, "BOOLEAN")
+        self.assertFalse(vector_type.element.nullable)
+        self.assertEqual(vector_type.length, 7)
 
     def test_api(self):
         """Example usage of RESTCatalogServer"""
