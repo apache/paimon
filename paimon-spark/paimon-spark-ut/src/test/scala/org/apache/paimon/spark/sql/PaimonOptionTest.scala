@@ -19,10 +19,12 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTableFactory
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
 
@@ -263,6 +265,43 @@ class PaimonConfigCheckTest extends SparkFunSuite {
       } finally {
         spark.close()
       }
+    }
+  }
+
+  test("Paimon Option: required confs check with temporary SQLConf") {
+    val spark = SparkSession
+      .builder()
+      .master("local[2]")
+      .config("spark.sql.catalog.paimon", "org.apache.paimon.spark.SparkCatalog")
+      .config("spark.sql.catalog.paimon.warehouse", Utils.createTempDir.getCanonicalPath)
+      .config(
+        "spark.sql.extensions",
+        "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+      .config("spark.paimon.requiredSparkConfsCheck.enabled", "true")
+      .getOrCreate()
+    try {
+      SQLConf.withExistingConf(new SQLConf) {
+        OptionUtils.checkRequiredConfigurations(spark)
+      }
+    } finally {
+      spark.close()
+    }
+  }
+
+  test("Paimon Option: required confs switch with temporary SQLConf") {
+    val spark = SparkSession
+      .builder()
+      .master("local[2]")
+      .config("spark.sql.catalog.paimon", "org.apache.paimon.spark.SparkCatalog")
+      .config("spark.sql.catalog.paimon.warehouse", Utils.createTempDir.getCanonicalPath)
+      .config("spark.paimon.requiredSparkConfsCheck.enabled", "false")
+      .getOrCreate()
+    try {
+      SQLConf.withExistingConf(new SQLConf) {
+        OptionUtils.checkRequiredConfigurations(spark)
+      }
+    } finally {
+      spark.close()
     }
   }
 }
