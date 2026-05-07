@@ -50,6 +50,17 @@ public class DataEvolutionTestBase extends TableTestBase {
         return schemaBuilder.build();
     }
 
+    protected Schema schemaWithPartition() {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.partitionKeys("pt");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return schemaBuilder.build();
+    }
+
     protected void write(long count) throws Exception {
         createTableDefault();
 
