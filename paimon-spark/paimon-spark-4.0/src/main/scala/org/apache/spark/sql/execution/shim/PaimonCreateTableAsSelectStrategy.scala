@@ -21,14 +21,13 @@ package org.apache.spark.sql.execution.shim
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.iceberg.IcebergOptions
 import org.apache.paimon.spark.SparkCatalog
-import org.apache.paimon.spark.catalog.FormatTableCatalog
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, TableSpec}
-import org.apache.spark.sql.connector.catalog.StagingTableCatalog
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, ReplaceTableAsSelect, TableSpec}
+import org.apache.spark.sql.connector.catalog.{Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan, SparkStrategy}
-import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
+import org.apache.spark.sql.execution.datasources.v2.{CreateTableAsSelectExec, DataSourceV2Relation, ReplaceTableAsSelectExec}
 
 import scala.collection.JavaConverters._
 
@@ -51,30 +50,8 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
         case _: StagingTableCatalog =>
           throw new RuntimeException("Paimon can't extend StagingTableCatalog for now.")
         case _ =>
-          val coreOptionKeys = CoreOptions.getOptions.asScala.map(_.key()).toSeq
-
-          // Include Iceberg compatibility options in table properties (fix for DataFrame writer options)
-          val icebergOptionKeys = IcebergOptions.getOptions.asScala.map(_.key()).toSeq
-
-          val allTableOptionKeys = coreOptionKeys ++ icebergOptionKeys
-
-          val (tableOptions, writeOptions) = options.partition {
-            case (key, _) => allTableOptionKeys.contains(key)
-          }
-          val newTableSpec = tableSpec.copy(properties = tableSpec.properties ++ tableOptions)
-
-          val isPartitionedFormatTable = {
-            catalog match {
-              case catalog: FormatTableCatalog =>
-                catalog.isFormatTable(newTableSpec.provider.orNull) && parts.nonEmpty
-              case _ => false
-            }
-          }
-
-          if (isPartitionedFormatTable) {
-            throw new UnsupportedOperationException(
-              "Using CTAS with partitioned format table is not supported yet.")
-          }
+          val (newTableSpec, writeOptions) = tableSpecWithOptions(tableSpec, options)
+          failIfPartitionedFormatTable(catalog, newTableSpec, parts)
 
           CreateTableAsSelectExec(
             catalog.asTableCatalog,
@@ -85,6 +62,62 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
             writeOptions,
             ifNotExists) :: Nil
       }
+    case ReplaceTableAsSelect(
+          ResolvedIdentifier(catalog: SparkCatalog, ident),
+          parts,
+          query,
+          tableSpec: TableSpec,
+          options,
+          orCreate,
+          true) =>
+      catalog match {
+        case _: StagingTableCatalog =>
+          throw new RuntimeException("Paimon can't extend StagingTableCatalog for now.")
+        case _ =>
+          val (newTableSpec, writeOptions) = tableSpecWithOptions(tableSpec, options)
+
+          ReplaceTableAsSelectExec(
+            catalog.asTableCatalog,
+            ident,
+            parts,
+            query,
+            qualifyLocInTableSpec(newTableSpec),
+            writeOptions,
+            orCreate,
+            invalidateCache) :: Nil
+      }
     case _ => Nil
+  }
+
+  private lazy val tableOptionKeys: Seq[String] = {
+    val coreOptionKeys = CoreOptions.getOptions.asScala.map(_.key()).toSeq
+
+    // Include Iceberg compatibility options in table properties (fix for DataFrame writer options)
+    val icebergOptionKeys = IcebergOptions.getOptions.asScala.map(_.key()).toSeq
+
+    coreOptionKeys ++ icebergOptionKeys
+  }
+
+  private def tableSpecWithOptions(
+      tableSpec: TableSpec, options: Map[String, String]): (TableSpec, Map[String, String]) = {
+    val (tableOptions, writeOptions) = options.partition {
+      case (key, _) => tableOptionKeys.contains(key)
+    }
+    (tableSpec.copy(properties = tableSpec.properties ++ tableOptions), writeOptions)
+  }
+
+  private def failIfPartitionedFormatTable(
+      catalog: SparkCatalog, tableSpec: TableSpec, parts: Seq[_]): Unit = {
+    if (catalog.isFormatTable(tableSpec.provider.orNull) && parts.nonEmpty) {
+      throw new UnsupportedOperationException(
+        "Using CTAS with partitioned format table is not supported yet.")
+    }
+  }
+
+  private def invalidateCache(
+      catalog: TableCatalog, table: Table, ident: Identifier): Unit = {
+    val v2Relation = DataSourceV2Relation.create(table, Some(catalog), Some(ident))
+    val classicSpark = spark.asInstanceOf[org.apache.spark.sql.classic.SparkSession]
+    classicSpark.sharedState.cacheManager.uncacheQuery(classicSpark, v2Relation, true, false)
   }
 }
