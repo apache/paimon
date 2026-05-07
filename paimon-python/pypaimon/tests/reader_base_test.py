@@ -572,6 +572,26 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(core_options.metadata_stats_mode(), 'truncate(16)')
         self.assertTrue(core_options.metadata_stats_enabled())
 
+    def test_high_precision_timestamp_stats_skip_minmax(self):
+        from pypaimon.write.writer.data_writer import DataWriter
+
+        data = pa.Table.from_pydict(
+            {
+                'ts_us': [datetime(2024, 1, 1, 0, 0, 0, 999)],
+                'ts_ns': [datetime(2024, 1, 1, 0, 0, 0, 999)],
+            },
+            schema=pa.schema([
+                ('ts_us', pa.timestamp('us')),
+                ('ts_ns', pa.timestamp('ns')),
+            ])
+        )
+
+        for column in ['ts_us', 'ts_ns']:
+            stats = DataWriter._get_column_stats(data, column, 'full')
+            self.assertIsNone(stats['min_values'])
+            self.assertIsNone(stats['max_values'])
+            self.assertEqual(stats['null_counts'], 0)
+
     def test_default_truncate_stats_e2e(self):
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
         catalog.create_database("test_db_truncate_e2e", True)
@@ -698,6 +718,39 @@ class ReaderBasicTest(unittest.TestCase):
         max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
         self.assertEqual(min_row.values[1], min_amount)
         self.assertEqual(max_row.values[1], max_amount)
+        self.assertEqual(rb.new_read().to_arrow(scan.plan().splits()), data)
+
+    def test_default_stats_with_high_precision_timestamp_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_timestamp_stats", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('ts', pa.timestamp('us'))])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_timestamp_stats.t", schema, False)
+        table = catalog.get_table("test_db_timestamp_stats.t")
+
+        value = datetime(2024, 1, 1, 0, 0, 0, 999)
+        data = pa.Table.from_pydict({'id': [1], 'ts': [value]}, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertIsNone(min_row.values[1])
+        self.assertIsNone(max_row.values[1])
+        self.assertEqual(stats.null_counts, [0, 0])
         self.assertEqual(rb.new_read().to_arrow(scan.plan().splits()), data)
 
     def test_value_stats_empty_when_stats_disabled(self):
