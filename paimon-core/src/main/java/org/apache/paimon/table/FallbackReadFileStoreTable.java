@@ -573,12 +573,17 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         private final InnerTableRead mainRead;
         private final InnerTableRead fallbackRead;
+        private final boolean fallbackReadFailFast;
 
         private Read() {
             FileStoreTable first = wrappedFirst ? wrapped : other;
             FileStoreTable second = wrappedFirst ? other : wrapped;
             this.mainRead = first.newRead();
             this.fallbackRead = second.newRead();
+            this.fallbackReadFailFast =
+                    wrapped.coreOptions()
+                            .toConfiguration()
+                            .get(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST);
         }
 
         @Override
@@ -623,10 +628,23 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 if (fallbackSplit.isFallback()) {
                     try {
                         return fallbackRead.createReader(fallbackSplit.wrapped());
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        if (fallbackReadFailFast) {
+                            if (e instanceof IOException) {
+                                throw (IOException) e;
+                            }
+                            if (e instanceof RuntimeException) {
+                                throw (RuntimeException) e;
+                            }
+                            throw new IOException(
+                                    "Failed to read fallback branch split: "
+                                            + fallbackSplit.wrapped(),
+                                    e);
+                        }
                         LOG.error(
                                 "Reading from supplemental branch has problems: {}",
-                                fallbackSplit.wrapped());
+                                fallbackSplit.wrapped(),
+                                e);
                     }
                 }
             }

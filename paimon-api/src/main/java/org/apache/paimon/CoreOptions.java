@@ -1972,6 +1972,16 @@ public class CoreOptions implements Serializable {
                             "When a batch job queries from a table, if a partition does not exist in the current branch, "
                                     + "the reader will try to get this partition from this fallback branch.");
 
+    public static final ConfigOption<Boolean> SCAN_FALLBACK_BRANCH_READ_FAIL_FAST =
+            key("scan.fallback-branch.read-fail-fast")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to fail the read immediately when reading from a fallback branch throws. "
+                                    + "By default the failure is logged with the full stack trace and the reader "
+                                    + "falls through to the current branch, which can mask data issues. "
+                                    + "Set this to true to surface fallback branch errors to the caller instead.");
+
     public static final ConfigOption<String> SCAN_PRIMARY_BRANCH =
             key("scan.primary-branch")
                     .stringType()
