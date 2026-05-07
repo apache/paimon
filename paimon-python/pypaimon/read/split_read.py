@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Callable, List, Optional, Tuple
 
+from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import ApplyDeletionVectorReader
@@ -98,6 +99,10 @@ class SplitRead(ABC):
         self.split = split
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
+        # Snapshot the raw value-side schema before _create_key_value_fields
+        # wraps it, so MergeFileSplitRead can hand per-value-field nullable
+        # flags to merge functions that mirror Java's NOT-NULL check.
+        self.value_fields = list(read_type)
 
         self.trimmed_primary_key = self.table.trimmed_primary_keys
         self.read_fields = read_type
@@ -508,7 +513,24 @@ class MergeFileSplitRead(SplitRead):
                 supplier = partial(self.kv_reader_supplier, file, self.deletion_file_readers.get(file.file_name, None))
                 data_readers.append(supplier)
             readers.append(ConcatRecordReader(data_readers))
-        return SortMergeReaderWithMinHeap(readers, self.table.table_schema)
+        merge_function = self._build_merge_function()
+        return SortMergeReaderWithMinHeap(
+            readers, self.table.table_schema, merge_function=merge_function)
+
+    def _build_merge_function(self):
+        """Pick the MergeFunction for the table's ``merge-engine`` option.
+
+        Delegates to the shared dispatch in
+        ``pypaimon.common.merge_engine_dispatch`` so the read path and
+        the in-memory merge buffer on the write path cannot drift.
+        """
+        return build_merge_function(
+            engine=self.table.options.merge_engine(),
+            raw_options=self.table.options.options.to_map(),
+            key_arity=len(self.trimmed_primary_key),
+            value_arity=self.value_arity,
+            value_field_nullables=[f.type.nullable for f in self.value_fields],
+        )
 
     def create_reader(self) -> RecordReader:
         # Create a dict mapping data file name to deletion file reader method
