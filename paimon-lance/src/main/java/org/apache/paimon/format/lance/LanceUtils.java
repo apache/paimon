@@ -123,8 +123,7 @@ public class LanceUtils {
                 storageOptions.put(
                         STORAGE_OPTION_ENDPOINT,
                         "https://" + uri.getHost() + "." + originOptions.get(FS_OSS_ENDPOINT));
-                storageOptions.put(
-                        STORAGE_OPTION_OSS_ENDPOINT, originOptions.get(FS_OSS_ENDPOINT));
+                storageOptions.put(STORAGE_OPTION_OSS_ENDPOINT, originOptions.get(FS_OSS_ENDPOINT));
             }
             if (originOptions.get(FS_OSS_ACCESS_KEY_ID) != null) {
                 storageOptions.put(
@@ -153,8 +152,7 @@ public class LanceUtils {
         while (iterator.hasNext()) {
             Map.Entry<String, String> entry = iterator.next();
             if (entry.getValue() == null) {
-                LOG.warn(
-                        "Removing null Lance storage option value for key '{}'.", entry.getKey());
+                LOG.warn("Removing null Lance storage option value for key '{}'.", entry.getKey());
                 iterator.remove();
             }
         }
