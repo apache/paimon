@@ -24,12 +24,15 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.cache.BlockDiskCache;
+import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -59,6 +62,7 @@ import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileSystemBranchManager;
+import org.apache.paimon.utils.FileType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -80,6 +84,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
@@ -106,7 +111,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Path path,
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
-        this.fileIO = fileIO;
+        this.fileIO = wrapWithCachingIfNeeded(fileIO, tableSchema);
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
@@ -116,6 +121,33 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+    }
+
+    private static FileIO wrapWithCachingIfNeeded(FileIO fileIO, TableSchema tableSchema) {
+        if (fileIO instanceof CachingFileIO) {
+            return fileIO;
+        }
+        CoreOptions options = CoreOptions.fromMap(tableSchema.options());
+        if (!options.fileCacheEnabled()) {
+            return fileIO;
+        }
+        String cacheDir = options.fileCacheDir();
+        if (cacheDir == null) {
+            cacheDir =
+                    System.getProperty("java.io.tmpdir")
+                            + java.io.File.separator
+                            + "paimon-file-cache";
+        }
+        MemorySize maxSizeOpt = options.fileCacheMaxSize();
+        long maxSize = maxSizeOpt == null ? Long.MAX_VALUE : maxSizeOpt.getBytes();
+        int blockSize = (int) options.fileCacheBlockSize().getBytes();
+        BlockDiskCache cache = BlockDiskCache.getOrCreate(cacheDir, maxSize, blockSize);
+
+        Set<FileType> whitelist = FileType.parseWhitelist(options.fileCacheWhitelist());
+        if (whitelist.isEmpty()) {
+            return fileIO;
+        }
+        return new CachingFileIO(fileIO, cache, whitelist);
     }
 
     public String currentBranch() {

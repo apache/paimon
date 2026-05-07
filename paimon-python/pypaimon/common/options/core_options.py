@@ -388,6 +388,47 @@ class CoreOptions:
         )
     )
 
+    FILE_CACHE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("file-cache.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable local disk block cache for file reads.")
+    )
+
+    FILE_CACHE_DIR: ConfigOption[str] = (
+        ConfigOptions.key("file-cache.dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory for file block cache. "
+            "Defaults to a 'paimon-file-cache' subdirectory under the system temp directory."
+        )
+    )
+
+    FILE_CACHE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("file-cache.max-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Maximum total size of the local disk block cache. Unlimited by default.")
+    )
+
+    FILE_CACHE_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("file-cache.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description("Block size for local disk cache.")
+    )
+
+    FILE_CACHE_WHITELIST: ConfigOption[str] = (
+        ConfigOptions.key("file-cache.whitelist")
+        .string_type()
+        .default_value("meta,global-index")
+        .with_description(
+            "Comma-separated list of file types to cache. "
+            "Supported values: meta, global-index, bucket-index, data, file-index."
+        )
+    )
+
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
@@ -616,6 +657,21 @@ class CoreOptions:
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def file_cache_enabled(self) -> bool:
+        return self.options.get(CoreOptions.FILE_CACHE_ENABLED)
+
+    def file_cache_dir(self) -> Optional[str]:
+        return self.options.get(CoreOptions.FILE_CACHE_DIR)
+
+    def file_cache_max_size(self) -> Optional[MemorySize]:
+        return self.options.get(CoreOptions.FILE_CACHE_MAX_SIZE)
+
+    def file_cache_block_size(self) -> MemorySize:
+        return self.options.get(CoreOptions.FILE_CACHE_BLOCK_SIZE)
+
+    def file_cache_whitelist(self) -> str:
+        return self.options.get(CoreOptions.FILE_CACHE_WHITELIST)
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
