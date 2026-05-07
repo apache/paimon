@@ -524,16 +524,22 @@ public class ExpireSnapshotsTest {
         builder.snapshotRetainMin(1)
                 .snapshotRetainMax(Integer.MAX_VALUE)
                 .snapshotTimeRetain(Duration.ofMillis(1000));
-        ExpireSnapshots expire = store.newExpire(builder.build());
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(builder.build());
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
-        Thread.sleep(1500);
+        for (int i = 1; i <= 5; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
         commit(5, allData, snapshotPositions);
-        long expireMillis = System.currentTimeMillis();
-        // expire twice to check for idempotence
+        for (int i = 6; i <= 10; i++) {
+            rewriteSnapshotTime(i, 2000);
+        }
 
+        // expire at time 2500, olderThanMills = 1500
+        expire.setCurrentTimeMillis(() -> 2500L);
+        // expire twice to check for idempotence
         expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
         expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
 
@@ -560,16 +566,20 @@ public class ExpireSnapshotsTest {
         builder.snapshotRetainMin(1)
                 .snapshotRetainMax(Integer.MAX_VALUE)
                 .snapshotTimeRetain(Duration.ofMillis(5000));
-        ExpireSnapshots expire = store.newExpire(builder.build());
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(builder.build());
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
 
         // create 5 snapshots quickly
         commit(5, allData, snapshotPositions);
+        for (int i = 1; i <= 5; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
 
         // expire immediately - no snapshot should be expired because each
         // snapshot's next snapshot is still within the time window
+        expire.setCurrentTimeMillis(() -> 100L);
         expire.config(builder.build()).expire();
 
         for (int i = 1; i <= 5; i++) {
@@ -577,15 +587,14 @@ public class ExpireSnapshotsTest {
             assertSnapshot(i, allData, snapshotPositions);
         }
 
-        // wait for snapshotTimeRetain to pass
-        Thread.sleep(5500);
-
         // create one more snapshot so snapshot 5 has a "next"
         commit(1, allData, snapshotPositions);
+        rewriteSnapshotTime(6, 6000);
 
         // expire again - now snapshots 1-4 can be expired (their next snapshots
         // are older than 5000ms), but snapshot 5 is still protected because its
         // next snapshot (6) was just created
+        expire.setCurrentTimeMillis(() -> 6500L);
         expire.config(builder.build()).expire();
 
         for (int i = 1; i <= 4; i++) {
@@ -788,6 +797,34 @@ public class ExpireSnapshotsTest {
                         null)
                 .changelogProducer(changelogProducer)
                 .build();
+    }
+
+    private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
+        Snapshot old = snapshotManager.snapshot(snapshotId);
+        Snapshot updated =
+                new Snapshot(
+                        old.id(),
+                        old.schemaId(),
+                        old.baseManifestList(),
+                        old.baseManifestListSize(),
+                        old.deltaManifestList(),
+                        old.deltaManifestListSize(),
+                        old.changelogManifestList(),
+                        old.changelogManifestListSize(),
+                        old.indexManifest(),
+                        old.commitUser(),
+                        old.commitIdentifier(),
+                        old.commitKind(),
+                        newTimeMillis,
+                        old.totalRecordCount(),
+                        old.deltaRecordCount(),
+                        old.changelogRecordCount(),
+                        old.watermark(),
+                        old.statistics(),
+                        old.properties(),
+                        old.nextRowId());
+        fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshotId), updated.toJson());
+        snapshotManager.invalidateCache();
     }
 
     protected void commit(int numCommits, List<KeyValue> allData, List<Integer> snapshotPositions)
