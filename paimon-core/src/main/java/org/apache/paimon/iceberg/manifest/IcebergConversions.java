@@ -126,6 +126,14 @@ public class IcebergConversions {
                 .putLong(0, timestamp.toMicros());
     }
 
+    private static Timestamp timestampFromBytes(byte[] bytes, int precision) {
+        Preconditions.checkArgument(
+                precision >= 3 && precision <= 6,
+                "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
+        long encoded = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        return precision == 3 ? Timestamp.fromEpochMillis(encoded) : Timestamp.fromMicros(encoded);
+    }
+
     private static ByteBuffer timeToByteBuffer(int millisOfDay, int precision) {
         Preconditions.checkArgument(
                 precision >= 0 && precision <= 3,
@@ -164,17 +172,11 @@ public class IcebergConversions {
                 return Decimal.fromUnscaledBytes(
                         bytes, decimalType.getPrecision(), decimalType.getScale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return timestampFromBytes(bytes, ((TimestampType) type).getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                int timestampPrecision = ((TimestampType) type).getPrecision();
-                long timestampLong =
-                        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
-                Preconditions.checkArgument(
-                        timestampPrecision >= 3 && timestampPrecision <= 6,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
-                if (timestampPrecision == 3) {
-                    return Timestamp.fromEpochMillis(timestampLong);
-                }
-                return Timestamp.fromMicros(timestampLong);
+                // LocalZonedTimestampType does not extend TimestampType, so it cannot
+                // share a switch arm with TIMESTAMP_WITHOUT_TIME_ZONE.
+                return timestampFromBytes(bytes, ((LocalZonedTimestampType) type).getPrecision());
             case TIME_WITHOUT_TIME_ZONE:
                 int timePrecision = ((TimeType) type).getPrecision();
                 Preconditions.checkArgument(
