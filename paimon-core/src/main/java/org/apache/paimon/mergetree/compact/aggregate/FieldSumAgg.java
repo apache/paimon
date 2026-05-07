@@ -55,16 +55,16 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = (byte) ((byte) accumulator + (byte) inputField);
+                sum = toExactByte((byte) accumulator + (byte) inputField);
                 break;
             case SMALLINT:
-                sum = (short) ((short) accumulator + (short) inputField);
+                sum = toExactShort((short) accumulator + (short) inputField);
                 break;
             case INTEGER:
-                sum = (int) accumulator + (int) inputField;
+                sum = Math.addExact((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                sum = (long) accumulator + (long) inputField;
+                sum = Math.addExact((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 sum = (float) accumulator + (float) inputField;
@@ -105,16 +105,16 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = (byte) ((byte) accumulator - (byte) inputField);
+                sum = toExactByte((byte) accumulator - (byte) inputField);
                 break;
             case SMALLINT:
-                sum = (short) ((short) accumulator - (short) inputField);
+                sum = toExactShort((short) accumulator - (short) inputField);
                 break;
             case INTEGER:
-                sum = (int) accumulator - (int) inputField;
+                sum = Math.subtractExact((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                sum = (long) accumulator - (long) inputField;
+                sum = Math.subtractExact((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 sum = (float) accumulator - (float) inputField;
@@ -142,13 +142,13 @@ public class FieldSumAgg extends FieldAggregator {
                 return Decimal.fromBigDecimal(
                         decimal.toBigDecimal().negate(), decimal.precision(), decimal.scale());
             case TINYINT:
-                return (byte) -((byte) value);
+                return toExactByte(-(byte) value);
             case SMALLINT:
-                return (short) -((short) value);
+                return toExactShort(-(short) value);
             case INTEGER:
-                return -((int) value);
+                return Math.negateExact((int) value);
             case BIGINT:
-                return -((long) value);
+                return Math.negateExact((long) value);
             case FLOAT:
                 return -((float) value);
             case DOUBLE:
@@ -160,5 +160,19 @@ public class FieldSumAgg extends FieldAggregator {
                                 fieldType.getTypeRoot().toString(), this.getClass().getName());
                 throw new IllegalArgumentException(msg);
         }
+    }
+
+    private static byte toExactByte(int result) {
+        if (result > Byte.MAX_VALUE || result < Byte.MIN_VALUE) {
+            throw new ArithmeticException("byte overflow");
+        }
+        return (byte) result;
+    }
+
+    private static short toExactShort(int result) {
+        if (result > Short.MAX_VALUE || result < Short.MIN_VALUE) {
+            throw new ArithmeticException("short overflow");
+        }
+        return (short) result;
     }
 }
