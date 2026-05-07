@@ -106,19 +106,27 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
         Arrays.fill(this.length, value.length);
     }
 
+    /** The maximum size of array to allocate. Some VMs reserve header words in an array. */
+    private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+
     private void reserveBytes(int newCapacity) {
         if (newCapacity > buffer.length) {
-            int newBytesCapacity = newCapacity * 2;
-            try {
-                buffer = Arrays.copyOf(buffer, newBytesCapacity);
-            } catch (NegativeArraySizeException e) {
+            if (newCapacity > MAX_ARRAY_SIZE) {
                 throw new RuntimeException(
                         String.format(
-                                "The new claimed capacity %s is too large, will overflow the INTEGER.MAX after multiply by 2. "
-                                        + "Try reduce `read.batch-size` to avoid this exception.",
-                                newCapacity),
-                        e);
+                                "The required byte buffer capacity %s exceeds the maximum array size. "
+                                        + "Try reducing `read.batch-size` to avoid this exception.",
+                                newCapacity));
             }
+            // Try to double the capacity for amortized growth. If doubling would overflow,
+            // fall back to the exact required capacity (capped at MAX_ARRAY_SIZE).
+            int newBytesCapacity;
+            if (newCapacity <= (MAX_ARRAY_SIZE >> 1)) {
+                newBytesCapacity = newCapacity << 1;
+            } else {
+                newBytesCapacity = MAX_ARRAY_SIZE;
+            }
+            buffer = Arrays.copyOf(buffer, newBytesCapacity);
         }
     }
 
