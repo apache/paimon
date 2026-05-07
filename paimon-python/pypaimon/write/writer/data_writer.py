@@ -34,13 +34,22 @@ from pypaimon.table.row.generic_row import GenericRow
 def _truncate_min(value, length):
     if value is None:
         return None
-    if isinstance(value, str) and len(value) > length:
+    if isinstance(value, (bytes, str)) and len(value) > length:
         return value[:length]
     return value
 
 
 def _truncate_max(value, length):
     if value is None:
+        return None
+    if isinstance(value, bytes):
+        if len(value) <= length:
+            return value
+        truncated = bytearray(value[:length])
+        for i in range(len(truncated) - 1, -1, -1):
+            if truncated[i] < 0xFF:
+                truncated[i] += 1
+                return bytes(truncated[:i + 1])
         return None
     if isinstance(value, str):
         if len(value) <= length:
