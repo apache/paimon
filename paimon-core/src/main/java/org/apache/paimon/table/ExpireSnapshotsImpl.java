@@ -45,6 +45,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.SnapshotManager.findPreviousOrEqualSnapshot;
@@ -63,6 +64,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final TagManager tagManager;
 
     private ExpireConfig expireConfig;
+    private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
 
     public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
@@ -82,6 +84,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.fileExecutor = snapshotDeletion.fileExecutor();
     }
 
+    @VisibleForTesting
+    public void setCurrentTimeMillis(Supplier<Long> currentTimeMillis) {
+        this.currentTimeMillis = currentTimeMillis;
+    }
+
     @Override
     public ExpireSnapshots config(ExpireConfig expireConfig) {
         this.expireConfig = expireConfig;
@@ -95,7 +102,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         int retainMin = expireConfig.getSnapshotRetainMin();
         int maxDeletes = expireConfig.getSnapshotMaxDeletes();
         long olderThanMills =
-                System.currentTimeMillis() - expireConfig.getSnapshotTimeRetain().toMillis();
+                currentTimeMillis.get() - expireConfig.getSnapshotTimeRetain().toMillis();
 
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
@@ -136,10 +143,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
-            // (the maximum time of snapshots to retain)
+            // A snapshot can only be expired if its next snapshot has been alive
+            // longer than snapshotTimeRetain, providing stronger protection
             try {
-                Snapshot snapshot = snapshotManager.tryGetSnapshot(id);
-                if (olderThanMills <= snapshot.timeMillis()) {
+                Snapshot nextSnapshot = snapshotManager.tryGetSnapshot(id + 1);
+                if (olderThanMills <= nextSnapshot.timeMillis()) {
                     return expireUntil(earliest, id);
                 }
             } catch (FileNotFoundException e) {
@@ -162,7 +170,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     private int innerExpireUntil(long earliestId, long endExclusiveId)
             throws ExecutionException, InterruptedException {
-        long startTime = System.currentTimeMillis();
+        long startTime = currentTimeMillis.get();
 
         if (endExclusiveId <= earliestId) {
             // No expire happens:
@@ -268,7 +276,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         writeEarliestHint(endExclusiveId);
-        long duration = System.currentTimeMillis() - startTime;
+        long duration = currentTimeMillis.get() - startTime;
         LOG.info(
                 "Finished expire snapshots, duration {} ms, range is [{}, {})",
                 duration,
