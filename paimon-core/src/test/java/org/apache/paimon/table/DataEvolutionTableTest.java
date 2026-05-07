@@ -54,8 +54,10 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -101,6 +103,11 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                         .sum();
         assertThat(noMergedRowCount).isEqualTo(2);
         assertThat(mergedRowCount).isEqualTo(1);
+
+        // assert record count tracked by snapshot. The second commit reuses rowId 0, so
+        // totalRecordCount should be 1 instead of 2.
+        assertThat(getTableDefault().snapshotManager().latestSnapshot().totalRecordCount())
+                .isEqualTo(1L);
 
         RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
         assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
@@ -951,6 +958,10 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(entries.size()).isEqualTo(1);
         assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
+
+        // assert record count tracked by snapshot. Compact commit should not introduce new rowIds,
+        // and totalRecordCount should still match the total inserted records (5 * 100000).
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(500000L);
     }
 
     @Test
@@ -995,5 +1006,126 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                                 testExternalpath2,
                                 null));
         assertThat(path4.toString()).isEqualTo(testExternalpath2);
+    }
+
+    @Test
+    public void testInsertOverwrite() throws Exception {
+        Schema schema = schemaWithPartition();
+        catalog.createTable(identifier(), schema, true);
+        FileStoreTable table = getTableDefault();
+
+        // Write 10 rows to partition "a"
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i, BinaryString.fromString("v" + i), BinaryString.fromString("a")));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(10L);
+
+        // Write 5 rows to partition "b"
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 5; i++) {
+                write.write(
+                        GenericRow.of(
+                                i + 10,
+                                BinaryString.fromString("v" + (i + 10)),
+                                BinaryString.fromString("b")));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(15L);
+
+        // INSERT OVERWRITE partition "a" with 3 new rows
+        Map<String, String> overwritePartition = new HashMap<>();
+        overwritePartition.put("pt", "a");
+        BatchWriteBuilder overwriteBuilder =
+                table.newBatchWriteBuilder().withOverwrite(overwritePartition);
+        try (BatchTableWrite write = overwriteBuilder.newWrite()) {
+            for (int i = 0; i < 3; i++) {
+                write.write(
+                        GenericRow.of(
+                                i + 100,
+                                BinaryString.fromString("new" + i),
+                                BinaryString.fromString("a")));
+            }
+            try (BatchTableCommit commit = overwriteBuilder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        // totalRecordCount should be: 15 (previous) - 10 (deleted from partition "a") + 3 (new) = 8
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(8L);
+
+        // Verify data: partition "a" should have 3 rows, partition "b" should have 5 rows
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        AtomicInteger rowCount = new AtomicInteger(0);
+        reader.forEachRemaining(r -> rowCount.incrementAndGet());
+        assertThat(rowCount.get()).isEqualTo(8);
+    }
+
+    @Test
+    public void testDropPartition() throws Exception {
+        Schema schema = schemaWithPartition();
+        catalog.createTable(identifier(), schema, true);
+        FileStoreTable table = getTableDefault();
+
+        // Write 10 rows to partition "a"
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i, BinaryString.fromString("v" + i), BinaryString.fromString("a")));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(10L);
+
+        // Write 5 rows to partition "b"
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 5; i++) {
+                write.write(
+                        GenericRow.of(
+                                i + 10,
+                                BinaryString.fromString("v" + (i + 10)),
+                                BinaryString.fromString("b")));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(15L);
+
+        // Drop partition "a"
+        Map<String, String> partitionToDrop = new HashMap<>();
+        partitionToDrop.put("pt", "a");
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(Collections.singletonList(partitionToDrop));
+        }
+
+        // totalRecordCount should be: 15 (previous) - 10 (deleted from partition "a") = 5
+        assertThat(table.snapshotManager().latestSnapshot().totalRecordCount()).isEqualTo(5L);
+
+        // Verify data: only partition "b" should remain with 5 rows
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        AtomicInteger rowCount = new AtomicInteger(0);
+        reader.forEachRemaining(r -> rowCount.incrementAndGet());
+        assertThat(rowCount.get()).isEqualTo(5);
     }
 }

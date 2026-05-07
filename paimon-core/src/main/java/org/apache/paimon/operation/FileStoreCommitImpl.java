@@ -98,6 +98,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
+import static org.apache.paimon.operation.commit.DataEvolutionCommitUtils.dataEvolutionDeltaRecordCount;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
@@ -932,8 +933,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaFiles = assigned.assignedEntries;
             }
 
-            // the added records subtract the deleted records from
-            long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            long deltaRecordCount;
+            if (options.dataEvolutionEnabled()) {
+                // inserted rows count can be calculated by nextRowId
+                deltaRecordCount =
+                        dataEvolutionDeltaRecordCount(
+                                deltaFiles, nextRowIdStart - firstRowIdStart, commitKind);
+            } else {
+                // the added records subtract the deleted records from
+                deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
+            }
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files
