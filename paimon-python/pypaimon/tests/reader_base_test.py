@@ -572,6 +572,48 @@ class ReaderBasicTest(unittest.TestCase):
         self.assertEqual(core_options.metadata_stats_mode(), 'truncate(16)')
         self.assertTrue(core_options.metadata_stats_enabled())
 
+        disabled_options = CoreOptions(Options({
+            CoreOptions.METADATA_STATS_MODE.key(): '  none  '
+        }))
+        self.assertEqual(disabled_options.metadata_stats_mode(), 'none')
+        self.assertFalse(disabled_options.metadata_stats_enabled())
+
+        invalid_options = CoreOptions(Options({
+            CoreOptions.METADATA_STATS_MODE.key(): 'tuncate(16)'
+        }))
+        with self.assertRaises(ValueError):
+            invalid_options.metadata_stats_mode()
+        with self.assertRaises(ValueError):
+            invalid_options.metadata_stats_enabled()
+
+    def test_invalid_stats_mode_rejected_before_writing_file(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_invalid_stats_mode", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'metadata.stats-mode': 'tuncate(16)',
+                'target-file-size': '1b',
+            }
+        )
+        catalog.create_table("test_db_invalid_stats_mode.t", schema, False)
+        table = catalog.get_table("test_db_invalid_stats_mode.t")
+
+        data = pa.Table.from_pydict({'id': [1], 'name': ['Alice']}, schema=pa_schema)
+        tw = table.new_batch_write_builder().new_write()
+        with self.assertRaises(ValueError):
+            tw.write_arrow(data)
+
+        data_files = []
+        table_path = os.path.join(self.warehouse, "test_db_invalid_stats_mode.db", "t")
+        for root, _, files in os.walk(table_path):
+            for file in files:
+                if file.endswith(('.avro', '.orc', '.parquet')):
+                    data_files.append(os.path.join(root, file))
+        self.assertEqual(data_files, [])
+
     def test_high_precision_timestamp_stats_skip_minmax(self):
         from pypaimon.write.writer.data_writer import DataWriter
 

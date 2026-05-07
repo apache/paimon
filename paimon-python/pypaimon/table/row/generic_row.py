@@ -471,6 +471,9 @@ class GenericRowSerializer:
 
     @classmethod
     def _serialize_decimal(cls, value: Decimal, data_type: DataType) -> bytes:
+        # This helper is only for compact decimals. Wider decimals are written
+        # through the variable-length path in to_bytes so their length can be
+        # preserved in the fixed part.
         _, scale = _decimal_precision_scale(data_type)
         unscaled_value = _decimal_unscaled_value(value, scale)
         return struct.pack('<q', unscaled_value)

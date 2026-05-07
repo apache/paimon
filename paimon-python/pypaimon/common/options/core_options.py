@@ -477,10 +477,32 @@ class CoreOptions:
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
 
     def metadata_stats_enabled(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default).upper() != "NONE"
+        mode, _ = CoreOptions.parse_metadata_stats_mode(
+            self.options.get(CoreOptions.METADATA_STATS_MODE, default))
+        return mode != "NONE"
 
     def metadata_stats_mode(self, default=None):
-        return self.options.get(CoreOptions.METADATA_STATS_MODE, default)
+        mode = self.options.get(CoreOptions.METADATA_STATS_MODE, default)
+        CoreOptions.parse_metadata_stats_mode(mode)
+        return mode.strip()
+
+    @staticmethod
+    def parse_metadata_stats_mode(mode: str):
+        if mode is None:
+            mode = CoreOptions.METADATA_STATS_MODE.default_value()
+        normalized = mode.strip()
+        upper = normalized.upper()
+        if upper in ("NONE", "COUNTS", "FULL"):
+            return upper, None
+        if upper.startswith("TRUNCATE(") and upper.endswith(")"):
+            length_text = upper[9:-1]
+            if not length_text or not all('0' <= c <= '9' for c in length_text):
+                raise ValueError(f"Unsupported metadata.stats-mode: {mode}")
+            length = int(length_text)
+            if length <= 0:
+                raise ValueError(f"Truncate length must be > 0, got: {mode}")
+            return "TRUNCATE", length
+        raise ValueError(f"Unsupported metadata.stats-mode: {mode}")
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
