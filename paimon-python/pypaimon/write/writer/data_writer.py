@@ -297,18 +297,15 @@ class DataWriter(ABC):
 
         return best_split
 
-    def _collect_value_stats(self, data: pa.Table, fields: List,
-                             column_stats: Optional[Dict[str, Dict]] = None,
-                             mode: str = None) -> SimpleStats:
+    def _collect_value_stats(self, data: pa.Table, fields: List, mode: str = None) -> SimpleStats:
         if not fields:
             return SimpleStats.empty_stats()
 
-        if column_stats is None or not column_stats:
-            m = mode or self.stats_mode
-            column_stats = {
-                field.name: self._get_column_stats(data, field.name, m)
-                for field in fields
-            }
+        m = mode or self.stats_mode
+        column_stats = {
+            field.name: self._get_column_stats(data, field.name, m)
+            for field in fields
+        }
         
         min_stats = [column_stats[field.name]['min_values'] for field in fields]
         max_stats = [column_stats[field.name]['max_values'] for field in fields]

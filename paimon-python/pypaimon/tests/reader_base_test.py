@@ -564,6 +564,15 @@ class ReaderBasicTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 DataWriter._parse_truncate_length(invalid_mode)
 
+    def test_metadata_stats_mode_defaults(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options import Options
+
+        core_options = CoreOptions(Options({}))
+
+        self.assertEqual(core_options.metadata_stats_mode(), 'truncate(16)')
+        self.assertTrue(core_options.metadata_stats_enabled())
+
     def test_default_truncate_stats_e2e(self):
         catalog = CatalogFactory.create({"warehouse": self.warehouse})
         catalog.create_database("test_db_truncate_e2e", True)
