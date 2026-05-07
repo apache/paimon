@@ -31,6 +31,38 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 
 
+def _truncate_min(value, length):
+    if value is None:
+        return None
+    if isinstance(value, (bytes, str)) and len(value) > length:
+        return value[:length]
+    return value
+
+
+def _truncate_max(value, length):
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        if len(value) <= length:
+            return value
+        truncated = bytearray(value[:length])
+        for i in range(len(truncated) - 1, -1, -1):
+            if truncated[i] < 0xFF:
+                truncated[i] += 1
+                return bytes(truncated[:i + 1])
+        return None
+    if isinstance(value, str):
+        if len(value) <= length:
+            return value
+        truncated = value[:length]
+        for i in range(len(truncated) - 1, -1, -1):
+            next_cp = ord(truncated[i]) + 1
+            if next_cp <= 0x10FFFF and not 0xD800 <= next_cp <= 0xDFFF:
+                return truncated[:i] + chr(next_cp)
+        return None
+    return value
+
+
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
@@ -63,6 +95,8 @@ class DataWriter(ABC):
         self.committed_files: List[DataFileMeta] = []
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
+        self.stats_mode = self.options.metadata_stats_mode()
+        self._parse_truncate_length(self.stats_mode)
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
@@ -210,24 +244,20 @@ class DataWriter(ABC):
         min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
-        # key stats & value stats
-        value_stats_enabled = self.options.metadata_stats_enabled()
-        if value_stats_enabled:
-            stats_fields = self.table.fields if self.table.is_primary_key_table \
-                else PyarrowFieldParser.to_paimon_schema(data.schema)
-        else:
-            stats_fields = self.table.trimmed_primary_keys_fields
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in stats_fields
-        }
+        # key stats (always computed with "full" mode, not affected by stats mode)
         key_fields = self.trimmed_primary_keys_fields
-        key_stats = self._collect_value_stats(data, key_fields, column_stats)
+        key_stats = self._collect_value_stats(data, key_fields, mode="full")
         if not all(count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
 
-        value_fields = stats_fields if value_stats_enabled else []
-        value_stats = self._collect_value_stats(data, value_fields, column_stats)
+        # value stats
+        value_stats_enabled = self.options.metadata_stats_enabled()
+        if value_stats_enabled:
+            value_fields = self.table.fields if self.table.is_primary_key_table \
+                else PyarrowFieldParser.to_paimon_schema(data.schema)
+        else:
+            value_fields = []
+        value_stats = self._collect_value_stats(data, value_fields)
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
@@ -312,16 +342,15 @@ class DataWriter(ABC):
 
         return best_split
 
-    def _collect_value_stats(self, data: pa.Table, fields: List,
-                             column_stats: Optional[Dict[str, Dict]] = None) -> SimpleStats:
+    def _collect_value_stats(self, data: pa.Table, fields: List, mode: str = None) -> SimpleStats:
         if not fields:
             return SimpleStats.empty_stats()
-        
-        if column_stats is None or not column_stats:
-            column_stats = {
-                field.name: self._get_column_stats(data, field.name)
-                for field in fields
-            }
+
+        m = mode or self.stats_mode
+        column_stats = {
+            field.name: self._get_column_stats(data, field.name, m)
+            for field in fields
+        }
         
         min_stats = [column_stats[field.name]['min_values'] for field in fields]
         max_stats = [column_stats[field.name]['max_values'] for field in fields]
@@ -334,32 +363,63 @@ class DataWriter(ABC):
         )
 
     @staticmethod
-    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
+    def _parse_truncate_length(mode: str):
+        return CoreOptions.parse_metadata_stats_mode(mode)
+
+    @staticmethod
+    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str,
+                          mode: str = "truncate(16)") -> Dict:
+        parsed_mode, truncate_length = DataWriter._parse_truncate_length(mode)
+
+        if parsed_mode == "NONE":
+            return {
+                "min_values": None,
+                "max_values": None,
+                "null_counts": None,
+            }
+
         column_array = record_batch.column(column_name)
+
+        if parsed_mode == "COUNTS":
+            return {
+                "min_values": None,
+                "max_values": None,
+                "null_counts": column_array.null_count,
+            }
+
         if column_array.null_count == len(column_array):
             return {
                 "min_values": None,
                 "max_values": None,
                 "null_counts": column_array.null_count,
             }
-        
+
         column_type = column_array.type
-        supports_minmax = not (pa.types.is_nested(column_type) or pa.types.is_map(column_type))
-        
+        supports_minmax = not (pa.types.is_nested(column_type) or pa.types.is_map(column_type)
+                               or pa.types.is_large_binary(column_type)
+                               or (pa.types.is_timestamp(column_type)
+                                   and (column_type.tz is not None or column_type.unit not in ('s', 'ms'))))
+
         if not supports_minmax:
             return {
                 "min_values": None,
                 "max_values": None,
                 "null_counts": column_array.null_count,
             }
-        
+
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
-        null_counts = column_array.null_count
+
+        if truncate_length is not None:
+            min_values = _truncate_min(min_values, truncate_length)
+            max_values = _truncate_max(max_values, truncate_length)
+            if max_values is None:
+                min_values = None
+
         return {
             "min_values": min_values,
             "max_values": max_values,
-            "null_counts": null_counts,
+            "null_counts": column_array.null_count,
         }
 
 

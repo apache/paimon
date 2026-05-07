@@ -431,6 +431,15 @@ class PredicateTest(unittest.TestCase):
         )
         self.assertTrue(pred.test_by_simple_stats(stat_positive, 10))
 
+    def test_missing_minmax_keeps_file_for_value_predicate(self):
+        stat_missing_minmax = SimpleStats(
+            min_values=GenericRow([None], []),
+            max_values=GenericRow([None], []),
+            null_counts=[0],
+        )
+        pred = Predicate(method="equal", index=0, field="c", literals=["target"])
+        self.assertTrue(pred.test_by_simple_stats(stat_missing_minmax, 10))
+
     def test_filter_with_null_and_or(self):
         p_gt = Predicate(method='greaterThan', index=1, field='score', literals=[10])
         p_null = Predicate(method='isNull', index=1, field='score', literals=[])

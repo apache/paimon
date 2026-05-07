@@ -21,7 +21,6 @@ import os
 import shutil
 import tempfile
 import unittest
-import random
 from datetime import date, datetime, time
 from decimal import Decimal
 from unittest.mock import Mock
@@ -180,8 +179,7 @@ class ReaderBasicTest(unittest.TestCase):
             ('f12', pa.date32()),
             ('f13', pa.time32('ms')),
         ])
-        stats_enabled = random.random() < 0.5
-        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        options = {'metadata.stats-mode': 'full'}
         schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
         self.catalog.create_table('default.test_full_data_types', schema, False)
         table = self.catalog.get_table('default.test_full_data_types')
@@ -216,10 +214,9 @@ class ReaderBasicTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
 
-        # assert data file without stats
+        # splits have stats dropped (drop_stats=True by default)
         first_file = splits[0].files[0]
         self.assertEqual(first_file.value_stats_cols, [])
-        self.assertEqual(first_file.value_stats, SimpleStats.empty_stats())
 
         # assert equal
         actual_data = table_read.to_arrow(splits)
@@ -231,25 +228,15 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
 
-        # Python write does not produce value stats
-        if stats_enabled:
-            self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
-            min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
-                                                                table.fields).values
-            max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
-                                                                table.fields).values
-            expected_min_values = [col[0].as_py() for col in expect_data]
-            expected_max_values = [col[1].as_py() for col in expect_data]
-            self.assertEqual(min_value_stats, expected_min_values)
-            self.assertEqual(max_value_stats, expected_max_values)
-        else:
-            self.assertEqual(manifest_entries[0].file.value_stats_cols, [])
-            min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
-                                                                []).values
-            max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
-                                                                []).values
-            self.assertEqual(min_value_stats, [])
-            self.assertEqual(max_value_stats, [])
+        self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
+        min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                            table.fields).values
+        max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                            table.fields).values
+        expected_min_values = [col[0].as_py() for col in expect_data]
+        expected_max_values = [col[1].as_py() for col in expect_data]
+        self.assertEqual(min_value_stats, expected_min_values)
+        self.assertEqual(max_value_stats, expected_max_values)
 
     def test_write_wrong_schema(self):
         self.catalog.create_table('default.test_wrong_schema',
@@ -552,6 +539,262 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
 
+    def test_truncate_stats(self):
+        from pypaimon.write.writer.data_writer import DataWriter, _truncate_min, _truncate_max
+
+        self.assertEqual(_truncate_min('abcdefghij', 5), 'abcde')
+        self.assertEqual(_truncate_min('abc', 5), 'abc')
+        self.assertEqual(_truncate_min(None, 5), None)
+        self.assertEqual(_truncate_min(42, 5), 42)
+
+        self.assertEqual(_truncate_max('abc', 5), 'abc')
+        self.assertEqual(_truncate_max('abcdefghij', 5), 'abcdf')
+        self.assertIsNone(_truncate_max('\ud7ffx', 1))
+        self.assertEqual(_truncate_max('a\ud7ffx', 2), 'b')
+        self.assertEqual(_truncate_max(None, 5), None)
+        self.assertEqual(_truncate_max(42, 5), 42)
+
+        self.assertEqual(_truncate_min(b'\x01\x02\x03\x04\x05\x06', 3), b'\x01\x02\x03')
+        self.assertEqual(_truncate_max(b'\x01\x02\x03\x04\x05\x06', 3), b'\x01\x02\x04')
+        self.assertIsNone(_truncate_max(b'\xff\xff\xff\x00', 3))
+
+        self.assertEqual(DataWriter._parse_truncate_length('truncate(10)'), ('TRUNCATE', 10))
+        for invalid_mode in ['truncate(+1)', 'truncate( 1)', 'truncate(10.1)', 'truncate()', 'truncate(0)']:
+            with self.assertRaises(ValueError):
+                DataWriter._parse_truncate_length(invalid_mode)
+
+    def test_metadata_stats_mode_defaults(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options import Options
+
+        core_options = CoreOptions(Options({}))
+
+        self.assertEqual(core_options.metadata_stats_mode(), 'truncate(16)')
+        self.assertTrue(core_options.metadata_stats_enabled())
+
+        disabled_options = CoreOptions(Options({
+            CoreOptions.METADATA_STATS_MODE.key(): '  none  '
+        }))
+        self.assertEqual(disabled_options.metadata_stats_mode(), 'none')
+        self.assertFalse(disabled_options.metadata_stats_enabled())
+
+        invalid_options = CoreOptions(Options({
+            CoreOptions.METADATA_STATS_MODE.key(): 'tuncate(16)'
+        }))
+        with self.assertRaises(ValueError):
+            invalid_options.metadata_stats_mode()
+        with self.assertRaises(ValueError):
+            invalid_options.metadata_stats_enabled()
+
+    def test_invalid_stats_mode_rejected_before_writing_file(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_invalid_stats_mode", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'metadata.stats-mode': 'tuncate(16)',
+                'target-file-size': '1b',
+            }
+        )
+        catalog.create_table("test_db_invalid_stats_mode.t", schema, False)
+        table = catalog.get_table("test_db_invalid_stats_mode.t")
+
+        data = pa.Table.from_pydict({'id': [1], 'name': ['Alice']}, schema=pa_schema)
+        tw = table.new_batch_write_builder().new_write()
+        with self.assertRaises(ValueError):
+            tw.write_arrow(data)
+
+        data_files = []
+        table_path = os.path.join(self.warehouse, "test_db_invalid_stats_mode.db", "t")
+        for root, _, files in os.walk(table_path):
+            for file in files:
+                if file.endswith(('.avro', '.orc', '.parquet')):
+                    data_files.append(os.path.join(root, file))
+        self.assertEqual(data_files, [])
+
+    def test_high_precision_timestamp_stats_skip_minmax(self):
+        from pypaimon.write.writer.data_writer import DataWriter
+
+        data = pa.Table.from_pydict(
+            {
+                'ts_us': [datetime(2024, 1, 1, 0, 0, 0, 999)],
+                'ts_ns': [datetime(2024, 1, 1, 0, 0, 0, 999)],
+            },
+            schema=pa.schema([
+                ('ts_us', pa.timestamp('us')),
+                ('ts_ns', pa.timestamp('ns')),
+            ])
+        )
+
+        for column in ['ts_us', 'ts_ns']:
+            stats = DataWriter._get_column_stats(data, column, 'full')
+            self.assertIsNone(stats['min_values'])
+            self.assertIsNone(stats['max_values'])
+            self.assertEqual(stats['null_counts'], 0)
+
+    def test_default_truncate_stats_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_truncate_e2e", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_truncate_e2e.t", schema, False)
+        table = catalog.get_table("test_db_truncate_e2e.t")
+
+        long_str = 'a' * 30
+        data = pa.Table.from_pydict({'id': [1], 'name': [long_str]})
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertEqual(min_row.values[1], 'a' * 16)
+        self.assertEqual(max_row.values[1], 'a' * 15 + 'b')
+
+    def test_default_truncate_skips_invalid_surrogate_max_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_truncate_surrogate_e2e", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_truncate_surrogate_e2e.t", schema, False)
+        table = catalog.get_table("test_db_truncate_surrogate_e2e.t")
+
+        high_boundary_str = 'a' * 15 + '\ud7ff' + 'tail'
+        data = pa.Table.from_pydict({'id': [1], 'name': [high_boundary_str]}, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertEqual(min_row.values[1], high_boundary_str[:16])
+        self.assertEqual(max_row.values[1], 'a' * 14 + 'b')
+
+    def test_default_truncate_binary_stats_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_truncate_binary_e2e", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('payload', pa.binary())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_truncate_binary_e2e.t", schema, False)
+        table = catalog.get_table("test_db_truncate_binary_e2e.t")
+
+        long_bytes = b'a' * 30
+        data = pa.Table.from_pydict({'id': [1], 'payload': [long_bytes]}, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertEqual(min_row.values[1], b'a' * 16)
+        self.assertEqual(max_row.values[1], b'a' * 15 + b'b')
+
+    def test_default_stats_with_high_precision_decimal(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_decimal_stats", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('amount', pa.decimal128(38, 0))])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_decimal_stats.t", schema, False)
+        table = catalog.get_table("test_db_decimal_stats.t")
+
+        min_amount = Decimal('-123456789012345678901234567890')
+        max_amount = Decimal('123456789012345678901234567890')
+        data = pa.Table.from_pydict(
+            {'id': [1, 2], 'amount': [max_amount, min_amount]},
+            schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertEqual(min_row.values[1], min_amount)
+        self.assertEqual(max_row.values[1], max_amount)
+        self.assertEqual(rb.new_read().to_arrow(scan.plan().splits()), data)
+
+    def test_default_stats_with_high_precision_timestamp_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_timestamp_stats", True)
+
+        pa_schema = pa.schema([('id', pa.int64()), ('ts', pa.timestamp('us'))])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db_timestamp_stats.t", schema, False)
+        table = catalog.get_table("test_db_timestamp_stats.t")
+
+        value = datetime(2024, 1, 1, 0, 0, 0, 999)
+        data = pa.Table.from_pydict({'id': [1], 'ts': [value]}, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+        self.assertIsNone(min_row.values[1])
+        self.assertIsNone(max_row.values[1])
+        self.assertEqual(stats.null_counts, [0, 0])
+        self.assertEqual(rb.new_read().to_arrow(scan.plan().splits()), data)
+
     def test_value_stats_empty_when_stats_disabled(self):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
@@ -634,6 +877,49 @@ class ReaderBasicTest(unittest.TestCase):
             len(file_meta.value_stats.null_counts), len(empty_stats.null_counts),
             "value_stats.null_counts should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
         )
+
+    def test_value_stats_counts_mode_e2e(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_stats_counts", True)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'metadata.stats-mode': 'counts'}
+        )
+        catalog.create_table("test_db_stats_counts.t", schema, False)
+        table = catalog.get_table("test_db_stats_counts.t")
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', None, 'Charlie'],
+            'price': [None, 20.3, None],
+        }, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap = SnapshotManager(table).get_latest_snapshot()
+        rb = table.new_read_builder()
+        scan = rb.new_scan()
+        mf = scan.file_scanner.manifest_list_manager.read_all(snap)
+        entries = scan.file_scanner.manifest_file_manager.read(
+            mf[0].file_name, lambda r: True, drop_stats=False)
+        stats = entries[0].file.value_stats
+        min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+        max_row = GenericRowDeserializer.from_bytes(stats.max_values.data, table.fields)
+
+        self.assertEqual(min_row.values, [None, None, None])
+        self.assertEqual(max_row.values, [None, None, None])
+        self.assertEqual(stats.null_counts, [0, 1, 2])
 
     def test_types(self):
         data_fields = [
