@@ -44,9 +44,12 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -802,7 +805,7 @@ public class ExpireSnapshotsTest {
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
         String oldJson = fileIO.readFileUtf8(snapshotManager.snapshotPath(snapshotId));
         ObjectNode node = (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(oldJson);
-        node.put(Snapshot.FIELD_TIME_MILLIS, newTimeMillis);
+        node.put("timeMillis", newTimeMillis);
         String newJson = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.writeValueAsString(node);
         fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshotId), newJson);
         snapshotManager.invalidateCache();
