@@ -18,9 +18,10 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
-import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.analysis.{AssignmentAlignmentHelper, MergeSchemaEvolutionHelper, PaimonRelation}
 
-import org.apache.spark.sql.AnalysisException
+import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, Exists, Expression, IsNotNull, Literal, MetadataAttribute, MonotonicallyIncreasingID, OuterReference, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -80,6 +81,7 @@ object Spark41MergeIntoRewrite
   extends RewriteRowLevelCommand
   with PredicateHelper
   with AssignmentAlignmentHelper
+  with MergeSchemaEvolutionHelper
   with PureAppendOnlyScope {
 
   final private val ROW_FROM_SOURCE = "__row_from_source"
@@ -92,9 +94,19 @@ object Spark41MergeIntoRewrite
         case m: MergeIntoTable
             if m.resolved && m.rewritable && !m.needSchemaEvolution &&
               targetsPureAppendOnly(m.targetTable) =>
-          rewrite(alignMergeIntoTable(m))
+          // Pure append-only tables never reach the postHoc `PaimonMergeIntoBase`, so evolve here.
+          rewrite(alignMergeIntoTable(evolveSchemaIfPaimon(m)))
       }
     }
+  }
+
+  private def evolveSchemaIfPaimon(m: MergeIntoTable): MergeIntoTable = {
+    if (!PaimonRelation.isPaimonTable(m.targetTable)) return m
+    val relation = PaimonRelation.getPaimonRelation(m.targetTable)
+    val v2Table = relation.table.asInstanceOf[SparkTable]
+    evolveTargetIfNeeded(m, relation, v2Table, SparkSession.active, _.notMatchedBySourceActions)
+      .map(_._1)
+      .getOrElse(m)
   }
 
   /* ------------------------------------------------------------------------------------------- *
