@@ -54,6 +54,26 @@ Conservative scope (deliberately narrower than Java's general flexibility):
 Returns a callable ``selector(bucket: int, total_buckets: int) -> bool``.
 The callable is cached per ``total_buckets`` to handle the rare case
 where bucket count varies across snapshots (rescale).
+
+TODO: per-partition predicate pre-evaluation.
+
+  Predicates of the form ``(part='a' AND bk IN (1,2)) OR (part='b' AND bk
+  IN (3,4))`` currently fall through to "no pruning" because the top-level
+  OR mixes partition and bucket-key constraints. Java simplifies the
+  predicate per concrete partition value first (replacing partition
+  leaves with literal true/false and folding AND/OR), so each partition
+  gets a tighter bucket-key predicate and the corresponding bucket set.
+
+  Implementing this here would need three pieces:
+
+    * a Predicate-replace walker that substitutes a partition's actual
+      values into partition-column leaves (mirrors Java's
+      ``paimon-common/.../predicate/PartitionValuePredicateVisitor.java``).
+    * lifting ``_Selector`` to key its cache by
+      ``(partition, total_buckets)`` instead of just ``total_buckets``.
+    * threading the partition value into the early manifest filter
+      ``FileScanner._build_early_bucket_filter`` (currently sees only
+      ``(bucket, total_buckets)``).
 """
 
 from itertools import product

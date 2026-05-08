@@ -17,7 +17,7 @@
 ################################################################################
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from typing import List
+from typing import Callable, List, Optional
 
 import fastavro
 
@@ -48,10 +48,13 @@ class ManifestFileManager:
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
 
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
-                              drop_stats=True, max_workers=8) -> List[ManifestEntry]:
+                              drop_stats=True, max_workers=8,
+                              early_entry_filter: Optional[Callable[[int, int], bool]] = None
+                              ) -> List[ManifestEntry]:
 
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
-            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
+            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats,
+                             early_entry_filter=early_entry_filter)
 
         def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
@@ -81,7 +84,19 @@ class ManifestFileManager:
         ]
         return final_entries
 
-    def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
+    def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True,
+             early_entry_filter: Optional[Callable[[int, int], bool]] = None
+             ) -> List[ManifestEntry]:
+        """
+        early_entry_filter: optional ``(bucket, total_buckets) -> bool``
+        called immediately after the avro record is parsed. Mirrors
+        Java ``BucketFilter`` applied at the InternalRow stage in
+        ``ManifestEntryCache``: when it returns False, the entry's
+        ``_FILE`` block / partition / stats are never deserialized.
+        Caller is responsible for soundness (any non-pruning rule must
+        return True). The full ``manifest_entry_filter`` still runs on
+        the survivors.
+        """
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
@@ -91,6 +106,9 @@ class ManifestFileManager:
         reader = fastavro.reader(buffer)
 
         for record in reader:
+            if early_entry_filter is not None and not early_entry_filter(
+                    record['_BUCKET'], record['_TOTAL_BUCKETS']):
+                continue
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(

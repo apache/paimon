@@ -347,8 +347,35 @@ class FileScanner:
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
-            max_workers=max_workers
+            max_workers=max_workers,
+            early_entry_filter=self._build_early_bucket_filter(),
         )
+
+    def _build_early_bucket_filter(self):
+        """Compose the (bucket, total_buckets) -> bool used by the manifest
+        reader to drop entries before deserialising ``_FILE`` / partition.
+
+        Mirrors the BucketFilter applied at Java's InternalRow stage in
+        ``ManifestEntryCache``. The signature is intentionally minimal:
+        per-partition predicate pre-evaluation would also need
+        ``(partition, bucket, total_buckets)``, but the current selector
+        is partition-agnostic.
+        """
+        only_real = self.only_read_real_buckets
+        selector = self._bucket_selector
+        if not only_real and selector is None:
+            return None
+
+        def _filter(bucket: int, total_buckets: int) -> bool:
+            if only_real and bucket < 0:
+                return False
+            if (selector is not None
+                    and bucket >= 0
+                    and not selector(bucket, total_buckets)):
+                return False
+            return True
+
+        return _filter
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
@@ -400,13 +427,10 @@ class FileScanner:
         fields to Equal/In literals. Anything else returns None — the
         caller treats None as "no bucket-level pruning".
 
-        Bucket-key fields are derived by instantiating the *writer's*
-        ``FixedBucketRowKeyExtractor`` and reading back its resolved
-        fields. Reusing the writer class (rather than re-deriving the
-        list here) is what guarantees the reader always hashes against
-        the same fields the writer used at insert time — any future
-        change to the writer's bucket-key resolution propagates
-        automatically.
+        Bucket-key fields come from ``TableSchema.logical_bucket_key_fields``
+        — the same source the writer's ``FixedBucketRowKeyExtractor`` reads
+        from, which is what makes the read/write hash agreement a property
+        of the schema rather than of any particular extractor instance.
 
         Sound across rescale: ``_Selector`` caches per ``total_buckets``,
         which can vary between manifest entries after a bucket rescale.
@@ -430,16 +454,11 @@ class FileScanner:
         return create_bucket_selector(self.predicate, bucket_key_fields)
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
-        if self.only_read_real_buckets and entry.bucket < 0:
-            return False
-        # Predicate-driven bucket pruning. Cheapest possible discriminator
-        # for PK point queries (``pk = 'X'``) — short-circuits before any
-        # stats decoding. Stays sound across rescale because the selector
-        # keys its internal cache on ``total_buckets``.
-        if (self._bucket_selector is not None
-                and entry.bucket >= 0
-                and not self._bucket_selector(entry.bucket, entry.total_buckets)):
-            return False
+        # Bucket-level filtering (``only_read_real_buckets`` and the
+        # predicate-driven selector) runs in the manifest reader's early
+        # filter so rejected entries skip ``_FILE`` / partition decoding
+        # entirely. Anything that survives to here is at least a real
+        # bucket the selector wants.
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
         # Get SimpleStatsEvolution for this schema

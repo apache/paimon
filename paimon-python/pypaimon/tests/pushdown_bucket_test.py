@@ -523,6 +523,48 @@ class BucketPruningIntegrationTest(unittest.TestCase):
                          "Equal on PK still narrows to the writer's bucket "
                          "even when AND'd with a non-bucket-key predicate")
 
+    def test_early_filter_skips_full_entry_decode_for_pruned_buckets(self):
+        """Entries the bucket selector rejects must never reach
+        ``GenericRowDeserializer.from_bytes`` for their partition / key
+        stats. Without the early filter the count would scale with the
+        manifest entry count; with it, only the surviving entries pay
+        the deserialisation cost."""
+        from unittest import mock
+
+        from pypaimon.table.row import generic_row
+
+        table = self._create_pk_table('early_filter')
+        # 8 separate single-row commits → 8 manifest entries each touching
+        # a different bucket. ``pk = X`` should reach exactly one of them.
+        for i in range(self.NUM_BUCKETS):
+            self._write(table, [{'id': i, 'val': i * 11}])
+
+        pred = table.new_read_builder().new_predicate_builder().equal('id', 0)
+        rb = table.new_read_builder().with_filter(pred)
+
+        real_from_bytes = generic_row.GenericRowDeserializer.from_bytes
+        calls = {'n': 0}
+
+        def counting(*args, **kwargs):
+            calls['n'] += 1
+            return real_from_bytes(*args, **kwargs)
+
+        with mock.patch.object(generic_row.GenericRowDeserializer,
+                               'from_bytes',
+                               side_effect=counting):
+            splits = rb.new_scan().plan().splits()
+            got = rb.new_read().to_arrow(splits).to_pylist() if splits else []
+
+        self.assertEqual(got, [{'id': 0, 'val': 0}])
+        # Each surviving entry decodes partition + min_key + max_key
+        # (3 ``from_bytes`` calls). Allow a small slack in case the planner
+        # touches extras, but assert it is well below 8 entries × 3 = 24.
+        self.assertLess(
+            calls['n'], 3 * self.NUM_BUCKETS,
+            "early filter should skip from_bytes for pruned entries; "
+            "got {} calls (would be {}+ without the filter)".format(
+                calls['n'], 3 * self.NUM_BUCKETS))
+
     # -- Explicit bucket-key option ------------------------------------
     def test_bucket_key_option_overrides_pk_for_pruning(self):
         """When the ``bucket-key`` option is set explicitly, the bucket
