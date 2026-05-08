@@ -44,12 +44,10 @@ Conservative scope (deliberately narrower than Java's general flexibility):
     single AND-of-OR-of-literals shape. If any bucket-key column is
     unconstrained, return None — the caller must scan all buckets.
   * Repeated constraints on the same bucket-key column under top-level
-    AND (e.g. ``id IN (1,2,3) AND id IN (2,3,4)``) → return None. This
-    is strictly more conservative than Java, which intersects literal
-    sets and only bails when the intersection is empty. Soundness is
-    unaffected (any superset of the true bucket set is correct); we
-    just lose a pruning opportunity for the rare repeated-constraint
-    case.
+    AND (e.g. ``id IN (1,2,3) AND id IN (2,3,4)``) intersect their
+    literal sets (mirrors Java ``BucketSelector.retainAll``). An empty
+    intersection means the predicate is unsatisfiable, and we return
+    None.
   * Total cartesian product capped at MAX_VALUES (1000), again matching
     Java; above that, fall back to a full scan.
 
@@ -235,14 +233,17 @@ def create_bucket_selector(
             continue
         slot, values = extracted
         if slot_values[slot] is not None:
-            # Two AND clauses on the same bucket-key column. Java
-            # intersects literal sets here and only bails when the
-            # intersection is empty; we are strictly more conservative
-            # and just give up. Soundness still holds (no false-
-            # negatives) — we just miss a pruning opportunity for
-            # ``id IN (...) AND id IN (...)`` style queries.
-            return None
-        slot_values[slot] = values
+            # Same bucket-key column constrained twice in top-level AND
+            # (e.g. ``id IN (1,2,3) AND id IN (2,3,4)``). Mirror Java's
+            # ``retainAll``: keep the intersection, bail only when it is
+            # empty (the predicate is unsatisfiable).
+            intersection = [v for v in slot_values[slot]
+                            if v in set(values)]
+            if not intersection:
+                return None
+            slot_values[slot] = intersection
+        else:
+            slot_values[slot] = values
 
     # Every bucket-key column must be constrained.
     for v in slot_values:

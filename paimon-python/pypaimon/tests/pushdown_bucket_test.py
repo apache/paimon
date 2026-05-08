@@ -163,16 +163,30 @@ class BucketSelectConverterUnitTest(unittest.TestCase):
         sel = create_bucket_selector(pred, [self.id_field])
         self.assertIsNone(sel)
 
-    def test_repeated_equal_on_same_key_under_and_returns_none(self):
-        # ``id = 1 AND id = 2``: unsatisfiable, but Java bails to "no
-        # filter" rather than reasoning. We do the same — any superset
-        # of the true set is acceptable.
+    def test_repeated_equal_on_same_key_with_empty_intersection_returns_none(self):
+        # ``id = 1 AND id = 2``: literal sets {1} and {2} intersect to
+        # empty; Java's ``retainAll`` would also bail here, since the
+        # predicate is unsatisfiable.
         pred = PredicateBuilder.and_predicates([
             self.pb_id_val.equal('id', 1),
             self.pb_id_val.equal('id', 2),
         ])
         sel = create_bucket_selector(pred, [self.id_field])
         self.assertIsNone(sel)
+
+    def test_repeated_in_on_same_key_intersects_literals(self):
+        # ``id IN (1,2,3) AND id IN (2,3,4)`` should now keep the
+        # intersection {2, 3} and prune to those buckets only. Used to
+        # bail with no selector before the Java parity fix.
+        pred = PredicateBuilder.and_predicates([
+            self.pb_id_val.is_in('id', [1, 2, 3]),
+            self.pb_id_val.is_in('id', [2, 3, 4]),
+        ])
+        sel = create_bucket_selector(pred, [self.id_field])
+        self.assertIsNotNone(sel)
+        expected = {_hash_bucket([v], [self.id_field], 8) for v in (2, 3)}
+        for b in range(8):
+            self.assertEqual(sel(b, 8), b in expected)
 
     def test_and_with_unrelated_clause_is_unaffected(self):
         # ``id = 7 AND val > 100`` — the ``val > 100`` part doesn't
