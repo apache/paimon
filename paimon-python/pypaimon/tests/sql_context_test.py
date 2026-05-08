@@ -20,7 +20,6 @@ import unittest
 
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
 from pypaimon_rust.datafusion import SQLContext
 
 
@@ -29,67 +28,26 @@ WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE", "/tmp/paimon-warehouse")
 
 class SQLContextTest(unittest.TestCase):
 
-    _table_created = False
-
-    def _create_catalog(self):
-        return CatalogFactory.create({"warehouse": WAREHOUSE})
-
-    def _create_sql_context(self):
-        ctx = SQLContext()
-        ctx.register_catalog("paimon", {"warehouse": WAREHOUSE})
-        ctx.set_current_catalog("paimon")
-        ctx.set_current_database("default")
-        return ctx
-
     @classmethod
     def setUpClass(cls):
         """Create the test table once before all tests in this class."""
-        from pypaimon import Schema, CatalogFactory
-        from pypaimon.schema.data_types import DataField, AtomicType
-
-        catalog = CatalogFactory.create({"warehouse": WAREHOUSE})
-        try:
-            catalog.create_database("default", ignore_if_exists=True)
-        except Exception:
-            pass
-
-        identifier = "default.sql_test_table"
-
-        # Drop existing table to ensure clean state
-        catalog.drop_table(identifier, ignore_if_not_exists=True)
-
-        schema = Schema(
-            fields=[
-                DataField(0, "id", AtomicType("INT")),
-                DataField(1, "name", AtomicType("STRING")),
-            ],
-            primary_keys=[],
-            partition_keys=[],
-            options={},
-            comment="",
-        )
-        catalog.create_table(identifier, schema, ignore_if_exists=False)
-
-        table = catalog.get_table(identifier)
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        try:
-            pa_table = pa.table({
-                "id": pa.array([1, 2, 3], type=pa.int32()),
-                "name": pa.array(["alice", "bob", "carol"], type=pa.string()),
-            })
-            table_write.write_arrow(pa_table)
-            table_commit.commit(table_write.prepare_commit())
-        finally:
-            table_write.close()
-            table_commit.close()
+        ctx = SQLContext()
+        ctx.register_catalog("paimon", {"warehouse": WAREHOUSE})
+        ctx.sql("DROP TABLE IF EXISTS sql_test_table")
+        ctx.sql("CREATE TABLE sql_test_table (id INT, name STRING)")
+        ctx.sql("INSERT INTO sql_test_table VALUES (1, 'alice'), (2, 'bob'), (3, 'carol')")
 
     @classmethod
     def tearDownClass(cls):
         """Clean up the test table after all tests."""
-        catalog = CatalogFactory.create({"warehouse": WAREHOUSE})
-        catalog.drop_table("default.sql_test_table", ignore_if_not_exists=True)
+        ctx = SQLContext()
+        ctx.register_catalog("paimon", {"warehouse": WAREHOUSE})
+        ctx.sql("DROP TABLE IF EXISTS sql_test_table")
+
+    def _create_sql_context(self):
+        ctx = SQLContext()
+        ctx.register_catalog("paimon", {"warehouse": WAREHOUSE})
+        return ctx
 
     def test_sql_returns_table(self):
         ctx = self._create_sql_context()
