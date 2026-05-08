@@ -28,7 +28,6 @@ from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.schema.schema import Schema
 from pypaimon.tag.tag import Tag
 from pypaimon.tag.tag_manager import TagManager
-from pypaimon_rust.datafusion import SQLContext
 
 __all__ = [
     "PaimonVirtualFileSystem",
@@ -38,3 +37,10 @@ __all__ = [
     "TagManager",
     "SQLContext",
 ]
+
+
+def __getattr__(name):
+    if name == "SQLContext":
+        from pypaimon_rust.datafusion import SQLContext
+        return SQLContext
+    raise AttributeError("module 'pypaimon' has no attribute {}".format(name))
