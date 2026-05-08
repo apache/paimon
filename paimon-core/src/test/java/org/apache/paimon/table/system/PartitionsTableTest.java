@@ -123,7 +123,7 @@ public class PartitionsTableTest extends TableTestBase {
 
     @Test
     void testPartitionAuditFieldsNull() throws Exception {
-        List<InternalRow> result = read(partitionsTable, new int[] {0, 5, 6, 7, 8});
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 6, 7, 8, 9, 10});
         assertThat(result).hasSize(3);
 
         for (InternalRow row : result) {
@@ -131,7 +131,20 @@ public class PartitionsTableTest extends TableTestBase {
             assertThat(row.isNullAt(2)).isTrue(); //  created_by
             assertThat(row.isNullAt(3)).isTrue(); // updated_by
             assertThat(row.isNullAt(4)).isTrue(); // options
+            assertThat(row.getBoolean(5)).isFalse(); // done
         }
+    }
+
+    @Test
+    public void testPartitionNumBuckets() throws Exception {
+        List<InternalRow> expectedRow = new ArrayList<>();
+        expectedRow.add(GenericRow.of(BinaryString.fromString("pt=1"), 1));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("pt=2"), 1));
+        expectedRow.add(GenericRow.of(BinaryString.fromString("pt=3"), 1));
+
+        // Read partition and num_buckets columns; the table is configured with bucket=1.
+        List<InternalRow> result = read(partitionsTable, new int[] {0, 4});
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
 
     @Test

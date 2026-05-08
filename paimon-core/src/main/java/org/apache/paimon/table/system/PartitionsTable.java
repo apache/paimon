@@ -91,11 +91,13 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(1, "record_count", new BigIntType(false)),
                             new DataField(2, "file_size_in_bytes", new BigIntType(false)),
                             new DataField(3, "file_count", new BigIntType(false)),
-                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS()),
-                            new DataField(5, "created_at", DataTypes.TIMESTAMP_MILLIS()),
-                            new DataField(6, "created_by", DataTypes.STRING()),
-                            new DataField(7, "updated_by", DataTypes.STRING()),
-                            new DataField(8, "options", DataTypes.STRING())));
+                            new DataField(4, "num_buckets", DataTypes.INT()),
+                            new DataField(5, "last_update_time", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(6, "created_at", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(7, "created_by", DataTypes.STRING()),
+                            new DataField(8, "updated_by", DataTypes.STRING()),
+                            new DataField(9, "options", DataTypes.STRING()),
+                            new DataField(10, "done", DataTypes.BOOLEAN())));
 
     private final FileStoreTable storeTable;
 
@@ -287,11 +289,13 @@ public class PartitionsTable implements ReadonlyTable {
                     partition.recordCount(),
                     partition.fileSizeInBytes(),
                     partition.fileCount(),
+                    partition.totalBuckets(),
                     toTimestamp(partition.lastFileCreationTime()),
                     createdAtTimestamp,
                     createdByString,
                     updatedByString,
-                    optionsString);
+                    optionsString,
+                    partition.done());
         }
 
         private PartitionEntry toPartitionEntry(Partition partition) {
