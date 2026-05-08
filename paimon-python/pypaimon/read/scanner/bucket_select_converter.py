@@ -68,19 +68,30 @@ from pypaimon.write.row_key_extractor import (_bucket_from_hash,
 
 MAX_VALUES = 1000
 
-# Atomic types whose Python literal in a Predicate may legitimately serialize
-# to different bytes than the value the writer hashed at insert time, even
-# though the *logical* values are equal. Concretely:
-#   DECIMAL    — writer reads ``Decimal`` from PyArrow, but a user predicate
-#                that passes ``float`` will hit ``int(value * 10**scale)``
-#                with float-precision drift (``int(2.675 * 1000) == 2674``).
-#   TIMESTAMP* — ``int(value.timestamp() * 1000)`` on a naive ``datetime``
-#                interprets local timezone; writer/reader on different
-#                machine TZs will disagree on the byte representation.
-# A divergent hash is silent data loss (false-negative). The soundness
-# contract is more important than the rare pruning win, so we refuse to
-# build a selector when any bucket-key field has one of these types.
-_UNSAFE_BUCKET_KEY_TYPES = ('DECIMAL', 'TIMESTAMP')
+# Bucket-key column types where the Python serializer is not byte-aligned
+# with the writer's logical value, or with Java's ``BinaryRow`` byte layout.
+# A divergent hash is silent data loss (false-negative), so the selector
+# refuses to build at all when a bucket-key field has one of these types.
+#
+# Two reasons something gets blacklisted:
+#
+#   1. Locale / precision drift between writer and reader for equal logical
+#      values (DECIMAL via float-vs-Decimal, TIMESTAMP via naive datetime
+#      timezone interpretation).
+#   2. Composite / nested types whose ``GenericRowSerializer`` byte layout
+#      hasn't been cross-validated against Java's ``BinaryRow`` (ARRAY,
+#      MAP, ROW, MULTISET, VARIANT, BLOB). Until that validation lands,
+#      treating them as safe risks a hash divergence.
+_UNSAFE_BUCKET_KEY_TYPES = (
+    'DECIMAL',
+    'TIMESTAMP',
+    'ARRAY',
+    'MAP',
+    'ROW',
+    'MULTISET',
+    'VARIANT',
+    'BLOB',
+)
 
 
 def _has_unsafe_bucket_key_type(bucket_key_fields: List[DataField]) -> bool:

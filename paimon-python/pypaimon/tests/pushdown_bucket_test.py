@@ -296,6 +296,19 @@ class BucketSelectConverterUnitTest(unittest.TestCase):
         self.assertIsNone(
             sel, "DECIMAL bucket-key column must disable pruning")
 
+    def test_array_bucket_key_disables_pruning(self):
+        """Composite types (ARRAY/MAP/ROW/MULTISET/VARIANT/BLOB) have no
+        cross-validated byte alignment with Java's ``BinaryRow`` — until
+        that exists, refuse to prune on them."""
+        # Hand-roll a DataField whose AtomicType reports an ARRAY type
+        # name; the converter inspects ``field.type.type`` only.
+        af = DataField(0, 'arr', AtomicType('ARRAY<BIGINT>'))
+        vf = _bigint_field(1, 'val')
+        pb = PredicateBuilder([af, vf])
+        sel = create_bucket_selector(pb.equal('arr', [1]), [af])
+        self.assertIsNone(
+            sel, "ARRAY bucket-key column must disable pruning")
+
     def test_timestamp_bucket_key_disables_pruning(self):
         """TIMESTAMP columns serialise via ``value.timestamp()`` whose
         result depends on the process timezone for naive datetimes —
