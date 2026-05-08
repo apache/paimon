@@ -424,13 +424,7 @@ class FileScanner:
             # Defensive: any catalog/proxy table that fails the mode check
             # falls back to no pruning rather than crashing the scan.
             return None
-        from pypaimon.write.row_key_extractor import \
-            FixedBucketRowKeyExtractor
-        try:
-            extractor = FixedBucketRowKeyExtractor(self.table.table_schema)
-        except Exception:
-            return None
-        bucket_key_fields = list(extractor._bucket_key_fields)
+        bucket_key_fields = self.table.table_schema.logical_bucket_key_fields
         if not bucket_key_fields:
             return None
         return create_bucket_selector(self.predicate, bucket_key_fields)

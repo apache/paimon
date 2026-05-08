@@ -64,6 +64,34 @@ class TableSchema:
         # Return True if they don't contain all (cross-partition update)
         return not all(pk in self.primary_keys for pk in self.partition_keys)
 
+    @property
+    def bucket_keys(self) -> List[str]:
+        """Resolve the effective bucket-key column names.
+
+        Mirrors Java ``TableSchema.bucketKeys()``: prefer the explicit
+        ``bucket-key`` option; otherwise fall back to primary keys with
+        partition keys stripped (the same convention writers use).
+        """
+        configured = self.options.get(CoreOptions.BUCKET_KEY.key())
+        if configured and configured.strip():
+            keys = [k.strip() for k in configured.split(',') if k.strip()]
+            field_names = {f.name for f in self.fields}
+            missing = [k for k in keys if k not in field_names]
+            if missing:
+                raise ValueError(
+                    "bucket-key references unknown columns: {}".format(missing))
+            return keys
+        return [pk for pk in self.primary_keys if pk not in self.partition_keys]
+
+    @property
+    def logical_bucket_key_fields(self) -> List[DataField]:
+        """The ``DataField``s for ``bucket_keys``, in the order they were
+        declared. Mirrors Java ``TableSchema.logicalBucketKeyType()``.
+        """
+        field_map = {f.name: f for f in self.fields}
+        return [field_map[name] for name in self.bucket_keys
+                if name in field_map]
+
     def to_schema(self) -> Schema:
         return Schema(
             fields=self.fields,
