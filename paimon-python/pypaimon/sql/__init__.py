@@ -20,6 +20,6 @@ __all__ = ['SQLContext']
 
 def __getattr__(name):
     if name == "SQLContext":
-        from pypaimon.sql.sql_context import SQLContext
+        from pypaimon_rust.datafusion import SQLContext
         return SQLContext
     raise AttributeError("module 'pypaimon.sql' has no attribute {}".format(name))

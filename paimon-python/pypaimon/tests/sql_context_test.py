@@ -21,9 +21,14 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory
+from pypaimon_rust.datafusion import SQLContext
 
 
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE", "/tmp/paimon-warehouse")
+
+
+def _batches_to_table(batches):
+    return pa.Table.from_batches(batches) if batches else pa.Table.from_batches([])
 
 
 class SQLContextTest(unittest.TestCase):
@@ -34,7 +39,6 @@ class SQLContextTest(unittest.TestCase):
         return CatalogFactory.create({"warehouse": WAREHOUSE})
 
     def _create_sql_context(self):
-        from pypaimon.sql.sql_context import SQLContext
         ctx = SQLContext()
         ctx.register_catalog("paimon", {"warehouse": WAREHOUSE})
         ctx.set_current_catalog("paimon")
@@ -93,7 +97,8 @@ class SQLContextTest(unittest.TestCase):
 
     def test_sql_returns_table(self):
         ctx = self._create_sql_context()
-        table = ctx.sql("SELECT id, name FROM sql_test_table ORDER BY id")
+        batches = ctx.sql("SELECT id, name FROM sql_test_table ORDER BY id")
+        table = _batches_to_table(batches)
         self.assertIsInstance(table, pa.Table)
         self.assertEqual(table.num_rows, 3)
         self.assertEqual(table.column("id").to_pylist(), [1, 2, 3])
@@ -101,51 +106,38 @@ class SQLContextTest(unittest.TestCase):
 
     def test_sql_to_pandas(self):
         ctx = self._create_sql_context()
-        table = ctx.sql("SELECT id, name FROM sql_test_table ORDER BY id")
+        batches = ctx.sql("SELECT id, name FROM sql_test_table ORDER BY id")
+        table = _batches_to_table(batches)
         df = table.to_pandas()
         self.assertEqual(len(df), 3)
         self.assertListEqual(list(df.columns), ["id", "name"])
 
     def test_sql_with_filter(self):
         ctx = self._create_sql_context()
-        table = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 1 ORDER BY id")
+        batches = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 1 ORDER BY id")
+        table = _batches_to_table(batches)
         self.assertEqual(table.num_rows, 2)
         self.assertEqual(table.column("id").to_pylist(), [2, 3])
 
     def test_sql_with_empty_result(self):
         ctx = self._create_sql_context()
-        table = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 4 ORDER BY id")
+        batches = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 4 ORDER BY id")
+        table = _batches_to_table(batches)
         self.assertIsInstance(table, pa.Table)
         self.assertEqual(table.num_rows, 0)
         self.assertEqual(table.schema.names, ["id", "name"])
 
     def test_sql_with_aggregation(self):
         ctx = self._create_sql_context()
-        table = ctx.sql("SELECT count(*) AS cnt FROM sql_test_table")
+        batches = ctx.sql("SELECT count(*) AS cnt FROM sql_test_table")
+        table = _batches_to_table(batches)
         self.assertEqual(table.column("cnt").to_pylist(), [3])
 
     def test_sql_two_part_reference(self):
         ctx = self._create_sql_context()
-        table = ctx.sql("SELECT count(*) AS cnt FROM default.sql_test_table")
+        batches = ctx.sql("SELECT count(*) AS cnt FROM default.sql_test_table")
+        table = _batches_to_table(batches)
         self.assertEqual(table.column("cnt").to_pylist(), [3])
-
-    def test_import_error_without_pypaimon_rust(self):
-        """register_catalog should raise ImportError when pypaimon-rust is missing."""
-        import unittest.mock as mock
-        import builtins
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "pypaimon_rust.datafusion" or name == "pypaimon_rust":
-                raise ImportError("No module named 'pypaimon_rust'")
-            return original_import(name, *args, **kwargs)
-
-        from pypaimon.sql.sql_context import SQLContext
-        ctx = SQLContext()
-        with mock.patch("builtins.__import__", side_effect=mock_import):
-            with self.assertRaises(ImportError) as cm:
-                ctx.register_catalog("paimon", {"warehouse": WAREHOUSE})
-            self.assertIn("pypaimon-rust", str(cm.exception))
 
 
 if __name__ == "__main__":

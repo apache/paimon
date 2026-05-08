@@ -26,6 +26,8 @@ import re
 import sys
 import time
 
+import pyarrow as pa
+
 _PAIMON_BANNER = r"""
     ____        _
    / __ \____ _(_)___ ___  ____  ____
@@ -131,7 +133,7 @@ def cmd_sql(args):
     config = load_catalog_config(config_path)
 
     try:
-        from pypaimon.sql.sql_context import SQLContext
+        from pypaimon_rust.datafusion import SQLContext
         catalog_options = {str(k): str(v) for k, v in config.items()}
         ctx = SQLContext()
         ctx.register_catalog("paimon", catalog_options)
@@ -151,7 +153,8 @@ def cmd_sql(args):
 def _execute_query(ctx, query, output_format):
     """Execute a single SQL query and print the result."""
     try:
-        table = ctx.sql(query)
+        batches = ctx.sql(query)
+        table = pa.Table.from_batches(batches) if batches else pa.Table.from_batches([])
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -255,7 +258,8 @@ def _interactive_repl(ctx, output_format):
 
             try:
                 start = time.time()
-                table = ctx.sql(query)
+                batches = ctx.sql(query)
+                table = pa.Table.from_batches(batches) if batches else pa.Table.from_batches([])
                 elapsed = time.time() - start
                 _print_table(table, output_format, elapsed)
                 print()
