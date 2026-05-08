@@ -448,17 +448,28 @@ class FileScanner:
             # Defensive: any catalog/proxy table that fails the mode check
             # falls back to no pruning rather than crashing the scan.
             return None
-        bucket_key_fields = self.table.table_schema.logical_bucket_key_fields
+        try:
+            bucket_key_fields = self.table.table_schema.logical_bucket_key_fields
+        except Exception:
+            # ``bucket_keys`` raises on misconfigured ``bucket-key`` (e.g.
+            # references an unknown column). The previous extractor-based
+            # path failed open here; preserve that — pruning is an
+            # optimisation, never a correctness requirement.
+            return None
         if not bucket_key_fields:
             return None
         return create_bucket_selector(self.predicate, bucket_key_fields)
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
-        # Bucket-level filtering (``only_read_real_buckets`` and the
-        # predicate-driven selector) runs in the manifest reader's early
-        # filter so rejected entries skip ``_FILE`` / partition decoding
-        # entirely. Anything that survives to here is at least a real
-        # bucket the selector wants.
+        # NOTE: bucket-level filtering (``only_read_real_buckets`` + the
+        # predicate-driven selector) is enforced in the manifest reader's
+        # early filter (see ``_build_early_bucket_filter``) so rejected
+        # entries skip ``_FILE`` / partition decoding entirely. This
+        # method assumes that early filter has already run; a caller that
+        # bypasses ``read_entries_parallel`` and invokes this directly on
+        # raw entries MUST still apply ``_build_early_bucket_filter`` (or
+        # otherwise enforce ``bucket >= 0`` on POSTPONE tables) — this
+        # function alone is not sound on its own.
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
         # Get SimpleStatsEvolution for this schema

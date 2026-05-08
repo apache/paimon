@@ -68,9 +68,19 @@ class TableSchema:
     def bucket_keys(self) -> List[str]:
         """Resolve the effective bucket-key column names.
 
-        Mirrors Java ``TableSchema.bucketKeys()``: prefer the explicit
-        ``bucket-key`` option; otherwise fall back to primary keys with
-        partition keys stripped (the same convention writers use).
+        Resolution rule matches Java ``TableSchema.bucketKeys()``: prefer
+        the explicit ``bucket-key`` option; otherwise fall back to primary
+        keys with partition keys stripped (the same convention writers
+        use).
+
+        Validation is intentionally narrower than Java's
+        ``originalBucketKeys()``: only ``unknown column name`` is checked
+        here. Java additionally enforces ``bucket-key`` ⊄ partition keys,
+        and (when primary keys are non-empty) ``bucket-key`` ⊆ primary
+        keys, but it does so once at schema construction. Doing the same
+        in a property would add per-read overhead and could surface
+        errors on tables already in the catalog. The narrow check here
+        is just enough to fail fast on the typo case.
         """
         configured = self.options.get(CoreOptions.BUCKET_KEY.key())
         if configured and configured.strip():

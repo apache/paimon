@@ -268,8 +268,9 @@ def create_bucket_selector(
             # (e.g. ``id IN (1,2,3) AND id IN (2,3,4)``). Mirror Java's
             # ``retainAll``: keep the intersection, bail only when it is
             # empty (the predicate is unsatisfiable).
+            new_values_set = set(values)
             intersection = [v for v in slot_values[slot]
-                            if v in set(values)]
+                            if v in new_values_set]
             if not intersection:
                 return None
             slot_values[slot] = intersection

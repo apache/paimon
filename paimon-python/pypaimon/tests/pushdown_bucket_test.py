@@ -565,6 +565,29 @@ class BucketPruningIntegrationTest(unittest.TestCase):
             "got {} calls (would be {}+ without the filter)".format(
                 calls['n'], 3 * self.NUM_BUCKETS))
 
+    def test_init_bucket_selector_fails_open_when_bucket_keys_raises(self):
+        """``TableSchema.bucket_keys`` raises if ``bucket-key`` references
+        an unknown column. The pre-Java-alignment selector path used to
+        catch ``Exception`` from instantiating ``FixedBucketRowKeyExtractor``
+        and silently skip pruning; that property must survive the move
+        of bucket-key resolution onto ``TableSchema``. Crashing the scan
+        on a misconfiguration would be worse than skipping the
+        optimisation."""
+        table = self._create_pk_table('init_fails_open')
+        self._write(table, [{'id': 1, 'val': 1}])
+        # Mutate the in-memory schema options to a broken value to
+        # simulate a corrupted/migrated catalog without rewriting it.
+        table.table_schema.options['bucket-key'] = 'nope_no_such_column'
+
+        rb = table.new_read_builder().with_filter(
+            table.new_read_builder().new_predicate_builder().equal('id', 1))
+        scanner = rb.new_scan().file_scanner
+        # Must NOT raise: the broken option falls back to "no pruning",
+        # and the scan still finds the row.
+        self.assertIsNone(scanner._init_bucket_selector())
+        got, _ = self._read_with(table, scanner.predicate)
+        self.assertEqual(got, [{'id': 1, 'val': 1}])
+
     # -- Explicit bucket-key option ------------------------------------
     def test_bucket_key_option_overrides_pk_for_pruning(self):
         """When the ``bucket-key`` option is set explicitly, the bucket
