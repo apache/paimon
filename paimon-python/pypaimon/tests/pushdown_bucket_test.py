@@ -65,6 +65,10 @@ def _bigint_field(idx: int, name: str) -> DataField:
     return DataField(idx, name, AtomicType('BIGINT', nullable=False))
 
 
+def _field(idx: int, name: str, type_name: str) -> DataField:
+    return DataField(idx, name, AtomicType(type_name, nullable=False))
+
+
 def _hash_bucket(values: List[Any], fields: List[DataField], total: int) -> int:
     """Re-implement the writer's hash so unit tests can compute the
     expected bucket without spinning up a real table."""
@@ -239,6 +243,58 @@ class BucketSelectConverterUnitTest(unittest.TestCase):
             self.assertTrue(sel(-1, total))
             self.assertTrue(sel(99, total))
 
+    # -- Bucket-key column types beyond BIGINT --------------------------
+    def test_string_bucket_key_yields_correct_bucket(self):
+        """STRING uses a different ``GenericRowSerializer`` path (utf-8
+        encode + variable-part offset) — verify writer/reader agree on
+        its byte layout independent of the BIGINT happy path."""
+        sf = _field(0, 'sk', 'STRING')
+        vf = _bigint_field(1, 'val')
+        pb = PredicateBuilder([sf, vf])
+        sel = create_bucket_selector(pb.equal('sk', 'hello'), [sf])
+        self.assertIsNotNone(sel)
+        expected = _hash_bucket(['hello'], [sf], total=8)
+        for b in range(8):
+            self.assertEqual(sel(b, 8), b == expected)
+
+    def test_int_bucket_key_yields_correct_bucket(self):
+        """INT (32-bit) and BIGINT (64-bit) hit different struct.pack
+        paths in the serializer — guard the smaller width."""
+        intf = _field(0, 'i', 'INT')
+        vf = _bigint_field(1, 'val')
+        pb = PredicateBuilder([intf, vf])
+        sel = create_bucket_selector(pb.equal('i', 7), [intf])
+        self.assertIsNotNone(sel)
+        expected = _hash_bucket([7], [intf], total=4)
+        for b in range(4):
+            self.assertEqual(sel(b, 4), b == expected)
+
+    # -- Hash-divergence-prone types refuse to build a selector --------
+    def test_decimal_bucket_key_disables_pruning(self):
+        """DECIMAL columns risk silent hash divergence between writer
+        (Decimal) and reader-supplied ``float`` literals. Soundness
+        contract demands fail-open: refuse to build a selector at all."""
+        df = _field(0, 'd', 'DECIMAL(10, 2)')
+        vf = _bigint_field(1, 'val')
+        pb = PredicateBuilder([df, vf])
+        from decimal import Decimal
+        sel = create_bucket_selector(pb.equal('d', Decimal('1.50')), [df])
+        self.assertIsNone(
+            sel, "DECIMAL bucket-key column must disable pruning")
+
+    def test_timestamp_bucket_key_disables_pruning(self):
+        """TIMESTAMP columns serialise via ``value.timestamp()`` whose
+        result depends on the process timezone for naive datetimes —
+        writer and reader running in different TZs would disagree."""
+        tf = _field(0, 't', 'TIMESTAMP(3)')
+        vf = _bigint_field(1, 'val')
+        pb = PredicateBuilder([tf, vf])
+        from datetime import datetime
+        sel = create_bucket_selector(
+            pb.equal('t', datetime(2026, 1, 1)), [tf])
+        self.assertIsNone(
+            sel, "TIMESTAMP bucket-key column must disable pruning")
+
     def test_type_mismatched_literal_fails_open_not_crash(self):
         """If the user constructs a predicate whose literal type doesn't
         match the bucket-key column's atomic type — e.g. a STRING literal
@@ -326,6 +382,23 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         """Collect the distinct bucket numbers actually returned in a plan."""
         return {s.bucket for s in splits}
 
+    @staticmethod
+    def _expected_buckets(table, ids, value_field='val') -> set:
+        """Use the writer's RowKeyExtractor to compute the bucket(s) the
+        rows for ``ids`` were written into. Cross-check against the
+        reader's selector — divergence indicates read/write hash drift."""
+        ext = FixedBucketRowKeyExtractor(table.table_schema)
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            (value_field, pa.int64()),
+        ])
+        out = set()
+        for i in ids:
+            arr = pa.RecordBatch.from_pylist(
+                [{'id': i, value_field: 0}], schema=pa_schema)
+            out.update(ext._extract_buckets_batch(arr))
+        return out
+
     # -- Equal on PK -----------------------------------------------------
     def test_pk_equal_only_reads_target_bucket(self):
         table = self._create_pk_table('int_eq')
@@ -340,9 +413,13 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         # Correctness: row for id=42 returned (and only that).
         self.assertEqual(got, [{'id': 42, 'val': 42 * 11}])
 
-        # Pruning effectiveness: at most 1 bucket touched.
-        self.assertEqual(len(self._split_buckets(splits)), 1,
-                         "PK equal must touch exactly one bucket")
+        # Pruning effectiveness AND hash correctness: the touched bucket
+        # must equal the bucket the writer placed id=42 into. Asserting
+        # only ``len == 1`` would mask a hash drift that picks the wrong
+        # single bucket.
+        self.assertEqual(self._split_buckets(splits),
+                         self._expected_buckets(table, [target_id]),
+                         "PK equal must touch exactly the writer's bucket")
 
     def test_pk_in_reads_only_target_buckets(self):
         table = self._create_pk_table('int_in')
@@ -358,21 +435,13 @@ class BucketPruningIntegrationTest(unittest.TestCase):
                          [{'id': i, 'val': i * 7} for i in sorted(ids)])
 
         actual = self._split_buckets(splits)
-        # Selector-derived expectation
-        ext = FixedBucketRowKeyExtractor(table.table_schema)
-        expected_buckets = set()
-        for i in ids:
-            arr = pa.RecordBatch.from_pylist(
-                [{'id': i, 'val': 0}],
-                schema=pa.schema([
-                    pa.field('id', pa.int64(), nullable=False),
-                    ('val', pa.int64()),
-                ]),
-            )
-            expected_buckets.update(ext._extract_buckets_batch(arr))
-        self.assertTrue(actual.issubset(expected_buckets),
-                        "must not read buckets outside the target set; "
-                        "got {}, expected ⊆ {}".format(actual, expected_buckets))
+        expected_buckets = self._expected_buckets(table, ids)
+        # Equality (not subset): under the single-commit setup every
+        # target bucket actually has a file, so the planner must produce
+        # exactly the writer's bucket set. ``issubset`` would mask a
+        # selector that's overly aggressive on a subset of the IN list.
+        self.assertEqual(actual, expected_buckets,
+                         "got {}, expected {}".format(actual, expected_buckets))
 
     # -- Predicates that should NOT prune -------------------------------
     def test_value_only_predicate_falls_back_to_full_scan(self):
@@ -422,9 +491,10 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         ])
         got, splits = self._read_with(table, pred)
         self.assertEqual(got, [{'id': 25, 'val': 25}])
-        self.assertEqual(len(self._split_buckets(splits)), 1,
-                         "Equal on PK still narrows buckets even when "
-                         "AND'd with a non-bucket-key predicate")
+        self.assertEqual(self._split_buckets(splits),
+                         self._expected_buckets(table, [25]),
+                         "Equal on PK still narrows to the writer's bucket "
+                         "even when AND'd with a non-bucket-key predicate")
 
     # -- Explicit bucket-key option ------------------------------------
     def test_bucket_key_option_overrides_pk_for_pruning(self):
@@ -441,7 +511,8 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         pred = table.new_read_builder().new_predicate_builder().equal('id', 17)
         got, splits = self._read_with(table, pred)
         self.assertEqual(got, [{'id': 17, 'val': 51}])
-        self.assertEqual(len(self._split_buckets(splits)), 1)
+        self.assertEqual(self._split_buckets(splits),
+                         self._expected_buckets(table, [17]))
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +565,21 @@ class BucketPruningPropertyTest(unittest.TestCase):
             w.close()
             c.close()
 
+    @staticmethod
+    def _expected_buckets(table, keys) -> set:
+        """Independent oracle: writer's bucket placement for the given keys."""
+        ext = FixedBucketRowKeyExtractor(table.table_schema)
+        pa_schema = pa.schema([
+            pa.field('k', pa.int64(), nullable=False),
+            ('v', pa.int64()),
+        ])
+        out = set()
+        for k in keys:
+            arr = pa.RecordBatch.from_pylist(
+                [{'k': k, 'v': 0}], schema=pa_schema)
+            out.update(ext._extract_buckets_batch(arr))
+        return out
+
     def test_property_pk_equal_correctness(self):
         for trial in range(self.TRIALS):
             num_buckets = self.rnd.choice([2, 4, 8, 16])
@@ -514,6 +600,13 @@ class BucketPruningPropertyTest(unittest.TestCase):
             self.assertEqual(got, [{'k': target, 'v': target * 13}],
                              "trial {} buckets={} target={}: result mismatch"
                              .format(trial, num_buckets, target))
+            # Pruning fired AND picked the writer's bucket. Without this
+            # cross-check a fail-open selector (i.e. no pruning) would
+            # still pass the result-equality assertion above.
+            self.assertEqual(self._split_buckets(splits),
+                             self._expected_buckets(table, [target]),
+                             "trial {}: bucket set != writer's placement"
+                             .format(trial))
 
     def test_property_pk_in_correctness(self):
         for trial in range(self.TRIALS):
@@ -540,6 +633,14 @@ class BucketPruningPropertyTest(unittest.TestCase):
                 key=lambda r: r['k'])
             self.assertEqual(got_sorted, want,
                              "trial {}: IN result mismatch".format(trial))
+            self.assertEqual(self._split_buckets(splits),
+                             self._expected_buckets(table, targets),
+                             "trial {}: IN bucket set != writer's placement"
+                             .format(trial))
+
+    @staticmethod
+    def _split_buckets(splits) -> set:
+        return {s.bucket for s in splits}
 
 
 if __name__ == '__main__':

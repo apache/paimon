@@ -44,8 +44,12 @@ Conservative scope (deliberately narrower than Java's general flexibility):
     single AND-of-OR-of-literals shape. If any bucket-key column is
     unconstrained, return None — the caller must scan all buckets.
   * Repeated constraints on the same bucket-key column under top-level
-    AND (e.g. ``id = 1 AND id = 2``) → return None. Java does the same
-    rather than reasoning about unsatisfiability.
+    AND (e.g. ``id IN (1,2,3) AND id IN (2,3,4)``) → return None. This
+    is strictly more conservative than Java, which intersects literal
+    sets and only bails when the intersection is empty. Soundness is
+    unaffected (any superset of the true bucket set is correct); we
+    just lose a pruning opportunity for the rare repeated-constraint
+    case.
   * Total cartesian product capped at MAX_VALUES (1000), again matching
     Java; above that, fall back to a full scan.
 
@@ -65,6 +69,31 @@ from pypaimon.write.row_key_extractor import (_bucket_from_hash,
                                               _hash_bytes_by_words)
 
 MAX_VALUES = 1000
+
+# Atomic types whose Python literal in a Predicate may legitimately serialize
+# to different bytes than the value the writer hashed at insert time, even
+# though the *logical* values are equal. Concretely:
+#   DECIMAL    — writer reads ``Decimal`` from PyArrow, but a user predicate
+#                that passes ``float`` will hit ``int(value * 10**scale)``
+#                with float-precision drift (``int(2.675 * 1000) == 2674``).
+#   TIMESTAMP* — ``int(value.timestamp() * 1000)`` on a naive ``datetime``
+#                interprets local timezone; writer/reader on different
+#                machine TZs will disagree on the byte representation.
+# A divergent hash is silent data loss (false-negative). The soundness
+# contract is more important than the rare pruning win, so we refuse to
+# build a selector when any bucket-key field has one of these types.
+_UNSAFE_BUCKET_KEY_TYPES = ('DECIMAL', 'TIMESTAMP')
+
+
+def _has_unsafe_bucket_key_type(bucket_key_fields: List[DataField]) -> bool:
+    for f in bucket_key_fields:
+        type_name = getattr(getattr(f, 'type', None), 'type', '')
+        if not type_name:
+            continue
+        head = type_name.split('(')[0].strip().upper()
+        if any(head.startswith(prefix) for prefix in _UNSAFE_BUCKET_KEY_TYPES):
+            return True
+    return False
 
 
 def _split_and(p: Predicate) -> List[Predicate]:
@@ -184,6 +213,12 @@ def create_bucket_selector(
     if predicate is None or not bucket_key_fields:
         return None
 
+    # See ``_UNSAFE_BUCKET_KEY_TYPES``: refuse pruning when the bucket-key
+    # column types are prone to writer/reader byte-level disagreement on
+    # equal logical values. Fail open rather than risk false-negatives.
+    if _has_unsafe_bucket_key_type(bucket_key_fields):
+        return None
+
     bk_name_to_slot: Dict[str, int] = {
         f.name: i for i, f in enumerate(bucket_key_fields)
     }
@@ -200,10 +235,12 @@ def create_bucket_selector(
             continue
         slot, values = extracted
         if slot_values[slot] is not None:
-            # Two AND clauses on the same bucket-key column. Java bails;
-            # so do we. (e.g. ``id = 1 AND id = 2`` is unsatisfiable but
-            # we don't reason about that — any superset, including "all
-            # buckets", is correct.)
+            # Two AND clauses on the same bucket-key column. Java
+            # intersects literal sets here and only bails when the
+            # intersection is empty; we are strictly more conservative
+            # and just give up. Soundness still holds (no false-
+            # negatives) — we just miss a pruning opportunity for
+            # ``id IN (...) AND id IN (...)`` style queries.
             return None
         slot_values[slot] = values
 
