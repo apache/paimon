@@ -305,6 +305,7 @@ case class PaimonSparkWriter(
         }
         val clusteringColumns = coreOptions.clusteringColumns()
         if (
+          table.bucketMode() != POSTPONE_MODE &&
           (!coreOptions.clusteringIncrementalEnabled() || coreOptions
             .clusteringIncrementalOptimizeWrite()) && (!clusteringColumns.isEmpty)
         ) {
