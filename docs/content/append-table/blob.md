@@ -71,7 +71,7 @@ For details about the blob file format structure, see [File Format - BLOB]({{< r
 
 ## Storage Modes
 
-Paimon supports three storage modes for BLOB fields:
+Paimon supports four storage modes for BLOB fields:
 
 1. **Default blob storage**
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
@@ -82,7 +82,10 @@ Paimon supports three storage modes for BLOB fields:
 3. **External-storage descriptor mode**
    Fields configured in `blob-external-storage-field` are a subset of `blob-descriptor-field`. At write time, Paimon writes the raw blob data to the configured `blob-external-storage-path` and stores only serialized `BlobDescriptor` bytes inline in data files.
 
-This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, and descriptor-based BLOB fields backed by external storage.
+4. **Blob view storage**
+   Fields configured in `blob-view-field` store serialized `BlobViewStruct` bytes inline in data files. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
+
+This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, descriptor-based BLOB fields backed by external storage, and view fields that reference upstream BLOB values.
 
 ## Table Options
 
@@ -121,6 +124,17 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
         By default, all blob fields store blob bytes in separate <code>.blob</code> files.
         If configured, one table can mix:
         some BLOB fields in <code>.blob</code> files and some as descriptor references.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>blob-view-field</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated BLOB field names stored as serialized <code>BlobViewStruct</code> bytes inline in normal data files.
+        The field values reference BLOB values in upstream tables and are resolved at read time.
+        This option must be a subset of <code>blob-field</code> and must not overlap with <code>blob-descriptor-field</code>.
       </td>
     </tr>
     <tr>
@@ -278,6 +292,69 @@ SELECT image FROM blob_table;
 ALTER TABLE blob_table SET ('blob-as-descriptor' = 'false');
 SELECT image FROM blob_table;
 ```
+
+### Blob View
+
+Blob view is useful when a downstream table should reference BLOB values already stored in an upstream table, without copying the bytes or creating new `.blob` files. A blob view field stores only a small `BlobViewStruct` inline. When the field is read, Paimon resolves the referenced BLOB from the upstream table.
+
+Blob view requires:
+
+- the upstream table to have row tracking enabled, so each row has a stable `_ROW_ID`
+- the downstream field to be listed in both `blob-field` and `blob-view-field`
+- writes to provide a serialized `BlobViewStruct`; in Flink SQL, use the built-in `sys.blob_view` function
+
+The Flink SQL function signature is:
+
+```sql
+sys.blob_view(table_name, field_name, row_id)
+```
+
+Arguments:
+
+- `table_name`: the upstream table name. It must be fully qualified as `database.table` or `catalog.database.table`. Unqualified table names are rejected.
+- `field_name`: the upstream BLOB field name.
+- `row_id`: the `_ROW_ID` value from the upstream row-tracking table.
+
+The following example writes a downstream table whose `image_ref` field views the `image` field in `image_table`:
+
+```sql
+CREATE TABLE image_table (
+    id INT,
+    name STRING,
+    image BYTES
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'blob-field' = 'image'
+);
+
+CREATE TABLE image_view_table (
+    id INT,
+    label STRING,
+    image_ref BYTES
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'blob-field' = 'image_ref',
+    'blob-view-field' = 'image_ref'
+);
+
+INSERT INTO image_view_table
+SELECT
+    id,
+    name AS label,
+    sys.blob_view('default.image_table', 'image', _ROW_ID)
+FROM `image_table$row_tracking`;
+```
+
+If the current Paimon catalog name is included in the table name, the function also accepts `catalog.database.table`:
+
+```sql
+SELECT sys.blob_view('my_catalog.default.image_table', 'image', _ROW_ID)
+FROM `image_table$row_tracking`;
+```
+
+Reads from `image_view_table.image_ref` return the referenced BLOB bytes in the same way as normal blob fields. The referenced upstream table and row must remain available for the view to be resolved.
 
 ### MERGE INTO Support
 
@@ -643,6 +720,7 @@ For these configured fields:
 3. **No Statistics**: Statistics collection is not supported for blob columns.
 4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 5. **External Storage Cleanup**: Files written through `blob-external-storage-path` are outside Paimon's orphan file cleanup scope.
+6. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
 
 ## Best Practices
 
@@ -656,4 +734,6 @@ For these configured fields:
 
 5. **Manage External Storage Lifecycle Separately**: Files written to `blob-external-storage-path` are not cleaned up by Paimon, so retention and deletion should be managed externally.
 
-6. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.
+6. **Use Blob View to Avoid Copying BLOB Data**: Configure `blob-view-field` when a downstream table only needs to reference BLOB values from an upstream table.
+
+7. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.

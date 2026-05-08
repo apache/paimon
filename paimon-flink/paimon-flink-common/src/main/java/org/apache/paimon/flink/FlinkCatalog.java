@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.function.BuiltInFunctions;
+import org.apache.paimon.flink.function.CatalogAwareFunction;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -56,6 +57,7 @@ import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -111,6 +113,9 @@ import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.factories.FunctionDefinitionFactory;
+import org.apache.flink.table.functions.UserDefinedFunction;
+import org.apache.flink.table.functions.UserDefinedFunctionHelper;
 import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.resource.ResourceType;
 import org.apache.flink.table.resource.ResourceUri;
@@ -184,6 +189,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private final Catalog catalog;
     private final String name;
+    private final Options options;
 
     private final boolean disableCreateTableInDefaultDatabase;
 
@@ -192,6 +198,7 @@ public class FlinkCatalog extends AbstractCatalog {
         LOG.info("Creating Flink catalog: metastore={}", options.get(CatalogOptions.METASTORE));
         this.catalog = catalog;
         this.name = name;
+        this.options = new Options(options.toMap());
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         if (!disableCreateTableInDefaultDatabase) {
             try {
@@ -212,6 +219,52 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public Optional<Factory> getFactory() {
         return Optional.of(new FlinkTableFactory(this));
+    }
+
+    @Override
+    public Optional<FunctionDefinitionFactory> getFunctionDefinitionFactory() {
+        return Optional.of(
+                new CatalogAwareFunctionDefinitionFactory(name, getDefaultDatabase(), options));
+    }
+
+    private static class CatalogAwareFunctionDefinitionFactory
+            implements FunctionDefinitionFactory {
+
+        private final String catalogName;
+        private final String defaultDatabase;
+        private final Options catalogOptions;
+
+        private CatalogAwareFunctionDefinitionFactory(
+                String catalogName, String defaultDatabase, Options catalogOptions) {
+            this.catalogName = catalogName;
+            this.defaultDatabase = defaultDatabase;
+            this.catalogOptions = new Options(catalogOptions.toMap());
+        }
+
+        @SuppressWarnings("deprecation")
+        public org.apache.flink.table.functions.FunctionDefinition createFunctionDefinition(
+                String functionName, CatalogFunction catalogFunction) {
+            return createFunctionDefinition(functionName, catalogFunction, null);
+        }
+
+        @Override
+        public org.apache.flink.table.functions.FunctionDefinition createFunctionDefinition(
+                String functionName,
+                CatalogFunction catalogFunction,
+                FunctionDefinitionFactory.Context context) {
+            ClassLoader classLoader =
+                    context == null
+                            ? Thread.currentThread().getContextClassLoader()
+                            : context.getClassLoader();
+            UserDefinedFunction function =
+                    UserDefinedFunctionHelper.instantiateFunction(
+                            classLoader, new Configuration(), functionName, catalogFunction);
+            if (function instanceof CatalogAwareFunction) {
+                ((CatalogAwareFunction) function)
+                        .setCatalogContext(catalogName, defaultDatabase, catalogOptions);
+            }
+            return function;
+        }
     }
 
     @Override

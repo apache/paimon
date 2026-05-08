@@ -185,12 +185,6 @@ public class BlobTableITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO upstream_blob_view VALUES (1, 'row1', X'48656C6C6F')");
         batchSql("INSERT INTO upstream_blob_view VALUES (2, 'row2', X'5945')");
 
-        int pictureFieldId =
-                paimonTable("upstream_blob_view").rowType().getFields().stream()
-                        .filter(field -> field.name().equals("picture"))
-                        .findFirst()
-                        .orElseThrow(() -> new RuntimeException("picture field not found"))
-                        .id();
         String fullTableName = tEnv.getCurrentDatabase() + ".upstream_blob_view";
 
         tEnv.executeSql(
@@ -203,9 +197,9 @@ public class BlobTableITCase extends CatalogITCaseBase {
         batchSql(
                 String.format(
                         "INSERT INTO downstream_blob_view"
-                                + " SELECT id, name, sys.blob_view('%s', %d, _ROW_ID)"
+                                + " SELECT id, name, sys.blob_view('%s', 'picture', _ROW_ID)"
                                 + " FROM `upstream_blob_view$row_tracking`",
-                        fullTableName, pictureFieldId));
+                        fullTableName));
 
         List<Row> result = batchSql("SELECT * FROM downstream_blob_view ORDER BY id");
         assertThat(result).hasSize(2);
@@ -216,6 +210,44 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(result.get(1).getField(0)).isEqualTo(2);
         assertThat(result.get(1).getField(1)).isEqualTo("row2");
         assertThat((byte[]) result.get(1).getField(2)).isEqualTo(new byte[] {89, 69});
+    }
+
+    @Test
+    public void testBlobViewRejectsUnqualifiedTableName() {
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT sys.blob_view("
+                                                + "'upstream_blob_view', "
+                                                + "'picture', "
+                                                + "CAST(0 AS BIGINT))"))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Table name must be 'database.table' or 'PAIMON.database.table', "
+                                + "but is 'upstream_blob_view'.");
+    }
+
+    @Test
+    public void testBlobViewRejectsNonBlobField() {
+        tEnv.executeSql(
+                "CREATE TABLE upstream_non_blob (id INT, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true')");
+
+        String fullTableName = tEnv.getCurrentDatabase() + ".upstream_non_blob";
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "SELECT sys.blob_view("
+                                                + "'%s', "
+                                                + "'picture', "
+                                                + "CAST(0 AS BIGINT))",
+                                        fullTableName))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Field picture in upstream table "
+                                + fullTableName
+                                + " is not a BLOB field.");
     }
 
     @Test
