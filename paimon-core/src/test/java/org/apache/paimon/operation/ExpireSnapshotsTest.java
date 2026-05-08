@@ -800,30 +800,11 @@ public class ExpireSnapshotsTest {
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
-        Snapshot old = snapshotManager.snapshot(snapshotId);
-        Snapshot updated =
-                new Snapshot(
-                        old.id(),
-                        old.schemaId(),
-                        old.baseManifestList(),
-                        old.baseManifestListSize(),
-                        old.deltaManifestList(),
-                        old.deltaManifestListSize(),
-                        old.changelogManifestList(),
-                        old.changelogManifestListSize(),
-                        old.indexManifest(),
-                        old.commitUser(),
-                        old.commitIdentifier(),
-                        old.commitKind(),
-                        newTimeMillis,
-                        old.totalRecordCount(),
-                        old.deltaRecordCount(),
-                        old.changelogRecordCount(),
-                        old.watermark(),
-                        old.statistics(),
-                        old.properties(),
-                        old.nextRowId());
-        fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshotId), updated.toJson());
+        String oldJson = fileIO.readFileUtf8(snapshotManager.snapshotPath(snapshotId));
+        ObjectNode node = (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(oldJson);
+        node.put(Snapshot.FIELD_TIME_MILLIS, newTimeMillis);
+        String newJson = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.writeValueAsString(node);
+        fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshotId), newJson);
         snapshotManager.invalidateCache();
     }
 
