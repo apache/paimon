@@ -50,7 +50,7 @@ import java.io.Serializable;
 import java.util.Collections;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
-import static org.apache.paimon.flink.sink.FlinkSink.configureSlotSharingGroup;
+import static org.apache.paimon.flink.sink.FlinkSink.configureOperatorResource;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
@@ -126,7 +126,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                 input.transform(
                         WRITER_NAME, typeInfo, createWriteOperator(sinkProvider, commitUser));
         forwardParallelism(written, input);
-        configureSlotSharingGroup(written, writeCpuCores, writeHeapMemory);
+        configureOperatorResource(written, writeCpuCores, writeHeapMemory);
 
         // shuffle committables by table
         DataStream<MultiTableCommittable> partitioned =
@@ -146,7 +146,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 createCommitterFactory(tableFilter),
                                 createCommittableStateManager()));
         forwardParallelism(committed, input);
-        configureSlotSharingGroup(committed, commitCpuCores, commitHeapMemory);
+        configureOperatorResource(committed, commitCpuCores, commitHeapMemory);
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 

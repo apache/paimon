@@ -29,7 +29,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.operators.SlotSharingGroup;
+import org.apache.flink.api.common.operators.ResourceSpec;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.typeutils.EitherTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -157,7 +157,7 @@ public abstract class FlinkSink<T> implements Serializable {
             declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
         }
 
-        configureSlotSharingGroup(
+        configureOperatorResource(
                 written, options.get(SINK_WRITER_CPU), options.get(SINK_WRITER_MEMORY));
 
         if (!table.primaryKeys().isEmpty() && options.get(PRECOMMIT_COMPACT)) {
@@ -238,12 +238,12 @@ public abstract class FlinkSink<T> implements Serializable {
         if (!options.get(SINK_COMMITTER_OPERATOR_CHAINING)) {
             committed = committed.startNewChain();
         }
-        configureSlotSharingGroup(
+        configureOperatorResource(
                 committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
-    public static void configureSlotSharingGroup(
+    public static void configureOperatorResource(
             SingleOutputStreamOperator<?> operator,
             double cpuCores,
             @Nullable MemorySize heapMemory) {
@@ -251,14 +251,13 @@ public abstract class FlinkSink<T> implements Serializable {
             return;
         }
 
-        SlotSharingGroup slotSharingGroup =
-                SlotSharingGroup.newBuilder(operator.getName())
-                        .setCpuCores(cpuCores)
-                        .setTaskHeapMemory(
+        ResourceSpec resourceSpec =
+                ResourceSpec.newBuilder(
+                                cpuCores,
                                 new org.apache.flink.configuration.MemorySize(
                                         heapMemory.getBytes()))
                         .build();
-        operator.slotSharingGroup(slotSharingGroup);
+        operator.getTransformation().setResources(resourceSpec, resourceSpec);
     }
 
     public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
