@@ -27,8 +27,14 @@ from pypaimon_rust.datafusion import SQLContext
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE", "/tmp/paimon-warehouse")
 
 
-def _batches_to_table(batches):
-    return pa.Table.from_batches(batches) if batches else pa.Table.from_batches([])
+def _batches_to_table(ctx, query, batches):
+    if batches:
+        return pa.Table.from_batches(batches)
+    # Empty result: get schema via LIMIT 0 query
+    schema_batches = ctx.sql("SELECT * FROM ({}) LIMIT 0".format(query))
+    if schema_batches:
+        return pa.Table.from_batches([], schema=schema_batches[0].schema)
+    return pa.Table.from_batches([])
 
 
 class SQLContextTest(unittest.TestCase):
@@ -97,8 +103,8 @@ class SQLContextTest(unittest.TestCase):
 
     def test_sql_returns_table(self):
         ctx = self._create_sql_context()
-        batches = ctx.sql("SELECT id, name FROM sql_test_table ORDER BY id")
-        table = _batches_to_table(batches)
+        query = "SELECT id, name FROM sql_test_table ORDER BY id"
+        table = _batches_to_table(ctx, query, ctx.sql(query))
         self.assertIsInstance(table, pa.Table)
         self.assertEqual(table.num_rows, 3)
         self.assertEqual(table.column("id").to_pylist(), [1, 2, 3])
@@ -106,37 +112,37 @@ class SQLContextTest(unittest.TestCase):
 
     def test_sql_to_pandas(self):
         ctx = self._create_sql_context()
-        batches = ctx.sql("SELECT id, name FROM sql_test_table ORDER BY id")
-        table = _batches_to_table(batches)
+        query = "SELECT id, name FROM sql_test_table ORDER BY id"
+        table = _batches_to_table(ctx, query, ctx.sql(query))
         df = table.to_pandas()
         self.assertEqual(len(df), 3)
         self.assertListEqual(list(df.columns), ["id", "name"])
 
     def test_sql_with_filter(self):
         ctx = self._create_sql_context()
-        batches = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 1 ORDER BY id")
-        table = _batches_to_table(batches)
+        query = "SELECT id, name FROM sql_test_table WHERE id > 1 ORDER BY id"
+        table = _batches_to_table(ctx, query, ctx.sql(query))
         self.assertEqual(table.num_rows, 2)
         self.assertEqual(table.column("id").to_pylist(), [2, 3])
 
     def test_sql_with_empty_result(self):
         ctx = self._create_sql_context()
-        batches = ctx.sql("SELECT id, name FROM sql_test_table WHERE id > 4 ORDER BY id")
-        table = _batches_to_table(batches)
+        query = "SELECT id, name FROM sql_test_table WHERE id > 4 ORDER BY id"
+        table = _batches_to_table(ctx, query, ctx.sql(query))
         self.assertIsInstance(table, pa.Table)
         self.assertEqual(table.num_rows, 0)
         self.assertEqual(table.schema.names, ["id", "name"])
 
     def test_sql_with_aggregation(self):
         ctx = self._create_sql_context()
-        batches = ctx.sql("SELECT count(*) AS cnt FROM sql_test_table")
-        table = _batches_to_table(batches)
+        query = "SELECT count(*) AS cnt FROM sql_test_table"
+        table = _batches_to_table(ctx, query, ctx.sql(query))
         self.assertEqual(table.column("cnt").to_pylist(), [3])
 
     def test_sql_two_part_reference(self):
         ctx = self._create_sql_context()
-        batches = ctx.sql("SELECT count(*) AS cnt FROM default.sql_test_table")
-        table = _batches_to_table(batches)
+        query = "SELECT count(*) AS cnt FROM default.sql_test_table"
+        table = _batches_to_table(ctx, query, ctx.sql(query))
         self.assertEqual(table.column("cnt").to_pylist(), [3])
 
 

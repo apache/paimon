@@ -150,11 +150,21 @@ def cmd_sql(args):
         _interactive_repl(ctx, getattr(args, 'format', 'table'))
 
 
+def _batches_to_table(ctx, query, batches):
+    if batches:
+        return pa.Table.from_batches(batches)
+    # Empty result: get schema via LIMIT 0 query
+    schema_batches = ctx.sql("SELECT * FROM ({}) LIMIT 0".format(query))
+    if schema_batches:
+        return pa.Table.from_batches([], schema=schema_batches[0].schema)
+    return pa.Table.from_batches([])
+
+
 def _execute_query(ctx, query, output_format):
     """Execute a single SQL query and print the result."""
     try:
         batches = ctx.sql(query)
-        table = pa.Table.from_batches(batches) if batches else pa.Table.from_batches([])
+        table = _batches_to_table(ctx, query, batches)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -259,7 +269,7 @@ def _interactive_repl(ctx, output_format):
             try:
                 start = time.time()
                 batches = ctx.sql(query)
-                table = pa.Table.from_batches(batches) if batches else pa.Table.from_batches([])
+                table = _batches_to_table(ctx, query, batches)
                 elapsed = time.time() - start
                 _print_table(table, output_format, elapsed)
                 print()
