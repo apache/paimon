@@ -81,6 +81,8 @@ class PyArrowFileIO(FileIO):
             self.filesystem = self._initialize_s3_fs()
         elif scheme in {"hdfs", "viewfs"}:
             self.filesystem = self._initialize_hdfs_fs(scheme, netloc)
+        elif scheme == "gs":
+            self.filesystem = self._initialize_gcs_fs()
         else:
             raise ValueError(f"Unrecognized filesystem type in URI: {scheme}")
 
@@ -291,6 +293,26 @@ class PyArrowFileIO(FileIO):
                 port=port,
                 user=os.environ.get('HADOOP_USER_NAME', 'hadoop')
             )
+
+    def _initialize_gcs_fs(self) -> FileSystem:
+        access_token = self._get_property("gcs.access-token")
+        token_expiry = self._get_property("gcs.access-token.expiration")
+        project_id = self._get_property("gcs.project-id")
+
+        kwargs = {}
+        if access_token:
+            from datetime import datetime
+            kwargs["access_token"] = access_token
+            kwargs["credential_token_expiration"] = (
+                datetime.fromisoformat(token_expiry) if token_expiry
+                else datetime(9999, 12, 31)
+            )
+        if project_id:
+            kwargs["project_id"] = project_id
+
+        # With no kwargs, GcsFileSystem uses ADC automatically
+        # (GOOGLE_APPLICATION_CREDENTIALS or GCP metadata server / Workload Identity)
+        return pafs.GcsFileSystem(**kwargs)
 
     @staticmethod
     def _kerberos_login_from_keytab(principal: str, keytab: str):
@@ -723,6 +745,13 @@ class PyArrowFileIO(FileIO):
                     return result if result else '.'
             else:
                 return str(path)
+
+        from pyarrow.fs import GcsFileSystem
+        if isinstance(self.filesystem, GcsFileSystem):
+            if parsed.scheme and parsed.netloc:
+                path_part = normalized_path.lstrip('/')
+                return f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+            return str(path)
 
         if parsed.scheme:
             if not normalized_path:

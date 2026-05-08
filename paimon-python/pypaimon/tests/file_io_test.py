@@ -489,5 +489,62 @@ class FileIOTest(unittest.TestCase):
             self.assertNotIn("\\", call[0][0], f"backslash in path: {call[0][0]}")
 
 
+class GCSFileIOPathTest(unittest.TestCase):
+    """Unit tests for PyArrowFileIO.to_filesystem_path with GCS (no credentials required)."""
+
+    def setUp(self):
+        self.file_io = PyArrowFileIO("gs://my-bucket/warehouse", Options({}))
+
+    def test_gcs_filesystem_type(self):
+        """GCS warehouse path should produce a GcsFileSystem."""
+        self.assertIsInstance(self.file_io.filesystem, pafs.GcsFileSystem)
+
+    def test_gcs_path_conversion(self):
+        """gs://bucket/key should map to bucket/key (no leading slash)."""
+        self.assertEqual(
+            self.file_io.to_filesystem_path("gs://my-bucket/path/to/file.parquet"),
+            "my-bucket/path/to/file.parquet"
+        )
+        self.assertEqual(
+            self.file_io.to_filesystem_path("gs://my-bucket/warehouse/db.db/tbl/data-0.parquet"),
+            "my-bucket/warehouse/db.db/tbl/data-0.parquet"
+        )
+
+    def test_gcs_path_bucket_only(self):
+        """gs://bucket with no path should return just the bucket name."""
+        self.assertEqual(
+            self.file_io.to_filesystem_path("gs://my-bucket"),
+            "my-bucket"
+        )
+
+    def test_gcs_path_normalization(self):
+        """Multiple consecutive slashes in the path should be collapsed."""
+        self.assertEqual(
+            self.file_io.to_filesystem_path("gs://my-bucket///path///to///file.parquet"),
+            "my-bucket/path/to/file.parquet"
+        )
+
+    def test_gcs_path_idempotency(self):
+        """Already-converted bucket/key paths should pass through unchanged."""
+        converted = "my-bucket/path/to/file.parquet"
+        self.assertEqual(self.file_io.to_filesystem_path(converted), converted)
+        parent = str(Path(converted).parent)
+        self.assertEqual(self.file_io.to_filesystem_path(parent), parent)
+
+    def test_gcs_path_no_leading_slash(self):
+        """to_filesystem_path must never return a path starting with '/'."""
+        cases = [
+            "gs://my-bucket/path/to/file.parquet",
+            "gs://my-bucket",
+            "gs://my-bucket///path",
+        ]
+        for uri in cases:
+            result = self.file_io.to_filesystem_path(uri)
+            self.assertFalse(
+                result.startswith("/"),
+                f"Path must not start with '/' for GcsFileSystem, got: {result!r} (input: {uri!r})"
+            )
+
+
 if __name__ == '__main__':
     unittest.main()
