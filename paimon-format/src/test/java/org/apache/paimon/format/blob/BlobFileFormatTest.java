@@ -20,6 +20,7 @@ package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -30,6 +31,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -46,6 +48,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BlobFileFormat}. */
 public class BlobFileFormatTest {
@@ -169,5 +172,76 @@ public class BlobFileFormatTest {
         }
         assertThat(rows.get(0).getBlob(1).toData()).isEqualTo("hello".getBytes());
         assertThat(rows.get(1).getBlob(1).toData()).isEqualTo("world".getBytes());
+    }
+
+    @Test
+    public void testWriteUnreadableBlobAsNull() throws IOException {
+        BlobFileFormat format = new BlobFileFormat(false, true);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        List<BlobDescriptor> descriptors = new ArrayList<>();
+        format.setWriteConsumer(
+                (blobFieldName, blobDescriptor) -> {
+                    descriptors.add(blobDescriptor);
+                    return false;
+                });
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter formatWriter = format.createWriterFactory(rowType).create(out, null);
+            formatWriter.addElement(GenericRow.of(new BlobData("hello".getBytes())));
+            formatWriter.addElement(GenericRow.of(new UnreadableBlob()));
+            formatWriter.addElement(GenericRow.of(new BlobData("world".getBytes())));
+            formatWriter.close();
+        }
+
+        assertThat(descriptors).hasSize(3);
+        assertThat(descriptors.get(0)).isNotNull();
+        assertThat(descriptors.get(1)).isNull();
+        assertThat(descriptors.get(2)).isNotNull();
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        List<byte[]> result = new ArrayList<>();
+        readerFactory
+                .createReader(context)
+                .forEachRemaining(
+                        row -> result.add(row.isNullAt(0) ? null : row.getBlob(0).toData()));
+
+        assertThat(result).hasSize(3);
+        assertThat(result.get(0)).isEqualTo("hello".getBytes());
+        assertThat(result.get(1)).isNull();
+        assertThat(result.get(2)).isEqualTo("world".getBytes());
+    }
+
+    @Test
+    public void testUnreadableBlobFailsByDefault() throws IOException {
+        BlobFileFormat format = new BlobFileFormat(false);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter formatWriter = format.createWriterFactory(rowType).create(out, null);
+
+            assertThatThrownBy(() -> formatWriter.addElement(GenericRow.of(new UnreadableBlob())))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Cannot open blob input stream.");
+        }
+    }
+
+    private static class UnreadableBlob implements Blob {
+
+        @Override
+        public byte[] toData() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public BlobDescriptor toDescriptor() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public SeekableInputStream newInputStream() throws IOException {
+            throw new IOException("Cannot open blob input stream.");
+        }
     }
 }

@@ -127,6 +127,15 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       </td>
     </tr>
     <tr>
+      <td><h5>blob-write-null-on-unreadable</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>
+        When enabled, if a BLOB value cannot open a new input stream during writes, Paimon writes <code>NULL</code> for that value instead of failing the write.
+      </td>
+    </tr>
+    <tr>
       <td><h5>blob-view-field</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>

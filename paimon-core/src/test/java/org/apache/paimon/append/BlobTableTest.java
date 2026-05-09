@@ -388,6 +388,24 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testUnreadableExternalStorageBlobWritesNull() throws Exception {
+        createExternalStorageTable(true);
+
+        writeDataDefault(
+                Collections.singletonList(
+                        GenericRow.of(
+                                1,
+                                BinaryString.fromString("unreadable"),
+                                new UnreadableBlob())));
+
+        readDefault(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("unreadable");
+                    assertThat(row.isNullAt(2)).isTrue();
+                });
+    }
+
+    @Test
     public void testThreeTypeBlobCoexistence() throws Exception {
         createThreeTypeBlobTable();
         FileStoreTable table = getTableDefault();
@@ -902,6 +920,10 @@ public class BlobTableTest extends TableTestBase {
     }
 
     private void createExternalStorageTable() throws Exception {
+        createExternalStorageTable(false);
+    }
+
+    private void createExternalStorageTable(boolean writeNullOnUnreadableBlob) throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
@@ -915,6 +937,9 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(
                 CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
                 tempPath.resolve("external-storage-blob-path").toString());
+        if (writeNullOnUnreadableBlob) {
+            schemaBuilder.option(CoreOptions.BLOB_WRITE_NULL_ON_UNREADABLE.key(), "true");
+        }
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
 
@@ -999,6 +1024,24 @@ public class BlobTableTest extends TableTestBase {
             }
         }
         return count;
+    }
+
+    private static class UnreadableBlob implements Blob {
+
+        @Override
+        public byte[] toData() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public BlobDescriptor toDescriptor() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public SeekableInputStream newInputStream() throws IOException {
+            throw new IOException("Cannot open blob input stream.");
+        }
     }
 
     protected Schema schemaDefault() {

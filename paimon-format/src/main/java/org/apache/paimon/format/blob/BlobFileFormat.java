@@ -50,16 +50,22 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
+    private final boolean writeNullOnUnreadableBlob;
 
     @Nullable public BlobConsumer writeConsumer;
 
     public BlobFileFormat() {
-        this(false);
+        this(false, false);
     }
 
     public BlobFileFormat(boolean blobAsDescriptor) {
+        this(blobAsDescriptor, false);
+    }
+
+    public BlobFileFormat(boolean blobAsDescriptor, boolean writeNullOnUnreadableBlob) {
         super(BlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;
+        this.writeNullOnUnreadableBlob = writeNullOnUnreadableBlob;
     }
 
     public static boolean isBlobFile(String fileName) {
@@ -108,7 +114,7 @@ public class BlobFileFormat extends FileFormat {
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(out, writeConsumer, type);
+            return new BlobFormatWriter(out, writeConsumer, type, writeNullOnUnreadableBlob);
         }
     }
 

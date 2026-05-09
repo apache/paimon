@@ -35,6 +35,8 @@ public class BlobFileFormatFactory implements FileFormatFactory {
     @Override
     public FileFormat create(FormatContext formatContext) {
         boolean blobAsDescriptor = formatContext.options().get(CoreOptions.BLOB_AS_DESCRIPTOR);
-        return new BlobFileFormat(blobAsDescriptor);
+        boolean writeNullOnUnreadable =
+                formatContext.options().get(CoreOptions.BLOB_WRITE_NULL_ON_UNREADABLE);
+        return new BlobFileFormat(blobAsDescriptor, writeNullOnUnreadable);
     }
 }

@@ -2302,6 +2302,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_UNREADABLE =
+            key("blob-write-null-on-unreadable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to write NULL for a BLOB value when the value cannot provide "
+                                    + "a new input stream during writes. When false, the write "
+                                    + "fails.");
+
     @Immutable
     public static final ConfigOption<String> BLOB_EXTERNAL_STORAGE_PATH =
             key("blob-external-storage-path")
@@ -3787,6 +3796,10 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean blobWriteNullOnUnreadable() {
+        return options.get(BLOB_WRITE_NULL_ON_UNREADABLE);
     }
 
     public boolean postponeBatchWriteFixedBucket() {
