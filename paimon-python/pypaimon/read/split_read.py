@@ -570,6 +570,29 @@ class RawFileSplitRead(SplitRead):
 
 
 class MergeFileSplitRead(SplitRead):
+    def __init__(
+            self,
+            table,
+            predicate: Optional[Predicate],
+            read_type: List[DataField],
+            split: Split,
+            row_tracking_enabled: bool,
+            outer_extract_name_paths: Optional[List[List[str]]] = None):
+        # Merge-read intentionally does *not* push nested paths down to the
+        # file reader: the merge function needs full ROW sub-structures so
+        # deduplicate / partial-update / aggregation see the original row.
+        # Sub-path extraction happens later in create_reader via
+        # OuterProjectionRecordReader.
+        super().__init__(
+            table=table,
+            predicate=predicate,
+            read_type=read_type,
+            split=split,
+            row_tracking_enabled=row_tracking_enabled,
+            nested_name_paths=None,
+        )
+        self.outer_extract_name_paths = outer_extract_name_paths
+
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
         file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
         dv = dv_factory() if dv_factory else None
@@ -601,9 +624,16 @@ class MergeFileSplitRead(SplitRead):
         concat_reader = ConcatRecordReader(section_readers)
         kv_unwrap_reader = KeyValueUnwrapRecordReader(DropDeleteRecordReader(concat_reader))
         if self.predicate_for_reader:
-            return FilterRecordReader(kv_unwrap_reader, self.predicate_for_reader)
+            reader = FilterRecordReader(kv_unwrap_reader, self.predicate_for_reader)
         else:
-            return kv_unwrap_reader
+            reader = kv_unwrap_reader
+        if self.outer_extract_name_paths:
+            from pypaimon.read.reader.outer_projection_record_reader import \
+                OuterProjectionRecordReader
+            inner_top_names = [f.name for f in self.read_fields[-self.value_arity:]]
+            reader = OuterProjectionRecordReader(
+                reader, inner_top_names, self.outer_extract_name_paths)
+        return reader
 
     def _get_all_data_fields(self):
         return self._create_key_value_fields(self.table.fields)

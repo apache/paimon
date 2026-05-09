@@ -175,35 +175,66 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
              {'val': 'y', 'id': 2},
              {'val': 'z', 'id': 3}])
 
-    def test_pk_table_merge_split_with_nested_projection_raises(self):
-        # Phase 2b lands the append-only path only; PK + nested needs an
-        # outer-projection wrapper that ships in a follow-up commit. Until
-        # then, the call must refuse loudly rather than silently corrupt
-        # the merge function input. Two commits on the same PK force the
-        # split out of the raw-convertible fast path into the merge
-        # reader, which is where the guard lives.
-        identifier = 'default.pk_nested_unsupported'
+
+class PrimaryKeyNestedTest(_AppendOnlyNestedBase):
+    """PK tables go through the merge reader once a split is no longer
+    raw-convertible (multiple overlapping commits on the same key). The
+    merge function still needs full ROW sub-structures, so the read
+    splits inner = full-ROW from outer = flat sub-paths via an
+    OuterProjectionRecordReader."""
+
+    def _create_pk_table(self, name: str, file_format: str = 'parquet'):
+        identifier = 'default.{}'.format(name)
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             primary_keys=['id'],
-            options={'bucket': '1', 'file.format': 'parquet'},
+            options={'bucket': '1', 'file.format': file_format},
         )
         self.catalog.create_table(identifier, schema, False)
         table = self.catalog.get_table(identifier)
-        for batch in (self.rows, self.rows):  # two overlapping commits
+        # Two overlapping commits force the split off the raw-convertible
+        # fast path into the merge reader.
+        for batch in (self.rows, self.rows):
             wb = table.new_batch_write_builder()
             w = wb.new_write()
             w.write_arrow(pa.Table.from_pylist(batch, schema=self.pa_schema))
             wb.new_commit().commit(w.prepare_commit())
             w.close()
+        return table
 
-        rb = table.new_read_builder().with_projection(['mv.latest_version'])
+    def _read_arrow(self, table, projection):
+        rb = table.new_read_builder().with_projection(projection)
         splits = rb.new_scan().plan().splits()
-        # ``to_arrow`` materialises the split read; the merge path is what
-        # raises, so do it eagerly here rather than waiting for the first
-        # batch.
-        with self.assertRaises(NotImplementedError):
-            rb.new_read().to_arrow(splits)
+        return rb.new_read().to_arrow(splits)
+
+    def test_extracts_single_nested_leaf(self):
+        table = self._create_pk_table('pk_nested_single')
+        arrow = self._read_arrow(table, ['mv.latest_version'])
+        self.assertEqual(arrow.column_names, ['mv_latest_version'])
+        versions = sorted(arrow.column('mv_latest_version').to_pylist())
+        self.assertEqual(versions, [100, 200, 300])
+
+    def test_multiple_sub_paths_under_same_struct(self):
+        table = self._create_pk_table('pk_nested_double')
+        arrow = self._read_arrow(
+            table, ['mv.latest_version', 'mv.latest_value'])
+        self.assertEqual(arrow.column_names, ['mv_latest_version', 'mv_latest_value'])
+        pairs = sorted(zip(
+            arrow.column('mv_latest_version').to_pylist(),
+            arrow.column('mv_latest_value').to_pylist()))
+        self.assertEqual(pairs, [(100, 'a'), (200, 'b'), (300, 'c')])
+
+    def test_mixed_nested_and_top_level_preserves_order(self):
+        table = self._create_pk_table('pk_nested_mixed')
+        arrow = self._read_arrow(
+            table, ['id', 'mv.latest_version', 'val'])
+        self.assertEqual(
+            arrow.column_names, ['id', 'mv_latest_version', 'val'])
+        rows = sorted(zip(
+            arrow.column('id').to_pylist(),
+            arrow.column('mv_latest_version').to_pylist(),
+            arrow.column('val').to_pylist()))
+        self.assertEqual(rows, [(1, 100, 'x'), (2, 200, 'y'), (3, 300, 'z')])
 
 
 if __name__ == '__main__':

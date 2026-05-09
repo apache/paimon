@@ -270,17 +270,23 @@ class TableRead:
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
+            inner_read_type = self.read_type
+            outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
-                raise NotImplementedError(
-                    "Nested-field projection on primary-key tables that "
-                    "require a merge read is not yet supported")
+                # Merge functions need full ROW sub-structures, so widen the
+                # inner read_type back to the unique top-level fields touched
+                # by the user's nested paths and let an outer-projection
+                # wrapper extract the requested sub-paths after merge.
+                inner_read_type = self._widen_to_top_level_for_merge()
+                outer_extract_name_paths = self.nested_name_paths
             return MergeFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                read_type=self.read_type,
+                read_type=inner_read_type,
                 split=split,
-                row_tracking_enabled=False
+                row_tracking_enabled=False,
+                outer_extract_name_paths=outer_extract_name_paths,
             )
         elif self.table.options.data_evolution_enabled():
             if self.nested_name_paths and any(
@@ -305,6 +311,31 @@ class TableRead:
                 row_tracking_enabled=self.table.options.row_tracking_enabled(),
                 nested_name_paths=self.nested_name_paths,
             )
+
+    def _widen_to_top_level_for_merge(self) -> List[DataField]:
+        """Return the unique top-level table fields touched by
+        ``self.nested_name_paths``, in path order.
+
+        ``self.read_type`` is the user-visible flat schema. For a merge
+        read the file reader must instead expose full ROW sub-structures
+        for those top-level fields; the OuterProjectionRecordReader then
+        extracts the per-path sub-values to rebuild the flat schema.
+        """
+        table_fields_by_name = {f.name: f for f in self.table.fields}
+        seen = set()
+        widened: List[DataField] = []
+        for path in self.nested_name_paths or []:
+            top_name = path[0]
+            if top_name in seen:
+                continue
+            seen.add(top_name)
+            field = table_fields_by_name.get(top_name)
+            if field is None:
+                raise ValueError(
+                    "Nested projection top-level field %r not found in "
+                    "table schema" % (top_name,))
+            widened.append(field)
+        return widened
 
     @staticmethod
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
