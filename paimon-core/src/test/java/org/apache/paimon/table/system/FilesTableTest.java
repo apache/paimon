@@ -203,6 +203,43 @@ public class FilesTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadWithSchemaIdFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+
+        assertThat(readPartBucketLevel(builder.equal(4, 0L)))
+                .containsExactlyInAnyOrder(
+                        "{1, 10}-0-0", "{1, 10}-0-0", "{2, 20}-0-0", "{2, 20}-0-0");
+        assertThat(readPartBucketLevel(builder.equal(4, 999L))).isEmpty();
+    }
+
+    @Test
+    public void testReadWithRecordCountFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+
+        assertThat(readPartBucketLevel(builder.greaterThan(6, 0L)))
+                .containsExactlyInAnyOrder(
+                        "{1, 10}-0-0", "{1, 10}-0-0", "{2, 20}-0-0", "{2, 20}-0-0");
+        assertThat(readPartBucketLevel(builder.greaterThan(6, 100L))).isEmpty();
+    }
+
+    @Test
+    public void testReadWithCombinedPushdownAndPostFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+
+        Predicate combined =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("{1, 10}")), builder.equal(4, 0L));
+        assertThat(readPartBucketLevel(combined))
+                .containsExactlyInAnyOrder("{1, 10}-0-0", "{1, 10}-0-0");
+
+        Predicate combinedMiss =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("{1, 10}")),
+                        builder.equal(4, 999L));
+        assertThat(readPartBucketLevel(combinedMiss)).isEmpty();
+    }
+
+    @Test
     public void testReadFilesFromSpecifiedSnapshot() throws Exception {
         List<InternalRow> expectedRow = getExpectedResult(1L);
         filesTable =

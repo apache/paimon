@@ -26,6 +26,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -33,12 +36,15 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -179,5 +185,65 @@ public class PartitionsTableTest extends TableTestBase {
 
         List<InternalRow> result = read(testPartitionsTable, new int[] {0, 1});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testReadWithPartitionEqualFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        assertThat(readPartitionAndRecordCount(builder.equal(0, BinaryString.fromString("pt=2"))))
+                .containsExactlyInAnyOrder("pt=2-1");
+
+        assertThat(readPartitionAndRecordCount(builder.equal(0, BinaryString.fromString("pt=99"))))
+                .isEmpty();
+    }
+
+    @Test
+    public void testReadWithPartitionInFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        assertThat(
+                        readPartitionAndRecordCount(
+                                builder.in(
+                                        0,
+                                        Arrays.asList(
+                                                (Object) BinaryString.fromString("pt=1"),
+                                                BinaryString.fromString("pt=3")))))
+                .containsExactlyInAnyOrder("pt=1-2", "pt=3-1");
+    }
+
+    @Test
+    public void testReadWithRecordCountFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        assertThat(readPartitionAndRecordCount(builder.greaterThan(1, 1L)))
+                .containsExactlyInAnyOrder("pt=1-2");
+    }
+
+    @Test
+    public void testReadWithFileCountFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(PartitionsTable.TABLE_TYPE);
+
+        assertThat(readPartitionAndRecordCount(builder.equal(3, 1L)))
+                .containsExactlyInAnyOrder("pt=2-1", "pt=3-1");
+        assertThat(readPartitionAndRecordCount(builder.greaterOrEqual(3, 2L)))
+                .containsExactlyInAnyOrder("pt=1-2");
+    }
+
+    @Test
+    public void testReadWithNullFilterReturnsAll() throws Exception {
+        assertThat(readPartitionAndRecordCount(null))
+                .containsExactlyInAnyOrder("pt=1-2", "pt=2-1", "pt=3-1");
+    }
+
+    private List<String> readPartitionAndRecordCount(Predicate predicate) throws IOException {
+        ReadBuilder readBuilder = partitionsTable.newReadBuilder().withFilter(predicate);
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> rows.add(row.getString(0).toString() + "-" + row.getLong(1)));
+        }
+        return rows;
     }
 }

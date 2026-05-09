@@ -35,6 +35,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -73,11 +74,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -280,11 +283,23 @@ public class FilesTable implements ReadonlyTable {
 
     private static class FilesRead implements InnerTableRead {
 
+        private static final Set<String> SCAN_PUSHDOWN_FIELDS = scanPushdownFields();
+
+        private static Set<String> scanPushdownFields() {
+            Set<String> fields = new HashSet<>();
+            fields.add("partition");
+            fields.add("bucket");
+            fields.add("level");
+            return Collections.unmodifiableSet(fields);
+        }
+
         private final SchemaManager schemaManager;
 
         private final FileStoreTable storeTable;
 
         private RowType readType;
+
+        @Nullable private Predicate predicate;
 
         private FilesRead(SchemaManager schemaManager, FileStoreTable fileStoreTable) {
             this.schemaManager = schemaManager;
@@ -293,7 +308,14 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                this.predicate = null;
+                return this;
+            }
+            List<Predicate> remaining =
+                    PredicateBuilder.excludePredicateWithFields(
+                            PredicateBuilder.splitAnd(predicate), SCAN_PUSHDOWN_FIELDS);
+            this.predicate = remaining.isEmpty() ? null : PredicateBuilder.and(remaining);
             return this;
         }
 
@@ -366,6 +388,11 @@ public class FilesTable implements ReadonlyTable {
                                                 simpleStatsEvolutions)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());
+
+            if (predicate != null) {
+                rows = Iterators.filter(rows, predicate::test);
+            }
+
             if (readType != null) {
                 rows =
                         Iterators.transform(

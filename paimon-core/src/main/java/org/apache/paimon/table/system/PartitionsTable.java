@@ -61,6 +61,8 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -182,13 +184,15 @@ public class PartitionsTable implements ReadonlyTable {
 
         private RowType readType;
 
+        @Nullable private Predicate predicate;
+
         public PartitionsRead(FileStoreTable table) {
             this.fileStoreTable = table;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.predicate = predicate;
             return this;
         }
 
@@ -235,6 +239,10 @@ public class PartitionsTable implements ReadonlyTable {
                                                             .partitionDefaultName()))
                             .sorted(Comparator.comparing(row -> row.getString(0)))
                             .iterator();
+
+            if (predicate != null) {
+                iterator = Iterators.filter(iterator, predicate::test);
+            }
 
             if (readType != null) {
                 iterator =
