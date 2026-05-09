@@ -1357,6 +1357,35 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testFastForwardWithoutTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createBranch(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
+
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        table.fastForward(BRANCH_NAME);
+
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .contains("2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
     public void testUnsupportedTagName() throws Exception {
         FileStoreTable table = createFileStoreTable();
 

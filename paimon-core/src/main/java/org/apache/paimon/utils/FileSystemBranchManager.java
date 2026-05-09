@@ -195,10 +195,11 @@ public class FileSystemBranchManager implements BranchManager {
                     schemaManager.copyWithBranch(branchName).schemaDirectory(),
                     schemaManager.schemaDirectory(),
                     true);
-            fileIO.copyFiles(
-                    tagManager.copyWithBranch(branchName).tagDirectory(),
-                    tagManager.tagDirectory(),
-                    true);
+            // Continue fast-forward even without tags.
+            Path branchTagDirectory = tagManager.copyWithBranch(branchName).tagDirectory();
+            if (fileIO.exists(branchTagDirectory)) {
+                fileIO.copyFiles(branchTagDirectory, tagManager.tagDirectory(), true);
+            }
             snapshotManager.invalidateCache();
         } catch (IOException e) {
             throw new RuntimeException(
