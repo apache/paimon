@@ -34,7 +34,13 @@ import org.apache.paimon.table.source.ScanMode;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 
 import static java.util.Collections.emptyList;
 
@@ -42,14 +48,20 @@ import static java.util.Collections.emptyList;
 public class CommitScanner {
 
     private final FileStoreScan scan;
+    private final Supplier<FileStoreScan> scanSupplier;
     private final IndexManifestFile indexManifestFile;
+    private final boolean dropStats;
 
     public CommitScanner(
-            FileStoreScan scan, IndexManifestFile indexManifestFile, CoreOptions options) {
-        this.scan = scan;
+            Supplier<FileStoreScan> scanSupplier,
+            IndexManifestFile indexManifestFile,
+            CoreOptions options) {
+        this.scanSupplier = scanSupplier;
+        this.scan = scanSupplier.get();
         this.indexManifestFile = indexManifestFile;
         // Stats in DELETE Manifest Entries is useless
-        if (options.manifestDeleteFileDropStats()) {
+        this.dropStats = options.manifestDeleteFileDropStats();
+        if (dropStats) {
             this.scan.dropStats();
         }
     }
@@ -86,6 +98,34 @@ public class CommitScanner {
                     .readSimpleEntries();
         } catch (Throwable e) {
             throw new RuntimeException("Cannot read manifest entries from changed partitions.", e);
+        }
+    }
+
+    public Map<BinaryRow, Integer> readTotalBuckets(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        try {
+            Set<BinaryRow> remainingPartitions = new HashSet<>(changedPartitions);
+            Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
+            FileStoreScan freshScan = scanSupplier.get();
+            if (dropStats) {
+                freshScan.dropStats();
+            }
+            Iterator<ManifestEntry> iterator =
+                    freshScan
+                            .withSnapshot(snapshot)
+                            .withKind(ScanMode.ALL)
+                            .withPartitionFilter(changedPartitions)
+                            .readFileIterator();
+            while (iterator.hasNext() && !remainingPartitions.isEmpty()) {
+                ManifestEntry entry = iterator.next();
+                int totalBucket = entry.totalBuckets();
+                if (totalBucket > 0 && remainingPartitions.remove(entry.partition())) {
+                    totalBuckets.put(entry.partition(), totalBucket);
+                }
+            }
+            return totalBuckets;
+        } catch (Throwable e) {
+            throw new RuntimeException("Cannot read total buckets from changed partitions.", e);
         }
     }
 

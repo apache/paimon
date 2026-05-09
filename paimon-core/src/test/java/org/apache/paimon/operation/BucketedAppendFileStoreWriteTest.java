@@ -45,11 +45,15 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_APPEND_ORDERED;
 import static org.apache.paimon.CoreOptions.WRITE_MAX_WRITERS_TO_SPILL;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 
 /** Tests for {@link BucketedAppendFileStoreWrite}. */
 public class BucketedAppendFileStoreWriteTest {
@@ -170,6 +174,43 @@ public class BucketedAppendFileStoreWriteTest {
         catalog.createDatabase("default", false);
         catalog.createTable(identifier, schema, false);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    @Test
+    public void testIgnorePreviousFilesChecksPartitionBucketNumber() throws Exception {
+        FileStoreTable table = createFileStoreTable().copy(bucketOptions(2, false, false));
+        BaseAppendFileStoreWrite write = (BaseAppendFileStoreWrite) table.store().newWrite("ss");
+        StreamTableCommit commit = table.newStreamWriteBuilder().newCommit();
+
+        write.write(partition(1), 1, GenericRow.of(1, 1, 0));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        FileStoreTable rescaledTable = table.copy(bucketOptions(4, false, true));
+        write = (BaseAppendFileStoreWrite) rescaledTable.store().newWrite("ss");
+        write.write(partition(1), 1, GenericRow.of(1, 1, 0));
+        List<CommitMessage> commitMessages = write.prepareCommit(false, 1);
+        Assertions.assertThat(commitMessages).isNotEmpty();
+        Assertions.assertThatThrownBy(
+                        () ->
+                                rescaledTable
+                                        .newStreamWriteBuilder()
+                                        .newCommit()
+                                        .commit(1, commitMessages))
+                .hasMessageContaining("new bucket num 4")
+                .hasMessageContaining("previous bucket num is 2");
+
+        write = (BaseAppendFileStoreWrite) rescaledTable.store().newWrite("ss");
+        write.write(partition(2), 2, GenericRow.of(2, 2, 0));
+        rescaledTable.newStreamWriteBuilder().newCommit().commit(2, write.prepareCommit(false, 2));
+    }
+
+    private Map<String, String> bucketOptions(
+            int bucket, boolean bucketAppendOrdered, boolean writeOnly) {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(bucket));
+        options.put(BUCKET_APPEND_ORDERED.key(), String.valueOf(bucketAppendOrdered));
+        options.put(WRITE_ONLY.key(), String.valueOf(writeOnly));
+        return options;
     }
 
     private BinaryRow partition(int i) {
