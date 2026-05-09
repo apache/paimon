@@ -73,7 +73,8 @@ public class FlinkRowWrapperTest {
     }
 
     private GenericRowData descriptorRow(java.nio.file.Path path, long length) {
-        return GenericRowData.of(new BlobDescriptor(path.toUri().toString(), 0, length).serialize());
+        return GenericRowData.of(
+                new BlobDescriptor(path.toUri().toString(), 0, length).serialize());
     }
 
     private FlinkRowWrapper wrapper(GenericRowData row, boolean checkBlobDescriptorExists) {
