@@ -927,13 +927,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
-                Map<BinaryRow, List<ManifestEntry>> deltaFilesByPart =
-                        deltaFiles.stream()
-                                .collect(Collectors.groupingBy(ManifestEntry::partition));
-                deltaFiles =
-                        deltaFilesByPart.values().stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList());
+                if (options.rowTrackingPartitionGroupOnCommit()) {
+                    Map<BinaryRow, List<ManifestEntry>> deltaFilesByPart =
+                            deltaFiles.stream()
+                                    .collect(Collectors.groupingBy(ManifestEntry::partition));
+                    deltaFiles =
+                            deltaFilesByPart.values().stream()
+                                    .flatMap(Collection::stream)
+                                    .collect(Collectors.toList());
+                }
                 RowTrackingAssigned assigned =
                         assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
                 nextRowIdStart = assigned.nextRowIdStart;
