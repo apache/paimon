@@ -41,6 +41,7 @@ class FileStoreWrite:
         self.write_cols = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
+        self.changelog_producer = self.options.changelog_producer()
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
             self.options.set(CoreOptions.DATA_FILE_PREFIX,
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
@@ -77,7 +78,8 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=max_seq_number(),
-                options=options)
+                options=options,
+                changelog_producer=self.changelog_producer)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
@@ -86,7 +88,8 @@ class FileStoreWrite:
                 bucket=bucket,
                 max_seq_number=seq_number,
                 options=options,
-                write_cols=self.write_cols
+                write_cols=self.write_cols,
+                changelog_producer=self.changelog_producer
             )
 
     def _has_blob_columns(self) -> bool:
@@ -105,11 +108,13 @@ class FileStoreWrite:
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
-            if committed_files:
+            changelog_files = writer.prepare_changelog_commit()
+            if committed_files or changelog_files:
                 commit_message = CommitMessage(
                     partition=partition,
                     bucket=bucket,
-                    new_files=committed_files
+                    new_files=committed_files,
+                    changelog_files=changelog_files,
                 )
                 commit_messages.append(commit_message)
         return commit_messages

@@ -292,6 +292,14 @@ class CoreOptions:
                           "Options: none, input, full-compaction, lookup.")
     )
 
+    CHANGELOG_FILE_FORMAT: ConfigOption[str] = (
+        ConfigOptions.key("changelog-file.format")
+        .string_type()
+        .no_default_value()
+        .with_description("Specify the file format of changelog files. "
+                          "Currently parquet, avro and orc are supported.")
+    )
+
     MERGE_ENGINE: ConfigOption[MergeEngine] = (
         ConfigOptions.key("merge-engine")
         .enum_type(MergeEngine)
@@ -578,6 +586,9 @@ class CoreOptions:
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
+
+    def changelog_file_format(self, default=None):
+        return self.options.get(CoreOptions.CHANGELOG_FILE_FORMAT, default)
 
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
