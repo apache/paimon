@@ -307,8 +307,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles(),
                         coreOptions.spillCompressOptions(),
-                        coreOptions.writeBufferSpillDiskSize(),
-                        coreOptions.sequenceFieldSortOrderIsAscending());
+                        coreOptions.writeBufferSpillDiskSize());
 
         Function<SortOrder, RowIterator> iteratorFunction =
                 sortOrder -> {

@@ -83,21 +83,20 @@ public class CodeGenUtils {
     }
 
     public static RecordComparator newRecordComparator(List<DataType> inputTypes) {
-        return newRecordComparator(
-                inputTypes, IntStream.range(0, inputTypes.size()).toArray(), true);
+        int[] sortFields = new int[inputTypes.size()];
+        for (int i = 0; i < sortFields.length; i++) {
+            sortFields[i] = i;
+        }
+        return newRecordComparator(inputTypes, sortFields);
     }
 
     public static RecordComparator newRecordComparator(
-            List<DataType> inputTypes, int[] sortFields, boolean isAscendingOrder) {
-        return generate(
-                RecordComparator.class,
-                inputTypes,
-                sortFields,
-                isAscendingOrder,
-                () ->
-                        getCodeGenerator()
-                                .generateRecordComparator(
-                                        inputTypes, sortFields, isAscendingOrder));
+            List<DataType> inputTypes, int[] sortFields) {
+        boolean[] ascendingOrders = new boolean[sortFields.length];
+        for (int i = 0; i < sortFields.length; i++) {
+            ascendingOrders[i] = true;
+        }
+        return newRecordComparator(inputTypes, sortFields, ascendingOrders);
     }
 
     public static RecordComparator newRecordComparator(

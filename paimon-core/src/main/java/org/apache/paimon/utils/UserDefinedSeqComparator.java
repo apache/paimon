@@ -83,9 +83,13 @@ public class UserDefinedSeqComparator implements FieldsComparator {
             return null;
         }
 
+        boolean[] ascendingOrders = new boolean[sequenceFields.length];
+        for (int i = 0; i < sequenceFields.length; i++) {
+            ascendingOrders[i] = isAscendingOrder;
+        }
         RecordComparator comparator =
                 CodeGenUtils.newRecordComparator(
-                        rowType.getFieldTypes(), sequenceFields, isAscendingOrder);
+                        rowType.getFieldTypes(), sequenceFields, ascendingOrders);
         return new UserDefinedSeqComparator(sequenceFields, comparator, isAscendingOrder);
     }
 }

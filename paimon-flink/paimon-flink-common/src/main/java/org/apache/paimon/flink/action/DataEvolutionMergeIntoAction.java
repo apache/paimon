@@ -377,8 +377,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         coreOptions.localSortMaxNumFileHandles(),
                                         coreOptions.spillCompressOptions(),
                                         sinkParallelism,
-                                        coreOptions.writeBufferSpillDiskSize(),
-                                        coreOptions.sequenceFieldSortOrderIsAscending()))
+                                        coreOptions.writeBufferSpillDiskSize()))
                         .setParallelism(sinkParallelism);
 
         // 2. write partial columns
