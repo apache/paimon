@@ -748,6 +748,49 @@ class ClusteringTableTest {
                         GenericRow.of(BinaryString.fromString("hi"), 2, 20));
     }
 
+    /** Test first-row mode keeps original values after bootstrapping composite key index. */
+    @Test
+    public void testFirstRowCompositePkKeepsOriginalValuesAcrossBootstrap() throws Exception {
+        Table firstRowTable = createFirstRowTableCompositePk();
+
+        List<GenericRow> originalRows =
+                Arrays.asList(
+                        GenericRow.of(BinaryString.fromString("same"), 1, 10),
+                        GenericRow.of(BinaryString.fromString("same"), 2, 20),
+                        GenericRow.of(BinaryString.fromString("same"), 3, 30));
+        writeRows(firstRowTable, originalRows);
+
+        writeRows(
+                firstRowTable,
+                Arrays.asList(
+                        GenericRow.of(BinaryString.fromString("same"), 1, 100),
+                        GenericRow.of(BinaryString.fromString("same"), 2, 200),
+                        GenericRow.of(BinaryString.fromString("same"), 3, 300)));
+
+        assertThat(readRowsCompositePk(firstRowTable))
+                .containsExactlyInAnyOrderElementsOf(originalRows);
+        assertThat(dataFiles(firstRowTable).stream().mapToLong(DataFileMeta::rowCount).sum())
+                .isEqualTo(originalRows.size());
+    }
+
+    /** Test sort-and-rewrite writes clustering ranges in ascending order. */
+    @Test
+    public void testFirstRowSortAndRewriteFileKeepsAscendingClusteringRange() throws Exception {
+        Table firstRowTable = createFirstRowTableWithCompositeClusteringColumns();
+
+        writeRows(
+                firstRowTable,
+                Arrays.asList(
+                        GenericRow.of(1, BinaryString.fromString("same"), 2),
+                        GenericRow.of(2, BinaryString.fromString("same"), 1)));
+
+        List<DataFileMeta> dataFiles = dataFiles(firstRowTable);
+        assertThat(dataFiles).hasSize(1);
+        DataFileMeta dataFile = dataFiles.get(0);
+        assertThat(dataFile.minKey().getInt(1)).isEqualTo(1);
+        assertThat(dataFile.maxKey().getInt(1)).isEqualTo(2);
+    }
+
     // ==================== Spill Tests ====================
 
     /** Test first-row mode with spill: keeps first values despite many duplicate commits. */
@@ -1098,6 +1141,25 @@ class ClusteringTableTest {
         return catalog.getTable(identifier);
     }
 
+    private Table createFirstRowTableWithCompositeClusteringColumns() throws Exception {
+        Identifier identifier =
+                Identifier.create("default", "first_row_composite_clustering_table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("c", DataTypes.STRING())
+                        .column("b", DataTypes.INT())
+                        .primaryKey("a")
+                        .option(DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "1")
+                        .option(CLUSTERING_COLUMNS.key(), "c,b")
+                        .option(PK_CLUSTERING_OVERRIDE.key(), "true")
+                        .option(MERGE_ENGINE.key(), "first-row")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        return catalog.getTable(identifier);
+    }
+
     private List<GenericRow> readRowsCompositePk(Table targetTable) throws Exception {
         ReadBuilder readBuilder = targetTable.newReadBuilder();
         @SuppressWarnings("resource")
@@ -1145,6 +1207,14 @@ class ClusteringTableTest {
         while (iterator.hasNext()) {
             InternalRow row = iterator.next();
             result.add(GenericRow.of(row.getInt(0), row.getInt(1)));
+        }
+        return result;
+    }
+
+    private List<DataFileMeta> dataFiles(Table targetTable) {
+        List<DataFileMeta> result = new ArrayList<>();
+        for (Split split : targetTable.newReadBuilder().newScan().plan().splits()) {
+            result.addAll(((DataSplit) split).dataFiles());
         }
         return result;
     }
