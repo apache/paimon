@@ -30,9 +30,6 @@ import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -56,7 +53,6 @@ public class FlinkRowWrapper implements InternalRow {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkRowWrapper.class);
 
     private final org.apache.flink.table.data.RowData row;
-    @Nullable private final CatalogContext catalogContext;
     private final UriReaderFactory uriReaderFactory;
     private final boolean checkBlobDescriptorExists;
 
@@ -73,7 +69,6 @@ public class FlinkRowWrapper implements InternalRow {
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
         this.row = row;
-        this.catalogContext = catalogContext;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
     }
@@ -184,20 +179,8 @@ public class FlinkRowWrapper implements InternalRow {
     }
 
     private boolean descriptorFileExists(int pos, BlobDescriptor descriptor) {
-        Path path = new Path(descriptor.uri());
-        String scheme = path.toUri().getScheme();
-        if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
-            return true;
-        }
-
         try {
-            boolean exists =
-                    FileIO.get(
-                                    path,
-                                    catalogContext == null
-                                            ? CatalogContext.create(new Options())
-                                            : catalogContext)
-                            .exists(path);
+            boolean exists = uriReaderFactory.exists(descriptor.uri());
             if (!exists) {
                 LOG.warn(
                         "Blob descriptor file {} does not exist, returning NULL for BLOB field at position {}.",
@@ -212,6 +195,13 @@ public class FlinkRowWrapper implements InternalRow {
                     pos,
                     e);
             throw new RuntimeException(e);
+        } catch (RuntimeException e) {
+            LOG.warn(
+                    "Failed to check blob descriptor file {} for BLOB field at position {}.",
+                    descriptor.uri(),
+                    pos,
+                    e);
+            throw e;
         }
     }
 
