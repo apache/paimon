@@ -270,6 +270,30 @@ class PkReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
+    def test_pk_reader_with_projection_excluding_pk(self):
+        # Two commits force the split through the merge path. The merge
+        # reader still needs the PK column to assemble its key, even
+        # though the user-visible projection drops it — regress the
+        # case where narrowing to value-only fields broke the file
+        # column lookup.
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '2'})
+        self.catalog.create_table('default.test_pk_projection_no_pk', schema, False)
+        table = self.catalog.get_table('default.test_pk_projection_no_pk')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['behavior'])
+        actual = self._read_test_table(read_builder)
+        expected = self.expected.select(['behavior'])
+        # Projection drops PKs so we can only compare bag semantics.
+        self.assertEqual(
+            sorted([r['behavior'] for r in actual.to_pylist()],
+                   key=lambda v: '' if v is None else v),
+            sorted([r['behavior'] for r in expected.to_pylist()],
+                   key=lambda v: '' if v is None else v))
+
     def test_pk_reader_with_limit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],

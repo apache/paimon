@@ -189,6 +189,19 @@ class SplitRead(ABC):
         nested_path_by_name = self._nested_path_by_name()
         has_nested = nested_path_by_name is not None
 
+        # Look DataFields up by every name the format reader may receive.
+        # ``self.read_fields`` covers nested-projection flat names and
+        # merge-internal aliases (``_KEY_id``); the trimmed-fields list
+        # adds the user-facing PK name (``id``) the file actually stores
+        # so PK columns stay reachable when value projection narrows the
+        # user-facing read_type and drops the bare PK field.
+        name_to_field: Dict[str, DataField] = {f.name: f for f in self.read_fields}
+        _, _trimmed_lookup_fields = self._get_trimmed_fields(
+            self._get_read_data_fields(), self._get_all_data_fields()
+        )
+        for f in _trimmed_lookup_fields:
+            name_to_field.setdefault(f.name, f)
+
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
             avro_nested_paths = (
@@ -210,7 +223,6 @@ class SplitRead(ABC):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on Lance files")
-            name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
                                               read_arrow_predicate, batch_size=batch_size,
@@ -219,7 +231,6 @@ class SplitRead(ABC):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on Vortex files")
-            name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             predicate_fields = _get_all_fields(self.push_down_predicate) if self.push_down_predicate else set()
             format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
@@ -227,7 +238,6 @@ class SplitRead(ABC):
                                                row_indices=row_indices,
                                                predicate_fields=predicate_fields)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
-            name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             ordered_nested_paths = (
                 [nested_path_by_name[f.name] for f in ordered_read_fields]
