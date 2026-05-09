@@ -148,6 +148,15 @@ public class BucketsTableTest extends TableTestBase {
         assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4})).isEmpty();
     }
 
+    @Test
+    public void testBucketsTableUnsupportedPredicateFallsBackToFullScan() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(BucketsTable.TABLE_TYPE);
+
+        // isNotNull cannot be pushed down as partition filter — must fall back to full scan
+        Predicate filter = builder.isNotNull(0);
+        assertThat(readWithFilter(bucketsTable, filter, new int[] {0, 1, 2, 4})).hasSize(2);
+    }
+
     private List<InternalRow> readWithFilter(Table table, Predicate filter, int[] projection)
             throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(filter);
