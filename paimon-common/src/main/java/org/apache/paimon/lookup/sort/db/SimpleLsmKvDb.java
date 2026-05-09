@@ -247,11 +247,13 @@ public class SimpleLsmKvDb implements Closeable {
 
         int targetLevel = MAX_LEVELS - 1;
         List<SstFileMetadata> targetLevelFiles = levels.get(targetLevel);
+        List<SstFileMetadata> bulkLoadFiles = new ArrayList<>();
 
         SortLookupStoreWriter currentWriter = null;
         File currentSstFile = null;
         MemorySlice currentFileMinKey = null;
         MemorySlice currentFileMaxKey = null;
+        MemorySlice previousFileMaxKey = null;
         long currentBatchSize = 0;
 
         try {
@@ -259,28 +261,30 @@ public class SimpleLsmKvDb implements Closeable {
                 Map.Entry<byte[], byte[]> entry = sortedEntries.next();
                 byte[] key = entry.getKey();
                 byte[] value = entry.getValue();
+                MemorySlice currentKey = MemorySlice.wrap(key);
 
                 if (currentWriter == null) {
                     currentSstFile = newSstFile();
                     currentWriter = storeFactory.createWriter(currentSstFile, null);
-                    currentFileMinKey = MemorySlice.wrap(key);
+                    currentFileMinKey = currentKey;
                     currentBatchSize = 0;
                 }
 
                 currentWriter.put(key, value);
-                currentFileMaxKey = MemorySlice.wrap(key);
+                currentFileMaxKey = currentKey;
                 currentBatchSize += key.length + value.length;
 
                 if (currentBatchSize >= maxSstFileSize) {
                     currentWriter.close();
-                    targetLevelFiles.add(
-                            new SstFileMetadata(
+                    currentWriter = null;
+                    previousFileMaxKey =
+                            addBulkLoadSstFile(
+                                    bulkLoadFiles,
                                     currentSstFile,
                                     currentFileMinKey,
                                     currentFileMaxKey,
-                                    0,
-                                    targetLevel));
-                    currentWriter = null;
+                                    previousFileMaxKey,
+                                    targetLevel);
                     currentSstFile = null;
                     currentFileMinKey = null;
                     currentFileMaxKey = null;
@@ -289,13 +293,14 @@ public class SimpleLsmKvDb implements Closeable {
 
             if (currentWriter != null) {
                 currentWriter.close();
-                targetLevelFiles.add(
-                        new SstFileMetadata(
-                                currentSstFile,
-                                currentFileMinKey,
-                                currentFileMaxKey,
-                                0,
-                                targetLevel));
+                currentWriter = null;
+                addBulkLoadSstFile(
+                        bulkLoadFiles,
+                        currentSstFile,
+                        currentFileMinKey,
+                        currentFileMaxKey,
+                        previousFileMaxKey,
+                        targetLevel);
             }
         } catch (IOException | RuntimeException e) {
             if (currentWriter != null) {
@@ -308,10 +313,34 @@ public class SimpleLsmKvDb implements Closeable {
             throw e;
         }
 
+        targetLevelFiles.addAll(bulkLoadFiles);
+
         LOG.info(
-                "Bulk-loaded {} SST files directly to level {}",
-                targetLevelFiles.size(),
-                targetLevel);
+                "Bulk-loaded {} SST files directly to level {}", bulkLoadFiles.size(), targetLevel);
+    }
+
+    private MemorySlice addBulkLoadSstFile(
+            List<SstFileMetadata> targetLevelFiles,
+            File currentSstFile,
+            MemorySlice currentFileMinKey,
+            MemorySlice currentFileMaxKey,
+            @Nullable MemorySlice previousFileMaxKey,
+            int targetLevel) {
+        if (keyComparator.compare(currentFileMinKey, currentFileMaxKey) > 0) {
+            throw new IllegalArgumentException(
+                    "bulkLoad requires entries sorted by the configured key comparator; "
+                            + "generated SST min key is greater than max key.");
+        }
+        if (previousFileMaxKey != null
+                && keyComparator.compare(previousFileMaxKey, currentFileMinKey) > 0) {
+            throw new IllegalArgumentException(
+                    "bulkLoad requires entries sorted by the configured key comparator; "
+                            + "generated SST key ranges are not ordered.");
+        }
+        targetLevelFiles.add(
+                new SstFileMetadata(
+                        currentSstFile, currentFileMinKey, currentFileMaxKey, 0, targetLevel));
+        return currentFileMaxKey;
     }
 
     // -------------------------------------------------------------------------
