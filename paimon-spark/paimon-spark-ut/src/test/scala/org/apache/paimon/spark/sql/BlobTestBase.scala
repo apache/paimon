@@ -339,6 +339,61 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into updates non-blob column on raw blob table with split blob files") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', X'48656C6C6F'), " +
+          "(2, 'name2', X'5945'), " +
+          "(3, 'name3', X'414243')")
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"), Row(3, "name3"))
+      )
+    }
+  }
+
+  test("Blob: self merge reads raw blob column to update non-blob column") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', X'48656C6C6F'), " +
+          "(2, 'name2', X'5945'), " +
+          "(3, 'name3', X'414243')")
+
+      sql("""
+            |MERGE INTO t
+            |USING t AS source
+            |ON t._ROW_ID = source._ROW_ID
+            |WHEN MATCHED THEN UPDATE SET t.name = CAST(length(source.picture) AS STRING)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "5"), Row(2, "2"), Row(3, "3"))
+      )
+    }
+  }
+
   test("Blob: merge-into updates non-blob column on descriptor blob table") {
     withTable("s", "t") {
       sql(

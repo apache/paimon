@@ -32,6 +32,7 @@ import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
@@ -150,7 +151,12 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val firstRowIds: immutable.IndexedSeq[Long] = tableSplits
       .flatMap(_.dataFiles().asScala)
-      .filter(file => file.firstRowId() != null && !isBlobFile(file.fileName()))
+      .filter {
+        file =>
+          file.firstRowId() != null &&
+          !isBlobFile(file.fileName()) &&
+          !isVectorStoreFile(file.fileName())
+      }
       .map(file => file.firstRowId().asInstanceOf[Long])
       .distinct
       .sorted

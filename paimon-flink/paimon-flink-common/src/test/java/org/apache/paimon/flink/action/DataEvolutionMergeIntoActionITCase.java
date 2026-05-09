@@ -722,6 +722,61 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testUpdateNonBlobColumnOnRawBlobTableWithSplitFiles() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_SPLIT_T",
+                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+                            }
+                        }));
+        insertInto(
+                "RAW_BLOB_SPLIT_T",
+                "(1, 'name1', X'48656C6C6F')",
+                "(2, 'name2', X'5945')",
+                "(3, 'name3', X'414243')");
+        testBatchRead(
+                "SELECT COUNT(*) FROM `RAW_BLOB_SPLIT_T$files` "
+                        + "WHERE file_path NOT LIKE '%.blob'",
+                Collections.singletonList(changelogRow("+I", 1L)));
+        testBatchRead(
+                "SELECT COUNT(*) > 1 FROM `RAW_BLOB_SPLIT_T$files` "
+                        + "WHERE file_path LIKE '%.blob'",
+                Collections.singletonList(changelogRow("+I", true)));
+
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_SPLIT_S",
+                        Arrays.asList("id INT", "name STRING"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_BLOB_SPLIT_S", "(1, 'updated_name1')");
+
+        builder(warehouse, database, "RAW_BLOB_SPLIT_T")
+                .withMergeCondition("RAW_BLOB_SPLIT_T.id=RAW_BLOB_SPLIT_S.id")
+                .withMatchedUpdateSet("RAW_BLOB_SPLIT_T.name=RAW_BLOB_SPLIT_S.name")
+                .withSourceTable("RAW_BLOB_SPLIT_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "updated_name1"),
+                        changelogRow("+I", 2, "name2"),
+                        changelogRow("+I", 3, "name3"));
+        testBatchRead("SELECT id, name FROM RAW_BLOB_SPLIT_T ORDER BY id", expected);
+    }
+
+    @Test
     public void testUpdateNonBlobColumnOnDescriptorBlobTableSucceeds() throws Exception {
         // Create a table with descriptor BLOB column.
         // Previously, MERGE INTO would reject ANY table with BLOB columns.

@@ -20,12 +20,14 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.DataType
 import org.apache.paimon.types.DataTypeRoot.BLOB
+import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.sql._
 
@@ -44,6 +46,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
         split
           .dataFiles()
           .asScala
+          .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
           .foreach(
             file =>
               firstRowIdToPartitionMap
