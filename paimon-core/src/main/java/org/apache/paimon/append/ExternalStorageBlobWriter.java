@@ -73,7 +73,6 @@ public class ExternalStorageBlobWriter implements Closeable {
     private final List<ExternalStorageBlobFieldWriter> fieldWriters;
     private final UriReader uriReader;
     private final GenericRow overrideRow;
-    private final int[] overrideMappings;
     private final FallbackMappingRow resultRow;
 
     public ExternalStorageBlobWriter(
@@ -87,8 +86,7 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize,
-            boolean writeNullOnUnreadableBlob) {
+            long targetFileSize) {
         checkNotNull(
                 externalStoragePath,
                 "'%s' must be set when '%s' is configured.",
@@ -107,15 +105,13 @@ public class ExternalStorageBlobWriter implements Closeable {
                         fileSource,
                         asyncFileWrite,
                         statsDenseStore,
-                        targetFileSize,
-                        writeNullOnUnreadableBlob);
+                        targetFileSize);
         this.uriReader = UriReader.fromFile(fileIO);
 
         int fieldCount = writeSchema.getFieldCount();
         this.overrideRow = new GenericRow(fieldCount);
         // identity mappings: position i maps to position i
-        this.overrideMappings = IntStream.range(0, fieldCount).toArray();
-        this.resultRow = new FallbackMappingRow(overrideMappings);
+        this.resultRow = new FallbackMappingRow(IntStream.range(0, fieldCount).toArray());
     }
 
     /**
@@ -132,15 +128,12 @@ public class ExternalStorageBlobWriter implements Closeable {
         // clear all override positions so non-overridden fields fall back to delegate
         for (ExternalStorageBlobFieldWriter fw : fieldWriters) {
             overrideRow.setField(fw.fieldIndex(), null);
-            overrideMappings[fw.fieldIndex()] = fw.fieldIndex();
         }
 
         for (ExternalStorageBlobFieldWriter fw : fieldWriters) {
             BlobDescriptor descriptor = fw.writeAndReplace(row);
             if (descriptor != null) {
                 overrideRow.setField(fw.fieldIndex(), Blob.fromDescriptor(uriReader, descriptor));
-            } else {
-                overrideMappings[fw.fieldIndex()] = -1;
             }
         }
 
@@ -174,8 +167,7 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize,
-            boolean writeNullOnUnreadableBlob) {
+            long targetFileSize) {
         List<ExternalStorageBlobFieldWriter> writers = new ArrayList<>();
         for (DataField field : writeSchema.getFields()) {
             if (field.type().getTypeRoot() == DataTypeRoot.BLOB
@@ -192,8 +184,7 @@ public class ExternalStorageBlobWriter implements Closeable {
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                targetFileSize,
-                                writeNullOnUnreadableBlob));
+                                targetFileSize));
             }
         }
         return writers;
@@ -210,12 +201,11 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize,
-            boolean writeNullOnUnreadableBlob) {
+            long targetFileSize) {
         int fieldIndex = writeSchema.getFieldIndex(fieldName);
         ExternalStorageBlobFieldWriter fieldWriter = new ExternalStorageBlobFieldWriter(fieldIndex);
 
-        BlobFileFormat blobFileFormat = new BlobFileFormat(false, writeNullOnUnreadableBlob);
+        BlobFileFormat blobFileFormat = new BlobFileFormat();
         blobFileFormat.setWriteConsumer(fieldWriter);
 
         RowType projectedType = writeSchema.project(fieldName);

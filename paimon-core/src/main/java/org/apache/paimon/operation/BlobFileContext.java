@@ -37,7 +37,6 @@ public class BlobFileContext {
     private final Set<String> blobInlineFields;
     private final Set<String> blobExternalStorageFields;
     @Nullable private final String blobExternalStoragePath;
-    private final boolean writeNullOnUnreadableBlob;
 
     private @Nullable BlobConsumer blobConsumer;
 
@@ -45,13 +44,11 @@ public class BlobFileContext {
             Set<String> blobDescriptorFields,
             Set<String> blobInlineFields,
             Set<String> blobExternalStorageFields,
-            @Nullable String blobExternalStoragePath,
-            boolean writeNullOnUnreadableBlob) {
+            @Nullable String blobExternalStoragePath) {
         this.blobDescriptorFields = blobDescriptorFields;
         this.blobInlineFields = blobInlineFields;
         this.blobExternalStorageFields = blobExternalStorageFields;
         this.blobExternalStoragePath = blobExternalStoragePath;
-        this.writeNullOnUnreadableBlob = writeNullOnUnreadableBlob;
     }
 
     @Nullable
@@ -77,11 +74,7 @@ public class BlobFileContext {
             return null;
         }
         return new BlobFileContext(
-                descriptorFields,
-                inlineFields,
-                externalStorageField,
-                externalStoragePath,
-                options.blobWriteNullOnUnreadable());
+                descriptorFields, inlineFields, externalStorageField, externalStoragePath);
     }
 
     public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
@@ -106,10 +99,6 @@ public class BlobFileContext {
 
     public Set<String> blobExternalStorageFields() {
         return blobExternalStorageFields;
-    }
-
-    public boolean writeNullOnUnreadableBlob() {
-        return writeNullOnUnreadableBlob;
     }
 
     @Nullable

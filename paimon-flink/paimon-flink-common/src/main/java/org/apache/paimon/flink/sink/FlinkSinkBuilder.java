@@ -34,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.BlobDescriptorUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
@@ -213,7 +214,11 @@ public class FlinkSinkBuilder {
                         table.coreOptions().toConfiguration());
 
         DataStream<InternalRow> input =
-                mapToInternalRow(this.input, table.rowType(), contextForDescriptor);
+                mapToInternalRow(
+                        this.input,
+                        table.rowType(),
+                        contextForDescriptor,
+                        table.coreOptions().blobWriteNullOnUnreadable());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -246,15 +251,38 @@ public class FlinkSinkBuilder {
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext) {
+        return mapToInternalRow(input, rowType, catalogContext, false);
+    }
+
+    public static DataStream<InternalRow> mapToInternalRow(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists) {
+        boolean[] blobDescriptorExistenceCheck =
+                checkBlobDescriptorExists ? blobDescriptorExistenceCheck(rowType) : null;
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
-                                        r -> new FlinkRowWrapper(r, catalogContext))
+                                        r ->
+                                                new FlinkRowWrapper(
+                                                        r,
+                                                        catalogContext,
+                                                        blobDescriptorExistenceCheck))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
         forwardParallelism(result, input);
         return result;
+    }
+
+    private static boolean[] blobDescriptorExistenceCheck(
+            org.apache.paimon.types.RowType rowType) {
+        boolean[] check = new boolean[rowType.getFieldCount()];
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            check[i] = rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB;
+        }
+        return check;
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(

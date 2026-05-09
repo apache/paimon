@@ -132,7 +132,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td style="word-wrap: break-word;">false</td>
       <td>Boolean</td>
       <td>
-        When enabled, if a BLOB value cannot open a new input stream during writes, Paimon writes <code>NULL</code> for that value instead of failing the write.
+        When enabled for Flink writes, if a descriptor BLOB value references a file that does not exist, Paimon writes <code>NULL</code> for that value and logs a warning instead of failing when reading the descriptor.
       </td>
     </tr>
     <tr>

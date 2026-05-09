@@ -50,7 +50,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
     private final String blobFieldName;
-    private final boolean writeNullOnUnreadableBlob;
     private final CRC32 crc32;
     private final byte[] tmpBuffer;
     private final LongArrayList lengths;
@@ -59,19 +58,10 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     public BlobFormatWriter(
             PositionOutputStream out, @Nullable BlobConsumer writeConsumer, RowType type) {
-        this(out, writeConsumer, type, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnUnreadableBlob) {
         this.out = out;
         this.writeConsumer = writeConsumer;
         checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         this.blobFieldName = type.getFieldNames().get(0);
-        this.writeNullOnUnreadableBlob = writeNullOnUnreadableBlob;
         this.crc32 = new CRC32();
         this.tmpBuffer = new byte[4096];
         this.lengths = new LongArrayList(16);
@@ -91,21 +81,13 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     public void addElement(InternalRow element) throws IOException {
         checkArgument(element.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         if (element.isNullAt(0)) {
-            writeNullBlob();
+            lengths.add(-1L);
+            if (writeConsumer != null) {
+                writeConsumer.accept(blobFieldName, null);
+            }
             return;
         }
         Blob blob = element.getBlob(0);
-
-        SeekableInputStream in;
-        try {
-            in = blob.newInputStream();
-        } catch (IOException | RuntimeException e) {
-            if (writeNullOnUnreadableBlob) {
-                writeNullBlob();
-                return;
-            }
-            throw e;
-        }
 
         long previousPos = out.getPos();
         crc32.reset();
@@ -113,7 +95,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         write(MAGIC_NUMBER_BYTES);
 
         long blobPos = out.getPos();
-        try (SeekableInputStream ignored = in) {
+        try (SeekableInputStream in = blob.newInputStream()) {
             int bytesRead = in.read(tmpBuffer);
             while (bytesRead >= 0) {
                 write(tmpBuffer, bytesRead);
@@ -135,13 +117,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             if (flush) {
                 out.flush();
             }
-        }
-    }
-
-    private void writeNullBlob() {
-        lengths.add(-1L);
-        if (writeConsumer != null) {
-            writeConsumer.accept(blobFieldName, null);
         }
     }
 

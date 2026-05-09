@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -29,6 +30,9 @@ import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -36,6 +40,12 @@ import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
@@ -43,16 +53,29 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 /** Convert from Flink row data. */
 public class FlinkRowWrapper implements InternalRow {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkRowWrapper.class);
+
     private final org.apache.flink.table.data.RowData row;
+    @Nullable private final CatalogContext catalogContext;
     private final UriReaderFactory uriReaderFactory;
+    @Nullable private final boolean[] checkBlobDescriptorExists;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
     }
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
+        this(row, catalogContext, null);
+    }
+
+    public FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            CatalogContext catalogContext,
+            @Nullable boolean[] checkBlobDescriptorExists) {
         this.row = row;
+        this.catalogContext = catalogContext;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.checkBlobDescriptorExists = checkBlobDescriptorExists;
     }
 
     @Override
@@ -72,7 +95,11 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
-        return row.isNullAt(pos);
+        if (row.isNullAt(pos)) {
+            return true;
+        }
+        return shouldCheckBlobDescriptorExists(pos)
+                && isMissingBlobDescriptor(pos, row.getBinary(pos));
     }
 
     @Override
@@ -139,7 +166,60 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        return Blob.fromBytes(row.getBinary(pos), uriReaderFactory, null);
+        byte[] bytes = row.getBinary(pos);
+        if (isMissingBlobDescriptor(pos, bytes)) {
+            return null;
+        }
+        return Blob.fromBytes(bytes, uriReaderFactory, null);
+    }
+
+    private boolean isMissingBlobDescriptor(int pos, byte[] bytes) {
+        if (!shouldCheckBlobDescriptorExists(pos)
+                || bytes == null
+                || !BlobDescriptor.isBlobDescriptor(bytes)) {
+            return false;
+        }
+
+        BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
+        return !descriptorFileExists(pos, descriptor);
+    }
+
+    private boolean shouldCheckBlobDescriptorExists(int pos) {
+        return checkBlobDescriptorExists != null
+                && pos < checkBlobDescriptorExists.length
+                && checkBlobDescriptorExists[pos];
+    }
+
+    private boolean descriptorFileExists(int pos, BlobDescriptor descriptor) {
+        Path path = new Path(descriptor.uri());
+        String scheme = path.toUri().getScheme();
+        if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+            return true;
+        }
+
+        try {
+            boolean exists =
+                    FileIO.get(
+                                    path,
+                                    catalogContext == null
+                                            ? CatalogContext.create(new Options())
+                                            : catalogContext)
+                            .exists(path);
+            if (!exists) {
+                LOG.warn(
+                        "Blob descriptor file {} does not exist, returning NULL for BLOB field at position {}.",
+                        descriptor.uri(),
+                        pos);
+            }
+            return exists;
+        } catch (IOException | RuntimeException e) {
+            LOG.warn(
+                    "Failed to check blob descriptor file {}, returning NULL for BLOB field at position {}.",
+                    descriptor.uri(),
+                    pos,
+                    e);
+            return false;
+        }
     }
 
     @Override
