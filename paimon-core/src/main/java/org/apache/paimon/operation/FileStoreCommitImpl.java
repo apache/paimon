@@ -81,6 +81,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -926,6 +927,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
+                Map<BinaryRow, List<ManifestEntry>> deltaFilesByPart =
+                        deltaFiles.stream()
+                                .collect(Collectors.groupingBy(ManifestEntry::partition));
+                deltaFiles =
+                        deltaFilesByPart.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList());
                 RowTrackingAssigned assigned =
                         assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
                 nextRowIdStart = assigned.nextRowIdStart;
