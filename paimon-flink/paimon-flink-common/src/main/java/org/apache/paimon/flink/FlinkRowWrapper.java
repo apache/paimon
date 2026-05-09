@@ -40,8 +40,6 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
