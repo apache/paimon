@@ -28,12 +28,12 @@ import tempfile
 import unittest
 
 import pyarrow as pa
-import pytest
+
+from pypaimon_rust.datafusion import SQLContext
 
 
 WAREHOUSE = os.environ.get("PAIMON_TEST_WAREHOUSE")
 TABLE_NAME = "sql_system_test_table"
-TABLE_FQN = f"default.{TABLE_NAME}"
 ROW_COUNT = 3
 
 
@@ -41,11 +41,6 @@ class SQLSystemTableTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        pytest.importorskip("pypaimon_rust.datafusion")
-        from pypaimon import CatalogFactory, Schema
-        from pypaimon.schema.data_types import AtomicType, DataField
-        from pypaimon.sql.sql_context import SQLContext
-
         cls._tmpdir = None
         if WAREHOUSE:
             cls.warehouse = WAREHOUSE
@@ -53,51 +48,26 @@ class SQLSystemTableTest(unittest.TestCase):
             cls._tmpdir = tempfile.TemporaryDirectory(prefix="paimon-sql-systest-")
             cls.warehouse = cls._tmpdir.name
 
-        catalog = CatalogFactory.create({"warehouse": cls.warehouse})
-        catalog.create_database("default", ignore_if_exists=True)
-        catalog.drop_table(TABLE_FQN, ignore_if_not_exists=True)
-        schema = Schema(
-            fields=[
-                DataField(0, "id", AtomicType("INT")),
-                DataField(1, "name", AtomicType("STRING")),
-            ],
-            primary_keys=[],
-            partition_keys=[],
-            options={},
-            comment="",
+        ctx = SQLContext()
+        ctx.register_catalog("paimon", {"warehouse": cls.warehouse})
+        ctx.sql(f"DROP TABLE IF EXISTS {TABLE_NAME}")
+        ctx.sql(f"CREATE TABLE {TABLE_NAME} (id INT, name STRING)")
+        ctx.sql(
+            f"INSERT INTO {TABLE_NAME} VALUES (1, 'alice'), (2, 'bob'), (3, 'carol')"
         )
-        catalog.create_table(TABLE_FQN, schema, ignore_if_exists=False)
-
-        table = catalog.get_table(TABLE_FQN)
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        try:
-            pa_table = pa.table({
-                "id": pa.array([1, 2, 3], type=pa.int32()),
-                "name": pa.array(["alice", "bob", "carol"], type=pa.string()),
-            })
-            table_write.write_arrow(pa_table)
-            table_commit.commit(table_write.prepare_commit())
-        finally:
-            table_write.close()
-            table_commit.close()
-
-        cls.ctx = SQLContext()
-        cls.ctx.register_catalog("paimon", {"warehouse": cls.warehouse})
-        cls.ctx.set_current_catalog("paimon")
-        cls.ctx.set_current_database("default")
+        cls.ctx = ctx
 
     @classmethod
     def tearDownClass(cls):
-        from pypaimon import CatalogFactory
-        catalog = CatalogFactory.create({"warehouse": cls.warehouse})
-        catalog.drop_table(TABLE_FQN, ignore_if_not_exists=True)
+        ctx = SQLContext()
+        ctx.register_catalog("paimon", {"warehouse": cls.warehouse})
+        ctx.sql(f"DROP TABLE IF EXISTS {TABLE_NAME}")
         if cls._tmpdir is not None:
             cls._tmpdir.cleanup()
 
     def _query(self, system_name: str) -> pa.Table:
-        return self.ctx.sql(f"SELECT * FROM {TABLE_NAME}${system_name}")
+        batches = self.ctx.sql(f"SELECT * FROM {TABLE_NAME}${system_name}")
+        return pa.Table.from_batches(batches)
 
     def test_options_system_table(self):
         table = self._query("options")
