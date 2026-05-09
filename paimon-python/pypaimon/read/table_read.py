@@ -274,10 +274,8 @@ class TableRead:
             outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
-                # Merge functions need full ROW sub-structures, so widen the
-                # inner read_type back to the unique top-level fields touched
-                # by the user's nested paths and let an outer-projection
-                # wrapper extract the requested sub-paths after merge.
+                # Inner: full ROW for the merge function. Outer: extract
+                # the requested sub-paths back to the user's flat schema.
                 inner_read_type = self._widen_to_top_level_for_merge()
                 outer_extract_name_paths = self.nested_name_paths
             return MergeFileSplitRead(
@@ -313,14 +311,7 @@ class TableRead:
             )
 
     def _widen_to_top_level_for_merge(self) -> List[DataField]:
-        """Return the unique top-level table fields touched by
-        ``self.nested_name_paths``, in path order.
-
-        ``self.read_type`` is the user-visible flat schema. For a merge
-        read the file reader must instead expose full ROW sub-structures
-        for those top-level fields; the OuterProjectionRecordReader then
-        extracts the per-path sub-values to rebuild the flat schema.
-        """
+        """Unique top-level fields from ``self.nested_name_paths``, in path order."""
         table_fields_by_name = {f.name: f for f in self.table.fields}
         seen = set()
         widened: List[DataField] = []

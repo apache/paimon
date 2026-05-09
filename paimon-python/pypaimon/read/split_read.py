@@ -189,12 +189,8 @@ class SplitRead(ABC):
         nested_path_by_name = self._nested_path_by_name()
         has_nested = nested_path_by_name is not None
 
-        # Look DataFields up by every name the format reader may receive.
-        # ``self.read_fields`` covers nested-projection flat names and
-        # merge-internal aliases (``_KEY_id``); the trimmed-fields list
-        # adds the user-facing PK name (``id``) the file actually stores
-        # so PK columns stay reachable when value projection narrows the
-        # user-facing read_type and drops the bare PK field.
+        # Cover both the merge-internal aliases (``_KEY_id``) and the
+        # bare user-facing PK name (``id``) the file actually stores.
         name_to_field: Dict[str, DataField] = {f.name: f for f in self.read_fields}
         _, _trimmed_lookup_fields = self._get_trimmed_fields(
             self._get_read_data_fields(), self._get_all_data_fields()
@@ -578,11 +574,9 @@ class MergeFileSplitRead(SplitRead):
             split: Split,
             row_tracking_enabled: bool,
             outer_extract_name_paths: Optional[List[List[str]]] = None):
-        # Merge-read intentionally does *not* push nested paths down to the
-        # file reader: the merge function needs full ROW sub-structures so
-        # deduplicate / partial-update / aggregation see the original row.
-        # Sub-path extraction happens later in create_reader via
-        # OuterProjectionRecordReader.
+        # Merge functions need full ROW sub-structures, so nested paths
+        # are not pushed down here; sub-path extraction happens above
+        # the merge via OuterProjectionRecordReader.
         super().__init__(
             table=table,
             predicate=predicate,
