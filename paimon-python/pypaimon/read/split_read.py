@@ -19,7 +19,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -89,7 +89,8 @@ class SplitRead(ABC):
             predicate: Optional[Predicate],
             read_type: List[DataField],
             split: Split,
-            row_tracking_enabled: bool):
+            row_tracking_enabled: bool,
+            nested_name_paths: Optional[List[List[str]]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -98,6 +99,9 @@ class SplitRead(ABC):
         self.split = split
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
+        # Parallel to ``read_type``; each entry is the original-schema
+        # name path. ``None`` when no projection or top-level only.
+        self.nested_name_paths = nested_name_paths
 
         self.trimmed_primary_key = self.table.trimmed_primary_keys
         self.read_fields = read_type
@@ -126,6 +130,21 @@ class SplitRead(ABC):
             )
         else:
             self.predicate_for_reader = None
+
+    def _nested_path_by_name(self) -> Optional[Dict[str, List[str]]]:
+        """``{flat_name: original_path}`` for the rows of ``read_type``
+        that go through a nested path (``len > 1``). ``None`` when no
+        such path exists, so callers stay on the top-level fast path.
+        """
+        if not self.nested_name_paths:
+            return None
+        if not any(len(p) > 1 for p in self.nested_name_paths):
+            return None
+        out: Dict[str, List[str]] = {}
+        for f, path in zip(self.read_fields[:self.value_arity],
+                           self.nested_name_paths):
+            out[f.name] = path
+        return out
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
@@ -168,22 +187,46 @@ class SplitRead(ABC):
                     end = r.to - file.first_row_id
                     row_indices.extend(range(start, end + 1))
 
+        # Map the parallel ``self.nested_name_paths`` (aligned with
+        # ``self.read_fields``) into the same order the format reader
+        # will see, indexed by output column name. Set to ``None`` when
+        # no path has length > 1 so the reader stays on its top-level
+        # fast path.
+        nested_path_by_name = self._nested_path_by_name()
+        has_nested = nested_path_by_name is not None
+
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
+            if has_nested:
+                # Avro has no native nested column pruning; a Python-side
+                # walk-each-record fallback ships in a separate commit.
+                raise NotImplementedError(
+                    "Nested-field projection on Avro is not yet supported")
             format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+            if has_nested:
+                raise NotImplementedError(
+                    "Nested-field projection is not supported on BLOB files")
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
+            if has_nested:
+                # Lance has no nested column pruning today; project the
+                # parent struct in full and extract sub-fields client-side.
+                raise NotImplementedError(
+                    "Nested-field projection is not supported on Lance files")
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             format_reader = FormatLanceReader(self.table.file_io, file_path, ordered_read_fields,
                                               read_arrow_predicate, batch_size=batch_size,
                                               row_range=row_range, row_indices=row_indices)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
+            if has_nested:
+                raise NotImplementedError(
+                    "Nested-field projection is not supported on Vortex files")
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             predicate_fields = _get_all_fields(self.push_down_predicate) if self.push_down_predicate else set()
@@ -194,10 +237,15 @@ class SplitRead(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            ordered_nested_paths = (
+                [nested_path_by_name[f.name] for f in ordered_read_fields]
+                if has_nested else None
+            )
             format_reader = FormatPyArrowReader(
                 self.table.file_io, file_format, file_path,
                 ordered_read_fields, read_arrow_predicate, batch_size=batch_size,
-                options=self.table.options)
+                options=self.table.options,
+                nested_name_paths=ordered_nested_paths)
         elif file_format in ('json', 'csv'):
             raise NotImplementedError(
                 f"Reading '{file_format}' format is not yet supported in Python SDK. "
@@ -251,6 +299,10 @@ class SplitRead(ABC):
         return reader
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
+        # In nested mode the flat name (``mv_latest_version``) never
+        # appears in the file schema; reachability is decided by the
+        # path's top-level entry instead.
+        nested_path_by_name = self._nested_path_by_name()
         key = (schema_id, tuple(read_fields))
         if key not in self.schema_id_2_fields:
             schema = self.table.schema_manager.get_schema(schema_id)
@@ -262,7 +314,20 @@ class SplitRead(ABC):
             if self.table.is_primary_key_table:
                 schema_field_names.add('_SEQUENCE_NUMBER')
                 schema_field_names.add('_VALUE_KIND')
-            read_file_fields = [read_field for read_field in read_fields if read_field in schema_field_names]
+
+            def _is_reachable(name: str) -> bool:
+                if name in schema_field_names:
+                    return True
+                if nested_path_by_name is not None:
+                    path = nested_path_by_name.get(name)
+                    if path:
+                        return path[0] in schema_field_names
+                return False
+
+            read_file_fields = [
+                read_field for read_field in read_fields
+                if _is_reachable(read_field)
+            ]
             read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
             read_arrow_predicate = read_predicate.to_arrow() if read_predicate else None
             self.schema_id_2_fields[key] = (read_file_fields, read_arrow_predicate)
@@ -300,6 +365,10 @@ class SplitRead(ABC):
         return all_data_fields
 
     def create_index_mapping(self):
+        if self._nested_path_by_name() is not None:
+            # Format reader already emits flat columns aligned with
+            # ``read_fields``; the id-based remap can't see leaf IDs.
+            return None
         base_index_mapping = self._create_base_index_mapping(self.read_fields, self._get_read_data_fields())
         trimmed_key_mapping, _ = self._get_trimmed_fields(self._get_read_data_fields(), self._get_all_data_fields())
         if base_index_mapping is None:
@@ -341,6 +410,10 @@ class SplitRead(ABC):
         return None
 
     def _get_final_read_data_fields(self) -> List[str]:
+        if self._nested_path_by_name() is not None:
+            # Trimmed-fields filters by ID and drops nested leaves;
+            # hand the format reader the user-facing flat names directly.
+            return self._remove_partition_fields(list(self.read_fields))
         _, trimmed_fields = self._get_trimmed_fields(
             self._get_read_data_fields(), self._get_all_data_fields()
         )
@@ -395,6 +468,23 @@ class SplitRead(ABC):
         return PartitionInfo(partition_mapping, self.split.partition)
 
     def _construct_partition_mapping(self) -> List[int]:
+        if self._nested_path_by_name() is not None:
+            # Nested fields carry leaf IDs that don't match top-level
+            # data-field IDs, so the trimmed-fields machinery can't see
+            # them. Build the mapping directly from ``self.read_fields``:
+            # entries whose flat name equals a partition key get a
+            # negative index, the rest get a sequential read index.
+            partition_names = self.table.partition_keys
+            mapping = [0] * (len(self.read_fields) + 1)
+            p_count = 0
+            for i, field in enumerate(self.read_fields):
+                if field.name in partition_names:
+                    partition_index = partition_names.index(field.name)
+                    mapping[i] = -(partition_index + 1)
+                    p_count += 1
+                else:
+                    mapping[i] = (i - p_count) + 1
+            return mapping
         _, trimmed_fields = self._get_trimmed_fields(
             self._get_read_data_fields(), self._get_all_data_fields()
         )
@@ -537,13 +627,17 @@ class DataEvolutionSplitRead(SplitRead):
             predicate: Optional[Predicate],
             read_type: List[DataField],
             split: Split,
-            row_tracking_enabled: bool):
+            row_tracking_enabled: bool,
+            nested_name_paths: Optional[List[List[str]]] = None):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
             self.row_ranges = split.row_ranges()
             actual_split = split.data_split()
-        super().__init__(table, predicate, read_type, actual_split, row_tracking_enabled)
+        super().__init__(
+            table, predicate, read_type, actual_split, row_tracking_enabled,
+            nested_name_paths=nested_name_paths,
+        )
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         # Data evolution: files may have different schemas, so we don't push predicate

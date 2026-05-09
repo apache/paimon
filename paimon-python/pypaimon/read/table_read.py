@@ -40,7 +40,8 @@ class TableRead:
         table,
         predicate: Optional[Predicate],
         read_type: List[DataField],
-        include_row_kind: bool = False
+        include_row_kind: bool = False,
+        nested_name_paths: Optional[List[List[str]]] = None,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -48,6 +49,10 @@ class TableRead:
         self.predicate = predicate
         self.read_type = read_type
         self.include_row_kind = include_row_kind
+        # Parallel to ``read_type``; each entry is the original-schema
+        # name path for the field. ``None`` when no projection (or only
+        # top-level projection) is set.
+        self.nested_name_paths = nested_name_paths
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
         def _record_generator():
@@ -268,6 +273,15 @@ class TableRead:
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
+            if self.nested_name_paths and any(
+                    len(p) > 1 for p in self.nested_name_paths):
+                # The merge function needs full parent structs; outer
+                # projection that walks the path to recover leaves is a
+                # separate change. Project the parent struct and extract
+                # client-side until then.
+                raise NotImplementedError(
+                    "Nested-field projection on primary-key tables that "
+                    "require a merge read is not yet supported")
             return MergeFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
@@ -276,12 +290,23 @@ class TableRead:
                 row_tracking_enabled=False
             )
         elif self.table.options.data_evolution_enabled():
+            if self.nested_name_paths and any(
+                    len(p) > 1 for p in self.nested_name_paths):
+                # Multi-file union for data-evolution tables matches files
+                # by top-level field ID; a nested ``read_field`` carries
+                # its leaf ID, which never matches and would silently
+                # produce all-NULL columns. Refuse loudly until the
+                # union path is taught to walk paths.
+                raise NotImplementedError(
+                    "Nested-field projection on data-evolution tables is "
+                    "not yet supported")
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
                 read_type=self.read_type,
                 split=split,
-                row_tracking_enabled=True
+                row_tracking_enabled=True,
+                nested_name_paths=self.nested_name_paths,
             )
         else:
             return RawFileSplitRead(
@@ -289,7 +314,8 @@ class TableRead:
                 predicate=self.predicate,
                 read_type=self.read_type,
                 split=split,
-                row_tracking_enabled=self.table.options.row_tracking_enabled()
+                row_tracking_enabled=self.table.options.row_tracking_enabled(),
+                nested_name_paths=self.nested_name_paths,
             )
 
     @staticmethod

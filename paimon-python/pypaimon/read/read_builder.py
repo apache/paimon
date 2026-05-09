@@ -80,8 +80,21 @@ class ReadBuilder:
         return TableRead(
             table=self.table,
             predicate=self._predicate,
-            read_type=self.read_type()
+            read_type=self.read_type(),
+            nested_name_paths=self._nested_name_paths(),
         )
+
+    def _nested_name_paths(self) -> Optional[List[List[str]]]:
+        """Resolve the current nested-projection state into a parallel list
+        of name paths against the underlying table schema. Returns ``None``
+        if the user only requested top-level projection (or no projection).
+        """
+        if not self._nested_paths:
+            return None
+        table_fields = self.table.fields
+        if self.table.options.row_tracking_enabled():
+            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+        return Projection.of(self._nested_paths).to_name_paths(table_fields)
 
     def new_predicate_builder(self) -> PredicateBuilder:
         return PredicateBuilder(self.read_type())
