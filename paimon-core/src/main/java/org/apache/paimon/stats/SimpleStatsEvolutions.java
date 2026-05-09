@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.schema.SchemaEvolutionUtil.createIndexCastMapping;
@@ -77,7 +78,14 @@ public class SimpleStatsEvolutions {
 
                     // Project data fields to write cols for data evolution table
                     if (k.writeCols != null) {
-                        dataFields = new RowType(dataFields).project(k.writeCols).getFields();
+                        RowType rowType = new RowType(dataFields);
+                        // writeCols may contain some metadata fields i.e. row_id & max_seq
+                        dataFields =
+                                rowType.project(
+                                                k.writeCols.stream()
+                                                        .filter(rowType::containsField)
+                                                        .collect(Collectors.toList()))
+                                        .getFields();
                     }
                     IndexCastMapping indexCastMapping =
                             createIndexCastMapping(schemaTableFields, dataFields);
