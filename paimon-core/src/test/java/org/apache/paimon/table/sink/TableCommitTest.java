@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -436,7 +437,7 @@ public class TableCommitTest {
         commit1.commit(2, write1.prepareCommit(true, 2));
 
         write2.write(GenericRow.of(2, 5, 5L));
-        assertThatCode(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
                 .doesNotThrowAnyException();
 
         // COMPACT on the same partition should be checked and fail
@@ -445,7 +446,7 @@ public class TableCommitTest {
         commit1.commit(3, write1.prepareCommit(true, 3));
 
         write2.write(GenericRow.of(2, 7, 7L));
-        assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
@@ -634,8 +635,7 @@ public class TableCommitTest {
 
     private static BinaryRow partitionRow(int pt) {
         BinaryRow row = new BinaryRow(1);
-        org.apache.paimon.data.BinaryRowWriter writer =
-                new org.apache.paimon.data.BinaryRowWriter(row);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.writeInt(0, pt);
         writer.complete();
         return row;
