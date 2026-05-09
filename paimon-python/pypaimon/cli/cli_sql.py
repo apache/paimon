@@ -160,6 +160,8 @@ def _execute_query(ctx, query, output_format):
 
     if batches:
         _print_table(pa.Table.from_batches(batches), output_format)
+    else:
+        print("OK")
 
 
 def _print_table(table, output_format, elapsed=None):
@@ -262,6 +264,8 @@ def _interactive_repl(ctx, output_format):
                 elapsed = time.time() - start
                 if batches:
                     _print_table(pa.Table.from_batches(batches), output_format, elapsed)
+                else:
+                    print(f"OK ({elapsed:.2f}s)")
                 print()
             except Exception as e:
                 print(f"Error: {e}\n", file=sys.stderr)
