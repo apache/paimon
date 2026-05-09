@@ -35,12 +35,18 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -54,6 +60,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -221,6 +228,92 @@ public class FilesTableTest extends TableTestBase {
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
         assertThatThrownBy(() -> read(filesTable))
                 .satisfies(anyCauseMatches(IllegalArgumentException.class));
+    }
+
+    @Test
+    public void testReadStatsWithDataEvolutionWriteCols() throws Exception {
+        String tableName = "DataEvolutionFilesTable";
+        Identifier identifier = identifier(tableName);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+
+        // Write a data-evolution table.
+        FileStoreTable dataEvolutionTable = getTable(identifier);
+        BatchWriteBuilder writeBuilder = dataEvolutionTable.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        writeBuilder
+                                .newWrite()
+                                .withWriteType(
+                                        schema.rowType().project(Collections.singletonList("f1")));
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(BinaryString.fromString("a")));
+            commit.commit(write.prepareCommit());
+        }
+
+        catalog.alterTable(identifier, SchemaChange.addColumn("f2", DataTypes.INT()), false);
+        dataEvolutionTable = getTable(identifier);
+        writeBuilder = dataEvolutionTable.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        writeBuilder
+                                .newWrite()
+                                .withWriteType(
+                                        dataEvolutionTable
+                                                .schema()
+                                                .logicalRowType()
+                                                .project(Collections.singletonList("f2")));
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1));
+            List<CommitMessage> commitables = write.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        FilesTable dataEvolutionFilesTable =
+                (FilesTable)
+                        catalog.getTable(
+                                identifier(tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES));
+        List<InternalRow> result = read(dataEvolutionFilesTable);
+
+        // Each file only contain partial data columns.
+        assertThat(result).hasSize(2);
+        assertThat(
+                        result.stream()
+                                .map(row -> row.getString(10).toString())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("{f0=1, f1=0, f2=1}", "{f0=1, f1=1, f2=0}");
+        assertThat(
+                        result.stream()
+                                .map(row -> row.getString(11).toString())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("{f0=null, f1=a, f2=null}", "{f0=null, f1=null, f2=1}");
+        assertThat(
+                        result.stream()
+                                .map(row -> row.getString(12).toString())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("{f0=null, f1=a, f2=null}", "{f0=null, f1=null, f2=1}");
+    }
+
+    private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {
+        commitables.forEach(
+                c -> {
+                    CommitMessageImpl commitMessage = (CommitMessageImpl) c;
+                    List<DataFileMeta> newFiles =
+                            new ArrayList<>(commitMessage.newFilesIncrement().newFiles());
+                    commitMessage.newFilesIncrement().newFiles().clear();
+                    commitMessage
+                            .newFilesIncrement()
+                            .newFiles()
+                            .addAll(
+                                    newFiles.stream()
+                                            .map(s -> s.assignFirstRowId(firstRowId))
+                                            .collect(Collectors.toList()));
+                });
     }
 
     private List<InternalRow> getExpectedResult(long snapshotId) {

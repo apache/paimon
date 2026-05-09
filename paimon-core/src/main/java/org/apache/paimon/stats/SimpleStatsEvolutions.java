@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -44,7 +45,7 @@ public class SimpleStatsEvolutions {
     private final long tableSchemaId;
     private final List<DataField> tableDataFields;
     private final AtomicReference<List<DataField>> tableFields;
-    private final ConcurrentMap<Long, SimpleStatsEvolution> evolutions;
+    private final ConcurrentMap<Pair<Long, List<String>>, SimpleStatsEvolution> evolutions;
 
     public SimpleStatsEvolutions(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
         this.schemaFields = schemaFields;
@@ -55,20 +56,31 @@ public class SimpleStatsEvolutions {
     }
 
     public SimpleStatsEvolution getOrCreate(long dataSchemaId) {
+        return getOrCreate(dataSchemaId, null);
+    }
+
+    public SimpleStatsEvolution getOrCreate(long dataSchemaId, @Nullable List<String> writeCols) {
+        Pair<Long, List<String>> key =
+                Pair.of(dataSchemaId, writeCols == null ? null : new ArrayList<>(writeCols));
         return evolutions.computeIfAbsent(
-                dataSchemaId,
-                id -> {
-                    if (tableSchemaId == id) {
+                key,
+                k -> {
+                    if (tableSchemaId == k.getKey() && k.getValue() == null) {
                         return new SimpleStatsEvolution(
-                                new RowType(schemaFields.apply(id)), null, null);
+                                new RowType(schemaFields.apply(k.getKey())), null, null);
                     }
 
                     // Get atomic schema fields.
                     List<DataField> schemaTableFields =
                             tableFields.updateAndGet(v -> v == null ? tableDataFields : v);
-                    List<DataField> dataFields = schemaFields.apply(id);
+                    List<DataField> dataFields = schemaFields.apply(k.getKey());
+
+                    // Project data fields to write cols for data evolution table
+                    if (k.getValue() != null) {
+                        dataFields = new RowType(dataFields).project(k.getValue()).getFields();
+                    }
                     IndexCastMapping indexCastMapping =
-                            createIndexCastMapping(schemaTableFields, schemaFields.apply(id));
+                            createIndexCastMapping(schemaTableFields, dataFields);
                     @Nullable int[] indexMapping = indexCastMapping.getIndexMapping();
                     // Create col stats array serializer with schema evolution
                     return new SimpleStatsEvolution(

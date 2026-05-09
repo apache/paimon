@@ -462,7 +462,8 @@ public class FilesTable implements ReadonlyTable {
         }
 
         private void initialize() {
-            SimpleStatsEvolution evolution = simpleStatsEvolutions.getOrCreate(file.schemaId());
+            SimpleStatsEvolution evolution =
+                    simpleStatsEvolutions.getOrCreate(file.schemaId(), file.writeCols());
             // Create value stats
             SimpleStatsEvolution.Result result =
                     evolution.evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());
