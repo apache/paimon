@@ -1109,11 +1109,7 @@ class ClusteringTableTest {
         List<GenericRow> result = new ArrayList<>();
         while (iterator.hasNext()) {
             InternalRow row = iterator.next();
-            result.add(
-                    GenericRow.of(
-                            row.getString(0),
-                            row.getInt(1),
-                            row.getInt(2)));
+            result.add(GenericRow.of(row.getString(0), row.getInt(1), row.getInt(2)));
         }
         return result;
     }
