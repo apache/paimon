@@ -77,7 +77,8 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=max_seq_number(),
-                options=options)
+                options=options,
+                merge_function=self._build_pk_merge_function())
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
@@ -88,6 +89,94 @@ class FileStoreWrite:
                 options=options,
                 write_cols=self.write_cols
             )
+
+    def _build_pk_merge_function(self):
+        """Build the merge function for the in-memory write buffer.
+
+        Shares ``merge_engine_dispatch.build_merge_function`` with the
+        read path so the supported engines (deduplicate, partial-update
+        with no out-of-scope options) cannot drift between sides.
+
+        For wholly unsupported engines (``aggregation`` / ``first-row``)
+        the writer falls back to ``DeduplicateMergeFunction`` so the
+        flushed file still maintains the LSM "PK unique within a file"
+        invariant. The read path's dispatch still raises
+        ``NotImplementedError``, so the user gets an explicit error
+        before they observe wrong-engine data; the fallback only
+        narrows the damage to "file is deduped, not aggregated"
+        rather than the silent multi-row-per-PK corruption that
+        existed pre-PR.
+
+        Partial-update with out-of-scope options (sequence-group,
+        per-field aggregator, ignore-delete, remove-record-on-*) does
+        **not** fall back: ``partial_update_unsupported_options`` sees
+        the configured keys and re-raises, so the first
+        ``write_arrow`` call (where ``_create_data_writer`` first runs)
+        surfaces the error. Silently degrading to dedupe there is the
+        same live corruption pattern this PR exists to close.
+
+        ``with_write_type`` (column-subset writes) on a PK table is
+        also rejected here. The buffer layout
+        ``_add_system_fields`` produces would carry only the subset
+        on the value side, while a ``MergeFunction`` such as
+        ``PartialUpdateMergeFunction`` is built against the full table
+        arity -- the two sides would mismatch on
+        ``KeyValue.value.get_field`` and raise ``IndexError`` at
+        flush time. Refusing it explicitly avoids that obscure failure
+        and keeps the supported surface narrow.
+
+        The value-side schema must match the layout
+        ``KeyValueDataWriter`` flushes -- ``_add_system_fields`` keeps
+        every original user column on the value side (the primary keys
+        are duplicated as ``_KEY_<pk>`` columns to the left of the
+        value side). So ``value_arity`` here is ``len(table.fields)``,
+        not ``len(table.fields) - len(primary_keys)``.
+        """
+        from pypaimon.common.merge_engine_dispatch import (
+            build_merge_function, partial_update_unsupported_options)
+        from pypaimon.common.options.core_options import MergeEngine
+        from pypaimon.read.reader.deduplicate_merge_function import \
+            DeduplicateMergeFunction
+
+        engine = self.options.merge_engine()
+        raw_options = self.options.options.to_map()
+
+        if self.write_cols is not None:
+            raise NotImplementedError(
+                "with_write_type is not yet supported on primary-key "
+                "tables: the writer-side merge buffer assumes the "
+                "input batch carries the full table schema. Drop the "
+                "with_write_type call or write the missing columns as "
+                "nulls in the input batch."
+            )
+
+        # PARTIAL_UPDATE + out-of-scope option: never silently fall
+        # back -- forward the read-side error verbatim so writes fail
+        # before the first flush rather than corrupt the file.
+        if engine == MergeEngine.PARTIAL_UPDATE \
+                and partial_update_unsupported_options(raw_options):
+            return build_merge_function(
+                engine=engine, raw_options=raw_options,
+                key_arity=len(self.table.trimmed_primary_keys),
+                value_arity=len(self.table.table_schema.fields),
+                value_field_nullables=[
+                    f.type.nullable for f in self.table.table_schema.fields],
+            )
+
+        # Catch the dispatch's "wholly unsupported engine" raise only
+        # for the engines we know are out of scope today; any other
+        # NotImplementedError is a bug we want to surface, not swallow.
+        if engine in (MergeEngine.AGGREGATE, MergeEngine.FIRST_ROW):
+            return DeduplicateMergeFunction()
+
+        all_value_fields = self.table.table_schema.fields
+        return build_merge_function(
+            engine=engine, raw_options=raw_options,
+            key_arity=len(self.table.trimmed_primary_keys),
+            value_arity=len(all_value_fields),
+            value_field_nullables=[
+                f.type.nullable for f in all_value_fields],
+        )
 
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""

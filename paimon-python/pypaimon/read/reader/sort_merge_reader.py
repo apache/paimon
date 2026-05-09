@@ -19,6 +19,8 @@
 import heapq
 from typing import Any, Callable, List, Optional
 
+from pypaimon.read.reader.deduplicate_merge_function import \
+    DeduplicateMergeFunction
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.schema.data_types import DataField, Keyword
@@ -30,9 +32,15 @@ from pypaimon.table.row.key_value import KeyValue
 class SortMergeReaderWithMinHeap(RecordReader):
     """SortMergeReader implemented with min-heap."""
 
-    def __init__(self, readers: List[RecordReader[KeyValue]], schema: TableSchema):
+    def __init__(self, readers: List[RecordReader[KeyValue]], schema: TableSchema,
+                 merge_function: Optional[Any] = None):
         self.next_batch_readers = list(readers)
-        self.merge_function = DeduplicateMergeFunction()
+        # Default to dedupe so callers that don't pass a merge_function
+        # keep their old behaviour. The merge engine dispatch lives in
+        # ``MergeFileSplitRead.section_reader_supplier`` for the read
+        # path; tests or other ad-hoc callers can pass a different
+        # implementation here.
+        self.merge_function = merge_function if merge_function is not None else DeduplicateMergeFunction()
 
         if schema.partition_keys:
             trimmed_primary_keys = [pk for pk in schema.primary_keys if pk not in schema.partition_keys]
@@ -122,22 +130,6 @@ class SortMergeIterator(RecordIterator):
             self.polled.append(entry.element)
 
         return True
-
-
-class DeduplicateMergeFunction:
-    """A MergeFunction where key is primary key (unique) and value is the full record, only keep the latest one."""
-
-    def __init__(self):
-        self.latest_kv = None
-
-    def reset(self) -> None:
-        self.latest_kv = None
-
-    def add(self, kv: KeyValue):
-        self.latest_kv = kv
-
-    def get_result(self) -> Optional[KeyValue]:
-        return self.latest_kv
 
 
 class Element:
