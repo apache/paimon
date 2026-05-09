@@ -127,7 +127,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       </td>
     </tr>
     <tr>
-      <td><h5>blob-write-null-on-unreadable</h5></td>
+      <td><h5>blob-write-null-on-missing-file</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">false</td>
       <td>Boolean</td>

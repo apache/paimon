@@ -2302,8 +2302,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
-    public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_UNREADABLE =
-            key("blob-write-null-on-unreadable")
+    public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_MISSING_FILE =
+            key("blob-write-null-on-missing-file")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
@@ -3798,8 +3798,8 @@ public class CoreOptions implements Serializable {
         return options.get(BLOB_AS_DESCRIPTOR);
     }
 
-    public boolean blobWriteNullOnUnreadable() {
-        return options.get(BLOB_WRITE_NULL_ON_UNREADABLE);
+    public boolean blobWriteNullOnMissingFile() {
+        return options.get(BLOB_WRITE_NULL_ON_MISSING_FILE);
     }
 
     public boolean postponeBatchWriteFixedBucket() {

@@ -59,6 +59,7 @@ public class FlinkRowWrapper implements InternalRow {
     @Nullable private final CatalogContext catalogContext;
     private final UriReaderFactory uriReaderFactory;
     @Nullable private final boolean[] checkBlobDescriptorExists;
+    @Nullable private final Boolean[] blobDescriptorExists;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
@@ -76,6 +77,10 @@ public class FlinkRowWrapper implements InternalRow {
         this.catalogContext = catalogContext;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
+        this.blobDescriptorExists =
+                checkBlobDescriptorExists == null
+                        ? null
+                        : new Boolean[checkBlobDescriptorExists.length];
     }
 
     @Override
@@ -180,8 +185,16 @@ public class FlinkRowWrapper implements InternalRow {
             return false;
         }
 
+        if (blobDescriptorExists != null && blobDescriptorExists[pos] != null) {
+            return !blobDescriptorExists[pos];
+        }
+
         BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
-        return !descriptorFileExists(pos, descriptor);
+        boolean exists = descriptorFileExists(pos, descriptor);
+        if (blobDescriptorExists != null) {
+            blobDescriptorExists[pos] = exists;
+        }
+        return !exists;
     }
 
     private boolean shouldCheckBlobDescriptorExists(int pos) {
@@ -212,13 +225,13 @@ public class FlinkRowWrapper implements InternalRow {
                         pos);
             }
             return exists;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException e) {
             LOG.warn(
-                    "Failed to check blob descriptor file {}, returning NULL for BLOB field at position {}.",
+                    "Failed to check blob descriptor file {} for BLOB field at position {}.",
                     descriptor.uri(),
                     pos,
                     e);
-            return false;
+            throw new RuntimeException(e);
         }
     }
 

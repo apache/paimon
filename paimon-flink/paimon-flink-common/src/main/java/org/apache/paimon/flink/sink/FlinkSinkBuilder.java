@@ -218,7 +218,7 @@ public class FlinkSinkBuilder {
                         this.input,
                         table.rowType(),
                         contextForDescriptor,
-                        table.coreOptions().blobWriteNullOnUnreadable());
+                        table.coreOptions().blobWriteNullOnMissingFile());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
