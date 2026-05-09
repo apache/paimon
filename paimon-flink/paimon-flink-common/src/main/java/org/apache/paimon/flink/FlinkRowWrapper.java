@@ -58,29 +58,24 @@ public class FlinkRowWrapper implements InternalRow {
     private final org.apache.flink.table.data.RowData row;
     @Nullable private final CatalogContext catalogContext;
     private final UriReaderFactory uriReaderFactory;
-    @Nullable private final boolean[] checkBlobDescriptorExists;
-    @Nullable private final Boolean[] blobDescriptorExists;
+    private final boolean checkBlobDescriptorExists;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
     }
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
-        this(row, catalogContext, null);
+        this(row, catalogContext, false);
     }
 
     public FlinkRowWrapper(
             org.apache.flink.table.data.RowData row,
             CatalogContext catalogContext,
-            @Nullable boolean[] checkBlobDescriptorExists) {
+            boolean checkBlobDescriptorExists) {
         this.row = row;
         this.catalogContext = catalogContext;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
-        this.blobDescriptorExists =
-                checkBlobDescriptorExists == null
-                        ? null
-                        : new Boolean[checkBlobDescriptorExists.length];
     }
 
     @Override
@@ -185,22 +180,12 @@ public class FlinkRowWrapper implements InternalRow {
             return false;
         }
 
-        if (blobDescriptorExists != null && blobDescriptorExists[pos] != null) {
-            return !blobDescriptorExists[pos];
-        }
-
         BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
-        boolean exists = descriptorFileExists(pos, descriptor);
-        if (blobDescriptorExists != null) {
-            blobDescriptorExists[pos] = exists;
-        }
-        return !exists;
+        return !descriptorFileExists(pos, descriptor);
     }
 
     private boolean shouldCheckBlobDescriptorExists(int pos) {
-        return checkBlobDescriptorExists != null
-                && pos < checkBlobDescriptorExists.length
-                && checkBlobDescriptorExists[pos];
+        return checkBlobDescriptorExists;
     }
 
     private boolean descriptorFileExists(int pos, BlobDescriptor descriptor) {

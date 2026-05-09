@@ -34,7 +34,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.BlobDescriptorUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
@@ -259,8 +258,6 @@ public class FlinkSinkBuilder {
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
-        boolean[] blobDescriptorExistenceCheck =
-                checkBlobDescriptorExists ? blobDescriptorExistenceCheck(rowType) : null;
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
@@ -268,21 +265,12 @@ public class FlinkSinkBuilder {
                                                 new FlinkRowWrapper(
                                                         r,
                                                         catalogContext,
-                                                        blobDescriptorExistenceCheck))
+                                                        checkBlobDescriptorExists))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
         forwardParallelism(result, input);
         return result;
-    }
-
-    private static boolean[] blobDescriptorExistenceCheck(
-            org.apache.paimon.types.RowType rowType) {
-        boolean[] check = new boolean[rowType.getFieldCount()];
-        for (int i = 0; i < rowType.getFieldCount(); i++) {
-            check[i] = rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB;
-        }
-        return check;
     }
 
     protected DataStreamSink<?> buildDynamicBucketSink(

@@ -78,8 +78,6 @@ public class FlinkRowWrapperTest {
 
     private FlinkRowWrapper wrapper(GenericRowData row, boolean checkBlobDescriptorExists) {
         return new FlinkRowWrapper(
-                row,
-                CatalogContext.create(new Options()),
-                new boolean[] {checkBlobDescriptorExists});
+                row, CatalogContext.create(new Options()), checkBlobDescriptorExists);
     }
 }
