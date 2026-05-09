@@ -197,13 +197,13 @@ class SplitRead(ABC):
 
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
-            if has_nested:
-                # Avro has no native nested column pruning; a Python-side
-                # walk-each-record fallback ships in a separate commit.
-                raise NotImplementedError(
-                    "Nested-field projection on Avro is not yet supported")
+            avro_nested_paths = (
+                [nested_path_by_name[name] for name in read_file_fields]
+                if has_nested else None
+            )
             format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
-                                             self.read_fields, read_arrow_predicate, batch_size=batch_size)
+                                             self.read_fields, read_arrow_predicate, batch_size=batch_size,
+                                             nested_name_paths=avro_nested_paths)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             if has_nested:
                 raise NotImplementedError(

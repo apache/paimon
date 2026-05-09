@@ -150,6 +150,31 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
             [{'part': 'A', 'mv_latest_version': 100, 'val': 'x'},
              {'part': 'B', 'mv_latest_version': 200, 'val': 'y'}])
 
+    def test_avro_nested_projection_python_fallback(self):
+        """Avro has no native nested column pruning; the reader walks
+        each fastavro record dict by path and assembles the column
+        client-side."""
+        table = self._create_table('ao_avro_nested', file_format='avro')
+        rb = table.new_read_builder().with_projection(['mv.latest_version', 'val'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(
+            got,
+            [{'mv_latest_version': 100, 'val': 'x'},
+             {'mv_latest_version': 200, 'val': 'y'},
+             {'mv_latest_version': 300, 'val': 'z'}])
+
+    def test_avro_top_level_projection_unchanged(self):
+        """Top-level-only projection on Avro stays on the existing
+        ``record.get(name)`` fast path."""
+        table = self._create_table('ao_avro_top', file_format='avro')
+        rb = table.new_read_builder().with_projection(['val', 'id'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(
+            got,
+            [{'val': 'x', 'id': 1},
+             {'val': 'y', 'id': 2},
+             {'val': 'z', 'id': 3}])
+
     def test_pk_table_merge_split_with_nested_projection_raises(self):
         # Phase 2b lands the append-only path only; PK + nested needs an
         # outer-projection wrapper that ships in a follow-up commit. Until
