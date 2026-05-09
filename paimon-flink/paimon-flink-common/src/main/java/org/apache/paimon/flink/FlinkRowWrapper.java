@@ -98,8 +98,7 @@ public class FlinkRowWrapper implements InternalRow {
         if (row.isNullAt(pos)) {
             return true;
         }
-        return shouldCheckBlobDescriptorExists(pos)
-                && isMissingBlobDescriptor(pos, row.getBinary(pos));
+        return checkBlobDescriptorExists && isMissingBlobDescriptor(pos, row.getBinary(pos));
     }
 
     @Override
@@ -174,7 +173,7 @@ public class FlinkRowWrapper implements InternalRow {
     }
 
     private boolean isMissingBlobDescriptor(int pos, byte[] bytes) {
-        if (!shouldCheckBlobDescriptorExists(pos)
+        if (!checkBlobDescriptorExists
                 || bytes == null
                 || !BlobDescriptor.isBlobDescriptor(bytes)) {
             return false;
@@ -182,10 +181,6 @@ public class FlinkRowWrapper implements InternalRow {
 
         BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
         return !descriptorFileExists(pos, descriptor);
-    }
-
-    private boolean shouldCheckBlobDescriptorExists(int pos) {
-        return checkBlobDescriptorExists;
     }
 
     private boolean descriptorFileExists(int pos, BlobDescriptor descriptor) {
