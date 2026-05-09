@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -712,6 +713,41 @@ class ClusteringTableTest {
         assertThat(readRows(firstRowTable)).containsExactlyInAnyOrderElementsOf(firstBatch);
     }
 
+    /**
+     * Test first-row mode with composite primary key (STRING, INT) and same values inserted twice.
+     * Reproduces an issue where duplicate detection fails or produces wrong results.
+     */
+    @Test
+    public void testFirstRowCompositePkSameValues() throws Exception {
+        Table firstRowTable = createFirstRowTableCompositePk();
+
+        // Commit 1: initial records
+        writeRows(
+                firstRowTable,
+                Arrays.asList(
+                        GenericRow.of(BinaryString.fromString("hi"), 1, 10),
+                        GenericRow.of(BinaryString.fromString("hi"), 2, 20)));
+
+        // Verify first commit
+        assertThat(readRowsCompositePk(firstRowTable))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("hi"), 1, 10),
+                        GenericRow.of(BinaryString.fromString("hi"), 2, 20));
+
+        // Commit 2: same keys with same values again — all should be ignored in first-row mode
+        writeRows(
+                firstRowTable,
+                Arrays.asList(
+                        GenericRow.of(BinaryString.fromString("hi"), 1, 10),
+                        GenericRow.of(BinaryString.fromString("hi"), 2, 20)));
+
+        // Should still see the first values
+        assertThat(readRowsCompositePk(firstRowTable))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(BinaryString.fromString("hi"), 1, 10),
+                        GenericRow.of(BinaryString.fromString("hi"), 2, 20));
+    }
+
     // ==================== Spill Tests ====================
 
     /** Test first-row mode with spill: keeps first values despite many duplicate commits. */
@@ -1042,6 +1078,44 @@ class ClusteringTableTest {
                         .build();
         catalog.createTable(identifier, schema, false);
         return catalog.getTable(identifier);
+    }
+
+    private Table createFirstRowTableCompositePk() throws Exception {
+        Identifier identifier = Identifier.create("default", "first_row_composite_pk_table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k1", DataTypes.STRING())
+                        .column("k2", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("k1", "k2")
+                        .option(DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "1")
+                        .option(CLUSTERING_COLUMNS.key(), "v")
+                        .option(PK_CLUSTERING_OVERRIDE.key(), "true")
+                        .option(MERGE_ENGINE.key(), "first-row")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        return catalog.getTable(identifier);
+    }
+
+    private List<GenericRow> readRowsCompositePk(Table targetTable) throws Exception {
+        ReadBuilder readBuilder = targetTable.newReadBuilder();
+        @SuppressWarnings("resource")
+        CloseableIterator<InternalRow> iterator =
+                readBuilder
+                        .newRead()
+                        .createReader(readBuilder.newScan().plan())
+                        .toCloseableIterator();
+        List<GenericRow> result = new ArrayList<>();
+        while (iterator.hasNext()) {
+            InternalRow row = iterator.next();
+            result.add(
+                    GenericRow.of(
+                            row.getString(0),
+                            row.getInt(1),
+                            row.getInt(2)));
+        }
+        return result;
     }
 
     private void writeRows(List<GenericRow> rows) throws Exception {
