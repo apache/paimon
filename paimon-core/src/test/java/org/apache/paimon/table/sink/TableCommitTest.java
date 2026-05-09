@@ -388,8 +388,8 @@ public class TableCommitTest {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
-                        new String[] {"k", "v"});
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
 
         Options options = new Options();
         options.set(CoreOptions.PATH, path);
@@ -400,8 +400,8 @@ public class TableCommitTest {
                         new SchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
-                                Collections.emptyList(),
-                                Collections.singletonList("k"),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
                                 options.toMap(),
                                 ""));
         FileStoreTable table =
@@ -410,35 +410,131 @@ public class TableCommitTest {
                         new Path(path),
                         tableSchema,
                         CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+        BinaryRow pt2 = partitionRow(2);
+
         String user1 = UUID.randomUUID().toString();
         TableWriteImpl<?> write1 = table.newWrite(user1);
         TableCommitImpl commit1 = table.newCommit(user1);
 
-        write1.write(GenericRow.of(0, 0L));
-        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.compact(pt1, 0, true);
         commit1.commit(1, write1.prepareCommit(true, 1));
 
         // test skip this commit check
-
         String user2 = UUID.randomUUID().toString();
         table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = table.newWrite(user2);
         TableCommitImpl commit2 = table.newCommit(user2);
 
-        write2.write(GenericRow.of(1, 1L));
+        write2.write(GenericRow.of(2, 1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
 
-        // COMPACT commit should be checked
+        // COMPACT on a different partition should be ignored
+        write1.write(GenericRow.of(1, 4, 4L));
+        write1.compact(pt1, 0, true);
+        commit1.commit(2, write1.prepareCommit(true, 2));
 
-        write1.write(GenericRow.of(4, 4L));
-        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        write2.write(GenericRow.of(2, 5, 5L));
+        assertThatCode(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .doesNotThrowAnyException();
+
+        // COMPACT on the same partition should be checked and fail
+        write1.write(GenericRow.of(2, 6, 6L));
+        write1.compact(pt2, 0, true);
         commit1.commit(3, write1.prepareCommit(true, 3));
 
-        write2.write(GenericRow.of(5, 5L));
-        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+        write2.write(GenericRow.of(2, 7, 7L));
+        assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testStrictModeForOverwrite() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+        BinaryRow pt2 = partitionRow(2);
+
+        // user1 writes pt=1 and pt=2
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.write(GenericRow.of(2, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        // test skip this commit check
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+
+        write2.write(GenericRow.of(1, 1, 1L));
+        write2.compact(pt1, 0, true);
+        commit2.commit(1, write2.prepareCommit(true, 1));
+
+        // user1 OVERWRITE on pt=1, snapshot 3
+        TableCommitImpl commit1Ow1 = table.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 4, 4L));
+        commit1Ow1.commit(2, write1.prepareCommit(false, 2));
+
+        // user2 COMPACT on pt=2: OVERWRITE pt=1 does not overlap so no error
+        write2.write(GenericRow.of(2, 5, 5L));
+        write2.compact(pt2, 0, true);
+        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(true, 2)))
+                .doesNotThrowAnyException();
+
+        // user1 OVERWRITE on pt=1 again, snapshot 5
+        TableCommitImpl commit1Ow2 = table.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 6, 6L));
+        commit1Ow2.commit(3, write1.prepareCommit(false, 3));
+
+        // user2 COMPACT on pt=1: OVERWRITE pt=1 overlaps, should throw
+        write2.write(GenericRow.of(1, 7, 7L));
+        write2.compact(pt1, 0, true);
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        commit1Ow1.close();
+        commit1Ow2.close();
+        write2.close();
+        commit2.close();
     }
 
     @Test
@@ -446,8 +542,8 @@ public class TableCommitTest {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
-                        new String[] {"k", "v"});
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
 
         Options options = new Options();
         options.set(CoreOptions.PATH, path);
@@ -458,8 +554,8 @@ public class TableCommitTest {
                         new SchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
-                                Collections.emptyList(),
-                                Collections.singletonList("k"),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
                                 options.toMap(),
                                 ""));
         FileStoreTable table =
@@ -468,13 +564,15 @@ public class TableCommitTest {
                         new Path(path),
                         tableSchema,
                         CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+
         String user1 = UUID.randomUUID().toString();
         FileStoreTable fixedBucketWriteTable = table;
         TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
         TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
 
-        write1.write(GenericRow.of(0, 0L));
-        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.compact(pt1, 0, true);
         commit1.commit(1, write1.prepareCommit(true, 1));
 
         // test skip this commit check
@@ -482,9 +580,9 @@ public class TableCommitTest {
         String user2 = UUID.randomUUID().toString();
         table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
         TableWriteImpl<?> write2 = table.newWrite(user2);
-        TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(Collections.emptyMap());
+        TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(singletonMap("pt", "1"));
 
-        write2.write(GenericRow.of(1, 1L));
+        write2.write(GenericRow.of(1, 1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
 
         // APPEND with postpone bucket files should be ignored
@@ -496,25 +594,51 @@ public class TableCommitTest {
         FileStoreTable postponeWriteTable = fixedBucketWriteTable.copy(postponeWriteOptions);
         write1 = postponeWriteTable.newWrite(user1);
         commit1 = postponeWriteTable.newCommit(user1);
-        write1.write(GenericRow.of(2, 2L));
+        write1.write(GenericRow.of(1, 2, 2L));
         commit1.commit(2, write1.prepareCommit(false, 2));
 
-        write2.write(GenericRow.of(3, 3L));
+        write2.write(GenericRow.of(1, 3, 3L));
         commit2.commit(2, write2.prepareCommit(false, 2));
 
-        // APPEND with fixed bucket files should be checked
+        // APPEND with fixed bucket files on a different partition should be ignored
         write1.close();
         commit1.close();
         write1 = fixedBucketWriteTable.newWrite(user1);
         commit1 = fixedBucketWriteTable.newCommit(user1);
-        write1.write(GenericRow.of(4, 4L));
+        write1.write(GenericRow.of(2, 4, 4L));
         commit1.commit(3, write1.prepareCommit(false, 3));
 
-        write2.write(GenericRow.of(5, 5L));
-        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+        write2.write(GenericRow.of(1, 5, 5L));
+        assertThatCode(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .doesNotThrowAnyException();
+
+        // APPEND with fixed bucket files on the overwritten partition should be checked
+        write1.close();
+        commit1.close();
+        write1 = fixedBucketWriteTable.newWrite(user1);
+        commit1 = fixedBucketWriteTable.newCommit(user1);
+        write1.write(GenericRow.of(1, 6, 6L));
+        commit1.commit(4, write1.prepareCommit(false, 4));
+
+        write2.write(GenericRow.of(1, 7, 7L));
+        assertThatThrownBy(() -> commit2.commit(4, write2.prepareCommit(false, 4)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    private static BinaryRow partitionRow(int pt) {
+        BinaryRow row = new BinaryRow(1);
+        org.apache.paimon.data.BinaryRowWriter writer =
+                new org.apache.paimon.data.BinaryRowWriter(row);
+        writer.writeInt(0, pt);
+        writer.complete();
+        return row;
     }
 
     @Test

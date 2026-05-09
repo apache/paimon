@@ -816,8 +816,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        List<BinaryRow> changedPartitions = null;
         if (strictModeChecker != null) {
-            strictModeChecker.check(newSnapshotId, commitKind);
+            changedPartitions = changedPartitions(deltaFiles, indexFiles);
+            strictModeChecker.check(newSnapshotId, commitKind, changedPartitions);
             strictModeChecker.update(newSnapshotId - 1);
         }
 
@@ -838,7 +840,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (latestSnapshot != null && (discardDuplicate || detectConflicts)) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
-            List<BinaryRow> changedPartitions = changedPartitions(deltaFiles, indexFiles);
+            if (changedPartitions == null) {
+                changedPartitions = changedPartitions(deltaFiles, indexFiles);
+            }
             CommitFailRetryResult commitFailRetry =
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
