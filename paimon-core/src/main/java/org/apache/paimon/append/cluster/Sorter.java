@@ -76,7 +76,6 @@ public abstract class Sorter {
         int spillSortMaxNumFiles = options.localSortMaxNumFileHandles();
         CompressOptions spillCompression = options.spillCompressOptions();
         MemorySize maxDiskSize = options.writeBufferSpillDiskSize();
-        boolean sequenceOrder = options.sequenceFieldSortOrderIsAscending();
 
         this.ioManager = ioManager;
         this.buffer =
@@ -88,8 +87,7 @@ public abstract class Sorter {
                         pageSize,
                         spillSortMaxNumFiles,
                         spillCompression,
-                        maxDiskSize,
-                        sequenceOrder);
+                        maxDiskSize);
     }
 
     public abstract InternalRow assignSortKey(InternalRow row);

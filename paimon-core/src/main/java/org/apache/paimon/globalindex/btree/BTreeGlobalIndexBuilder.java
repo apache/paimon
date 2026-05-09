@@ -218,8 +218,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                         options.pageSize(),
                         options.localSortMaxNumFileHandles(),
                         options.spillCompressOptions(),
-                        options.writeBufferSpillDiskSize(),
-                        options.sequenceFieldSortOrderIsAscending());
+                        options.writeBufferSpillDiskSize());
 
         List<Split> splitList = Collections.singletonList(split);
         RecordReader<InternalRow> reader =

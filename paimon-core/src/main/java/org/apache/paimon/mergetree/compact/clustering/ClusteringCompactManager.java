@@ -112,11 +112,10 @@ public class ClusteringCompactManager extends CompactFutureManager {
         RecordComparator clusteringComparatorAlone =
                 CodeGenUtils.newRecordComparator(
                         valueType.project(clusteringColumns).getFieldTypes(),
-                        IntStream.range(0, clusteringColumns.size()).toArray(),
-                        true);
+                        IntStream.range(0, clusteringColumns.size()).toArray());
         RecordComparator clusteringComparatorInValue =
                 CodeGenUtils.newRecordComparator(
-                        valueType.getFieldTypes(), clusteringColumnIndexes, true);
+                        valueType.getFieldTypes(), clusteringColumnIndexes);
 
         SimpleLsmKvDb kvDb =
                 SimpleLsmKvDb.builder(new File(ioManager.pickTempDir()))
