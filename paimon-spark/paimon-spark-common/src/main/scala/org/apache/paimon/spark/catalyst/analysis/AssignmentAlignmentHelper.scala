@@ -230,11 +230,15 @@ trait AssignmentAlignmentHelper extends SQLConfHelper with ExpressionHelper {
       targetStruct: StructType): Expression = {
     val reorderedFields = targetStruct.map {
       targetField =>
-        val sourceIdx = sourceStruct.fieldIndex(targetField.name)
-        val sourceField = sourceStruct(sourceIdx)
-        val fieldExpr = GetStructField(expression, sourceIdx, Some(sourceField.name))
-        val reordered = reorderFieldsByName(fieldExpr, sourceField.dataType, targetField.dataType)
-        Alias(reordered, targetField.name)()
+        sourceStruct.fields.zipWithIndex.find(_._1.name == targetField.name) match {
+          case Some((sourceField, sourceIdx)) =>
+            val fieldExpr = GetStructField(expression, sourceIdx, Some(sourceField.name))
+            val reordered =
+              reorderFieldsByName(fieldExpr, sourceField.dataType, targetField.dataType)
+            Alias(reordered, targetField.name)()
+          case None =>
+            Alias(Literal(null, targetField.dataType), targetField.name)()
+        }
     }
     val struct = CreateNamedStruct(reorderedFields.flatMap(a => Seq(Literal(a.name), a.child)))
     if (expression.nullable) {

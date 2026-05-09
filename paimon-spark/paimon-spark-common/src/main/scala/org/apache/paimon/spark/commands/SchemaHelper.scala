@@ -26,8 +26,8 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, DataFrame, PaimonUtils, SparkSession}
-import org.apache.spark.sql.functions.{col, lit, struct, transform}
-import org.apache.spark.sql.types.{ArrayType, DataType, StructField, StructType}
+import org.apache.spark.sql.functions.{col, lit, struct, transform, transform_values}
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -123,9 +123,13 @@ private[spark] object SchemaHelper {
     (sourceType, targetField.dataType) match {
       case (s: StructType, t: StructType) if !PaimonUtils.sameType(s, t) =>
         alignStruct(sourceCol, s, t, resolve).as(targetField.name)
-      case (ArrayType(s: StructType, _), ArrayType(t: StructType, containsNull))
+      case (ArrayType(s: StructType, _), ArrayType(t: StructType, _))
           if !PaimonUtils.sameType(s, t) =>
         transform(sourceCol, elem => alignStruct(elem, s, t, resolve))
+          .as(targetField.name)
+      case (MapType(sKey, sVal: StructType, _), MapType(tKey, tVal: StructType, _))
+          if !PaimonUtils.sameType(sVal, tVal) =>
+        transform_values(sourceCol, (_, v) => alignStruct(v, sVal, tVal, resolve))
           .as(targetField.name)
       case _ =>
         sourceCol.as(targetField.name)

@@ -1198,6 +1198,68 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       }
     }
   }
+
+  test("Paimon MergeInto: struct field reorder when target has fields absent from source") {
+    withTable("source", "target") {
+      // Target struct has 3 sub-fields; source struct only has 2 of them in a different order.
+      createTable("target", "id INT, info STRUCT<x INT, y INT, z INT>", Seq("id"))
+      spark.sql("INSERT INTO target VALUES (1, struct(1, 2, 3)), (2, struct(4, 5, 6))")
+
+      createTable("source", "id INT, info STRUCT<y INT, x INT>", Seq("id"))
+      spark.sql("INSERT INTO source VALUES (1, struct(20, 10)), (3, struct(80, 70))")
+
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id = source.id
+                  |WHEN MATCHED THEN
+                  |UPDATE SET target.info = source.info
+                  |WHEN NOT MATCHED THEN
+                  |INSERT (id, info) VALUES (source.id, source.info)
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY id"),
+        Seq(
+          Row(1, Row(10, 20, null)),
+          Row(2, Row(4, 5, 6)),
+          Row(3, Row(70, 80, null))
+        )
+      )
+    }
+  }
+
+  test("Paimon MergeInto: map with struct value field reorder") {
+    withTable("source", "target") {
+      createTable("target", "id INT, props MAP<STRING, STRUCT<a INT, b STRING>>", Seq("id"))
+      spark.sql(
+        "INSERT INTO target VALUES (1, map('k1', struct(1, 'v1'))), (2, map('k2', struct(2, 'v2')))")
+
+      // Source map value struct has reversed sub-field order (b, a).
+      createTable("source", "id INT, props MAP<STRING, STRUCT<b STRING, a INT>>", Seq("id"))
+      spark.sql(
+        "INSERT INTO source VALUES (1, map('k1', struct('u1', 10))), (3, map('k3', struct('u3', 30)))")
+
+      spark.sql("""
+                  |MERGE INTO target
+                  |USING source
+                  |ON target.id = source.id
+                  |WHEN MATCHED THEN
+                  |UPDATE SET target.props = source.props
+                  |WHEN NOT MATCHED THEN
+                  |INSERT (id, props) VALUES (source.id, source.props)
+                  |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY id"),
+        Seq(
+          Row(1, Map("k1" -> Row(10, "u1"))),
+          Row(2, Map("k2" -> Row(2, "v2"))),
+          Row(3, Map("k3" -> Row(30, "u3")))
+        )
+      )
+    }
+  }
 }
 
 trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimaryKeyTable {
