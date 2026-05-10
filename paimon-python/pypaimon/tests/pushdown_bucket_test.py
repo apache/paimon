@@ -345,6 +345,217 @@ class BucketSelectConverterUnitTest(unittest.TestCase):
                                 "not crash (bucket={}, total={})".format(b, total))
 
 
+class PartitionAwareBucketSelectorUnitTest(unittest.TestCase):
+    """Unit tests for the per-partition predicate specialisation path.
+
+    Covers ``replace_partition_predicate`` (the AND/OR fold walker) and
+    the partition-aware ``_Selector.__call__(partition, bucket,
+    total_buckets)`` 3-arg form that ``FileScanner._filter_manifest_entry``
+    will use after wiring."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.id_field = _bigint_field(0, 'id')
+        cls.part_field = DataField(2, 'part', AtomicType('STRING'))
+        cls.pb = PredicateBuilder([cls.id_field, cls.part_field])
+
+    # ----- replace_partition_predicate --------------------------------
+
+    def test_replace_partition_leaf_to_true_drops_constraint(self):
+        from pypaimon.read.scanner.bucket_select_converter import \
+            replace_partition_predicate
+        # ``part = 'a' AND id = 1`` against partition {part: 'a'} →
+        # part leaf becomes True → AND fold removes it → only ``id = 1``
+        pred = PredicateBuilder.and_predicates([
+            self.pb.equal('part', 'a'),
+            self.pb.equal('id', 1),
+        ])
+        result = replace_partition_predicate(
+            pred, {'part'}, {'part': 'a'})
+        self.assertTrue(isinstance(result, type(pred)),
+                        "AND should fold to a remaining single leaf")
+        self.assertEqual(result.method, 'equal')
+        self.assertEqual(result.field, 'id')
+
+    def test_replace_partition_leaf_to_false_collapses_and(self):
+        from pypaimon.read.scanner.bucket_select_converter import \
+            replace_partition_predicate
+        # ``part = 'a' AND id = 1`` against partition {part: 'b'} →
+        # part leaf becomes False → AND collapses to AlwaysFalse (False).
+        pred = PredicateBuilder.and_predicates([
+            self.pb.equal('part', 'a'),
+            self.pb.equal('id', 1),
+        ])
+        result = replace_partition_predicate(
+            pred, {'part'}, {'part': 'b'})
+        self.assertIs(result, False)
+
+    def test_replace_partition_leaf_in_or_keeps_other_branch(self):
+        from pypaimon.read.scanner.bucket_select_converter import \
+            replace_partition_predicate
+        # ``(part='a' AND id=1) OR (part='b' AND id=2)`` against
+        # partition {part: 'a'} → first OR child becomes ``id=1``, second
+        # collapses to AlwaysFalse and is dropped. Result is just ``id=1``.
+        pred = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'a'),
+                self.pb.equal('id', 1),
+            ]),
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'b'),
+                self.pb.equal('id', 2),
+            ]),
+        ])
+        result = replace_partition_predicate(
+            pred, {'part'}, {'part': 'a'})
+        # OR with a single surviving child unwraps to that child.
+        self.assertEqual(result.method, 'equal')
+        self.assertEqual(result.field, 'id')
+        self.assertEqual(result.literals, [1])
+
+    def test_replace_partition_leaf_in_or_other_partition(self):
+        from pypaimon.read.scanner.bucket_select_converter import \
+            replace_partition_predicate
+        # Same predicate, partition {part: 'b'} → second branch survives
+        # as ``id=2``.
+        pred = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'a'),
+                self.pb.equal('id', 1),
+            ]),
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'b'),
+                self.pb.equal('id', 2),
+            ]),
+        ])
+        result = replace_partition_predicate(
+            pred, {'part'}, {'part': 'b'})
+        self.assertEqual(result.method, 'equal')
+        self.assertEqual(result.field, 'id')
+        self.assertEqual(result.literals, [2])
+
+    def test_replace_partition_leaf_unrelated_predicate_unchanged(self):
+        from pypaimon.read.scanner.bucket_select_converter import \
+            replace_partition_predicate
+        # No partition leaf → predicate returned as-is.
+        pred = self.pb.equal('id', 42)
+        result = replace_partition_predicate(
+            pred, {'part'}, {'part': 'a'})
+        self.assertIs(result, pred)
+
+    # ----- _Selector partition-aware path -----------------------------
+
+    def test_selector_3arg_specialises_per_partition(self):
+        # ``(part='a' AND id=1) OR (part='b' AND id=2)`` should hit
+        # bucket(1) only when partition='a' and bucket(2) only when
+        # partition='b'. Master without this fix returns "all buckets".
+        pred = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'a'),
+                self.pb.equal('id', 1),
+            ]),
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'b'),
+                self.pb.equal('id', 2),
+            ]),
+        ])
+        sel = create_bucket_selector(
+            pred, [self.id_field], partition_fields=[self.part_field])
+        self.assertIsNotNone(sel)
+        bucket_for_1 = _hash_bucket([1], [self.id_field], total=8)
+        bucket_for_2 = _hash_bucket([2], [self.id_field], total=8)
+
+        part_a = GenericRow(['a'], [self.part_field], RowKind.INSERT)
+        part_b = GenericRow(['b'], [self.part_field], RowKind.INSERT)
+
+        for b in range(8):
+            self.assertEqual(sel(part_a, b, 8), b == bucket_for_1,
+                             "partition a only keeps bucket %d" % bucket_for_1)
+            self.assertEqual(sel(part_b, b, 8), b == bucket_for_2,
+                             "partition b only keeps bucket %d" % bucket_for_2)
+
+    def test_selector_falls_through_when_partition_unknown(self):
+        """Early manifest filter passes ``partition=None`` (or uses the
+        2-arg form) — no specialisation runs, bucket set falls back to a
+        sound over-approximation: all buckets accept."""
+        pred = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'a'),
+                self.pb.equal('id', 1),
+            ]),
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'b'),
+                self.pb.equal('id', 2),
+            ]),
+        ])
+        sel = create_bucket_selector(
+            pred, [self.id_field], partition_fields=[self.part_field])
+        self.assertIsNotNone(sel)
+        # 2-arg form (legacy callsite) — partition unknown, all buckets keep.
+        for b in range(8):
+            self.assertTrue(sel(b, 8),
+                            "partition-unknown call must accept all buckets")
+        # 3-arg form with partition=None has the same semantics.
+        for b in range(8):
+            self.assertTrue(sel(None, b, 8))
+
+    def test_selector_partition_not_matching_returns_empty_bucket_set(self):
+        # ``part = 'a' AND id = 1`` on partition {part: 'c'} simplifies to
+        # AlwaysFalse — the selector returns False for every bucket since
+        # no row in this partition can possibly match. Sound: dropping a
+        # partition that *can't* contain matches doesn't lose data.
+        pred = PredicateBuilder.and_predicates([
+            self.pb.equal('part', 'a'),
+            self.pb.equal('id', 1),
+        ])
+        sel = create_bucket_selector(
+            pred, [self.id_field], partition_fields=[self.part_field])
+        self.assertIsNotNone(sel)
+        part_c = GenericRow(['c'], [self.part_field], RowKind.INSERT)
+        for b in range(8):
+            self.assertFalse(sel(part_c, b, 8),
+                             "partition c can't satisfy part='a', "
+                             "drop every bucket (b=%d)" % b)
+
+    def test_selector_partition_only_constraint_drops_partition(self):
+        # ``part='a' AND id IN (1,2)`` — same partition value 'a'
+        # specialises ``part='a'`` to True, leaving ``id IN (1,2)``.
+        pred = PredicateBuilder.and_predicates([
+            self.pb.equal('part', 'a'),
+            self.pb.is_in('id', [1, 2]),
+        ])
+        sel = create_bucket_selector(
+            pred, [self.id_field], partition_fields=[self.part_field])
+        self.assertIsNotNone(sel)
+        part_a = GenericRow(['a'], [self.part_field], RowKind.INSERT)
+        expected = {_hash_bucket([v], [self.id_field], 8) for v in (1, 2)}
+        for b in range(8):
+            self.assertEqual(sel(part_a, b, 8), b in expected)
+
+    def test_selector_caches_per_partition(self):
+        pred = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'a'),
+                self.pb.equal('id', 1),
+            ]),
+            PredicateBuilder.and_predicates([
+                self.pb.equal('part', 'b'),
+                self.pb.equal('id', 2),
+            ]),
+        ])
+        sel = create_bucket_selector(
+            pred, [self.id_field], partition_fields=[self.part_field])
+        part_a = GenericRow(['a'], [self.part_field], RowKind.INSERT)
+        part_b = GenericRow(['b'], [self.part_field], RowKind.INSERT)
+        # Drive the cache.
+        for _ in range(5):
+            sel(part_a, 0, 8)
+            sel(part_b, 0, 8)
+        # Cache keyed by (partition tuple, total_buckets); two distinct
+        # partitions × one total → exactly two entries.
+        self.assertEqual(len(sel._cache), 2)
+
+
 # ---------------------------------------------------------------------------
 # Layer 2 — Integration: real tables, public API, assert correctness AND
 # that pruning actually fired (otherwise we're not testing the optimisation,
