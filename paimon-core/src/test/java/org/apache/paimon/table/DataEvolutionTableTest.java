@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
@@ -54,8 +55,11 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -847,6 +851,75 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testPartitionGroupedRowIdsWithBlobFiles() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.partitionKeys("pt");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "128 MB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        byte[] blobBytes = new byte[1];
+        Arrays.fill(blobBytes, (byte) 1);
+        String[] partitionOrder =
+                new String[] {
+                    "pt1", "pt0", "pt2", "pt1", "pt2", "pt0",
+                    "pt0", "pt2", "pt1", "pt2", "pt0", "pt1",
+                    "pt1", "pt2", "pt0", "pt0", "pt1", "pt2"
+                };
+
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < partitionOrder.length; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partitionOrder[i]),
+                                i,
+                                BinaryString.fromString("v" + i),
+                                new BlobData(blobBytes)));
+            }
+
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        Map<String, List<DataFileMeta>> filesByPartition = new HashMap<>();
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            String partition = entry.partition().getString(0).toString();
+            filesByPartition.computeIfAbsent(partition, k -> new ArrayList<>()).add(entry.file());
+        }
+
+        assertThat(filesByPartition.size()).isEqualTo(3);
+        for (List<DataFileMeta> files : filesByPartition.values()) {
+            List<DataFileMeta> regularFiles =
+                    files.stream()
+                            .filter(file -> !"blob".equals(file.fileFormat()))
+                            .collect(Collectors.toList());
+            List<DataFileMeta> blobFiles =
+                    files.stream()
+                            .filter(file -> "blob".equals(file.fileFormat()))
+                            .collect(Collectors.toList());
+
+            assertThat(regularFiles.size()).isEqualTo(1);
+            assertThat(blobFiles.size()).isGreaterThan(1);
+
+            Range regularRange = assertContinuousRowIdRange(regularFiles);
+            Range blobRange = assertContinuousRowIdRange(blobFiles);
+            assertThat(regularRange.count()).isEqualTo(6L);
+            assertThat(blobRange).isEqualTo(regularRange);
+        }
+    }
+
+    @Test
     public void testNonNullColumn() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
@@ -995,5 +1068,16 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                                 testExternalpath2,
                                 null));
         assertThat(path4.toString()).isEqualTo(testExternalpath2);
+    }
+
+    private Range assertContinuousRowIdRange(List<DataFileMeta> files) {
+        files.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
+        long start = files.get(0).nonNullFirstRowId();
+        long expectedStart = start;
+        for (DataFileMeta file : files) {
+            assertThat(file.nonNullFirstRowId()).isEqualTo(expectedStart);
+            expectedStart += file.rowCount();
+        }
+        return new Range(start, expectedStart - 1);
     }
 }
