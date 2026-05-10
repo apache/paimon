@@ -223,6 +223,56 @@ public class FilesTableTest extends TableTestBase {
                 .satisfies(anyCauseMatches(IllegalArgumentException.class));
     }
 
+    @Test
+    public void testFileNameAndClusteringColumns() throws Exception {
+        String clusterTableName = "ClusterTable";
+        FileIO fileIO = LocalFileIO.create();
+        Path clusterTablePath =
+                new Path(String.format("%s/%s.db/%s", warehouse, database, clusterTableName));
+        Schema clusterSchema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.SEQUENCE_FIELD.key(), "col1")
+                        .option("clustering.columns", "col1,col2")
+                        .build();
+        TableSchema clusterTableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, clusterTablePath), clusterSchema);
+        FileStoreTable clusterTable =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(), clusterTablePath, clusterTableSchema);
+        write(clusterTable, GenericRow.of(1, 1, 100, BinaryString.fromString("abc")));
+
+        Identifier clusterFilesId =
+                identifier(clusterTableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES);
+        FilesTable clusterFilesTable = (FilesTable) catalog.getTable(clusterFilesId);
+        List<InternalRow> result = read(clusterFilesTable);
+
+        assertThat(result).hasSize(1);
+        InternalRow row = result.get(0);
+        String filePath = row.getString(2).toString();
+        String expectedFileName = filePath.substring(filePath.lastIndexOf("/") + 1);
+        String fileName = row.getString(20).toString();
+        assertThat(fileName).isEqualTo(expectedFileName);
+        String clusteringCols = row.getString(21).toString();
+        assertThat(clusteringCols).isEqualTo("col1,col2");
+    }
+
+    @Test
+    public void testClusteringColumnsNull() throws Exception {
+        List<InternalRow> result = read(filesTable);
+        assertThat(result).isNotEmpty();
+        for (InternalRow row : result) {
+            assertThat(row.getString(20).toString()).isNotEmpty();
+            assertThat(row.isNullAt(21)).isTrue();
+        }
+    }
+
     private List<InternalRow> getExpectedResult(long snapshotId) {
         if (!snapshotManager.snapshotExists(snapshotId)) {
             return Collections.emptyList();
@@ -279,6 +329,8 @@ public class FilesTableTest extends TableTestBase {
                             BinaryString.fromString(
                                     file.fileSource().map(Object::toString).orElse(null)),
                             file.firstRowId(),
+                            null,
+                            BinaryString.fromString(file.fileName()),
                             null));
         }
         return expectedRow;
