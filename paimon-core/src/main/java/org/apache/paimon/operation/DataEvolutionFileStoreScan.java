@@ -34,6 +34,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -257,14 +258,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                     continue;
                 }
                 int targetFieldId = allFields[j];
+                DataType targetType = schema.fields().get(j).type();
                 for (int fieldId : fieldIds) {
                     if (targetFieldId == fieldId) {
                         for (int k = 0; k < fieldIdsWithStats.length; k++) {
                             if (fieldId == fieldIdsWithStats[k]) {
-                                // TODO: If type not match (e.g. int -> string), we need to skip
-                                // this, set rowOffsets[j] = -1 always. (may -2, after all, set it
-                                // back to -1) Because schema evolution may happen to change int to
-                                // string or something like that.
+                                DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
+                                if (!fileType.equalsIgnoreFieldId(targetType)) {
+                                    continue loop1;
+                                }
                                 rowOffsets[j] = i;
                                 fieldOffsets[j] = k;
                                 continue loop1;
