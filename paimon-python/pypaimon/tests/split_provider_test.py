@@ -156,6 +156,78 @@ class SplitProviderTest(unittest.TestCase):
                 table_identifier=self.identifier, catalog_options=None
             )
 
+    def test_catalog_provider_rejects_snapshot_id_and_tag_name_together(self):
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(
+                table_identifier=self.identifier,
+                catalog_options=self.catalog_options,
+                snapshot_id=1,
+                tag_name='v1',
+            )
+
+    def test_catalog_provider_time_travel_by_snapshot_id(self):
+        """Two commits → snapshot_id=1 sees only the first commit's rows."""
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = 'default.split_provider_snap_id'
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog = CatalogFactory.create(self.catalog_options)
+        catalog.create_table(identifier, schema, False)
+        table = catalog.get_table(identifier)
+        for batch in [{'id': [10], 'name': ['a']}, {'id': [20], 'name': ['b']}]:
+            wb = table.new_batch_write_builder()
+            writer = wb.new_write()
+            writer.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            wb.new_commit().commit(writer.prepare_commit())
+            writer.close()
+
+        provider = CatalogSplitProvider(
+            table_identifier=identifier,
+            catalog_options=self.catalog_options,
+            snapshot_id=1,
+        )
+        from pypaimon.read.table_read import TableRead
+        tr = TableRead(
+            provider.table(),
+            predicate=None,
+            read_type=provider.read_type(),
+        )
+        rows = tr.to_arrow(provider.splits()).to_pylist()
+        self.assertEqual([r['id'] for r in rows], [10])
+
+    def test_catalog_provider_time_travel_by_tag_name(self):
+        """Tag captures snapshot 1; reading via tag returns only that snapshot's rows."""
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = 'default.split_provider_tag_name'
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog = CatalogFactory.create(self.catalog_options)
+        catalog.create_table(identifier, schema, False)
+        table = catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.Table.from_pydict({'id': [11], 'name': ['x']}, schema=pa_schema))
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+        table.create_tag('v1')
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.Table.from_pydict({'id': [22], 'name': ['y']}, schema=pa_schema))
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        provider = CatalogSplitProvider(
+            table_identifier=identifier,
+            catalog_options=self.catalog_options,
+            tag_name='v1',
+        )
+        from pypaimon.read.table_read import TableRead
+        tr = TableRead(
+            provider.table(),
+            predicate=None,
+            read_type=provider.read_type(),
+        )
+        rows = tr.to_arrow(provider.splits()).to_pylist()
+        self.assertEqual([r['id'] for r in rows], [11])
+
     def test_pre_resolved_provider_returns_inputs(self):
         """PreResolvedSplitProvider just hands back what it was given."""
         catalog = CatalogFactory.create(self.catalog_options)

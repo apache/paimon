@@ -25,7 +25,8 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tag.tag_manager import TagManager
 
 SCAN_KEYS = [
-    CoreOptions.SCAN_TAG_NAME.key()
+    CoreOptions.SCAN_TAG_NAME.key(),
+    CoreOptions.SCAN_SNAPSHOT_ID.key(),
 ]
 
 
@@ -35,21 +36,25 @@ class TimeTravelUtil:
     @staticmethod
     def try_travel_to_snapshot(
             options: Options,
-            tag_manager: TagManager
+            tag_manager: TagManager,
+            snapshot_manager=None,
     ) -> Optional[Snapshot]:
         """
         Try to travel to a snapshot based on the options.
-        
+
         Supports the following time travel options:
         - scan.tag-name: Travel to a specific tag
-        
+        - scan.snapshot-id: Travel to a specific snapshot id
+
         Args:
             options: The options containing time travel parameters
             tag_manager: The tag manager
-            
+            snapshot_manager: The snapshot manager, required when
+                ``scan.snapshot-id`` is set
+
         Returns:
             The Snapshot to travel to, or None if no time travel option is set.
-            
+
         Raises:
             ValueError: If more than one time travel option is set
         """
@@ -71,5 +76,15 @@ class TimeTravelUtil:
             if tag is None:
                 raise ValueError(f"Tag '{tag_name}' doesn't exist.")
             return tag.trim_to_snapshot()
+        elif key == CoreOptions.SCAN_SNAPSHOT_ID.key():
+            if snapshot_manager is None:
+                raise ValueError(
+                    "snapshot_manager is required to resolve scan.snapshot-id"
+                )
+            snapshot_id = int(core_options.scan_snapshot_id())
+            snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
+            return snapshot
         else:
             raise ValueError(f"Unsupported time travel mode: {key}")

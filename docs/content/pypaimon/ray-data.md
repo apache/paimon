@@ -90,6 +90,26 @@ ray_dataset = read_paimon(
 )
 ```
 
+**Time travel:**
+
+```python
+# Read a specific snapshot.
+ray_dataset = read_paimon(
+    "database_name.table_name",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    snapshot_id=42,
+)
+
+# Read a tagged snapshot.
+ray_dataset = read_paimon(
+    "database_name.table_name",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    tag_name="release-2026-04",
+)
+```
+
+`snapshot_id` and `tag_name` are mutually exclusive.
+
 **Parameters:**
 - `table_identifier`: full table name, e.g. `"db_name.table_name"`.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`,
@@ -97,6 +117,10 @@ ray_dataset = read_paimon(
 - `filter`: optional `Predicate` to push down into the scan.
 - `projection`: optional list of column names to read.
 - `limit`: optional row limit applied at scan planning time.
+- `snapshot_id`: optional snapshot id to time-travel to. Mutually
+  exclusive with `tag_name`.
+- `tag_name`: optional tag name to time-travel to. Mutually
+  exclusive with `snapshot_id`.
 - `override_num_blocks`: optional override for the number of output blocks.
   Must be `>= 1`.
 - `ray_remote_args`: optional kwargs passed to `ray.remote()` in read tasks

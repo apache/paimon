@@ -74,16 +74,24 @@ class CatalogSplitProvider(SplitProvider):
         predicate=None,
         projection: Optional[List[str]] = None,
         limit: Optional[int] = None,
+        snapshot_id: Optional[int] = None,
+        tag_name: Optional[str] = None,
     ):
         if not table_identifier:
             raise ValueError("table_identifier is required")
         if catalog_options is None:
             raise ValueError("catalog_options is required")
+        if snapshot_id is not None and tag_name is not None:
+            raise ValueError(
+                "snapshot_id and tag_name cannot be set at the same time"
+            )
         self._table_identifier = table_identifier
         self._catalog_options = catalog_options
         self._predicate = predicate
         self._projection = projection
         self._limit = limit
+        self._snapshot_id = snapshot_id
+        self._tag_name = tag_name
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
@@ -92,7 +100,15 @@ class CatalogSplitProvider(SplitProvider):
         if self._table_cached is None:
             from pypaimon.catalog.catalog_factory import CatalogFactory
             catalog = CatalogFactory.create(self._catalog_options)
-            self._table_cached = catalog.get_table(self._table_identifier)
+            table = catalog.get_table(self._table_identifier)
+            travel_options = {}
+            if self._snapshot_id is not None:
+                travel_options["scan.snapshot-id"] = str(self._snapshot_id)
+            if self._tag_name is not None:
+                travel_options["scan.tag-name"] = self._tag_name
+            if travel_options:
+                table = table.copy(travel_options)
+            self._table_cached = table
         return self._table_cached
 
     def _ensure_planned(self):

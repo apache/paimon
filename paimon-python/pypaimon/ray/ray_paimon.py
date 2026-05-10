@@ -40,6 +40,8 @@ def read_paimon(
     filter: Optional[Predicate] = None,
     projection: Optional[List[str]] = None,
     limit: Optional[int] = None,
+    snapshot_id: Optional[int] = None,
+    tag_name: Optional[str] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
@@ -54,6 +56,10 @@ def read_paimon(
         filter: Optional predicate to push down into the scan.
         projection: Optional list of column names to read.
         limit: Optional row limit for the scan.
+        snapshot_id: Optional snapshot id to time-travel to. Mutually
+            exclusive with ``tag_name``.
+        tag_name: Optional tag name to time-travel to. Mutually
+            exclusive with ``snapshot_id``.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in read tasks.
         concurrency: Optional max number of Ray read tasks to run concurrently.
         override_num_blocks: Optional override for the number of output blocks.
@@ -64,6 +70,11 @@ def read_paimon(
     """
     from pypaimon.read.datasource.ray_datasource import RayDatasource
     from pypaimon.read.datasource.split_provider import CatalogSplitProvider
+
+    if snapshot_id is not None and tag_name is not None:
+        raise ValueError(
+            "snapshot_id and tag_name cannot be set at the same time"
+        )
 
     if override_num_blocks is not None and override_num_blocks < 1:
         raise ValueError(
@@ -77,6 +88,8 @@ def read_paimon(
             predicate=filter,
             projection=projection,
             limit=limit,
+            snapshot_id=snapshot_id,
+            tag_name=tag_name,
         )
     )
     return ray.data.read_datasource(

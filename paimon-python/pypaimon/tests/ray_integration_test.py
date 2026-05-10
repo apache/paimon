@@ -196,6 +196,65 @@ class RayIntegrationTest(unittest.TestCase):
         ds = read_paimon(identifier, self.catalog_options)
         self.assertEqual(ds.count(), 0)
 
+    def test_read_paimon_with_snapshot_id(self):
+        """read_paimon(snapshot_id=N) time-travels to that snapshot."""
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = 'default.test_read_snap_id'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+        table = catalog.get_table(identifier)
+        for batch in [{'id': [1], 'name': ['a']}, {'id': [2], 'name': ['b']}]:
+            wb = table.new_batch_write_builder()
+            writer = wb.new_write()
+            writer.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            wb.new_commit().commit(writer.prepare_commit())
+            writer.close()
+
+        ds_latest = read_paimon(identifier, self.catalog_options)
+        self.assertEqual(ds_latest.count(), 2)
+
+        ds_snap1 = read_paimon(identifier, self.catalog_options, snapshot_id=1)
+        self.assertEqual(ds_snap1.count(), 1)
+        self.assertEqual(ds_snap1.to_pandas()['id'].tolist(), [1])
+
+    def test_read_paimon_with_tag_name(self):
+        """read_paimon(tag_name=...) time-travels to a tagged snapshot."""
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = 'default.test_read_tag_name'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+        table = catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.Table.from_pydict({'id': [1], 'name': ['a']}, schema=pa_schema))
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+        table.create_tag('v1')
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.Table.from_pydict({'id': [2], 'name': ['b']}, schema=pa_schema))
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        ds_tag = read_paimon(identifier, self.catalog_options, tag_name='v1')
+        self.assertEqual(ds_tag.count(), 1)
+        self.assertEqual(ds_tag.to_pandas()['id'].tolist(), [1])
+
+    def test_read_paimon_rejects_snapshot_id_and_tag_name_together(self):
+        from pypaimon.ray import read_paimon
+
+        with self.assertRaises(ValueError):
+            read_paimon(
+                'default.dummy', self.catalog_options,
+                snapshot_id=1, tag_name='v1',
+            )
+
     def test_write_paimon_basic(self):
         """write_paimon() writes data that read_paimon() can round-trip."""
         from pypaimon.ray import read_paimon, write_paimon

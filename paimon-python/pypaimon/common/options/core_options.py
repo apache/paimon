@@ -261,6 +261,16 @@ class CoreOptions:
         .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
     )
 
+    SCAN_SNAPSHOT_ID: ConfigOption[int] = (
+        ConfigOptions.key("scan.snapshot-id")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional snapshot id used in case of 'from-snapshot' or "
+            "'from-snapshot-full' scan mode."
+        )
+    )
+
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("source.split.target-size")
         .memory_type()
@@ -567,6 +577,9 @@ class CoreOptions:
 
     def scan_tag_name(self, default=None):
         return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
+
+    def scan_snapshot_id(self, default=None):
+        return self.options.get(CoreOptions.SCAN_SNAPSHOT_ID, default)
 
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()

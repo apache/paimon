@@ -61,7 +61,8 @@ class FullTextScanImpl(FullTextScan):
         from pypaimon.common.options.options import Options
         travel_snapshot = TimeTravelUtil.try_travel_to_snapshot(
             Options(self._table.table_schema.options),
-            self._table.tag_manager()
+            self._table.tag_manager(),
+            self._table.snapshot_manager(),
         )
         if travel_snapshot is not None:
             snapshot = travel_snapshot

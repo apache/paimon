@@ -77,7 +77,8 @@ class VectorSearchScanImpl(VectorSearchScan):
 
         snapshot = TimeTravelUtil.try_travel_to_snapshot(
             Options(self._table.table_schema.options),
-            self._table.tag_manager()
+            self._table.tag_manager(),
+            self._table.snapshot_manager(),
         )
         if snapshot is None:
             snapshot = self._table.snapshot_manager().get_latest_snapshot()

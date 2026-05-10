@@ -435,6 +435,7 @@ class FileStoreTable(Table):
 
         Supports the following time travel options:
         - scan.tag-name: Travel to a specific tag
+        - scan.snapshot-id: Travel to a specific snapshot id
 
         Returns:
             The TableSchema at the time travel point, or None if no time travel option is set.
@@ -442,7 +443,9 @@ class FileStoreTable(Table):
 
         try:
             from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-            snapshot = TimeTravelUtil.try_travel_to_snapshot(options, self.tag_manager())
+            snapshot = TimeTravelUtil.try_travel_to_snapshot(
+                options, self.tag_manager(), self.snapshot_manager()
+            )
             if snapshot is None:
                 return None
             return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())

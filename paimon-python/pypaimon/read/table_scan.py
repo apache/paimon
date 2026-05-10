@@ -113,6 +113,23 @@ class TableScan:
                 self.predicate,
                 self.limit
             )
+        elif options.contains(CoreOptions.SCAN_SNAPSHOT_ID):  # Handle snapshot-id-based reading
+            snapshot_id = int(options.get(CoreOptions.SCAN_SNAPSHOT_ID))
+
+            def snapshot_id_manifest_scanner():
+                snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+                if snapshot is None:
+                    raise ValueError(
+                        "Snapshot id %d does not exist" % snapshot_id
+                    )
+                return manifest_list_manager.read_all(snapshot), snapshot
+
+            return FileScanner(
+                self.table,
+                snapshot_id_manifest_scanner,
+                self.predicate,
+                self.limit
+            )
 
         def all_manifests():
             snapshot = snapshot_manager.get_latest_snapshot()
