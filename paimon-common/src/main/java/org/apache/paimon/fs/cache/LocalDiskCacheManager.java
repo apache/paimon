@@ -34,11 +34,13 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Block-level local disk cache with LRU eviction. Thread-safe. */
 public class LocalDiskCacheManager implements LocalCacheManager {
@@ -52,14 +54,20 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
+    private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
+    private final AtomicInteger refCount = new AtomicInteger(0);
+
+    // LRU-ordered index: key -> size. Access order so get() moves entry to tail.
+    private final LinkedHashMap<String, Long> entryIndex;
     private long currentSize;
 
     public LocalDiskCacheManager(String cacheDir, long maxSizeBytes, int blockSize) {
         this.cacheDir = new File(cacheDir);
         this.maxSizeBytes = maxSizeBytes;
         this.blockSize = blockSize;
+        this.entryIndex = new LinkedHashMap<>(64, 0.75f, true);
         this.cacheDir.mkdirs();
-        this.currentSize = scanSize();
+        this.currentSize = scanAndPopulateIndex();
     }
 
     /** Returns a shared instance for the given parameters, creating one if needed. */
@@ -76,24 +84,36 @@ public class LocalDiskCacheManager implements LocalCacheManager {
 
     public byte[] getBlock(String filePath, int blockIndex) {
         File path = cachePath(filePath, blockIndex);
-        if (!path.exists()) {
-            return null;
+        String cacheKey = path.getPath();
+        synchronized (lock) {
+            if (!entryIndex.containsKey(cacheKey)) {
+                return null;
+            }
+            // access to update LRU order
+            entryIndex.get(cacheKey);
         }
         try {
-            byte[] data = Files.readAllBytes(path.toPath());
-            // touch to update mtime for LRU
-            path.setLastModified(System.currentTimeMillis());
-            return data;
+            return Files.readAllBytes(path.toPath());
         } catch (IOException e) {
             LOG.debug("Failed to read cache block: {}", path, e);
+            synchronized (lock) {
+                Long size = entryIndex.remove(cacheKey);
+                if (size != null) {
+                    currentSize -= size;
+                }
+            }
             return null;
         }
     }
 
     public void putBlock(String filePath, int blockIndex, byte[] data) {
         File path = cachePath(filePath, blockIndex);
-        if (path.exists()) {
-            return;
+        String cacheKey = path.getPath();
+
+        synchronized (lock) {
+            if (entryIndex.containsKey(cacheKey)) {
+                return;
+            }
         }
 
         File subDir = path.getParentFile();
@@ -109,7 +129,6 @@ public class LocalDiskCacheManager implements LocalCacheManager {
             }
             if (!tmpFile.renameTo(path)) {
                 tmpFile.delete();
-                // another thread won the race — don't update currentSize
                 return;
             }
         } catch (IOException e) {
@@ -120,6 +139,7 @@ public class LocalDiskCacheManager implements LocalCacheManager {
 
         boolean needEvict = false;
         synchronized (lock) {
+            entryIndex.put(cacheKey, (long) data.length);
             currentSize += data.length;
             needEvict = maxSizeBytes < Long.MAX_VALUE && currentSize > maxSizeBytes;
         }
@@ -129,76 +149,55 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     }
 
     private void evict() {
-        List<CacheEntry> entries = new ArrayList<>();
-        File[] prefixDirs = cacheDir.listFiles();
-        if (prefixDirs == null) {
-            return;
-        }
-        for (File prefixDir : prefixDirs) {
-            if (!prefixDir.isDirectory()) {
-                continue;
-            }
-            File[] files = prefixDir.listFiles();
-            if (files == null) {
-                continue;
-            }
-            for (File file : files) {
-                if (file.getName().contains(".tmp.")) {
-                    continue;
-                }
-                entries.add(new CacheEntry(file.lastModified(), file.length(), file));
-            }
-        }
-
-        entries.sort(Comparator.comparingLong(e -> e.mtime));
-
-        List<CacheEntry> toDelete = new ArrayList<>();
+        List<Map.Entry<String, Long>> toDelete = new ArrayList<>();
         synchronized (lock) {
-            for (CacheEntry entry : entries) {
-                if (currentSize <= maxSizeBytes) {
-                    break;
-                }
+            if (currentSize <= maxSizeBytes) {
+                return;
+            }
+            Iterator<Map.Entry<String, Long>> it = entryIndex.entrySet().iterator();
+            while (it.hasNext() && currentSize > maxSizeBytes) {
+                Map.Entry<String, Long> entry = it.next();
                 toDelete.add(entry);
-                currentSize -= entry.size;
+                currentSize -= entry.getValue();
+                it.remove();
             }
         }
-        for (CacheEntry entry : toDelete) {
-            if (!entry.file.delete()) {
+        for (Map.Entry<String, Long> entry : toDelete) {
+            if (!new File(entry.getKey()).delete()) {
                 synchronized (lock) {
-                    currentSize += entry.size;
+                    entryIndex.put(entry.getKey(), entry.getValue());
+                    currentSize += entry.getValue();
                 }
             }
         }
     }
 
-    private long scanSize() {
+    private long scanAndPopulateIndex() {
         long total = 0;
         try {
             Path root = cacheDir.toPath();
             if (!Files.exists(root)) {
                 return 0;
             }
-            total = scanDirectory(root);
+            Files.walkFileTree(
+                    root,
+                    new SimpleFileVisitor<Path>() {
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                            String name = file.getFileName().toString();
+                            if (!name.contains(".tmp.")) {
+                                entryIndex.put(file.toFile().getPath(), attrs.size());
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+            for (Long size : entryIndex.values()) {
+                total += size;
+            }
         } catch (IOException e) {
-            LOG.warn("Failed to scan cache directory size", e);
+            LOG.warn("Failed to scan cache directory", e);
         }
         return total;
-    }
-
-    private long scanDirectory(Path root) throws IOException {
-        long[] total = {0};
-        Files.walkFileTree(
-                root,
-                new SimpleFileVisitor<Path>() {
-                    @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                        if (!file.getFileName().toString().contains(".tmp.")) {
-                            total[0] += attrs.size();
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-        return total[0];
     }
 
     private File cachePath(String filePath, int blockIndex) {
@@ -240,18 +239,32 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     }
 
     @Override
-    public void close() {}
+    public long getFileSize(String filePath) {
+        Long size = fileSizeCache.get(filePath);
+        return size != null ? size : -1;
+    }
 
-    private static class CacheEntry {
-        final long mtime;
-        final long size;
-        final File file;
+    @Override
+    public void putFileSize(String filePath, long size) {
+        fileSizeCache.put(filePath, size);
+    }
 
-        CacheEntry(long mtime, long size, File file) {
-            this.mtime = mtime;
-            this.size = size;
-            this.file = file;
+    @Override
+    public void retain() {
+        refCount.incrementAndGet();
+    }
+
+    @Override
+    public void release() {
+        if (refCount.decrementAndGet() <= 0) {
+            CacheKey key = new CacheKey(cacheDir.getPath(), maxSizeBytes, blockSize);
+            SHARED_CACHES.remove(key, this);
         }
+    }
+
+    @Override
+    public void close() {
+        fileSizeCache.clear();
     }
 
     private static class CacheKey {

@@ -57,6 +57,8 @@ class LocalMemoryCacheManager:
         self._lock = threading.Lock()
         self._current_size = 0
         self._cache: OrderedDict = OrderedDict()
+        self._file_size_cache: dict = {}
+        self._ref_count = 0
 
     @property
     def block_size(self) -> int:
@@ -83,10 +85,28 @@ class LocalMemoryCacheManager:
                 _, evicted = self._cache.popitem(last=False)
                 self._current_size -= len(evicted)
 
+    def get_file_size(self, file_path: str) -> int:
+        return self._file_size_cache.get(file_path, -1)
+
+    def put_file_size(self, file_path: str, size: int) -> None:
+        self._file_size_cache[file_path] = size
+
+    def retain(self) -> None:
+        with LocalMemoryCacheManager._shared_lock:
+            self._ref_count += 1
+
+    def release(self) -> None:
+        with LocalMemoryCacheManager._shared_lock:
+            self._ref_count -= 1
+            if self._ref_count <= 0:
+                key = (self._max_size_bytes, self._block_size)
+                LocalMemoryCacheManager._shared_caches.pop(key, None)
+
     def close(self) -> None:
         with self._lock:
             self._cache.clear()
             self._current_size = 0
+        self._file_size_cache.clear()
 
 
 class LocalDiskCacheManager:
@@ -112,8 +132,12 @@ class LocalDiskCacheManager:
         self._block_size = block_size
         self._lock = threading.Lock()
         self._current_size = 0
+        self._file_size_cache: dict = {}
+        self._ref_count = 0
+        # LRU-ordered index: cache_path -> size. OrderedDict with move_to_end for access order.
+        self._entry_index: OrderedDict = OrderedDict()
         os.makedirs(cache_dir, exist_ok=True)
-        self._current_size = self._scan_size()
+        self._current_size = self._scan_and_populate_index()
 
     @property
     def block_size(self) -> int:
@@ -128,18 +152,26 @@ class LocalDiskCacheManager:
 
     def get_block(self, file_path: str, block_index: int) -> Optional[bytes]:
         path = self._cache_path(file_path, block_index)
+        with self._lock:
+            if path not in self._entry_index:
+                return None
+            self._entry_index.move_to_end(path)
         try:
             with open(path, 'rb') as f:
-                data = f.read()
-            os.utime(path, None)
-            return data
-        except FileNotFoundError:
+                return f.read()
+        except (FileNotFoundError, OSError):
+            with self._lock:
+                size = self._entry_index.pop(path, None)
+                if size is not None:
+                    self._current_size -= size
             return None
 
     def put_block(self, file_path: str, block_index: int, data: bytes) -> None:
         path = self._cache_path(file_path, block_index)
-        if os.path.exists(path):
-            return
+
+        with self._lock:
+            if path in self._entry_index:
+                return
 
         sub_dir = os.path.dirname(path)
         os.makedirs(sub_dir, exist_ok=True)
@@ -158,6 +190,7 @@ class LocalDiskCacheManager:
 
         need_evict = False
         with self._lock:
+            self._entry_index[path] = len(data)
             self._current_size += len(data)
             need_evict = (self._max_size_bytes < (2 ** 63 - 1)
                           and self._current_size > self._max_size_bytes)
@@ -165,49 +198,57 @@ class LocalDiskCacheManager:
             self._evict()
 
     def _evict(self) -> None:
-        entries = []
+        to_delete = []
+        with self._lock:
+            if self._current_size <= self._max_size_bytes:
+                return
+            while self._entry_index and self._current_size > self._max_size_bytes:
+                path, size = self._entry_index.popitem(last=False)
+                self._current_size -= size
+                to_delete.append((path, size))
+
+        for path, size in to_delete:
+            try:
+                os.unlink(path)
+            except OSError:
+                with self._lock:
+                    self._entry_index[path] = size
+                    self._current_size += size
+
+    def _scan_and_populate_index(self) -> int:
+        total = 0
         for dirpath, _, filenames in os.walk(self._cache_dir):
             for fn in filenames:
                 if '.tmp.' in fn:
                     continue
                 fp = os.path.join(dirpath, fn)
                 try:
-                    st = os.stat(fp)
-                    entries.append((st.st_mtime, st.st_size, fp))
-                except OSError:
-                    pass
-
-        entries.sort()
-
-        to_delete = []
-        with self._lock:
-            for mtime, size, fp in entries:
-                if self._current_size <= self._max_size_bytes:
-                    break
-                to_delete.append((size, fp))
-                self._current_size -= size
-
-        for size, fp in to_delete:
-            try:
-                os.unlink(fp)
-            except OSError:
-                with self._lock:
-                    self._current_size += size
-
-    def _scan_size(self) -> int:
-        total = 0
-        for dirpath, _, filenames in os.walk(self._cache_dir):
-            for fn in filenames:
-                if '.tmp.' in fn:
-                    continue
-                try:
-                    total += os.path.getsize(os.path.join(dirpath, fn))
+                    size = os.path.getsize(fp)
+                    self._entry_index[fp] = size
+                    total += size
                 except OSError:
                     pass
         return total
 
+    def get_file_size(self, file_path: str) -> int:
+        return self._file_size_cache.get(file_path, -1)
+
+    def put_file_size(self, file_path: str, size: int) -> None:
+        self._file_size_cache[file_path] = size
+
+    def retain(self) -> None:
+        with LocalDiskCacheManager._shared_lock:
+            self._ref_count += 1
+
+    def release(self) -> None:
+        with LocalDiskCacheManager._shared_lock:
+            self._ref_count -= 1
+            if self._ref_count <= 0:
+                key = (self._cache_dir, self._max_size_bytes, self._block_size)
+                LocalDiskCacheManager._shared_caches.pop(key, None)
+
     def close(self) -> None:
-        pass
+        self._file_size_cache.clear()
 
 
 class CachingInputStream:
@@ -223,7 +264,12 @@ class CachingInputStream:
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
-            self._file_size = self._file_io.get_file_size(self._file_path)
+            cached = self._cache.get_file_size(self._file_path)
+            if cached >= 0:
+                self._file_size = cached
+            else:
+                self._file_size = self._file_io.get_file_size(self._file_path)
+                self._cache.put_file_size(self._file_path, self._file_size)
         return self._file_size
 
     def seek(self, offset, whence=0):
@@ -273,16 +319,16 @@ class CachingInputStream:
 
         stream = self._get_remote_stream()
         stream.seek(offset)
-        data = self._read_fully(read_size)
+        data = self._read_fully(stream, read_size)
 
         self._cache.put_block(self._file_path, block_index, data)
         return data
 
-    def _read_fully(self, size: int) -> bytes:
+    def _read_fully(self, stream, size: int) -> bytes:
         buf = bytearray()
         remaining = size
         while remaining > 0:
-            chunk = self._get_remote_stream().read(remaining)
+            chunk = stream.read(remaining)
             if not chunk:
                 break
             buf.extend(chunk)
@@ -325,6 +371,7 @@ class CachingFileIO(FileIO):
             self._whitelist = {FileType.META, FileType.GLOBAL_INDEX}
         else:
             self._whitelist = whitelist
+        cache.retain()
 
     def _get_cache(self):
         if self._cache is None:
@@ -334,6 +381,7 @@ class CachingFileIO(FileIO):
             else:
                 self._cache = LocalMemoryCacheManager.get_or_create(
                     self._max_size, self._block_size)
+            self._cache.retain()
         return self._cache
 
     @staticmethod
@@ -403,5 +451,6 @@ class CachingFileIO(FileIO):
         return getattr(self._delegate, name)
 
     def close(self):
-        self._cache.close()
+        if self._cache is not None:
+            self._cache.release()
         self._delegate.close()

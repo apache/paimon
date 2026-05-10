@@ -21,36 +21,33 @@ package org.apache.paimon.fs.cache;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Block-level in-memory cache with LRU eviction. Thread-safe. */
 public class LocalMemoryCacheManager implements LocalCacheManager {
 
     private static final Map<CacheKey, LocalMemoryCacheManager> SHARED_CACHES =
-            new java.util.concurrent.ConcurrentHashMap<>();
+            new ConcurrentHashMap<>();
 
+    private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
     private final LinkedHashMap<BlockKey, byte[]> cache;
+    private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
+    private final AtomicInteger refCount = new AtomicInteger(0);
 
     private long currentSize;
 
     public LocalMemoryCacheManager(long maxSizeBytes, int blockSize) {
+        this.maxSizeBytes = maxSizeBytes;
         this.blockSize = blockSize;
         this.currentSize = 0;
-        this.cache =
-                new LinkedHashMap<BlockKey, byte[]>(64, 0.75f, true) {
-                    @Override
-                    protected boolean removeEldestEntry(Map.Entry<BlockKey, byte[]> eldest) {
-                        if (currentSize > maxSizeBytes) {
-                            currentSize -= eldest.getValue().length;
-                            return true;
-                        }
-                        return false;
-                    }
-                };
+        this.cache = new LinkedHashMap<>(64, 0.75f, true);
     }
 
     public static LocalMemoryCacheManager getOrCreate(long maxSizeBytes, int blockSize) {
@@ -77,10 +74,43 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
     public void putBlock(String filePath, int blockIndex, byte[] data) {
         BlockKey key = new BlockKey(filePath, blockIndex);
         synchronized (lock) {
-            if (!cache.containsKey(key)) {
-                currentSize += data.length;
-                cache.put(key, data);
+            if (cache.containsKey(key)) {
+                return;
             }
+            currentSize += data.length;
+            cache.put(key, data);
+            while (maxSizeBytes < Long.MAX_VALUE
+                    && currentSize > maxSizeBytes
+                    && !cache.isEmpty()) {
+                Iterator<Map.Entry<BlockKey, byte[]>> it = cache.entrySet().iterator();
+                Map.Entry<BlockKey, byte[]> eldest = it.next();
+                currentSize -= eldest.getValue().length;
+                it.remove();
+            }
+        }
+    }
+
+    @Override
+    public long getFileSize(String filePath) {
+        Long size = fileSizeCache.get(filePath);
+        return size != null ? size : -1;
+    }
+
+    @Override
+    public void putFileSize(String filePath, long size) {
+        fileSizeCache.put(filePath, size);
+    }
+
+    @Override
+    public void retain() {
+        refCount.incrementAndGet();
+    }
+
+    @Override
+    public void release() {
+        if (refCount.decrementAndGet() <= 0) {
+            CacheKey key = new CacheKey(maxSizeBytes, blockSize);
+            SHARED_CACHES.remove(key, this);
         }
     }
 
@@ -90,6 +120,7 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
             cache.clear();
             currentSize = 0;
         }
+        fileSizeCache.clear();
     }
 
     private static class BlockKey {

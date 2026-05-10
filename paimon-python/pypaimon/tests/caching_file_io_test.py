@@ -277,8 +277,8 @@ class CachingFileIOTest(unittest.TestCase):
         with caching_io.new_input_stream("snapshot-1") as s:
             result2 = s.read()
         self.assertEqual(data, result2)
-        # get_file_size called lazily once per CachingInputStream on first read
-        self.assertEqual(2, delegate.get_file_size.call_count)
+        # get_file_size called only once — second stream gets size from cache
+        self.assertEqual(1, delegate.get_file_size.call_count)
 
     def test_manifest_file_is_cached(self):
         data = b"manifest data"

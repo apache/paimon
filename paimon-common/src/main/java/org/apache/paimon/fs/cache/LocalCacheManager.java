@@ -31,4 +31,18 @@ public interface LocalCacheManager extends Closeable {
     byte[] getBlock(String filePath, int blockIndex);
 
     void putBlock(String filePath, int blockIndex, byte[] data);
+
+    /** Returns cached file size, or -1 if not cached. */
+    long getFileSize(String filePath);
+
+    void putFileSize(String filePath, long size);
+
+    /** Acquire a reference to this shared cache. */
+    void retain();
+
+    /**
+     * Release a reference. When the last reference is released, the cache is removed from the
+     * shared pool.
+     */
+    void release();
 }

@@ -69,6 +69,7 @@ public class CachingFileIO implements FileIO {
         this.cacheDir = cacheDir;
         this.maxSize = maxSize;
         this.blockSize = blockSize;
+        cache.retain();
     }
 
     /**
@@ -111,11 +112,14 @@ public class CachingFileIO implements FileIO {
         if (cache == null) {
             synchronized (this) {
                 if (cache == null) {
+                    LocalCacheManager newCache;
                     if (cacheDir != null) {
-                        cache = LocalDiskCacheManager.getOrCreate(cacheDir, maxSize, blockSize);
+                        newCache = LocalDiskCacheManager.getOrCreate(cacheDir, maxSize, blockSize);
                     } else {
-                        cache = LocalMemoryCacheManager.getOrCreate(maxSize, blockSize);
+                        newCache = LocalMemoryCacheManager.getOrCreate(maxSize, blockSize);
                     }
+                    newCache.retain();
+                    cache = newCache;
                 }
             }
         }
@@ -184,7 +188,7 @@ public class CachingFileIO implements FileIO {
     @Override
     public void close() throws IOException {
         if (cache != null) {
-            cache.close();
+            cache.release();
         }
         delegate.close();
     }

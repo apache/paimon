@@ -77,7 +77,7 @@ class CachingFileIOTest {
             assertThat(result).isEqualTo(data);
         }
 
-        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(2);
+        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(1);
     }
 
     @Test

@@ -45,7 +45,14 @@ public class CachingSeekableInputStream extends SeekableInputStream {
 
     private long fileSize() throws IOException {
         if (fileSize == -1) {
-            fileSize = fileIO.getFileStatus(path).getLen();
+            String pathStr = path.toString();
+            long cached = cache.getFileSize(pathStr);
+            if (cached >= 0) {
+                fileSize = cached;
+            } else {
+                fileSize = fileIO.getFileStatus(path).getLen();
+                cache.putFileSize(pathStr, fileSize);
+            }
         }
         return fileSize;
     }
