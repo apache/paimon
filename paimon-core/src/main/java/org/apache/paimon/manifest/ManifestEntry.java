@@ -64,6 +64,8 @@ public interface ManifestEntry extends FileEntry {
 
     ManifestEntry assignFirstRowId(long firstRowId);
 
+    ManifestEntry assignCommitSnapshotId(long snapshotId);
+
     ManifestEntry upgrade(int newLevel);
 
     static long recordCount(List<ManifestEntry> manifestEntries) {

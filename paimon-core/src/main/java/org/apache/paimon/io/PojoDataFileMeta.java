@@ -82,6 +82,14 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     private final @Nullable List<String> writeCols;
 
+    /**
+     * Commit snapshot id stamped on this file. Non-null only when the table has {@code
+     * sequence.snapshot-ordering} enabled and the file has been assigned a snapshot id either at
+     * commit time or by a compaction rewriter. Null for files written before the feature was
+     * enabled or for tables that do not use snapshot-based ordering.
+     */
+    private final @Nullable Long commitSnapshotId;
+
     public PojoDataFileMeta(
             String fileName,
             long fileSize,
@@ -103,6 +111,52 @@ public class PojoDataFileMeta implements DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols) {
+        this(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                firstRowId,
+                writeCols,
+                null);
+    }
+
+    public PojoDataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryRow minKey,
+            BinaryRow maxKey,
+            SimpleStats keyStats,
+            SimpleStats valueStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            int level,
+            List<String> extraFiles,
+            Timestamp creationTime,
+            @Nullable Long deleteRowCount,
+            @Nullable byte[] embeddedIndex,
+            @Nullable FileSource fileSource,
+            @Nullable List<String> valueStatsCols,
+            @Nullable String externalPath,
+            @Nullable Long firstRowId,
+            @Nullable List<String> writeCols,
+            @Nullable Long commitSnapshotId) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
@@ -127,6 +181,7 @@ public class PojoDataFileMeta implements DataFileMeta {
         this.externalPath = externalPath;
         this.firstRowId = firstRowId;
         this.writeCols = writeCols;
+        this.commitSnapshotId = commitSnapshotId;
     }
 
     @Override
@@ -253,205 +308,238 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    @Nullable
+    public Long commitSnapshotId() {
+        return commitSnapshotId;
+    }
+
+    @Override
+    public PojoDataFileMeta assignCommitSnapshotId(long snapshotId) {
+        return toBuilder().commitSnapshotId(snapshotId).build();
+    }
+
+    @Override
     public PojoDataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                newLevel,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                externalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().level(newLevel).build();
     }
 
     @Override
     public PojoDataFileMeta rename(String newFileName) {
         String newExternalPath = externalPathDir().map(dir -> dir + "/" + newFileName).orElse(null);
-        return new PojoDataFileMeta(
-                newFileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                newExternalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().fileName(newFileName).externalPath(newExternalPath).build();
     }
 
     @Override
     public PojoDataFileMeta copyWithoutStats() {
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                EMPTY_STATS,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                Collections.emptyList(),
-                externalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().valueStats(EMPTY_STATS).valueStatsCols(Collections.emptyList()).build();
     }
 
     @Override
     public PojoDataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber) {
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                externalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder()
+                .minSequenceNumber(minSequenceNumber)
+                .maxSequenceNumber(maxSequenceNumber)
+                .build();
     }
 
     @Override
     public PojoDataFileMeta assignFirstRowId(long firstRowId) {
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                externalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().firstRowId(firstRowId).build();
     }
 
     @Override
     public PojoDataFileMeta copy(List<String> newExtraFiles) {
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                newExtraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                externalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().extraFiles(newExtraFiles).build();
     }
 
     @Override
     public PojoDataFileMeta newExternalPath(String newExternalPath) {
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                embeddedIndex,
-                fileSource,
-                valueStatsCols,
-                newExternalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().externalPath(newExternalPath).build();
     }
 
     @Override
     public PojoDataFileMeta copy(byte[] newEmbeddedIndex) {
-        return new PojoDataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                deleteRowCount,
-                newEmbeddedIndex,
-                fileSource,
-                valueStatsCols,
-                externalPath,
-                firstRowId,
-                writeCols);
+        return toBuilder().embeddedIndex(newEmbeddedIndex).build();
+    }
+
+    private Builder toBuilder() {
+        return new Builder()
+                .fileName(fileName)
+                .fileSize(fileSize)
+                .rowCount(rowCount)
+                .minKey(minKey)
+                .maxKey(maxKey)
+                .keyStats(keyStats)
+                .valueStats(valueStats)
+                .minSequenceNumber(minSequenceNumber)
+                .maxSequenceNumber(maxSequenceNumber)
+                .schemaId(schemaId)
+                .level(level)
+                .extraFiles(extraFiles)
+                .creationTime(creationTime)
+                .deleteRowCount(deleteRowCount)
+                .embeddedIndex(embeddedIndex)
+                .fileSource(fileSource)
+                .valueStatsCols(valueStatsCols)
+                .externalPath(externalPath)
+                .firstRowId(firstRowId)
+                .writeCols(writeCols)
+                .commitSnapshotId(commitSnapshotId);
+    }
+
+    private static class Builder {
+        private String fileName;
+        private long fileSize;
+        private long rowCount;
+        private BinaryRow minKey;
+        private BinaryRow maxKey;
+        private SimpleStats keyStats;
+        private SimpleStats valueStats;
+        private long minSequenceNumber;
+        private long maxSequenceNumber;
+        private long schemaId;
+        private int level;
+        private List<String> extraFiles;
+        private Timestamp creationTime;
+        private @Nullable Long deleteRowCount;
+        private @Nullable byte[] embeddedIndex;
+        private @Nullable FileSource fileSource;
+        private @Nullable List<String> valueStatsCols;
+        private @Nullable String externalPath;
+        private @Nullable Long firstRowId;
+        private @Nullable List<String> writeCols;
+        private @Nullable Long commitSnapshotId;
+
+        Builder fileName(String v) {
+            this.fileName = v;
+            return this;
+        }
+
+        Builder fileSize(long v) {
+            this.fileSize = v;
+            return this;
+        }
+
+        Builder rowCount(long v) {
+            this.rowCount = v;
+            return this;
+        }
+
+        Builder minKey(BinaryRow v) {
+            this.minKey = v;
+            return this;
+        }
+
+        Builder maxKey(BinaryRow v) {
+            this.maxKey = v;
+            return this;
+        }
+
+        Builder keyStats(SimpleStats v) {
+            this.keyStats = v;
+            return this;
+        }
+
+        Builder valueStats(SimpleStats v) {
+            this.valueStats = v;
+            return this;
+        }
+
+        Builder minSequenceNumber(long v) {
+            this.minSequenceNumber = v;
+            return this;
+        }
+
+        Builder maxSequenceNumber(long v) {
+            this.maxSequenceNumber = v;
+            return this;
+        }
+
+        Builder schemaId(long v) {
+            this.schemaId = v;
+            return this;
+        }
+
+        Builder level(int v) {
+            this.level = v;
+            return this;
+        }
+
+        Builder extraFiles(List<String> v) {
+            this.extraFiles = v;
+            return this;
+        }
+
+        Builder creationTime(Timestamp v) {
+            this.creationTime = v;
+            return this;
+        }
+
+        Builder deleteRowCount(@Nullable Long v) {
+            this.deleteRowCount = v;
+            return this;
+        }
+
+        Builder embeddedIndex(@Nullable byte[] v) {
+            this.embeddedIndex = v;
+            return this;
+        }
+
+        Builder fileSource(@Nullable FileSource v) {
+            this.fileSource = v;
+            return this;
+        }
+
+        Builder valueStatsCols(@Nullable List<String> v) {
+            this.valueStatsCols = v;
+            return this;
+        }
+
+        Builder externalPath(@Nullable String v) {
+            this.externalPath = v;
+            return this;
+        }
+
+        Builder firstRowId(@Nullable Long v) {
+            this.firstRowId = v;
+            return this;
+        }
+
+        Builder writeCols(@Nullable List<String> v) {
+            this.writeCols = v;
+            return this;
+        }
+
+        Builder commitSnapshotId(@Nullable Long v) {
+            this.commitSnapshotId = v;
+            return this;
+        }
+
+        PojoDataFileMeta build() {
+            return new PojoDataFileMeta(
+                    fileName,
+                    fileSize,
+                    rowCount,
+                    minKey,
+                    maxKey,
+                    keyStats,
+                    valueStats,
+                    minSequenceNumber,
+                    maxSequenceNumber,
+                    schemaId,
+                    level,
+                    extraFiles,
+                    creationTime,
+                    deleteRowCount,
+                    embeddedIndex,
+                    fileSource,
+                    valueStatsCols,
+                    externalPath,
+                    firstRowId,
+                    writeCols,
+                    commitSnapshotId);
+        }
     }
 
     @Override
@@ -513,7 +601,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 && Objects.equals(valueStatsCols, that.valueStatsCols())
                 && Objects.equals(externalPath, that.externalPath().orElse(null))
                 && Objects.equals(firstRowId, that.firstRowId())
-                && Objects.equals(writeCols, that.writeCols());
+                && Objects.equals(writeCols, that.writeCols())
+                && Objects.equals(commitSnapshotId, that.commitSnapshotId());
     }
 
     @Override
@@ -538,7 +627,8 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                commitSnapshotId);
     }
 
     @Override
@@ -548,7 +638,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "
-                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s, firstRowId: %s, writeCols: %s}",
+                        + "deleteRowCount: %d, fileSource: %s, valueStatsCols: %s, externalPath: %s, firstRowId: %s, writeCols: %s, commitSnapshotId: %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -568,6 +658,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                commitSnapshotId);
     }
 }

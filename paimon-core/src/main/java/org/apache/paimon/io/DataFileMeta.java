@@ -87,7 +87,8 @@ public interface DataFileMeta {
                             new DataField(17, "_EXTERNAL_PATH", newStringType(true)),
                             new DataField(18, "_FIRST_ROW_ID", new BigIntType(true)),
                             new DataField(
-                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false)))));
+                                    19, "_WRITE_COLS", new ArrayType(true, newStringType(false))),
+                            new DataField(20, "_COMMIT_SNAPSHOT_ID", new BigIntType(true))));
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -328,6 +329,17 @@ public interface DataFileMeta {
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
     DataFileMeta assignFirstRowId(long firstRowId);
+
+    /**
+     * Snapshot id at which this file was committed (or the source snapshot id stamped by a
+     * compaction rewriter). Null when the table does not enable {@code sequence.snapshot-ordering}
+     * or when this file pre-dates the feature.
+     */
+    @Nullable
+    Long commitSnapshotId();
+
+    /** Returns a copy of this file with the given commit snapshot id stamped on it. */
+    DataFileMeta assignCommitSnapshotId(long snapshotId);
 
     default List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();

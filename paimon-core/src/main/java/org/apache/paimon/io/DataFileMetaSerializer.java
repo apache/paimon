@@ -61,31 +61,40 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()));
+                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()),
+                meta.commitSnapshotId());
     }
 
     @Override
     public DataFileMeta fromRow(InternalRow row) {
-        return DataFileMeta.create(
-                row.getString(0).toString(),
-                row.getLong(1),
-                row.getLong(2),
-                deserializeBinaryRow(row.getBinary(3)),
-                deserializeBinaryRow(row.getBinary(4)),
-                SimpleStats.fromRow(row.getRow(5, 3)),
-                SimpleStats.fromRow(row.getRow(6, 3)),
-                row.getLong(7),
-                row.getLong(8),
-                row.getLong(9),
-                row.getInt(10),
-                fromStringArrayData(row.getArray(11)),
-                row.getTimestamp(12, 3),
-                row.isNullAt(13) ? null : row.getLong(13),
-                row.isNullAt(14) ? null : row.getBinary(14),
-                row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
-                row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
-                row.isNullAt(17) ? null : row.getString(17).toString(),
-                row.isNullAt(18) ? null : row.getLong(18),
-                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)));
+        DataFileMeta meta =
+                DataFileMeta.create(
+                        row.getString(0).toString(),
+                        row.getLong(1),
+                        row.getLong(2),
+                        deserializeBinaryRow(row.getBinary(3)),
+                        deserializeBinaryRow(row.getBinary(4)),
+                        SimpleStats.fromRow(row.getRow(5, 3)),
+                        SimpleStats.fromRow(row.getRow(6, 3)),
+                        row.getLong(7),
+                        row.getLong(8),
+                        row.getLong(9),
+                        row.getInt(10),
+                        fromStringArrayData(row.getArray(11)),
+                        row.getTimestamp(12, 3),
+                        row.isNullAt(13) ? null : row.getLong(13),
+                        row.isNullAt(14) ? null : row.getBinary(14),
+                        row.isNullAt(15) ? null : FileSource.fromByteValue(row.getByte(15)),
+                        row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
+                        row.isNullAt(17) ? null : row.getString(17).toString(),
+                        row.isNullAt(18) ? null : row.getLong(18),
+                        row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)));
+        // Field 20 (_COMMIT_SNAPSHOT_ID) was added in a later version and is nullable. Rows read
+        // through Avro from older manifests will have this position filled with null, so a simple
+        // null-check is sufficient for backwards compatibility.
+        if (!row.isNullAt(20)) {
+            meta = meta.assignCommitSnapshotId(row.getLong(20));
+        }
+        return meta;
     }
 }

@@ -146,6 +146,12 @@ public class PojoManifestEntry implements ManifestEntry {
     }
 
     @Override
+    public PojoManifestEntry assignCommitSnapshotId(long snapshotId) {
+        return new PojoManifestEntry(
+                kind, partition, bucket, totalBuckets, file.assignCommitSnapshotId(snapshotId));
+    }
+
+    @Override
     public ManifestEntry upgrade(int newLevel) {
         return new PojoManifestEntry(kind, partition, bucket, totalBuckets, file.upgrade(newLevel));
     }
