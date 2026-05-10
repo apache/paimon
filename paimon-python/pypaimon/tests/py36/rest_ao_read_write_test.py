@@ -613,11 +613,12 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         table = self.rest_catalog.get_table('default.test_append_only_limit')
         self._write_test_table(table)
 
+        # Row-level limit: the reader stops at exactly N rows (not "first
+        # split's full row count"). Scan still keeps the first split that
+        # covers the limit; the reader short-circuits inside it.
         read_builder = table.new_read_builder().with_limit(1)
         actual = self._read_test_table(read_builder)
-        # only records from 1st commit (1st split) will be read
-        # might be split of "dt=1" or split of "dt=2"
-        self.assertEqual(actual.num_rows, 4)
+        self.assertEqual(actual.num_rows, 1)
 
     def test_write_wrong_schema(self):
         self.rest_catalog.create_table('default.test_wrong_schema',

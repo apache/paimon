@@ -42,6 +42,7 @@ class TableRead:
         read_type: List[DataField],
         include_row_kind: bool = False,
         nested_name_paths: Optional[List[List[str]]] = None,
+        limit: Optional[int] = None,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -50,14 +51,24 @@ class TableRead:
         self.read_type = read_type
         self.include_row_kind = include_row_kind
         self.nested_name_paths = nested_name_paths
+        self.limit = limit
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
+        limit = self.limit
+
         def _record_generator():
+            count = 0
             for split in splits:
+                if limit is not None and count >= limit:
+                    return
                 reader = self._create_split_read(split).create_reader()
                 try:
                     for batch in iter(reader.read_batch, None):
-                        yield from iter(batch.next, None)
+                        for row in iter(batch.next, None):
+                            yield row
+                            count += 1
+                            if limit is not None and count >= limit:
+                                return
                 finally:
                     reader.close()
 
@@ -113,27 +124,46 @@ class TableRead:
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema) -> Iterator[pyarrow.RecordBatch]:
         chunk_size = 65536
+        # ``remaining`` tracks how many rows we are still allowed to emit
+        # across all splits. ``None`` means unlimited.
+        remaining = self.limit
 
         for split in splits:
+            if remaining is not None and remaining <= 0:
+                break
             reader = self._create_split_read(split).create_reader()
             try:
                 if isinstance(reader, RecordBatchReader):
-                    # Add row kind column if requested (default to +I for RecordBatchReader)
-                    if self.include_row_kind:
-                        for batch in iter(reader.read_arrow_batch, None):
-                            yield self._add_row_kind_column_to_batch(batch, "+I")
-                    else:
-                        yield from iter(reader.read_arrow_batch, None)
+                    for batch in iter(reader.read_arrow_batch, None):
+                        if remaining is not None and batch.num_rows > remaining:
+                            batch = batch.slice(0, remaining)
+                        if self.include_row_kind:
+                            batch = self._add_row_kind_column_to_batch(batch, "+I")
+                        yield batch
+                        if remaining is not None:
+                            remaining -= batch.num_rows
+                            if remaining <= 0:
+                                break
                 else:
                     row_tuple_chunk = []
                     row_kind_chunk = []
-                    for row_iterator in iter(reader.read_batch, None):
+                    while True:
+                        row_iterator = reader.read_batch()
+                        if row_iterator is None:
+                            break
+                        stop = False
                         for row in iter(row_iterator.next, None):
                             if not isinstance(row, OffsetRow):
                                 raise TypeError(f"Expected OffsetRow, but got {type(row).__name__}")
                             row_tuple_chunk.append(row.row_tuple[row.offset: row.offset + row.arity])
                             if self.include_row_kind:
                                 row_kind_chunk.append(row.get_row_kind().to_string())
+
+                            if remaining is not None:
+                                remaining -= 1
+                                if remaining <= 0:
+                                    stop = True
+                                    break
 
                             if len(row_tuple_chunk) >= chunk_size:
                                 batch = self._convert_rows_to_arrow_batch_with_row_kind(
@@ -142,6 +172,8 @@ class TableRead:
                                 yield batch
                                 row_tuple_chunk = []
                                 row_kind_chunk = []
+                        if stop:
+                            break
 
                     if row_tuple_chunk:
                         batch = self._convert_rows_to_arrow_batch_with_row_kind(
@@ -242,15 +274,22 @@ class TableRead:
                 splits=splits,
                 read_type=self.read_type,
                 predicate=self.predicate,
+                limit=self.limit,
             )
         )
-        return ray.data.read_datasource(
+        ds = ray.data.read_datasource(
             datasource,
             ray_remote_args=ray_remote_args,
             concurrency=concurrency,
             override_num_blocks=override_num_blocks,
             **read_args
         )
+        # Each Ray worker applies the per-task limit independently, so N
+        # workers can collectively yield up to N * limit rows. Cap the
+        # final dataset to the user-visible limit on top.
+        if self.limit is not None:
+            ds = ds.limit(self.limit)
+        return ds
 
     def to_torch(
         self,
@@ -285,6 +324,7 @@ class TableRead:
                 split=split,
                 row_tracking_enabled=False,
                 outer_extract_name_paths=outer_extract_name_paths,
+                limit=self.limit,
             )
         elif self.table.options.data_evolution_enabled():
             if self.nested_name_paths and any(

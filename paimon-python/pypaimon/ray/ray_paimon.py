@@ -79,13 +79,18 @@ def read_paimon(
             limit=limit,
         )
     )
-    return ray.data.read_datasource(
+    ds = ray.data.read_datasource(
         datasource,
         ray_remote_args=ray_remote_args,
         concurrency=concurrency,
         override_num_blocks=override_num_blocks,
         **read_args,
     )
+    # Per-task limit short-circuits each worker's reader, but N workers
+    # could collectively overshoot the user-visible limit. Cap on top.
+    if limit is not None:
+        ds = ds.limit(limit)
+    return ds
 
 
 def write_paimon(

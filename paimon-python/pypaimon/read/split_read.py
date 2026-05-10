@@ -578,7 +578,8 @@ class MergeFileSplitRead(SplitRead):
             read_type: List[DataField],
             split: Split,
             row_tracking_enabled: bool,
-            outer_extract_name_paths: Optional[List[List[str]]] = None):
+            outer_extract_name_paths: Optional[List[List[str]]] = None,
+            limit: Optional[int] = None):
         # Merge functions need full ROW sub-structures, so nested paths
         # are not pushed down here; sub-path extraction happens above
         # the merge via OuterProjectionRecordReader.
@@ -591,6 +592,7 @@ class MergeFileSplitRead(SplitRead):
             nested_name_paths=None,
         )
         self.outer_extract_name_paths = outer_extract_name_paths
+        self.limit = limit
 
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
         file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
@@ -632,6 +634,10 @@ class MergeFileSplitRead(SplitRead):
             inner_top_names = [f.name for f in self.read_fields[-self.value_arity:]]
             reader = OuterProjectionRecordReader(
                 reader, inner_top_names, self.outer_extract_name_paths)
+        if self.limit is not None:
+            from pypaimon.read.reader.limited_record_reader import \
+                LimitedRecordReader
+            reader = LimitedRecordReader(reader, self.limit)
         return reader
 
     def _get_all_data_fields(self):

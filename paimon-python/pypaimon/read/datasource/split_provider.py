@@ -58,6 +58,15 @@ class SplitProvider(ABC):
         to peek at concrete provider types to format its name.
         """
 
+    def limit(self) -> Optional[int]:
+        """Optional row limit applied at scan/read time.
+
+        Subclasses override when the limit is known up front so the
+        datasource can thread it through to per-task ``TableRead``
+        instances and stop reading once the budget is met.
+        """
+        return None
+
 
 class CatalogSplitProvider(SplitProvider):
     """Plan splits from a fully-qualified table identifier and catalog options.
@@ -127,6 +136,9 @@ class CatalogSplitProvider(SplitProvider):
     def predicate(self):
         return self._predicate
 
+    def limit(self) -> Optional[int]:
+        return self._limit
+
     def display_name(self) -> str:
         return self._table_identifier
 
@@ -139,11 +151,13 @@ class PreResolvedSplitProvider(SplitProvider):
     skipped.
     """
 
-    def __init__(self, table, splits: List[Split], read_type, predicate=None):
+    def __init__(self, table, splits: List[Split], read_type, predicate=None,
+                 limit: Optional[int] = None):
         self._table = table
         self._splits = splits
         self._read_type = read_type
         self._predicate = predicate
+        self._limit = limit
 
     def table(self):
         return self._table
@@ -156,6 +170,9 @@ class PreResolvedSplitProvider(SplitProvider):
 
     def predicate(self):
         return self._predicate
+
+    def limit(self) -> Optional[int]:
+        return self._limit
 
     def display_name(self) -> str:
         identifier = self._table.identifier

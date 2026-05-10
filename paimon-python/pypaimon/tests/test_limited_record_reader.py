@@ -38,14 +38,18 @@ class _ListIterator(RecordIterator):
 
 
 class _StaticReader(RecordReader):
-    """Hands back batches one at a time, plus tracks close calls."""
+    """Hands back batches one at a time, tracks close calls and the
+    number of times ``read_batch`` was invoked (so tests can prove the
+    limiter actually short-circuited instead of draining the inner)."""
 
     def __init__(self, batches: List[List]):
         self._batches = batches
         self._idx = 0
         self.closed = False
+        self.read_batch_calls = 0
 
     def read_batch(self) -> Optional[RecordIterator]:
+        self.read_batch_calls += 1
         if self._idx >= len(self._batches):
             return None
         batch = self._batches[self._idx]
@@ -121,6 +125,16 @@ class LimitedRecordReaderTest(unittest.TestCase):
             _StaticReader([[1, 2, 3, 4]]), limit=10)
         _drain(reader)
         self.assertEqual(reader.count, 4)
+
+    def test_does_not_drain_inner_when_limit_met_within_first_batch(self):
+        """Direct proof of the short-circuit: once the limiter has handed
+        out ``limit`` rows the next ``read_batch`` short-circuits at the
+        entry guard and never pulls a second batch from the inner."""
+        inner = _StaticReader([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+        reader = LimitedRecordReader(inner, limit=3)
+        self.assertEqual(_drain(reader), [1, 2, 3])
+        # Only the first batch was fetched; the second is never asked for.
+        self.assertEqual(inner.read_batch_calls, 1)
 
 
 if __name__ == '__main__':

@@ -80,6 +80,7 @@ class ReadBuilder:
             predicate=self._predicate,
             read_type=self.read_type(),
             nested_name_paths=self._nested_name_paths(),
+            limit=self._limit,
         )
 
     def _nested_name_paths(self) -> Optional[List[List[str]]]:

@@ -125,6 +125,7 @@ class RayDatasource(Datasource):
         predicate = self._split_provider.predicate()
         read_type = self._split_provider.read_type()
         splits = self._split_provider.splits()
+        limit = self._split_provider.limit()
         if not splits:
             return []
 
@@ -146,10 +147,12 @@ class RayDatasource(Datasource):
                 predicate=predicate,
                 read_type=read_type,
                 schema=schema,
+                limit=limit,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
-            worker_table_read = TableRead(table, predicate, read_type)
+            worker_table_read = TableRead(
+                table, predicate, read_type, limit=limit)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
             has_data = False
@@ -172,6 +175,7 @@ class RayDatasource(Datasource):
             predicate=predicate,
             read_type=read_type,
             schema=schema,
+            limit=limit,
         )
 
         read_tasks = []

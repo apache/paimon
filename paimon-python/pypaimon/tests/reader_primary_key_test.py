@@ -351,7 +351,6 @@ class PkReaderTest(unittest.TestCase):
             len(merge_splits), 0,
             "Should have at least one merge split to test limit with merge scenario")
 
-        total_unique_rows = 125
         for limit in [5, 10, 20, 50]:
             read_builder = table.new_read_builder().with_limit(limit)
             table_read = read_builder.new_read()
@@ -363,9 +362,9 @@ class PkReaderTest(unittest.TestCase):
             result = table_read.to_arrow(splits)
             row_count = result.num_rows if result is not None else 0
             self.assertEqual(
-                row_count, total_unique_rows,
-                f"with_limit({limit}) should return all rows for PK table "
-                f"(read-level limit not yet implemented)")
+                row_count, limit,
+                f"with_limit({limit}) on PK table must return exactly "
+                f"{limit} rows now that the read-level limit is wired")
 
     def test_incremental_timestamp(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
