@@ -204,9 +204,14 @@ class SplitRead(ABC):
                 [nested_path_by_name[name] for name in read_file_fields]
                 if has_nested else None
             )
-            format_reader = FormatAvroReader(self.table.file_io, file_path, read_file_fields,
-                                             self.read_fields, read_arrow_predicate, batch_size=batch_size,
-                                             nested_name_paths=avro_nested_paths)
+            # Pass the alias-safe union so FormatAvroReader can resolve
+            # the bare PK name (e.g. ``id``) requested by read_file_fields,
+            # even when value projection drops it from self.read_fields.
+            format_reader = FormatAvroReader(
+                self.table.file_io, file_path, read_file_fields,
+                list(name_to_field.values()),
+                read_arrow_predicate, batch_size=batch_size,
+                nested_name_paths=avro_nested_paths)
         elif file_format == CoreOptions.FILE_FORMAT_BLOB:
             if has_nested:
                 raise NotImplementedError(

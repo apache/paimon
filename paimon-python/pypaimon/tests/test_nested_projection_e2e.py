@@ -236,6 +236,16 @@ class PrimaryKeyNestedTest(_AppendOnlyNestedBase):
             arrow.column('val').to_pylist()))
         self.assertEqual(rows, [(1, 100, 'x'), (2, 200, 'y'), (3, 300, 'z')])
 
+    def test_avro_extracts_single_nested_leaf(self):
+        # Avro PK reads resolve DataFields through ``full_fields_map`` which
+        # historically only covered merge-internal aliases; without the
+        # alias-safe fix, this projection would raise ``KeyError: 'id'``.
+        table = self._create_pk_table('pk_avro_nested_single', file_format='avro')
+        arrow = self._read_arrow(table, ['mv.latest_version'])
+        self.assertEqual(arrow.column_names, ['mv_latest_version'])
+        versions = sorted(arrow.column('mv_latest_version').to_pylist())
+        self.assertEqual(versions, [100, 200, 300])
+
 
 if __name__ == '__main__':
     unittest.main()
