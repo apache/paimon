@@ -43,6 +43,8 @@ public class KeyValue {
 
     public static final long UNKNOWN_SEQUENCE = -1;
     public static final int UNKNOWN_LEVEL = -1;
+    // Paimon snapshot ids are always >= 1, so -1 is a safe sentinel for "unstamped".
+    public static final long UNKNOWN_SNAPSHOT_ID = -1;
 
     private InternalRow key;
     // determined after written into memory table or read from file
@@ -51,6 +53,9 @@ public class KeyValue {
     private InternalRow value;
     // determined after read from file
     private int level;
+    // determined after read from file; UNKNOWN_SNAPSHOT_ID if the source data file is not stamped
+    // with a commit snapshot id (snapshot-ordering disabled, or pre-existing data file)
+    private long snapshotId;
 
     public KeyValue replace(InternalRow key, RowKind valueKind, InternalRow value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
@@ -63,6 +68,7 @@ public class KeyValue {
         this.valueKind = valueKind;
         this.value = value;
         this.level = UNKNOWN_LEVEL;
+        this.snapshotId = UNKNOWN_SNAPSHOT_ID;
         return this;
     }
 
@@ -108,6 +114,26 @@ public class KeyValue {
     public KeyValue setLevel(int level) {
         this.level = level;
         return this;
+    }
+
+    public long snapshotId() {
+        return snapshotId;
+    }
+
+    public KeyValue setSnapshotId(long snapshotId) {
+        this.snapshotId = snapshotId;
+        return this;
+    }
+
+    /**
+     * Compare two KeyValues by their commit snapshot id. {@link #UNKNOWN_SNAPSHOT_ID} is treated as
+     * {@link Long#MIN_VALUE} so that stamped records always beat unstamped ones, preserving
+     * comparator transitivity.
+     */
+    public static int compareSnapshotId(KeyValue a, KeyValue b) {
+        long sa = a.snapshotId == UNKNOWN_SNAPSHOT_ID ? Long.MIN_VALUE : a.snapshotId;
+        long sb = b.snapshotId == UNKNOWN_SNAPSHOT_ID ? Long.MIN_VALUE : b.snapshotId;
+        return Long.compare(sa, sb);
     }
 
     public static RowType schema(RowType keyType, RowType valueType) {
@@ -173,7 +199,8 @@ public class KeyValue {
                         sequenceNumber,
                         valueKind,
                         valueSerializer.copy(value))
-                .setLevel(level);
+                .setLevel(level)
+                .setSnapshotId(snapshotId);
     }
 
     @VisibleForTesting

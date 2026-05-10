@@ -93,13 +93,17 @@ public class SpecialFields {
     public static final DataField ROW_ID =
             new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT().notNull());
 
+    public static final DataField COMMIT_SNAPSHOT_ID =
+            new DataField(Integer.MAX_VALUE - 6, "_COMMIT_SNAPSHOT_ID", DataTypes.BIGINT());
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
             Stream.of(
                             SEQUENCE_NUMBER.name(),
                             VALUE_KIND.name(),
                             LEVEL.name(),
                             ROW_KIND.name(),
-                            ROW_ID.name())
+                            ROW_ID.name(),
+                            COMMIT_SNAPSHOT_ID.name())
                     .collect(Collectors.toSet());
 
     public static boolean isSystemField(int fieldId) {
