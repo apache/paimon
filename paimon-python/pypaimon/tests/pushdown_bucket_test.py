@@ -817,6 +817,66 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         self.assertEqual(self._split_buckets(splits),
                          self._expected_buckets(table, [17]))
 
+    def test_per_partition_pruning_with_mixed_or(self):
+        """``(part='a' AND id=1) OR (part='b' AND id=2)``: each partition
+        sees only the bucket for its own ``id`` literal. Without
+        per-partition predicate specialisation this query falls through
+        to "all buckets in both partitions"."""
+        opts = {'bucket': '4', 'file.format': 'parquet'}
+        pa_schema = pa.schema([
+            pa.field('part', pa.string(), nullable=False),
+            pa.field('id', pa.int64(), nullable=False),
+            ('val', pa.int64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['part', 'id'],
+            partition_keys=['part'], options=opts)
+        identifier = 'default.per_part_mixed_or'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        # Two partitions × three id values each → up to 6 (part, bucket)
+        # combinations after the writer hashes.
+        rows = []
+        for p in ('a', 'b'):
+            for i in (1, 2, 3):
+                rows.append({'part': p, 'id': i, 'val': i * 7})
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        c = wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        mixed = PredicateBuilder.or_predicates([
+            PredicateBuilder.and_predicates([
+                pb.equal('part', 'a'),
+                pb.equal('id', 1),
+            ]),
+            PredicateBuilder.and_predicates([
+                pb.equal('part', 'b'),
+                pb.equal('id', 2),
+            ]),
+        ])
+        got, splits = self._read_with(table, mixed)
+        # Correctness: only the two matching rows.
+        got_sorted = sorted(got, key=lambda r: (r['part'], r['id']))
+        self.assertEqual(
+            got_sorted,
+            [{'part': 'a', 'id': 1, 'val': 7},
+             {'part': 'b', 'id': 2, 'val': 14}])
+        # Pruning effectiveness: across both partitions we should see at
+        # most two distinct (partition, bucket) splits — one per branch.
+        # Without per-partition pruning we'd see every (partition, bucket)
+        # combo that exists on disk for the predicate's id literals.
+        self.assertLessEqual(len(splits), 2,
+                             "per-partition pruning should keep ≤ 2 splits, "
+                             "got %d" % len(splits))
+
 
 # ---------------------------------------------------------------------------
 # Layer 3 — Property: random PK tables, random Equal/In predicates,

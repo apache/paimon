@@ -30,6 +30,7 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
+from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            remove_row_id_filter,
@@ -356,11 +357,12 @@ class FileScanner:
         """Compose the (bucket, total_buckets) -> bool used by the manifest
         reader to drop entries before deserialising ``_FILE`` / partition.
 
-        Mirrors the BucketFilter applied at Java's InternalRow stage in
-        ``ManifestEntryCache``. The signature is intentionally minimal:
-        per-partition predicate pre-evaluation would also need
-        ``(partition, bucket, total_buckets)``, but the current selector
-        is partition-agnostic.
+        The selector is partition-aware now, but at this early stage the
+        partition field has not been deserialised yet, so callers stick
+        with the two-arg form. The selector internally falls back to a
+        partition-agnostic over-approximation; per-partition tightening
+        still happens later in ``_filter_manifest_entry`` once the entry
+        is fully decoded.
         """
         only_real = self.only_read_real_buckets
         selector = self._bucket_selector
@@ -479,7 +481,21 @@ class FileScanner:
             return None
         if not bucket_key_fields:
             return None
-        return create_bucket_selector(self.predicate, bucket_key_fields)
+        # Partition fields are passed so the selector can specialise
+        # the predicate per partition value at the late filter stage,
+        # turning ``(part='a' AND bk=1) OR (part='b' AND bk=2)`` into a
+        # precise bucket pick per partition instead of an over-scan.
+        partition_fields: Optional[List[DataField]] = None
+        if self.table.partition_keys:
+            partition_fields = [
+                self.table.field_dict[name]
+                for name in self.table.partition_keys
+                if name in self.table.field_dict
+            ]
+        return create_bucket_selector(
+            self.predicate, bucket_key_fields,
+            partition_fields=partition_fields,
+        )
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
         # Redundant safety net: the early filter in the manifest reader
@@ -489,7 +505,8 @@ class FileScanner:
             return False
         if (self._bucket_selector is not None
                 and entry.bucket >= 0
-                and not self._bucket_selector(entry.bucket, entry.total_buckets)):
+                and not self._bucket_selector(
+                    entry.partition, entry.bucket, entry.total_buckets)):
             return False
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
