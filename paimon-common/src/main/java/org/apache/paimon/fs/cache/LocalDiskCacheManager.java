@@ -38,24 +38,18 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /** Block-level local disk cache with LRU eviction. Thread-safe. */
 public class LocalDiskCacheManager implements LocalCacheManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(LocalDiskCacheManager.class);
 
-    private static final Map<CacheKey, LocalDiskCacheManager> SHARED_CACHES =
-            new ConcurrentHashMap<>();
-
     private final File cacheDir;
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
     private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
-    private final AtomicInteger refCount = new AtomicInteger(0);
 
     // LRU-ordered index: key -> size. Access order so get() moves entry to tail.
     private final LinkedHashMap<String, Long> entryIndex;
@@ -68,14 +62,6 @@ public class LocalDiskCacheManager implements LocalCacheManager {
         this.entryIndex = new LinkedHashMap<>(64, 0.75f, true);
         this.cacheDir.mkdirs();
         this.currentSize = scanAndPopulateIndex();
-    }
-
-    /** Returns a shared instance for the given parameters, creating one if needed. */
-    public static LocalDiskCacheManager getOrCreate(
-            String cacheDir, long maxSizeBytes, int blockSize) {
-        CacheKey key = new CacheKey(cacheDir, maxSizeBytes, blockSize);
-        return SHARED_CACHES.computeIfAbsent(
-                key, k -> new LocalDiskCacheManager(cacheDir, maxSizeBytes, blockSize));
     }
 
     public int blockSize() {
@@ -250,51 +236,7 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     }
 
     @Override
-    public void retain() {
-        refCount.incrementAndGet();
-    }
-
-    @Override
-    public void release() {
-        if (refCount.decrementAndGet() <= 0) {
-            CacheKey key = new CacheKey(cacheDir.getPath(), maxSizeBytes, blockSize);
-            SHARED_CACHES.remove(key, this);
-        }
-    }
-
-    @Override
     public void close() {
         fileSizeCache.clear();
-    }
-
-    private static class CacheKey {
-        final String cacheDir;
-        final long maxSizeBytes;
-        final int blockSize;
-
-        CacheKey(String cacheDir, long maxSizeBytes, int blockSize) {
-            this.cacheDir = cacheDir;
-            this.maxSizeBytes = maxSizeBytes;
-            this.blockSize = blockSize;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (!(o instanceof CacheKey)) {
-                return false;
-            }
-            CacheKey that = (CacheKey) o;
-            return maxSizeBytes == that.maxSizeBytes
-                    && blockSize == that.blockSize
-                    && Objects.equals(cacheDir, that.cacheDir);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(cacheDir, maxSizeBytes, blockSize);
-        }
     }
 }

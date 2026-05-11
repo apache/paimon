@@ -38,19 +38,6 @@ from pypaimon.utils.file_type import FileType
 class LocalMemoryCacheManager:
     """Block-level in-memory cache with LRU eviction."""
 
-    _shared_caches: dict = {}
-    _shared_lock = threading.Lock()
-
-    @staticmethod
-    def get_or_create(max_size_bytes: int,
-                      block_size: int = 1 * 1024 * 1024) -> 'LocalMemoryCacheManager':
-        key = (max_size_bytes, block_size)
-        with LocalMemoryCacheManager._shared_lock:
-            if key not in LocalMemoryCacheManager._shared_caches:
-                LocalMemoryCacheManager._shared_caches[key] = LocalMemoryCacheManager(
-                    max_size_bytes, block_size)
-            return LocalMemoryCacheManager._shared_caches[key]
-
     def __init__(self, max_size_bytes: int, block_size: int = 1 * 1024 * 1024):
         self._max_size_bytes = max_size_bytes
         self._block_size = block_size
@@ -58,7 +45,6 @@ class LocalMemoryCacheManager:
         self._current_size = 0
         self._cache: OrderedDict = OrderedDict()
         self._file_size_cache: dict = {}
-        self._ref_count = 0
 
     @property
     def block_size(self) -> int:
@@ -91,17 +77,6 @@ class LocalMemoryCacheManager:
     def put_file_size(self, file_path: str, size: int) -> None:
         self._file_size_cache[file_path] = size
 
-    def retain(self) -> None:
-        with LocalMemoryCacheManager._shared_lock:
-            self._ref_count += 1
-
-    def release(self) -> None:
-        with LocalMemoryCacheManager._shared_lock:
-            self._ref_count -= 1
-            if self._ref_count <= 0:
-                key = (self._max_size_bytes, self._block_size)
-                LocalMemoryCacheManager._shared_caches.pop(key, None)
-
     def close(self) -> None:
         with self._lock:
             self._cache.clear()
@@ -112,19 +87,6 @@ class LocalMemoryCacheManager:
 class LocalDiskCacheManager:
     """Block-level local disk cache with LRU eviction."""
 
-    _shared_caches: dict = {}
-    _shared_lock = threading.Lock()
-
-    @staticmethod
-    def get_or_create(cache_dir: str, max_size_bytes: int,
-                      block_size: int = 1 * 1024 * 1024) -> 'LocalDiskCacheManager':
-        key = (cache_dir, max_size_bytes, block_size)
-        with LocalDiskCacheManager._shared_lock:
-            if key not in LocalDiskCacheManager._shared_caches:
-                LocalDiskCacheManager._shared_caches[key] = LocalDiskCacheManager(
-                    cache_dir, max_size_bytes, block_size)
-            return LocalDiskCacheManager._shared_caches[key]
-
     def __init__(self, cache_dir: str, max_size_bytes: int,
                  block_size: int = 1 * 1024 * 1024):
         self._cache_dir = cache_dir
@@ -133,7 +95,6 @@ class LocalDiskCacheManager:
         self._lock = threading.Lock()
         self._current_size = 0
         self._file_size_cache: dict = {}
-        self._ref_count = 0
         # LRU-ordered index: cache_path -> size. OrderedDict with move_to_end for access order.
         self._entry_index: OrderedDict = OrderedDict()
         os.makedirs(cache_dir, exist_ok=True)
@@ -235,17 +196,6 @@ class LocalDiskCacheManager:
 
     def put_file_size(self, file_path: str, size: int) -> None:
         self._file_size_cache[file_path] = size
-
-    def retain(self) -> None:
-        with LocalDiskCacheManager._shared_lock:
-            self._ref_count += 1
-
-    def release(self) -> None:
-        with LocalDiskCacheManager._shared_lock:
-            self._ref_count -= 1
-            if self._ref_count <= 0:
-                key = (self._cache_dir, self._max_size_bytes, self._block_size)
-                LocalDiskCacheManager._shared_caches.pop(key, None)
 
     def close(self) -> None:
         self._file_size_cache.clear()
@@ -357,68 +307,62 @@ class CachingFileIO(FileIO):
     """FileIO wrapper that caches reads at block granularity.
 
     Only file types in the whitelist are cached. Others are read directly
-    from the delegate. After deserialization, the cache is lazily recreated.
+    from the delegate. After pickling/unpickling, the cache is None and reads
+    fall through to the delegate directly.
     """
 
-    def __init__(self, delegate: FileIO, cache, whitelist=None,
-                 cache_dir=None, max_size=2**63-1, block_size=1*1024*1024):
+    def __init__(self, delegate: FileIO, cache, whitelist=None):
         self._delegate = delegate
         self._cache = cache
-        self._cache_dir = cache_dir
-        self._max_size = max_size
-        self._block_size = block_size
         if whitelist is None:
             self._whitelist = {FileType.META, FileType.GLOBAL_INDEX}
         else:
             self._whitelist = whitelist
-        cache.retain()
-
-    def _get_cache(self):
-        if self._cache is None:
-            if self._cache_dir is not None:
-                self._cache = LocalDiskCacheManager.get_or_create(
-                    self._cache_dir, self._max_size, self._block_size)
-            else:
-                self._cache = LocalMemoryCacheManager.get_or_create(
-                    self._max_size, self._block_size)
-            self._cache.retain()
-        return self._cache
 
     @staticmethod
-    def wrap_with_caching_if_needed(file_io, options):
+    def create_cache_manager(options):
+        """Creates a cache manager from options, or returns None if caching is not enabled."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions(options)
+        if not opts.local_cache_enabled():
+            return None
+        cache_dir = opts.local_cache_dir()
+        max_size_opt = opts.local_cache_max_size()
+        max_size = max_size_opt.get_bytes() if max_size_opt is not None else (2 ** 63 - 1)
+        block_size = opts.local_cache_block_size().get_bytes()
+        if cache_dir is not None:
+            return LocalDiskCacheManager(cache_dir, max_size, block_size)
+        else:
+            return LocalMemoryCacheManager(max_size, block_size)
+
+    @staticmethod
+    def wrap_with_caching_if_needed(file_io, options, cache=None):
         """Wraps the given FileIO with caching if local cache is enabled.
 
         Args:
             file_io: the FileIO to potentially wrap
             options: an Options object containing cache configuration
+            cache: the cache manager instance (managed by the caller)
 
         Returns:
             a CachingFileIO if caching is enabled and configured, otherwise the original FileIO
         """
         if isinstance(file_io, CachingFileIO):
             return file_io
+        if cache is None:
+            return file_io
         from pypaimon.common.options.core_options import CoreOptions
         opts = CoreOptions(options)
-        if not opts.local_cache_enabled():
-            return file_io
-        cache_dir = opts.local_cache_dir()
-        max_size_opt = opts.local_cache_max_size()
-        max_size = max_size_opt.get_bytes() if max_size_opt is not None else (2 ** 63 - 1)
-        block_size = opts.local_cache_block_size().get_bytes()
-        if cache_dir is not None:
-            cache = LocalDiskCacheManager.get_or_create(cache_dir, max_size, block_size)
-        else:
-            cache = LocalMemoryCacheManager.get_or_create(max_size, block_size)
         whitelist = FileType.parse_whitelist(opts.local_cache_whitelist())
         if not whitelist:
             return file_io
-        return CachingFileIO(file_io, cache, whitelist, cache_dir, max_size, block_size)
+        return CachingFileIO(file_io, cache, whitelist)
 
     def new_input_stream(self, path: str):
         file_type = FileType.classify(path)
-        if file_type not in self._whitelist or FileType.is_mutable(path):
+        if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
             return self._delegate.new_input_stream(path)
-        return CachingInputStream(self._delegate, path, self._get_cache())
+        return CachingInputStream(self._delegate, path, self._cache)
 
     def new_output_stream(self, path: str):
         return self._delegate.new_output_stream(path)
@@ -451,6 +395,4 @@ class CachingFileIO(FileIO):
         return getattr(self._delegate, name)
 
     def close(self):
-        if self._cache is not None:
-            self._cache.release()
         self._delegate.close()

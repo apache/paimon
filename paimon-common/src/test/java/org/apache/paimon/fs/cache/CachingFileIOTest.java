@@ -51,7 +51,7 @@ class CachingFileIOTest {
 
     private CachingFileIO newCachingFileIO(
             FileIO delegate, LocalCacheManager cache, EnumSet<FileType> whitelist, int blockSize) {
-        return new CachingFileIO(delegate, cache, whitelist, cacheDir, Long.MAX_VALUE, blockSize);
+        return new CachingFileIO(delegate, cache, whitelist);
     }
 
     @Test

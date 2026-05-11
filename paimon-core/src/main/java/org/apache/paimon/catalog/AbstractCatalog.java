@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.cache.CachingFileIO;
+import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -83,15 +84,18 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
     protected final CatalogContext context;
+    protected final @Nullable LocalCacheManager cacheManager;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = new HashMap<>();
         this.context = CatalogContext.create(new Options());
+        this.cacheManager = null;
     }
 
     protected AbstractCatalog(FileIO fileIO, CatalogContext context) {
-        this.fileIO = CachingFileIO.wrapWithCachingIfNeeded(fileIO, context);
+        this.cacheManager = CachingFileIO.createCacheManager(context);
+        this.fileIO = CachingFileIO.wrapWithCachingIfNeeded(fileIO, context, cacheManager);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
         this.context = context;
     }
@@ -764,5 +768,12 @@ public abstract class AbstractCatalog implements Catalog {
         }
         schema.ifPresent(s -> s.options().put(PATH.key(), tablePath.toString()));
         return schema;
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (cacheManager != null) {
+            cacheManager.close();
+        }
     }
 }

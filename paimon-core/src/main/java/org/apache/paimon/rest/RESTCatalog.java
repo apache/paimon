@@ -36,6 +36,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.fs.cache.CachingFileIO;
+import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -101,6 +102,7 @@ public class RESTCatalog implements Catalog {
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     protected final Map<String, String> tableDefaultOptions;
+    private final @Nullable LocalCacheManager cacheManager;
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -116,6 +118,7 @@ public class RESTCatalog implements Catalog {
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
+        this.cacheManager = CachingFileIO.createCacheManager(this.context);
     }
 
     @Override
@@ -1185,7 +1188,11 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        if (cacheManager != null) {
+            cacheManager.close();
+        }
+    }
 
     @VisibleForTesting
     RESTApi api() {
@@ -1197,7 +1204,8 @@ public class RESTCatalog implements Catalog {
                 dataTokenEnabled
                         ? new RESTTokenFileIO(context, api, identifier, path)
                         : fileIOFromOptions(path),
-                context);
+                context,
+                cacheManager);
     }
 
     private FileIO fileIOFromOptions(Path path) {

@@ -41,7 +41,7 @@ import java.util.Set;
  *
  * <p>Only file types in the whitelist are cached. Others are read directly from the delegate.
  *
- * <p>After deserialization, the cache is lazily recreated from the stored configuration.
+ * <p>After deserialization, the cache is null and reads fall through to the delegate directly.
  */
 public class CachingFileIO implements FileIO {
 
@@ -50,26 +50,12 @@ public class CachingFileIO implements FileIO {
     private final FileIO delegate;
     private final Set<FileType> whitelist;
 
-    @Nullable private final String cacheDir;
-    private final long maxSize;
-    private final int blockSize;
-
     private transient volatile LocalCacheManager cache;
 
-    public CachingFileIO(
-            FileIO delegate,
-            LocalCacheManager cache,
-            Set<FileType> whitelist,
-            @Nullable String cacheDir,
-            long maxSize,
-            int blockSize) {
+    public CachingFileIO(FileIO delegate, LocalCacheManager cache, Set<FileType> whitelist) {
         this.delegate = delegate;
         this.cache = cache;
         this.whitelist = EnumSet.copyOf(whitelist);
-        this.cacheDir = cacheDir;
-        this.maxSize = maxSize;
-        this.blockSize = blockSize;
-        cache.retain();
     }
 
     /**
@@ -77,15 +63,35 @@ public class CachingFileIO implements FileIO {
      *
      * @param fileIO the FileIO to potentially wrap
      * @param context the catalog context containing cache configuration
+     * @param cache the cache manager instance (managed by the Catalog)
      * @return a CachingFileIO if caching is enabled and configured, otherwise the original FileIO
      */
-    public static FileIO wrapWithCachingIfNeeded(FileIO fileIO, CatalogContext context) {
+    public static FileIO wrapWithCachingIfNeeded(
+            FileIO fileIO, CatalogContext context, @Nullable LocalCacheManager cache) {
         if (fileIO instanceof CachingFileIO) {
             return fileIO;
         }
+        if (cache == null) {
+            return fileIO;
+        }
+        Options options = context.options();
+        Set<FileType> whitelist =
+                FileType.parseWhitelist(options.get(CatalogOptions.LOCAL_CACHE_WHITELIST));
+        if (whitelist.isEmpty()) {
+            return fileIO;
+        }
+        return new CachingFileIO(fileIO, cache, whitelist);
+    }
+
+    /**
+     * Creates a {@link LocalCacheManager} from the catalog context options, or returns null if
+     * caching is not enabled.
+     */
+    @Nullable
+    public static LocalCacheManager createCacheManager(CatalogContext context) {
         Options options = context.options();
         if (!options.get(CatalogOptions.LOCAL_CACHE_ENABLED)) {
-            return fileIO;
+            return null;
         }
 
         MemorySize maxSizeOpt = options.get(CatalogOptions.LOCAL_CACHE_MAX_SIZE);
@@ -93,46 +99,21 @@ public class CachingFileIO implements FileIO {
         int blockSize = (int) options.get(CatalogOptions.LOCAL_CACHE_BLOCK_SIZE).getBytes();
 
         String cacheDir = options.get(CatalogOptions.LOCAL_CACHE_DIR);
-        LocalCacheManager cache;
         if (cacheDir != null) {
-            cache = LocalDiskCacheManager.getOrCreate(cacheDir, maxSize, blockSize);
+            return new LocalDiskCacheManager(cacheDir, maxSize, blockSize);
         } else {
-            cache = LocalMemoryCacheManager.getOrCreate(maxSize, blockSize);
+            return new LocalMemoryCacheManager(maxSize, blockSize);
         }
-
-        Set<FileType> whitelist =
-                FileType.parseWhitelist(options.get(CatalogOptions.LOCAL_CACHE_WHITELIST));
-        if (whitelist.isEmpty()) {
-            return fileIO;
-        }
-        return new CachingFileIO(fileIO, cache, whitelist, cacheDir, maxSize, blockSize);
-    }
-
-    private LocalCacheManager getCache() {
-        if (cache == null) {
-            synchronized (this) {
-                if (cache == null) {
-                    LocalCacheManager newCache;
-                    if (cacheDir != null) {
-                        newCache = LocalDiskCacheManager.getOrCreate(cacheDir, maxSize, blockSize);
-                    } else {
-                        newCache = LocalMemoryCacheManager.getOrCreate(maxSize, blockSize);
-                    }
-                    newCache.retain();
-                    cache = newCache;
-                }
-            }
-        }
-        return cache;
     }
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
+        LocalCacheManager c = cache;
         FileType fileType = FileType.classify(path);
-        if (!whitelist.contains(fileType) || FileType.isMutable(path)) {
+        if (c == null || !whitelist.contains(fileType) || FileType.isMutable(path)) {
             return delegate.newInputStream(path);
         }
-        return new CachingSeekableInputStream(delegate, path, getCache());
+        return new CachingSeekableInputStream(delegate, path, c);
     }
 
     @Override
@@ -187,9 +168,6 @@ public class CachingFileIO implements FileIO {
 
     @Override
     public void close() throws IOException {
-        if (cache != null) {
-            cache.release();
-        }
         delegate.close();
     }
 }
