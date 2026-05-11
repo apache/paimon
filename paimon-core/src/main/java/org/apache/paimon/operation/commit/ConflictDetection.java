@@ -253,7 +253,7 @@ public class ConflictDetection {
             Pair<RuntimeException, RuntimeException> conflictException =
                     createConflictException(
                             "Total buckets of partition "
-                                    + entry.partition()
+                                    + partToSimpleString(partitionType, entry.partition(), "-", 200)
                                     + " changed from "
                                     + old
                                     + " to "
