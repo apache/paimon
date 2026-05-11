@@ -152,6 +152,57 @@ class StatisticsOrRecordChannelComputerTest {
     }
 
     @Test
+    void testMultipleUnknownPartitionsWithoutStatistics() {
+        int downstreamParallelism = 8;
+        StatisticsOrRecordChannelComputer channelComputer =
+                new StatisticsOrRecordChannelComputer(schema);
+        channelComputer.setup(downstreamParallelism);
+
+        // Send records from multiple unknown partitions in interleaved order.
+        // This exercises the fallback cache in MapPartitioner.select(): each partition
+        // key must be stored as a copy, otherwise the reused BinaryRow from
+        // RowPartitionKeyExtractor corrupts earlier cache entries.
+        Map<String, Map<Integer, Integer>> partitionChannelCounts = new HashMap<>();
+        String[] partitions = {"pt_a", "pt_b", "pt_c"};
+        int recordsPerPartition = 10000;
+        for (int i = 0; i < recordsPerPartition; i++) {
+            for (String pt : partitions) {
+                InternalRow row =
+                        GenericRow.of(i, BinaryString.fromString(pt), BinaryString.fromString("d"));
+                int channel = channelComputer.channel(StatisticsOrRecord.fromRecord(row));
+                partitionChannelCounts
+                        .computeIfAbsent(pt, k -> new HashMap<>())
+                        .merge(channel, 1, Integer::sum);
+            }
+        }
+
+        // Each unknown partition should be assigned to its own set of subtasks
+        // (deterministic based on partition key hash). Verify they don't all collapse
+        // into the same assignment, which would happen if the mutable key were shared.
+        for (String pt : partitions) {
+            Map<Integer, Integer> counts = partitionChannelCounts.get(pt);
+            assertThat(counts).isNotEmpty();
+            int total = counts.values().stream().mapToInt(Integer::intValue).sum();
+            assertThat(total).isEqualTo(recordsPerPartition);
+        }
+
+        // Verify that not all partitions share the exact same channel set, which would
+        // indicate mutable key corruption (all keys pointing to the last partition's hash)
+        Map<Integer, Integer> countsA = partitionChannelCounts.get("pt_a");
+        Map<Integer, Integer> countsB = partitionChannelCounts.get("pt_b");
+        Map<Integer, Integer> countsC = partitionChannelCounts.get("pt_c");
+        boolean allSame =
+                countsA.keySet().equals(countsB.keySet())
+                        && countsB.keySet().equals(countsC.keySet());
+        assertThat(allSame)
+                .as(
+                        "Different partitions should generally get different channel assignments, "
+                                + "but all three got the same channels: %s",
+                        countsA.keySet())
+                .isFalse();
+    }
+
+    @Test
     void testBuildAssignment() {
         StatisticsOrRecordChannelComputer channelComputer =
                 new StatisticsOrRecordChannelComputer(schema);

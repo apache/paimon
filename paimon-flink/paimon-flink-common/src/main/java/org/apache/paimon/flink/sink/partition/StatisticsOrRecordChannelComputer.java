@@ -194,7 +194,7 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
                     weights.add(1L);
                 }
                 assignment = new WeightedRandomAssignment(subtasks, weights, random);
-                assignments.put(partitionKey, assignment);
+                assignments.put(partitionKey.copy(), assignment);
             }
             return assignment.select();
         }

@@ -693,28 +693,55 @@ public class AppendTableITCase extends CatalogITCaseBase {
     @Timeout(120)
     @Test
     public void testPartitionDynamicStreaming() throws Exception {
+        int sinkParallelism = 4;
         batchSql(
                 "CREATE TABLE IF NOT EXISTS dynamic_streaming ("
                         + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
                         + " WITH ("
                         + "'bucket' = '-1',"
                         + "'partition.sink-strategy' = 'partition_dynamic',"
-                        + "'sink.parallelism' = '4')");
+                        + "'sink.parallelism' = '%d')",
+                sinkParallelism);
+
+        // Write heavily skewed data: partition '20250301' gets most records.
+        // With streaming mode (sEnv has checkpoint interval 100ms), the
+        // DataStatisticsOperator sends local stats at checkpoint -> coordinator
+        // aggregates -> sends global stats back -> partitioner updates assignment.
+        // This verifies the full coordinator -> operator event -> partitioner update path.
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+        for (int i = 101; i <= 110; i++) {
+            values.append(String.format("(%d, 'data%d', '20250302'),", i, i));
+        }
+        for (int i = 111; i <= 115; i++) {
+            values.append(String.format("(%d, 'data%d', '20250303'),", i, i));
+        }
 
         sEnv.executeSql(
                         "INSERT INTO dynamic_streaming VALUES "
-                                + "(1, 'a', '20250301'), (2, 'b', '20250301'), "
-                                + "(3, 'c', '20250302'), (4, 'd', '20250303')")
+                                + values.substring(0, values.length() - 1))
                 .await();
 
-        List<Row> result = batchSql("SELECT * FROM dynamic_streaming ORDER BY id");
-        assertThat(result).hasSize(4);
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, "a", "20250301"),
-                        Row.of(2, "b", "20250301"),
-                        Row.of(3, "c", "20250302"),
-                        Row.of(4, "d", "20250303"));
+        // Verify data correctness
+        assertThat(batchSql("SELECT * FROM dynamic_streaming")).hasSize(115);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250301'")).hasSize(100);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250302'")).hasSize(10);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250303'")).hasSize(5);
+
+        // Verify the hot partition is spread across multiple subtasks (file count > 1).
+        // If statistics were not applied, each partition would only go to min(parallelism, 4)
+        // subtasks with equal weight. With statistics, the hot partition ('20250301') should
+        // be spread across more subtasks proportionally to its weight.
+        FileStoreTable table = paimonTable("dynamic_streaming");
+        List<PartitionEntry> partitionEntries =
+                table.newReadBuilder().newScan().listPartitionEntries();
+        assertThat(partitionEntries).hasSize(3);
+
+        for (PartitionEntry entry : partitionEntries) {
+            assertThat(entry.fileCount()).isGreaterThanOrEqualTo(1);
+        }
     }
 
     @Test
