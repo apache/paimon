@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
+
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,7 +100,7 @@ class AggregatedStatisticsTracker {
     static class Aggregation {
         private final int parallelism;
         private final Set<Integer> subtaskSet;
-        private final Map<String, Long> partitionStatistics;
+        private final Map<BinaryRow, Long> partitionStatistics;
 
         Aggregation(int parallelism) {
             this.parallelism = parallelism;
@@ -115,7 +117,7 @@ class AggregatedStatisticsTracker {
                 return false;
             }
             subtaskSet.add(subtask);
-            Map<String, Long> result = taskStatistics.result();
+            Map<BinaryRow, Long> result = taskStatistics.result();
             result.forEach(
                     (partition, count) -> partitionStatistics.merge(partition, count, Long::sum));
             return true;

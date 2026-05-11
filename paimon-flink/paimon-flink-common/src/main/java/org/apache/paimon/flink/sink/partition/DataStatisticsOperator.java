@@ -106,9 +106,8 @@ public class DataStatisticsOperator extends AbstractStreamOperator<StatisticsOrR
     @Override
     public void processElement(StreamRecord<InternalRow> streamRecord) throws Exception {
         InternalRow row = streamRecord.getValue();
-        BinaryRow partition = extractor.partition(row);
-        String partitionKey = partition.toString();
-        localStatistics.add(partitionKey, 1L);
+        BinaryRow partition = extractor.partition(row).copy();
+        localStatistics.add(partition, 1L);
         output.collect(new StreamRecord<>(StatisticsOrRecord.fromRecord(row)));
     }
 

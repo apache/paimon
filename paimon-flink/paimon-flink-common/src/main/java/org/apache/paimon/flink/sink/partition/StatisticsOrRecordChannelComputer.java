@@ -29,12 +29,12 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -80,8 +80,7 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
                 delegatePartitioner = buildPartitioner(null);
             }
             BinaryRow partition = extractor.partition(wrapper.record());
-            String partitionKey = partition.toString();
-            return delegatePartitioner.select(partitionKey, numChannels);
+            return delegatePartitioner.select(partition, numChannels);
         }
     }
 
@@ -92,8 +91,8 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
         return new MapPartitioner(buildAssignment(numChannels, statistics.result()));
     }
 
-    Map<String, WeightedRandomAssignment> buildAssignment(
-            int downstreamParallelism, Map<String, Long> statistics) {
+    Map<BinaryRow, WeightedRandomAssignment> buildAssignment(
+            int downstreamParallelism, Map<BinaryRow, Long> statistics) {
         if (statistics.isEmpty()) {
             return new HashMap<>();
         }
@@ -106,18 +105,19 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
                 (long) Math.ceil(((double) totalWeight) / downstreamParallelism);
 
         // Sort keys for deterministic assignment across JVMs
-        Map<String, Long> sortedStatistics = new TreeMap<>(statistics);
+        List<Map.Entry<BinaryRow, Long>> sortedEntries = new ArrayList<>(statistics.entrySet());
+        sortedEntries.sort(Comparator.comparingInt(e -> e.getKey().hashCode()));
 
-        Map<String, WeightedRandomAssignment> assignmentMap = new HashMap<>(statistics.size());
-        Iterator<String> keyIterator = sortedStatistics.keySet().iterator();
+        Map<BinaryRow, WeightedRandomAssignment> assignmentMap = new HashMap<>(statistics.size());
+        Iterator<Map.Entry<BinaryRow, Long>> entryIterator = sortedEntries.iterator();
         int subtaskId = 0;
-        String currentKey = null;
+        BinaryRow currentKey = null;
         long keyRemainingWeight = 0L;
         long subtaskRemainingWeight = targetWeightPerSubtask;
         List<Integer> assignedSubtasks = new ArrayList<>();
         List<Long> subtaskWeights = new ArrayList<>();
 
-        while (keyIterator.hasNext() || currentKey != null) {
+        while (entryIterator.hasNext() || currentKey != null) {
             if (subtaskId >= downstreamParallelism) {
                 LOG.error(
                         "Internal algorithm error: exhausted subtasks. parallelism: {}, "
@@ -130,8 +130,9 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
             }
 
             if (currentKey == null) {
-                currentKey = keyIterator.next();
-                keyRemainingWeight = statistics.get(currentKey);
+                Map.Entry<BinaryRow, Long> entry = entryIterator.next();
+                currentKey = entry.getKey();
+                keyRemainingWeight = entry.getValue();
             }
 
             assignedSubtasks.add(subtaskId);
@@ -174,13 +175,13 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
 
     private class MapPartitioner {
 
-        private final Map<String, WeightedRandomAssignment> assignments;
+        private final Map<BinaryRow, WeightedRandomAssignment> assignments;
 
-        MapPartitioner(Map<String, WeightedRandomAssignment> assignments) {
+        MapPartitioner(Map<BinaryRow, WeightedRandomAssignment> assignments) {
             this.assignments = assignments;
         }
 
-        int select(String partitionKey, int numChannels) {
+        int select(BinaryRow partitionKey, int numChannels) {
             WeightedRandomAssignment assignment = assignments.get(partitionKey);
             if (assignment == null) {
                 int defaultSubtaskCount =

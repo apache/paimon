@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -92,10 +93,10 @@ class StatisticsOrRecordChannelComputerTest {
         channelComputer.setup(downstreamParallelism);
 
         // Feed statistics: single partition gets all weight -> spread across all subtasks
-        Map<String, Long> partitionFrequency = new HashMap<>();
+        Map<BinaryRow, Long> partitionFrequency = new HashMap<>();
         InternalRow sampleRow =
                 GenericRow.of(0, BinaryString.fromString("pt1"), BinaryString.fromString("d"));
-        String partitionKey = getPartitionKey(sampleRow);
+        BinaryRow partitionKey = getPartitionKey(sampleRow);
         partitionFrequency.put(partitionKey, 10000L);
         channelComputer.channel(
                 StatisticsOrRecord.fromStatistics(new DataStatistics(partitionFrequency)));
@@ -127,11 +128,11 @@ class StatisticsOrRecordChannelComputerTest {
                 GenericRow.of(0, BinaryString.fromString("pt1"), BinaryString.fromString("d"));
         InternalRow sampleRow2 =
                 GenericRow.of(0, BinaryString.fromString("pt2"), BinaryString.fromString("d"));
-        String partitionKey1 = getPartitionKey(sampleRow1);
-        String partitionKey2 = getPartitionKey(sampleRow2);
+        BinaryRow partitionKey1 = getPartitionKey(sampleRow1);
+        BinaryRow partitionKey2 = getPartitionKey(sampleRow2);
 
         // partition 1 has 1/4 of the weight, partition 2 has 3/4
-        Map<String, Long> partitionFrequency = new HashMap<>();
+        Map<BinaryRow, Long> partitionFrequency = new HashMap<>();
         partitionFrequency.put(partitionKey1, 10000L);
         partitionFrequency.put(partitionKey2, 30000L);
         channelComputer.channel(
@@ -156,19 +157,26 @@ class StatisticsOrRecordChannelComputerTest {
                 new StatisticsOrRecordChannelComputer(schema);
         channelComputer.setup(4);
 
-        Map<String, Long> statistics = new HashMap<>();
-        statistics.put("p1", 100L);
-        statistics.put("p2", 300L);
+        InternalRow sampleRow1 =
+                GenericRow.of(0, BinaryString.fromString("p1"), BinaryString.fromString("d"));
+        InternalRow sampleRow2 =
+                GenericRow.of(0, BinaryString.fromString("p2"), BinaryString.fromString("d"));
+        BinaryRow p1 = getPartitionKey(sampleRow1);
+        BinaryRow p2 = getPartitionKey(sampleRow2);
 
-        Map<String, WeightedRandomAssignment> assignment =
+        Map<BinaryRow, Long> statistics = new HashMap<>();
+        statistics.put(p1, 100L);
+        statistics.put(p2, 300L);
+
+        Map<BinaryRow, WeightedRandomAssignment> assignment =
                 channelComputer.buildAssignment(4, statistics);
 
-        assertThat(assignment).containsKey("p1");
-        assertThat(assignment).containsKey("p2");
+        assertThat(assignment).containsKey(p1);
+        assertThat(assignment).containsKey(p2);
     }
 
-    private String getPartitionKey(InternalRow row) {
+    private BinaryRow getPartitionKey(InternalRow row) {
         RowPartitionKeyExtractor extractor = new RowPartitionKeyExtractor(schema);
-        return extractor.partition(row).toString();
+        return extractor.partition(row).copy();
     }
 }

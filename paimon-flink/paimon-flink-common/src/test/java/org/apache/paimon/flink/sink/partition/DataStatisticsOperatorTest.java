@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -105,9 +106,9 @@ class DataStatisticsOperatorTest {
             testHarness.open();
 
             // Simulate receiving global statistics from coordinator
-            Map<String, Long> globalStats = new HashMap<>();
-            globalStats.put("pt1", 1000L);
-            globalStats.put("pt2", 2000L);
+            Map<BinaryRow, Long> globalStats = new HashMap<>();
+            globalStats.put(BinaryRow.singleColumn("pt1"), 1000L);
+            globalStats.put(BinaryRow.singleColumn("pt2"), 2000L);
             DataStatistics globalStatistics = new DataStatistics(globalStats);
             StatisticsEvent event =
                     StatisticsEvent.createStatisticsEvent(
@@ -139,8 +140,8 @@ class DataStatisticsOperatorTest {
             testHarness.processElement(new StreamRecord<>(row2));
 
             // Receive global statistics
-            Map<String, Long> globalStats = new HashMap<>();
-            globalStats.put("pt1", 500L);
+            Map<BinaryRow, Long> globalStats = new HashMap<>();
+            globalStats.put(BinaryRow.singleColumn("pt1"), 500L);
             StatisticsEvent event =
                     StatisticsEvent.createStatisticsEvent(
                             1L, new DataStatistics(globalStats), new DataStatisticsSerializer());

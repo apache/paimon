@@ -18,16 +18,17 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.SerializationUtils;
+
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.api.common.typeutils.base.LongSerializer;
-import org.apache.flink.api.common.typeutils.base.MapSerializer;
-import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 /** Serializer for {@link DataStatistics}. */
@@ -35,12 +36,7 @@ public class DataStatisticsSerializer extends TypeSerializer<DataStatistics> {
 
     private static final long serialVersionUID = 1L;
 
-    private final MapSerializer<String, Long> mapSerializer;
-
-    public DataStatisticsSerializer() {
-        this.mapSerializer =
-                new MapSerializer<>(StringSerializer.INSTANCE, LongSerializer.INSTANCE);
-    }
+    public DataStatisticsSerializer() {}
 
     @Override
     public boolean isImmutableType() {
@@ -59,7 +55,11 @@ public class DataStatisticsSerializer extends TypeSerializer<DataStatistics> {
 
     @Override
     public DataStatistics copy(DataStatistics from) {
-        return new DataStatistics(new java.util.HashMap<>(from.result()));
+        Map<BinaryRow, Long> copy = new HashMap<>(from.result().size());
+        for (Map.Entry<BinaryRow, Long> entry : from.result().entrySet()) {
+            copy.put(entry.getKey().copy(), entry.getValue());
+        }
+        return new DataStatistics(copy);
     }
 
     @Override
@@ -74,13 +74,29 @@ public class DataStatisticsSerializer extends TypeSerializer<DataStatistics> {
 
     @Override
     public void serialize(DataStatistics record, DataOutputView target) throws IOException {
-        mapSerializer.serialize(record.result(), target);
+        Map<BinaryRow, Long> map = record.result();
+        target.writeInt(map.size());
+        for (Map.Entry<BinaryRow, Long> entry : map.entrySet()) {
+            byte[] bytes = SerializationUtils.serializeBinaryRow(entry.getKey());
+            target.writeInt(bytes.length);
+            target.write(bytes);
+            target.writeLong(entry.getValue());
+        }
     }
 
     @Override
     public DataStatistics deserialize(DataInputView source) throws IOException {
-        Map<String, Long> partitionFrequency = mapSerializer.deserialize(source);
-        return new DataStatistics(partitionFrequency);
+        int size = source.readInt();
+        Map<BinaryRow, Long> map = new HashMap<>(size);
+        for (int i = 0; i < size; i++) {
+            int length = source.readInt();
+            byte[] bytes = new byte[length];
+            source.readFully(bytes);
+            BinaryRow row = SerializationUtils.deserializeBinaryRow(bytes);
+            long value = source.readLong();
+            map.put(row, value);
+        }
+        return new DataStatistics(map);
     }
 
     @Override

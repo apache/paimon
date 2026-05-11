@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,9 +39,11 @@ class DataStatisticsSerializerTest {
                                 .isEmpty())
                 .isTrue();
 
-        dataStatistics.add("p1", 1);
-        dataStatistics.add("p2", 2);
-        dataStatistics.add("p1", 3);
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+        BinaryRow p2 = BinaryRow.singleColumn("p2");
+        dataStatistics.add(p1, 1);
+        dataStatistics.add(p2, 2);
+        dataStatistics.add(p1, 3);
         assertThat(
                         StatisticsUtil.deserializeDataStatistics(
                                         StatisticsUtil.serializeDataStatistics(
@@ -53,14 +57,17 @@ class DataStatisticsSerializerTest {
     void testCopy() {
         DataStatisticsSerializer serializer = new DataStatisticsSerializer();
         DataStatistics original = new DataStatistics();
-        original.add("p1", 100L);
-        original.add("p2", 200L);
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+        BinaryRow p2 = BinaryRow.singleColumn("p2");
+        BinaryRow p3 = BinaryRow.singleColumn("p3");
+        original.add(p1, 100L);
+        original.add(p2, 200L);
 
         DataStatistics copy = serializer.copy(original);
         assertThat(copy).isEqualTo(original);
 
         // Mutating copy should not affect original
-        copy.add("p3", 300L);
-        assertThat(original.result()).doesNotContainKey("p3");
+        copy.add(p3, 300L);
+        assertThat(original.result()).doesNotContainKey(p3);
     }
 }

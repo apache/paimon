@@ -18,9 +18,10 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -35,13 +36,17 @@ class AggregatedStatisticsTrackerTest {
     void testAggregationCompletesWhenAllSubtasksReport() {
         AggregatedStatisticsTracker tracker = new AggregatedStatisticsTracker("test-op", 2);
 
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+        BinaryRow p2 = BinaryRow.singleColumn("p2");
+        BinaryRow p3 = BinaryRow.singleColumn("p3");
+
         DataStatistics stats0 = new DataStatistics();
-        stats0.add("p1", 100L);
-        stats0.add("p2", 50L);
+        stats0.add(p1, 100L);
+        stats0.add(p2, 50L);
 
         DataStatistics stats1 = new DataStatistics();
-        stats1.add("p1", 200L);
-        stats1.add("p3", 75L);
+        stats1.add(p1, 200L);
+        stats1.add(p3, 75L);
 
         StatisticsEvent event0 = StatisticsEvent.createStatisticsEvent(1L, stats0, SERIALIZER);
         StatisticsEvent event1 = StatisticsEvent.createStatisticsEvent(1L, stats1, SERIALIZER);
@@ -53,16 +58,19 @@ class AggregatedStatisticsTrackerTest {
         // Second subtask reports - now complete
         result = tracker.updateAndCheckCompletion(1, event1);
         assertThat(result).isNotNull();
-        assertThat(result.result().get("p1")).isEqualTo(300L);
-        assertThat(result.result().get("p2")).isEqualTo(50L);
-        assertThat(result.result().get("p3")).isEqualTo(75L);
+        assertThat(result.result().get(p1)).isEqualTo(300L);
+        assertThat(result.result().get(p2)).isEqualTo(50L);
+        assertThat(result.result().get(p3)).isEqualTo(75L);
     }
 
     @Test
     void testIgnoresDuplicateSubtaskReport() {
         AggregatedStatisticsTracker tracker = new AggregatedStatisticsTracker("test-op", 2);
 
-        DataStatistics stats = new DataStatistics(Collections.singletonMap("p1", 100L));
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+        Map<BinaryRow, Long> map = new HashMap<>();
+        map.put(p1, 100L);
+        DataStatistics stats = new DataStatistics(map);
         StatisticsEvent event = StatisticsEvent.createStatisticsEvent(1L, stats, SERIALIZER);
 
         // First report from subtask 0
@@ -78,8 +86,12 @@ class AggregatedStatisticsTrackerTest {
     void testIgnoresStaleCheckpoint() {
         AggregatedStatisticsTracker tracker = new AggregatedStatisticsTracker("test-op", 1);
 
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+        Map<BinaryRow, Long> map = new HashMap<>();
+        map.put(p1, 100L);
+        DataStatistics stats = new DataStatistics(map);
+
         // Complete checkpoint 2
-        DataStatistics stats = new DataStatistics(Collections.singletonMap("p1", 100L));
         StatisticsEvent event2 = StatisticsEvent.createStatisticsEvent(2L, stats, SERIALIZER);
         DataStatistics result = tracker.updateAndCheckCompletion(0, event2);
         assertThat(result).isNotNull();
@@ -94,25 +106,33 @@ class AggregatedStatisticsTrackerTest {
     void testMultipleCheckpoints() {
         AggregatedStatisticsTracker tracker = new AggregatedStatisticsTracker("test-op", 2);
 
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+
         // Checkpoint 1: subtask 0 reports
-        DataStatistics statsChk1Sub0 = new DataStatistics(Collections.singletonMap("p1", 10L));
+        Map<BinaryRow, Long> map1 = new HashMap<>();
+        map1.put(p1, 10L);
+        DataStatistics statsChk1Sub0 = new DataStatistics(map1);
         StatisticsEvent eventChk1Sub0 =
                 StatisticsEvent.createStatisticsEvent(1L, statsChk1Sub0, SERIALIZER);
         assertThat(tracker.updateAndCheckCompletion(0, eventChk1Sub0)).isNull();
 
         // Checkpoint 2: subtask 0 reports (before checkpoint 1 completes)
-        DataStatistics statsChk2Sub0 = new DataStatistics(Collections.singletonMap("p1", 20L));
+        Map<BinaryRow, Long> map2 = new HashMap<>();
+        map2.put(p1, 20L);
+        DataStatistics statsChk2Sub0 = new DataStatistics(map2);
         StatisticsEvent eventChk2Sub0 =
                 StatisticsEvent.createStatisticsEvent(2L, statsChk2Sub0, SERIALIZER);
         assertThat(tracker.updateAndCheckCompletion(0, eventChk2Sub0)).isNull();
 
         // Checkpoint 1: subtask 1 reports - completes checkpoint 1
-        DataStatistics statsChk1Sub1 = new DataStatistics(Collections.singletonMap("p1", 15L));
+        Map<BinaryRow, Long> map3 = new HashMap<>();
+        map3.put(p1, 15L);
+        DataStatistics statsChk1Sub1 = new DataStatistics(map3);
         StatisticsEvent eventChk1Sub1 =
                 StatisticsEvent.createStatisticsEvent(1L, statsChk1Sub1, SERIALIZER);
         DataStatistics result = tracker.updateAndCheckCompletion(1, eventChk1Sub1);
         assertThat(result).isNotNull();
-        assertThat(result.result().get("p1")).isEqualTo(25L);
+        assertThat(result.result().get(p1)).isEqualTo(25L);
     }
 
     @Test
@@ -131,13 +151,16 @@ class AggregatedStatisticsTrackerTest {
     void testThreeSubtasks() {
         AggregatedStatisticsTracker tracker = new AggregatedStatisticsTracker("test-op", 3);
 
-        Map<String, Long> freq0 = new HashMap<>();
-        freq0.put("p1", 100L);
-        Map<String, Long> freq1 = new HashMap<>();
-        freq1.put("p1", 200L);
-        freq1.put("p2", 50L);
-        Map<String, Long> freq2 = new HashMap<>();
-        freq2.put("p2", 150L);
+        BinaryRow p1 = BinaryRow.singleColumn("p1");
+        BinaryRow p2 = BinaryRow.singleColumn("p2");
+
+        Map<BinaryRow, Long> freq0 = new HashMap<>();
+        freq0.put(p1, 100L);
+        Map<BinaryRow, Long> freq1 = new HashMap<>();
+        freq1.put(p1, 200L);
+        freq1.put(p2, 50L);
+        Map<BinaryRow, Long> freq2 = new HashMap<>();
+        freq2.put(p2, 150L);
 
         assertThat(
                         tracker.updateAndCheckCompletion(
@@ -158,7 +181,7 @@ class AggregatedStatisticsTrackerTest {
                         StatisticsEvent.createStatisticsEvent(
                                 1L, new DataStatistics(freq2), SERIALIZER));
         assertThat(result).isNotNull();
-        assertThat(result.result().get("p1")).isEqualTo(300L);
-        assertThat(result.result().get("p2")).isEqualTo(200L);
+        assertThat(result.result().get(p1)).isEqualTo(300L);
+        assertThat(result.result().get(p2)).isEqualTo(200L);
     }
 }

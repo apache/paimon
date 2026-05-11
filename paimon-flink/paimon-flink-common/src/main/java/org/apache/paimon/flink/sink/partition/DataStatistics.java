@@ -18,20 +18,22 @@
 
 package org.apache.paimon.flink.sink.partition;
 
+import org.apache.paimon.data.BinaryRow;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
-/** Data statistics tracking partition name to frequency/weight. */
+/** Data statistics tracking partition key to frequency/weight. */
 public class DataStatistics {
 
-    private final Map<String, Long> partitionFrequency;
+    private final Map<BinaryRow, Long> partitionFrequency;
 
     public DataStatistics() {
         this.partitionFrequency = new HashMap<>();
     }
 
-    public DataStatistics(Map<String, Long> partitionFrequency) {
+    public DataStatistics(Map<BinaryRow, Long> partitionFrequency) {
         this.partitionFrequency = partitionFrequency;
     }
 
@@ -39,11 +41,11 @@ public class DataStatistics {
         return partitionFrequency.isEmpty();
     }
 
-    public void add(String partition, long value) {
+    public void add(BinaryRow partition, long value) {
         partitionFrequency.merge(partition, value, Long::sum);
     }
 
-    public Map<String, Long> result() {
+    public Map<BinaryRow, Long> result() {
         return partitionFrequency;
     }
 
