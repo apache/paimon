@@ -69,6 +69,8 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.datasources.DataSource;
+import org.apache.spark.sql.execution.datasources.FileFormat;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -673,6 +675,28 @@ public class SparkCatalog extends SparkBaseCatalog
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
+        } catch (Exception e) {
+            // For SQL-on-file queries (e.g. SELECT * FROM parquet.`path`),
+            // swallow the exception to let Spark's ResolveSQLOnFile handle it.
+            if (isFileFormatNamespace(ident)) {
+                throw new NoSuchTableException(ident);
+            }
+            throw e;
+        }
+    }
+
+    /** Check if the identifier's namespace refers to a Spark FileFormat data source. */
+    private static boolean isFileFormatNamespace(Identifier ident) {
+        if (ident.namespace().length != 1) {
+            return false;
+        }
+        try {
+            SparkSession spark = SparkSession.active();
+            Class<?> cls =
+                    DataSource.lookupDataSource(ident.namespace()[0], spark.sessionState().conf());
+            return FileFormat.class.isAssignableFrom(cls);
+        } catch (Exception e) {
+            return false;
         }
     }
 

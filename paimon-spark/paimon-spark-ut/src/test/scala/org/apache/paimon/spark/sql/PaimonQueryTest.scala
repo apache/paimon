@@ -429,6 +429,16 @@ class PaimonQueryTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Query: select from parquet datasource path under paimon catalog") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (id INT, name STRING) USING paimon")
+      spark.sql("INSERT INTO T VALUES (1, 'a')")
+
+      val bucketDir = loadTable("T").location() + "/bucket-0"
+      checkAnswer(spark.sql(s"SELECT * FROM parquet.`$bucketDir`"), spark.sql("SELECT * FROM T"))
+    }
+  }
+
   fileFormats.foreach {
     fileFormat =>
       test(s"Query ignore-corrupt-files: file.format=$fileFormat") {
