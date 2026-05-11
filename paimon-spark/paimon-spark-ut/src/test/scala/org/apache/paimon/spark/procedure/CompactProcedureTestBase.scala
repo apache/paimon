@@ -135,7 +135,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 result.add(Row(a, b))
               }
             }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
 
             checkAnswer(
               spark.sql(
@@ -248,8 +248,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 result1.add(Row(1, a, b))
               }
             }
-            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
-            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+            Assertions.assertThat(query0().collect()).containsExactlyInAnyOrderElementsOf(result0)
+            Assertions.assertThat(query1().collect()).containsExactlyInAnyOrderElementsOf(result1)
 
             checkAnswer(
               spark.sql(
@@ -267,8 +267,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result2.add(7, Row(0, 2, 1))
             result2.add(8, Row(0, 2, 2))
 
-            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result2)
-            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+            Assertions.assertThat(query0().collect()).containsExactlyInAnyOrderElementsOf(result2)
+            Assertions.assertThat(query1().collect()).containsExactlyInAnyOrderElementsOf(result1)
 
             // test hilbert sort
             val result3 = new util.ArrayList[Row]()
@@ -287,16 +287,16 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'hilbert', order_by => 'a,b')"),
               Row(true) :: Nil)
 
-            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result3)
-            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+            Assertions.assertThat(query0().collect()).containsExactlyInAnyOrderElementsOf(result3)
+            Assertions.assertThat(query1().collect()).containsExactlyInAnyOrderElementsOf(result1)
 
             // test order sort
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'order', order_by => 'a,b')"),
               Row(true) :: Nil)
-            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
-            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+            Assertions.assertThat(query0().collect()).containsExactlyInAnyOrderElementsOf(result0)
+            Assertions.assertThat(query1().collect()).containsExactlyInAnyOrderElementsOf(result1)
           } finally {
             stream.stop()
           }

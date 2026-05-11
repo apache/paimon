@@ -955,11 +955,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     ManifestFileMerger.merge(
                             mergeBeforeManifests,
                             manifestFile,
-                            options.manifestTargetSize().getBytes(),
-                            options.manifestMergeMinCount(),
-                            options.manifestFullCompactionThresholdSize().getBytes(),
+                            manifestTargetSize.getBytes(),
+                            manifestMergeMinCount,
+                            manifestFullCompactionSize.getBytes(),
                             partitionType,
-                            options.scanManifestParallelism());
+                            manifestReadParallelism,
+                            coreOptions.manifestMergeSorted()
+                                    && coreOptions.manifestMergeSortOnCommit(),
+                            coreOptions.manifestMergeSortBufferSize());
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -984,8 +987,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             // write new delta files into manifest files
             deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
-            deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
-
+            List<ManifestEntry> deltaFilesForWrite = deltaFiles;
+            if (coreOptions.manifestDeltaSorted() && deltaFiles.size() > 1) {
+                deltaFilesForWrite = new ArrayList<>(deltaFiles);
+                deltaFilesForWrite.sort(
+                        ManifestFileMerger.createManifestEntryComparator(partitionType));
+            }
+            List<ManifestFileMeta> deltaManifests = manifestFile.write(deltaFilesForWrite);
+            deltaManifestList = manifestList.write(deltaManifests);
             // write changelog into manifest files
             if (!changelogFiles.isEmpty()) {
                 changelogManifestList = manifestList.write(manifestFile.write(changelogFiles));
@@ -1188,7 +1197,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         1,
                         1,
                         partitionType,
-                        options.scanManifestParallelism());
+                        options.scanManifestParallelism(),
+                        coreOptions.manifestMergeSorted(),
+                        coreOptions.manifestMergeSortBufferSize());
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
