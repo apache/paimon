@@ -15,16 +15,17 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
-import logging
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
-from pypaimon.write.table_write import BatchTableWrite
+from pypaimon.write.table_write import StreamTableWrite
 
 # Composite key is represented as a tuple of values
 _KeyTuple = Tuple[Any, ...]
@@ -44,11 +45,12 @@ class TableUpsertByKey:
     All upsert_keys must be columns present in both the input data and the table schema.
     """
 
-    def __init__(self, table, commit_user: str):
+    def __init__(self, table, commit_user: str, commit_identifier: int):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.commit_user = commit_user
+        self.commit_identifier = commit_identifier
 
     def upsert(self, data: pa.Table, upsert_keys: List[str],
                update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
@@ -107,30 +109,27 @@ class TableUpsertByKey:
         Split *data* into ``(partition_spec, partition_rows)`` pairs.
 
         For non-partitioned tables a single pair ``({}, data)`` is returned.
+        Iteration order matches first-appearance order of each partition value
+        in the input — dict preserves insertion order on Python 3.7+.
         """
         partition_keys = self.table.partition_keys
         if not partition_keys:
             return [({}, data)]
 
-        # Materialise partition columns once
         part_columns = [data[k].to_pylist() for k in partition_keys]
 
-        # Discover unique partitions and collect row indices
-        seen_order: List[Tuple[Any, ...]] = []  # preserves insertion order
         partition_to_indices: Dict[Tuple[Any, ...], List[int]] = {}
         for i in range(data.num_rows):
             part_tuple = tuple(col[i] for col in part_columns)
-            if part_tuple not in partition_to_indices:
-                seen_order.append(part_tuple)
-                partition_to_indices[part_tuple] = []
-            partition_to_indices[part_tuple].append(i)
+            partition_to_indices.setdefault(part_tuple, []).append(i)
 
-        result: List[Tuple[Dict[str, Any], pa.Table]] = []
-        for part_tuple in seen_order:
-            spec = dict(zip(partition_keys, part_tuple))
-            indices = pa.array(partition_to_indices[part_tuple], type=pa.int64())
-            result.append((spec, data.take(indices)))
-        return result
+        return [
+            (
+                dict(zip(partition_keys, part_tuple)),
+                data.take(pa.array(indices, type=pa.int64())),
+            )
+            for part_tuple, indices in partition_to_indices.items()
+        ]
 
     # ------------------------------------------------------------------
     # Per-partition upsert
@@ -153,72 +152,77 @@ class TableUpsertByKey:
         key set on-the-fly, so only matching key → _ROW_ID pairs are kept in
         memory (instead of the entire partition's key set).
         """
-        # Strip partition columns – they are constant inside one partition
+        # Partition columns are constant inside one partition – drop them
+        # from the key set used for matching.
         partition_key_set = set(self.table.partition_keys)
         match_keys = [k for k in upsert_keys if k not in partition_key_set]
 
-        # 1. Build input key tuples and a lookup set
+        # 1. Build the composite key tuple for every input row.
         key_columns = [partition_data[k].to_pylist() for k in match_keys]
-        input_key_tuples = [
+        input_key_tuples: List[_KeyTuple] = [
             tuple(col[i] for col in key_columns)
             for i in range(partition_data.num_rows)
         ]
 
-        # 2. Deduplicate: keep last occurrence of each key
+        # 2. Deduplicate – keep the LAST occurrence of every repeated key.
+        partition_data, input_key_tuples = self._dedup_last_write_wins(
+            partition_data, input_key_tuples, partition_spec,
+        )
+
+        # 3. Scan partition once, keeping only key → _ROW_ID pairs that
+        #    appear in the input (memory ∝ |input|, not |partition|).
+        key_to_row_id = self._build_key_to_row_id_map(
+            match_keys, partition_spec, set(input_key_tuples),
+        )
+
+        # 4. Partition input rows into matched (update) vs unmatched (append).
+        matched_indices: List[int] = []
+        new_indices: List[int] = []
+        for i, key_tuple in enumerate(input_key_tuples):
+            (matched_indices if key_tuple in key_to_row_id else new_indices).append(i)
+
+        logger.info(
+            "Upserting partition %s: %d matched, %d new",
+            partition_spec, len(matched_indices), len(new_indices),
+        )
+
+        commit_messages: List[CommitMessage] = []
+        if matched_indices:
+            commit_messages.extend(self._do_updates(
+                partition_data, matched_indices,
+                input_key_tuples, key_to_row_id, update_cols,
+            ))
+        if new_indices:
+            commit_messages.extend(self._do_appends(partition_data, new_indices))
+        return commit_messages
+
+    @staticmethod
+    def _dedup_last_write_wins(
+            partition_data: pa.Table,
+            input_key_tuples: List[_KeyTuple],
+            partition_spec: Dict[str, Any],
+    ) -> Tuple[pa.Table, List[_KeyTuple]]:
+        """Collapse duplicate-key rows in ``partition_data`` to the last
+        occurrence of each key, preserving relative order. No-op when the
+        input has no duplicates."""
         key_to_last_idx: Dict[_KeyTuple, int] = {}
         for i, key_tuple in enumerate(input_key_tuples):
             key_to_last_idx[key_tuple] = i  # last write wins
 
-        if len(input_key_tuples) != len(key_to_last_idx):
-            original_count = len(input_key_tuples)
-            dedup_indices = sorted(key_to_last_idx.values())
-            partition_data = partition_data.take(dedup_indices)
-            input_key_tuples = [input_key_tuples[i] for i in dedup_indices]
-            logger.warning(
-                "Deduplicated input from %d to %d rows in partition %s "
-                "(kept last occurrence).",
-                original_count, len(input_key_tuples), partition_spec,
-            )
+        if len(key_to_last_idx) == len(input_key_tuples):
+            return partition_data, input_key_tuples
 
-        # 3. Scan partition in batches, build key → _ROW_ID only for
-        #    keys present in the input (avoids full-partition materialisation).
-        input_key_set = set(key_to_last_idx.keys())
-        key_to_row_id = self._build_key_to_row_id_map(
-            match_keys, partition_spec, input_key_set
+        original_count = len(input_key_tuples)
+        dedup_indices = sorted(key_to_last_idx.values())
+        logger.warning(
+            "Deduplicated input from %d to %d rows in partition %s "
+            "(kept last occurrence).",
+            original_count, len(dedup_indices), partition_spec,
         )
-
-        # 4. Split into matched (update) vs unmatched (append)
-        matched_indices: List[int] = []
-        new_indices: List[int] = []
-        for i, key_tuple in enumerate(input_key_tuples):
-            if key_tuple in key_to_row_id:
-                matched_indices.append(i)
-            else:
-                new_indices.append(i)
-
-        commit_messages: List[CommitMessage] = []
-
-        logger.info(
-            f"Upserting partition {partition_spec}: "
-            f"{len(matched_indices)} matched, {len(new_indices)} new"
+        return (
+            partition_data.take(dedup_indices),
+            [input_key_tuples[i] for i in dedup_indices],
         )
-
-        # 5. In-place updates
-        if matched_indices:
-            commit_messages.extend(
-                self._do_updates(
-                    partition_data, matched_indices,
-                    input_key_tuples, key_to_row_id, update_cols
-                )
-            )
-
-        # 6. Appends
-        if new_indices:
-            commit_messages.extend(
-                self._do_appends(partition_data, new_indices)
-            )
-
-        return commit_messages
 
     def _validate_inputs(self, data: pa.Table, upsert_keys: List[str],
                          update_cols: Optional[List[str]]):
@@ -281,9 +285,11 @@ class TableUpsertByKey:
         Scan the partition in batches and collect key → _ROW_ID only for
         rows whose composite key is in *input_key_set*.
 
-        ``is_in`` predicates on each key column are pushed to the scan so
-        that files whose stats do not overlap the input values are pruned
-        entirely.
+        The partition spec (if any) is pushed down as an ``and`` of per-key
+        equality predicates so non-matching partitions are pruned by the
+        scanner. The match-key filter itself is applied in Python on each
+        batch — this keeps memory proportional to the input key set rather
+        than the entire partition.
 
         Args:
             match_keys:     Column names used as the composite match key
@@ -337,27 +343,21 @@ class TableUpsertByKey:
             key_to_row_id: Dict[_KeyTuple, int],
             update_cols: Optional[List[str]]
     ) -> List[CommitMessage]:
-        """
-        Update rows that have matching upsert keys by rewriting them in-place.
-        """
+        """Update matched rows by rewriting them in-place via
+        :class:`TableUpdateByRowId`."""
         matched_data = data.take(matched_indices)
+        row_id_array = pa.array(
+            [key_to_row_id[input_key_tuples[i]] for i in matched_indices],
+            type=pa.int64(),
+        )
+        update_data = matched_data.append_column(
+            SpecialFields.ROW_ID.name, row_id_array,
+        )
 
-        # Build _ROW_ID values for matched rows
-        row_id_values = [key_to_row_id[input_key_tuples[i]] for i in matched_indices]
-        row_id_array = pa.array(row_id_values, type=pa.int64())
-
-        # Add _ROW_ID column
-        update_data = matched_data.append_column(SpecialFields.ROW_ID.name, row_id_array)
-
-        # Determine which columns to update
-        if update_cols is None:
-            cols_to_update = list(self.table.field_names)
-        else:
-            cols_to_update = list(update_cols)
-
-        # Use TableUpdateByRowId to do the actual in-place update
-        updater = TableUpdateByRowId(self.table, self.commit_user)
-        return updater.update_columns(update_data, cols_to_update)
+        cols_to_update = list(update_cols) if update_cols else list(self.table.field_names)
+        return TableUpdateByRowId(
+            self.table, self.commit_user, self.commit_identifier,
+        ).update_columns(update_data, cols_to_update)
 
     def _do_appends(
             self,
@@ -367,10 +367,13 @@ class TableUpsertByKey:
         """
         Append rows that have no matching upsert key.
 
-        New rows are written with all columns via the standard
-        BatchTableWrite API, which handles partition/bucket routing
-        automatically.  ``update_cols`` only restricts which columns
-        are rewritten for *matched* rows.
+        New rows are always written with *all* columns — ``update_cols``
+        only restricts which columns are rewritten for *matched* rows.
+
+        :class:`StreamTableWrite` is used so the produced commit messages
+        carry this upsert's ``commit_identifier``; in batch mode the
+        identifier is :data:`BATCH_COMMIT_IDENTIFIER`, so the on-disk
+        result is identical to using :class:`BatchTableWrite`.
         """
         new_data = data.take(new_indices)
 
@@ -378,10 +381,10 @@ class TableUpsertByKey:
         all_ordered_cols = [c for c in self.table.field_names if c in new_data.column_names]
         new_data = new_data.select(all_ordered_cols)
 
-        table_write = BatchTableWrite(self.table, self.commit_user)
+        table_write = StreamTableWrite(self.table, self.commit_user)
         try:
             table_write.with_write_type(all_ordered_cols)
             table_write.write_arrow(new_data)
-            return table_write.prepare_commit()
+            return table_write.prepare_commit(self.commit_identifier)
         finally:
             table_write.close()

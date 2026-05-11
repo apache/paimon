@@ -27,7 +27,17 @@ from pypaimon.write.file_store_commit import FileStoreCommit
 
 
 class TableCommit:
-    """Python implementation of BatchTableCommit for batch writing scenarios."""
+    """Common base for batch and stream table commits.
+
+    Owns the underlying :class:`FileStoreCommit` and provides the shared
+    :meth:`_commit` implementation. The concrete subclasses differ only in
+    their public ``commit`` signature and lifecycle constraints:
+
+    * :class:`BatchTableCommit` accepts no ``commit_identifier`` and may be
+      committed at most once.
+    * :class:`StreamTableCommit` requires an explicit ``commit_identifier``
+      on every call and may be reused for many commits.
+    """
 
     def __init__(self, table, commit_user: str, static_partition: Optional[dict]):
         from pypaimon.table.file_store_table import FileStoreTable
@@ -42,11 +52,8 @@ class TableCommit:
             raise RuntimeError("Table does not provide a SnapshotCommit instance")
 
         self.file_store_commit = FileStoreCommit(snapshot_commit, table, commit_user)
-        self.batch_committed = False
 
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
-        self._check_committed()
-
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
         if self.overwrite_partition is not None:
@@ -66,7 +73,7 @@ class TableCommit:
             if not non_empty_messages:
                 return
             logger.info(
-                "Committing batch table %s, %d non-empty messages",
+                "Committing table %s, %d non-empty messages",
                 self.table.identifier, len(non_empty_messages)
             )
             self.file_store_commit.commit(
@@ -80,14 +87,16 @@ class TableCommit:
     def close(self):
         self.file_store_commit.close()
 
-    def _check_committed(self):
-        if self.batch_committed:
-            raise RuntimeError("BatchTableCommit only supports one-time committing.")
-        self.batch_committed = True
-
 
 class BatchTableCommit(TableCommit):
+    """Batch-mode commit; supports at most one commit per instance."""
+
+    def __init__(self, table, commit_user: str, static_partition: Optional[dict]):
+        super().__init__(table, commit_user, static_partition)
+        self.batch_committed = False
+
     def commit(self, commit_messages: List[CommitMessage]):
+        self._check_committed()
         self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
 
     def truncate_table(self) -> None:
@@ -99,8 +108,19 @@ class BatchTableCommit(TableCommit):
         self._check_committed()
         self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)
 
+    def _check_committed(self):
+        if self.batch_committed:
+            raise RuntimeError("BatchTableCommit only supports one-time committing.")
+        self.batch_committed = True
+
 
 class StreamTableCommit(TableCommit):
+    """Stream-mode commit; reusable across many commit rounds.
+
+    Each call must be tagged with a monotonically increasing
+    ``commit_identifier`` — analogous to
+    :meth:`StreamTableWrite.prepare_commit`.
+    """
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         self._commit(commit_messages, commit_identifier)

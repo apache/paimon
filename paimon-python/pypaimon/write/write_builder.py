@@ -22,7 +22,8 @@ from typing import Optional
 
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
-from pypaimon.write.table_update import TableUpdate
+from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
+                                         TableUpdate)
 from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
                                         TableWrite)
 
@@ -61,8 +62,8 @@ class BatchWriteBuilder(WriteBuilder):
     def new_write(self) -> BatchTableWrite:
         return BatchTableWrite(self.table, self.commit_user)
 
-    def new_update(self) -> TableUpdate:
-        return TableUpdate(self.table, self.commit_user)
+    def new_update(self) -> BatchTableUpdate:
+        return BatchTableUpdate(self.table, self.commit_user)
 
     def new_commit(self) -> BatchTableCommit:
         commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
@@ -74,8 +75,8 @@ class StreamWriteBuilder(WriteBuilder):
     def new_write(self) -> StreamTableWrite:
         return StreamTableWrite(self.table, self.commit_user)
 
-    def new_update(self) -> TableUpdate:
-        raise ValueError("StreamWriteBuilder.new_update() not supported.")
+    def new_update(self) -> StreamTableUpdate:
+        return StreamTableUpdate(self.table, self.commit_user)
 
     def new_commit(self) -> StreamTableCommit:
         commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)

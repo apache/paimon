@@ -1,1123 +1,659 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-import os
-import shutil
-import tempfile
+import random
+import string
+import threading
 import unittest
 
 import pyarrow as pa
 
-from pypaimon import CatalogFactory, Schema
+from pypaimon.tests.data_evolution_test_helpers import (
+    BatchModeMixin,
+    DataEvolutionTestBase,
+    StreamModeMixin,
+)
 
 
-class TableUpdateTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tempdir = tempfile.mkdtemp()
-        cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
-        cls.catalog = CatalogFactory.create({
-            'warehouse': cls.warehouse
-        })
-        cls.catalog.create_database('default', True)
+# ======================================================================
+# Shared base for batch & stream table-update tests
+# ======================================================================
 
-        # Define table schema for testing
-        cls.pa_schema = pa.schema([
-            ('id', pa.int32()),
-            ('name', pa.string()),
-            ('age', pa.int32()),
-            ('city', pa.string()),
-        ])
+class _TableUpdateTestBase(DataEvolutionTestBase):
+    """Shared tests for ``TableUpdate.update_by_arrow_with_row_id``.
 
-        # Define options for data evolution
-        cls.table_options = {
-            'row-tracking.enabled': 'true',
-            'data-evolution.enabled': 'true'
-        }
+    Concrete subclasses must inherit from :class:`unittest.TestCase` AND one
+    of :class:`_BatchModeMixin` / :class:`_StreamModeMixin`, which add the
+    operation-specific primitive ``_apply_update(tu, data, cid)`` on top of
+    the framework primitives provided by
+    :class:`DataEvolutionTestBase`/:class:`BatchModeMixin`/:class:`StreamModeMixin`.
+    """
 
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tempdir, ignore_errors=True)
+    # ------------------------------------------------------------------
+    # Operation-specific primitive (overridden by mixins)
+    # ------------------------------------------------------------------
 
-    def _create_table(self):
-        """Helper method to create a table with initial data."""
-        # Generate unique table name for each test
-        import uuid
-        table_name = f'test_data_evolution_{uuid.uuid4().hex[:8]}'
-        schema = Schema.from_pyarrow_schema(self.pa_schema, options=self.table_options)
-        self.catalog.create_table(f'default.{table_name}', schema, False)
-        table = self.catalog.get_table(f'default.{table_name}')
+    def _apply_update(self, table_update, data, cid):
+        raise NotImplementedError
 
-        # Write batch-1
-        write_builder = table.new_batch_write_builder()
+    # ------------------------------------------------------------------
+    # Helpers built on the primitives
+    # ------------------------------------------------------------------
 
-        initial_data = pa.Table.from_pydict({
+    def _create_seeded_table(self, partition_keys=None):
+        """Create the canonical 5-row / 2-file table used by most tests.
+
+        Layout (row_id → row):
+            0: (1, Alice,   25, NYC)
+            1: (2, Bob,     30, LA)
+            2: (3, Charlie, 35, Chicago)
+            3: (4, David,   40, Houston)
+            4: (5, Eve,     45, Phoenix)
+        """
+        table = self._create_table(partition_keys=partition_keys)
+        self._write_arrow(table, pa.Table.from_pydict({
             'id': [1, 2],
             'name': ['Alice', 'Bob'],
             'age': [25, 30],
-            'city': ['NYC', 'LA']
-        }, schema=self.pa_schema)
-
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(initial_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Write batch-2
-        following_data = pa.Table.from_pydict({
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
             'id': [3, 4, 5],
             'name': ['Charlie', 'David', 'Eve'],
             'age': [35, 40, 45],
-            'city': ['Chicago', 'Houston', 'Phoenix']
-        }, schema=self.pa_schema)
-
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(following_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
+            'city': ['Chicago', 'Houston', 'Phoenix'],
+        }, schema=self.pa_schema))
         return table
 
+    def _do_update(self, table, data, columns):
+        """End-to-end ``update_by_arrow_with_row_id`` + commit. Returns the
+        commit messages so callers can inspect produced files."""
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(columns)
+        cid = self._next_commit_id()
+        msgs = self._apply_update(tu, data, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    # ==================================================================
+    # Shared tests (run under both batch and stream modes)
+    # ==================================================================
+
     def test_update_existing_column(self):
-        """Test updating an existing column using data evolution."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        batch_write = write_builder.new_write()
-
-        # Prepare update data (sorted by row_id)
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [1, 0, 2, 3, 4],
-            'age': [31, 26, 36, 39, 42]
-        })
-
-        # Update the age column
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-        batch_write.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that ages were updated for rows 0-2
-        ages = result['age'].to_pylist()
-        expected_ages = [26, 31, 36, 39, 42]
-        self.assertEqual(ages, expected_ages)
-
-    def test_update_multiple_columns(self):
-        """Test updating multiple columns at once."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        batch_write = write_builder.new_write()
-
-        # Prepare update data (sorted by row_id)
-        update_data = pa.Table.from_pydict({
+        """Update a single column across both files (row_ids unordered)."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
             '_ROW_ID': [1, 0, 2, 3, 4],
             'age': [31, 26, 36, 39, 42],
-            'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston']
-        })
+        }), ['age'])
+        self.assertEqual(
+            [26, 31, 36, 39, 42],
+            self._read_all(table)['age'].to_pylist(),
+        )
 
-        # Update multiple columns
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age', 'city'])
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
+    def test_update_multiple_columns(self):
+        """Update ``age`` + ``city`` together; other columns are untouched."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'age': [31, 26, 36, 39, 42],
+            'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston'],
+        }), ['age', 'city'])
 
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-        batch_write.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that both age and city were updated for rows 0-2
-        ages = result['age'].to_pylist()
-        cities = result['city'].to_pylist()
-
-        expected_ages = [26, 31, 36, 39, 42]
-        expected_cities = ['New York', 'Los Angeles', 'Chicago', 'Phoenix', 'Houston']
-
-        self.assertEqual(ages, expected_ages)
-        self.assertEqual(cities, expected_cities)
-
-    def test_nonexistent_column(self):
-        """Test that updating a non-existent column raises an error."""
-        table = self._create_table()
-
-        # Try to update a non-existent column
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [0, 1, 2, 3, 4],
-            'nonexistent_column': [100, 200, 300, 400, 500]
-        })
-
-        # Should raise ValueError
-        with self.assertRaises(ValueError) as context:
-            write_builder = table.new_batch_write_builder()
-            table_update = write_builder.new_update().with_update_type(['nonexistent_column'])
-            table_update.update_by_arrow_with_row_id(update_data)
-
-        self.assertIn('not in table schema', str(context.exception))
-
-    def test_missing_row_id_column(self):
-        """Test that missing row_id column raises an error."""
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        batch_write = write_builder.new_write()
-
-        # Prepare update data without row_id column
-        update_data = pa.Table.from_pydict({
-            'age': [26, 27, 28, 29, 30]
-        })
-
-        # Should raise ValueError
-        with self.assertRaises(ValueError) as context:
-            write_builder = table.new_batch_write_builder()
-            table_update = write_builder.new_update().with_update_type(['age'])
-            table_update.update_by_arrow_with_row_id(update_data)
-
-        self.assertIn("Input data must contain _ROW_ID column", str(context.exception))
-        batch_write.close()
+        result = self._read_all(table)
+        self.assertEqual([26, 31, 36, 39, 42], result['age'].to_pylist())
+        self.assertEqual(
+            ['New York', 'Los Angeles', 'Chicago', 'Phoenix', 'Houston'],
+            result['city'].to_pylist(),
+        )
 
     def test_partitioned_table_update(self):
-        """Test updating columns in a partitioned table."""
-        # Create partitioned table
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['city'], options=self.table_options)
-        self.catalog.create_table('default.test_partitioned_evolution', schema, False)
-        table = self.catalog.get_table('default.test_partitioned_evolution')
-
-        # Write initial data
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-
-        initial_data = pa.Table.from_pydict({
+        """Updates work on a partitioned table the same as a flat one."""
+        table = self._create_table(partition_keys=['city'])
+        self._write_arrow(table, pa.Table.from_pydict({
             'id': [1, 2, 3, 4, 5],
             'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             'age': [25, 30, 35, 40, 45],
-            'city': ['NYC', 'NYC', 'LA', 'LA', 'Chicago']
-        }, schema=self.pa_schema)
+            'city': ['NYC', 'NYC', 'LA', 'LA', 'Chicago'],
+        }, schema=self.pa_schema))
 
-        table_write.write_arrow(initial_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Update ages
-        update_data = pa.Table.from_pydict({
+        self._do_update(table, pa.Table.from_pydict({
             '_ROW_ID': [1, 0, 2, 3, 4],
-            'age': [31, 26, 36, 41, 46]
-        })
+            'age': [31, 26, 36, 41, 46],
+        }), ['age'])
 
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check ages were updated
-        ages = result['age'].to_pylist()
-        expected_ages = [26, 31, 36, 41, 46]
-        self.assertEqual(ages, expected_ages)
-
-    def test_multiple_calls(self):
-        """Test multiple calls to update_columns, each updating a single column."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # First update: Update age column
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        update_age_data = pa.Table.from_pydict({
-            '_ROW_ID': [1, 0, 2, 3, 4],
-            'age': [31, 26, 36, 41, 46]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_age_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Second update: Update city column
-        update_city_data = pa.Table.from_pydict({
-            '_ROW_ID': [1, 0, 2, 3, 4],
-            'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston']
-        })
-        table_update.with_update_type(['city'])
-        commit_messages = table_update.update_by_arrow_with_row_id(update_city_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify both columns were updated correctly
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        ages = result['age'].to_pylist()
-        cities = result['city'].to_pylist()
-
-        expected_ages = [26, 31, 36, 41, 46]
-        expected_cities = ['New York', 'Los Angeles', 'Chicago', 'Phoenix', 'Houston']
-
-        self.assertEqual(ages, expected_ages, "Age column was not updated correctly")
-        self.assertEqual(cities, expected_cities, "City column was not updated correctly")
-
-    def test_update_partial_file(self):
-        """Test updating an existing column using data evolution."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        batch_write = write_builder.new_write()
-
-        # Prepare update data (sorted by row_id)
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [1],
-            'age': [31]
-        })
-
-        # Update the age column
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-        batch_write.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that ages were updated for rows 0-2
-        ages = result['age'].to_pylist()
-        expected_ages = [25, 31, 35, 40, 45]
-        self.assertEqual(ages, expected_ages)
-
-    def test_partial_rows_update_single_file(self):
-        """Test updating only some rows within a single file."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Update only row 0 in the first file (which contains rows 0-1)
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [0],
-            'age': [100]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that only row 0 was updated, others remain unchanged
-        ages = result['age'].to_pylist()
-        expected_ages = [100, 30, 35, 40, 45]  # Only first row updated
-        self.assertEqual(ages, expected_ages)
-
-    def test_partial_rows_update_multiple_files(self):
-        """Test updating partial rows across multiple files."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Update row 1 from first file and row 2 from second file
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [1, 2],
-            'age': [200, 300]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that only specified rows were updated
-        ages = result['age'].to_pylist()
-        expected_ages = [25, 200, 300, 40, 45]  # Rows 1 and 2 updated
-        self.assertEqual(ages, expected_ages)
-
-    def test_partial_rows_non_consecutive(self):
-        """Test updating non-consecutive rows."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Update rows 0, 2, 4 (non-consecutive)
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [0, 2, 4],
-            'age': [100, 300, 500]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that only specified rows were updated
-        ages = result['age'].to_pylist()
-        expected_ages = [100, 30, 300, 40, 500]  # Rows 0, 2, 4 updated
-        self.assertEqual(ages, expected_ages)
+        self.assertEqual(
+            [26, 31, 36, 41, 46],
+            self._read_all(table)['age'].to_pylist(),
+        )
 
     def test_update_preserves_other_columns(self):
-        """Test that updating one column preserves other columns."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Update only row 1
-        update_data = pa.Table.from_pydict({
+        """Updating ``age`` leaves all other columns untouched."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
             '_ROW_ID': [1],
-            'age': [999]
-        })
+            'age': [999],
+        }), ['age'])
 
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
+        result = self._read_all(table)
+        self.assertEqual([25, 999, 35, 40, 45], result['age'].to_pylist())
+        self.assertEqual(
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            result['name'].to_pylist(),
+        )
+        self.assertEqual(
+            ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
 
-        # Commit the changes
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
+    def test_partial_row_updates(self):
+        """All partial-row patterns share one parameterised test."""
+        cases = [
+            # name, row_ids, ages, expected ages after update
+            ('single_first_file',  [0],       [100],            [100, 30,  35,  40, 45]),
+            ('single_second_file', [1],       [31],             [25,  31,  35,  40, 45]),
+            ('one_per_file',       [1, 2],    [200, 300],       [25,  200, 300, 40, 45]),
+            ('non_consecutive',    [0, 2, 4], [100, 300, 500],  [100, 30,  300, 40, 500]),
+        ]
+        for name, row_ids, ages, expected in cases:
+            with self.subTest(case=name):
+                table = self._create_seeded_table()
+                self._do_update(table, pa.Table.from_pydict({
+                    '_ROW_ID': row_ids,
+                    'age': ages,
+                }), ['age'])
+                self.assertEqual(
+                    expected,
+                    self._read_all(table)['age'].to_pylist(),
+                )
 
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
+    def test_multiple_sequential_single_column_updates(self):
+        """Two sequential updates on different single columns compose."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'age': [31, 26, 36, 41, 46],
+        }), ['age'])
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston'],
+        }), ['city'])
 
-        # Check that age was updated for row 1
-        ages = result['age'].to_pylist()
-        expected_ages = [25, 999, 35, 40, 45]
-        self.assertEqual(ages, expected_ages)
-
-        # Check that other columns remain unchanged
-        names = result['name'].to_pylist()
-        expected_names = ['Alice', 'Bob', 'Charlie', 'David', 'Eve']
-        self.assertEqual(names, expected_names)
-
-        cities = result['city'].to_pylist()
-        expected_cities = ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix']
-        self.assertEqual(cities, expected_cities)
+        result = self._read_all(table)
+        self.assertEqual([26, 31, 36, 41, 46], result['age'].to_pylist())
+        self.assertEqual(
+            ['New York', 'Los Angeles', 'Chicago', 'Phoenix', 'Houston'],
+            result['city'].to_pylist(),
+        )
 
     def test_sequential_partial_updates(self):
-        """Test multiple sequential partial updates on the same table."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # First update: Update row 0
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        update_data_1 = pa.Table.from_pydict({
-            '_ROW_ID': [0],
-            'age': [100]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data_1)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Second update: Update row 2
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        update_data_2 = pa.Table.from_pydict({
-            '_ROW_ID': [2],
-            'age': [300]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data_2)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Third update: Update row 4
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        update_data_3 = pa.Table.from_pydict({
-            '_ROW_ID': [4],
-            'age': [500]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data_3)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify the final data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Check that all updates were applied correctly
-        ages = result['age'].to_pylist()
-        expected_ages = [100, 30, 300, 40, 500]
-        self.assertEqual(expected_ages, ages)
-
-    def test_row_id_out_of_range(self):
-        """Test that row_id out of valid range raises an error."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Prepare update data with row_id out of range (table has 5 rows: 0-4)
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [0, 10],  # 10 is out of range
-            'age': [26, 100]
-        })
-
-        # Should raise ValueError for row_id out of range
-        with self.assertRaises(ValueError) as context:
-            table_update.update_by_arrow_with_row_id(update_data)
-
-        self.assertIn("out of valid range", str(context.exception))
-
-    def test_negative_row_id(self):
-        """Test that negative row_id raises an error."""
-        # Create table with initial data
-        table = self._create_table()
-
-        # Create data evolution table update
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        # Prepare update data with negative row_id
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [-1, 0],
-            'age': [100, 26]
-        })
-
-        # Should raise ValueError for negative row_id
-        with self.assertRaises(ValueError) as context:
-            table_update.update_by_arrow_with_row_id(update_data)
-
-        self.assertIn("out of valid range", str(context.exception))
-
-    def test_duplicate_row_id(self):
-        """Test that duplicate _ROW_ID values raise an error."""
-        table = self._create_table()
-
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [0, 0, 1],
-            'age': [100, 200, 300]
-        })
-
-        with self.assertRaises(ValueError) as context:
-            table_update.update_by_arrow_with_row_id(update_data)
-
-        self.assertIn("duplicate _ROW_ID values", str(context.exception))
-
-    def test_large_table_partial_column_updates(self):
-        """Test partial column updates on a large table with 4 columns.
-
-        This test covers:
-        1. Update first column (id), update 1 row, verify result
-        2. Update first and second columns (id, name), update 2 rows, verify result
-        3. Update second column (name), update 1 row, verify result
-        4. Update third column (age), verify result
-        """
-        import uuid
-
-        # Create table with 4 columns and 20 rows in 2 files
-        table_name = f'test_large_table_{uuid.uuid4().hex[:8]}'
-        schema = Schema.from_pyarrow_schema(self.pa_schema, options=self.table_options)
-        self.catalog.create_table(f'default.{table_name}', schema, False)
-        table = self.catalog.get_table(f'default.{table_name}')
-
-        # Write batch-1
-        num_row = 1000
-        write_builder = table.new_batch_write_builder()
-        batch1_data = pa.Table.from_pydict({
-            'id': list(range(num_row)),
-            'name': [f'Name_{i}' for i in range(num_row)],
-            'age': [20 + i for i in range(num_row)],
-            'city': [f'City_{i}' for i in range(num_row)]
-        }, schema=self.pa_schema)
-
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(batch1_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Write batch-2
-        batch2_data = pa.Table.from_pydict({
-            'id': list(range(num_row, num_row * 2)),
-            'name': [f'Name_{i}' for i in range(num_row, num_row * 2)],
-            'age': [20 + num_row + i for i in range(num_row)],
-            'city': [f'City_{i}' for i in range(num_row, num_row * 2)]
-        }, schema=self.pa_schema)
-
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(batch2_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # --- Test 1: Update first column (id), update 1 row ---
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['id'])
-
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [5],
-            'id': [999]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify Test 1
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        ids = result['id'].to_pylist()
-        expected_ids = list(range(num_row * 2))
-        expected_ids[5] = 999
-        self.assertEqual(expected_ids, ids, "Test 1 failed: Update first column for 1 row")
-
-        # --- Test 2: Update first and second columns (id, name), update 2 rows ---
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['id', 'name'])
-
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [3, 15],
-            'id': [888, 777],
-            'name': ['Updated_Name_3', 'Updated_Name_15']
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify Test 2
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        ids = result['id'].to_pylist()
-        expected_ids[3] = 888
-        expected_ids[15] = 777
-        self.assertEqual(expected_ids, ids, "Test 2 failed: Update id column for 2 rows")
-
-        names = result['name'].to_pylist()
-        expected_names = [f'Name_{i}' for i in range(num_row * 2)]
-        expected_names[3] = 'Updated_Name_3'
-        expected_names[15] = 'Updated_Name_15'
-        self.assertEqual(expected_names, names, "Test 2 failed: Update name column for 2 rows")
-
-        # --- Test 3: Update second column (name), update 1 row ---
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['name'])
-
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [12],
-            'name': ['NewName_12']
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify Test 3
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        names = result['name'].to_pylist()
-        expected_names[12] = 'NewName_12'
-        self.assertEqual(expected_names, names, "Test 3 failed: Update name column for 1 row")
-
-        # --- Test 4: Update third column (age), update multiple rows across both files ---
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age'])
-
-        update_data = pa.Table.from_pydict({
-            '_ROW_ID': [0, 5, 10, 15],
-            'age': [100, 105, 110, 115]
-        })
-
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify Test 4
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        ages = result['age'].to_pylist()
-        expected_ages = [20 + i for i in range(num_row)] + [20 + num_row + i for i in range(num_row)]
-        expected_ages[0] = 100
-        expected_ages[5] = 105
-        expected_ages[10] = 110
-        expected_ages[15] = 115
-        self.assertEqual(expected_ages, ages, "Test 4 failed: Update age column for multiple rows")
-
-        # Verify other columns remain unchanged after all updates
-        cities = result['city'].to_pylist()
-        expected_cities = [f'City_{i}' for i in range(num_row * 2)]
-        self.assertEqual(expected_cities, cities, "City column should remain unchanged")
+        """Sequential single-row updates accumulate correctly."""
+        table = self._create_seeded_table()
+        for row_id, age in [(0, 100), (2, 300), (4, 500)]:
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': [row_id],
+                'age': [age],
+            }), ['age'])
+        self.assertEqual(
+            [100, 30, 300, 40, 500],
+            self._read_all(table)['age'].to_pylist(),
+        )
 
     def test_update_partial_rows_across_two_files(self):
-        """Test updating partial rows across two data files in a single update operation.
-
-        This test creates a table with 2 commits (2 data files), then performs a single update
-        that modifies partial rows from both files simultaneously.
-        """
-        import uuid
-
-        # Create table
-        table_name = f'test_two_files_{uuid.uuid4().hex[:8]}'
-        schema = Schema.from_pyarrow_schema(self.pa_schema, options=self.table_options)
-        self.catalog.create_table(f'default.{table_name}', schema, False)
-        table = self.catalog.get_table(f'default.{table_name}')
-
-        # Commit 1: Write first batch of data (row_id 0-4)
-        write_builder = table.new_batch_write_builder()
-        batch1_data = pa.Table.from_pydict({
+        """A single update modifies partial rows from both data files."""
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
             'id': [1, 2, 3, 4, 5],
             'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             'age': [20, 25, 30, 35, 40],
-            'city': ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix']
-        }, schema=self.pa_schema)
-
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(batch1_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Commit 2: Write second batch of data (row_id 5-9)
-        batch2_data = pa.Table.from_pydict({
+            'city': ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
             'id': [6, 7, 8, 9, 10],
             'name': ['Frank', 'Grace', 'Henry', 'Ivy', 'Jack'],
             'age': [45, 50, 55, 60, 65],
-            'city': ['Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta']
-        }, schema=self.pa_schema)
+            'city': ['Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta'],
+        }, schema=self.pa_schema))
 
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_arrow(batch2_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # Single update: Update partial rows from both files
-        # Update rows 1, 3 from file 1 and rows 6, 8 from file 2
-        write_builder = table.new_batch_write_builder()
-        table_update = write_builder.new_update().with_update_type(['age', 'name'])
-
-        update_data = pa.Table.from_pydict({
+        self._do_update(table, pa.Table.from_pydict({
             '_ROW_ID': [1, 3, 6, 8],
             'age': [100, 200, 300, 400],
-            'name': ['Updated_Bob', 'Updated_David', 'Updated_Grace', 'Updated_Ivy']
-        })
+            'name': ['Updated_Bob', 'Updated_David', 'Updated_Grace', 'Updated_Ivy'],
+        }), ['age', 'name'])
 
-        commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-        table_commit = write_builder.new_commit()
-        table_commit.commit(commit_messages)
-        table_commit.close()
-
-        # Verify the updated data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        # Verify ages: rows 1, 3, 6, 8 should be updated
-        ages = result['age'].to_pylist()
-        expected_ages = [20, 100, 30, 200, 40, 45, 300, 55, 400, 65]
-        self.assertEqual(expected_ages, ages, "Ages not updated correctly across two files")
-
-        # Verify names: rows 1, 3, 6, 8 should be updated
-        names = result['name'].to_pylist()
-        expected_names = ['Alice', 'Updated_Bob', 'Charlie', 'Updated_David', 'Eve',
-                          'Frank', 'Updated_Grace', 'Henry', 'Updated_Ivy', 'Jack']
-        self.assertEqual(expected_names, names, "Names not updated correctly across two files")
-
-        # Verify other columns remain unchanged
-        ids = result['id'].to_pylist()
-        expected_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        self.assertEqual(expected_ids, ids, "IDs should remain unchanged")
-
-        cities = result['city'].to_pylist()
-        expected_cities = ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix',
-                           'Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta']
-        self.assertEqual(expected_cities, cities, "Cities should remain unchanged")
-
-    def test_concurrent_updates_with_retry(self):
-        """Test data evolution with multiple threads performing concurrent updates.
-
-        Each thread updates different rows of the same column. If a conflict occurs,
-        the thread retries until the update succeeds. After all threads complete,
-        the final result is verified to ensure all updates were applied correctly.
-        """
-        import threading
-        table = self._create_table()
-
-        # Table has 5 rows (row_id 0-4) after _create_table:
-        #   row 0: age=25, row 1: age=30, row 2: age=35, row 3: age=40, row 4: age=45
-
-        # Thread 1 updates rows 0 and 1
-        # Thread 2 updates rows 2 and 3
-        # Thread 3 updates row 4
-        thread_updates = [
-            {'row_ids': [0, 1], 'ages': [100, 200]},
-            {'row_ids': [2, 3], 'ages': [300, 400]},
-            {'row_ids': [4], 'ages': [500]},
-        ]
-
-        errors = []
-        success_counts = [0] * len(thread_updates)
-
-        def update_worker(thread_index, update_spec):
-            max_retries = 20
-            for attempt in range(max_retries):
-                try:
-                    write_builder = table.new_batch_write_builder()
-                    table_update = write_builder.new_update().with_update_type(['age'])
-
-                    update_data = pa.Table.from_pydict({
-                        '_ROW_ID': update_spec['row_ids'],
-                        'age': update_spec['ages'],
-                    })
-
-                    commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-                    table_commit = write_builder.new_commit()
-                    table_commit.commit(commit_messages)
-                    table_commit.close()
-
-                    success_counts[thread_index] = attempt + 1
-                    return
-                except Exception as e:
-                    import traceback
-                    self.assertIn(
-                        "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts",
-                        str(e),
-                        "Thread-{} attempt {} unexpected error: {}\n{}".format(
-                            thread_index, attempt + 1, e, traceback.format_exc()
-                        )
-                    )
-                    if attempt == max_retries - 1:
-                        errors.append(
-                            "Thread-{} failed after {} retries: {}".format(
-                                thread_index, max_retries, e
-                            )
-                        )
-
-        threads = []
-        for idx, spec in enumerate(thread_updates):
-            thread = threading.Thread(target=update_worker, args=(idx, spec))
-            threads.append(thread)
-
-        for thread in threads:
-            thread.start()
-
-        for thread in threads:
-            thread.join(timeout=120)
-
-        if errors:
-            self.fail("Some threads failed:\n" + "\n".join(errors))
-
-        for idx, count in enumerate(success_counts):
-            self.assertGreater(
-                count, 0,
-                "Thread-{} did not succeed".format(idx)
-            )
-
-        # Verify the final data
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
-
-        ages = result['age'].to_pylist()
-        expected_ages = [100, 200, 300, 400, 500]
-        self.assertEqual(expected_ages, ages,
-                         "Concurrent updates did not produce correct final result")
-
-    def test_concurrent_updates_same_rows_with_retry(self):
-        """Test data evolution with multiple threads updating overlapping rows.
-
-        Multiple threads compete to update the same rows. Each thread retries
-        on conflict until success. The final result should reflect one of the
-        successful updates for each row (last-writer-wins).
-        """
-        import threading
-
-        table = self._create_table()
-
-        # All threads update the same rows but with different values
-        thread_updates = [
-            {'row_ids': [0, 1, 2], 'ages': [101, 201, 301], 'thread_name': 'A'},
-            {'row_ids': [0, 1, 2], 'ages': [102, 202, 302], 'thread_name': 'B'},
-            {'row_ids': [0, 1, 2], 'ages': [103, 203, 303], 'thread_name': 'C'},
-        ]
-
-        errors = []
-        completion_order = []
-        order_lock = threading.Lock()
-
-        def update_worker(thread_index, update_spec):
-            max_retries = 30
-            for attempt in range(max_retries):
-                try:
-                    write_builder = table.new_batch_write_builder()
-                    table_update = write_builder.new_update().with_update_type(['age'])
-
-                    update_data = pa.Table.from_pydict({
-                        '_ROW_ID': update_spec['row_ids'],
-                        'age': update_spec['ages'],
-                    })
-
-                    commit_messages = table_update.update_by_arrow_with_row_id(update_data)
-
-                    table_commit = write_builder.new_commit()
-                    table_commit.commit(commit_messages)
-                    table_commit.close()
-
-                    with order_lock:
-                        completion_order.append(thread_index)
-                    return
-                except Exception as e:
-                    import traceback
-                    self.assertIn(
-                        "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts",
-                        str(e),
-                        "Thread-{} attempt {} unexpected error: {}\n{}".format(
-                            thread_index, attempt + 1, e, traceback.format_exc()
-                        )
-                    )
-                    if attempt == max_retries - 1:
-                        errors.append(
-                            "Thread-{} ({}) failed after {} retries: {}".format(
-                                thread_index, update_spec['thread_name'],
-                                max_retries, e
-                            )
-                        )
-
-        threads = []
-        for idx, spec in enumerate(thread_updates):
-            thread = threading.Thread(target=update_worker, args=(idx, spec))
-            threads.append(thread)
-
-        for thread in threads:
-            thread.start()
-
-        for thread in threads:
-            thread.join(timeout=120)
-
-        if errors:
-            self.fail("Some threads failed:\n" + "\n".join(errors))
-
+        result = self._read_all(table)
         self.assertEqual(
-            len(completion_order), len(thread_updates),
-            "Not all threads completed successfully"
+            [20, 100, 30, 200, 40, 45, 300, 55, 400, 65],
+            result['age'].to_pylist(),
+        )
+        self.assertEqual(
+            ['Alice', 'Updated_Bob', 'Charlie', 'Updated_David', 'Eve',
+             'Frank', 'Updated_Grace', 'Henry', 'Updated_Ivy', 'Jack'],
+            result['name'].to_pylist(),
+        )
+        # Untouched columns
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                         result['id'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix',
+             'Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta'],
+            result['city'].to_pylist(),
         )
 
-        # Verify the final data: the last thread to commit wins
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        result = table_read.to_arrow(splits)
+    def test_large_table_partial_column_updates(self):
+        """4-step update sequence on a 2000-row / 2-file table.
 
-        ages = result['age'].to_pylist()
+        Covers: single-column / multi-column / both-files updates while
+        verifying that untouched columns stay intact.
+        """
+        num_row = 1000
+        table = self._create_table()
 
-        # The last thread to successfully commit determines rows 0-2
-        last_winner = completion_order[-1]
-        winner_ages = thread_updates[last_winner]['ages']
-        self.assertEqual(winner_ages[0], ages[0],
-                         "Row 0 should reflect last writer's value")
-        self.assertEqual(winner_ages[1], ages[1],
-                         "Row 1 should reflect last writer's value")
-        self.assertEqual(winner_ages[2], ages[2],
-                         "Row 2 should reflect last writer's value")
+        # 2 commits, num_row rows each
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': list(range(num_row)),
+            'name': [f'Name_{i}' for i in range(num_row)],
+            'age': [20 + i for i in range(num_row)],
+            'city': [f'City_{i}' for i in range(num_row)],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': list(range(num_row, num_row * 2)),
+            'name': [f'Name_{i}' for i in range(num_row, num_row * 2)],
+            'age': [20 + num_row + i for i in range(num_row)],
+            'city': [f'City_{i}' for i in range(num_row, num_row * 2)],
+        }, schema=self.pa_schema))
 
-        # Rows 3 and 4 should remain unchanged
-        self.assertEqual(40, ages[3], "Row 3 should remain unchanged")
-        self.assertEqual(45, ages[4], "Row 4 should remain unchanged")
+        expected_ids = list(range(num_row * 2))
+        expected_names = [f'Name_{i}' for i in range(num_row * 2)]
+        expected_ages = ([20 + i for i in range(num_row)]
+                         + [20 + num_row + i for i in range(num_row)])
+
+        # 1) update id col, 1 row
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [5], 'id': [999],
+        }), ['id'])
+        expected_ids[5] = 999
+
+        # 2) update id+name cols, 2 rows
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [3, 15],
+            'id': [888, 777],
+            'name': ['Updated_Name_3', 'Updated_Name_15'],
+        }), ['id', 'name'])
+        expected_ids[3], expected_ids[15] = 888, 777
+        expected_names[3] = 'Updated_Name_3'
+        expected_names[15] = 'Updated_Name_15'
+
+        # 3) update name col, 1 row
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [12], 'name': ['NewName_12'],
+        }), ['name'])
+        expected_names[12] = 'NewName_12'
+
+        # 4) update age col, 4 rows across both files
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [0, 5, 10, 15],
+            'age': [100, 105, 110, 115],
+        }), ['age'])
+        for r, a in [(0, 100), (5, 105), (10, 110), (15, 115)]:
+            expected_ages[r] = a
+
+        result = self._read_all(table)
+        self.assertEqual(expected_ids, result['id'].to_pylist())
+        self.assertEqual(expected_names, result['name'].to_pylist())
+        self.assertEqual(expected_ages, result['age'].to_pylist())
+        # city was never touched
+        self.assertEqual(
+            [f'City_{i}' for i in range(num_row * 2)],
+            result['city'].to_pylist(),
+        )
 
     def test_update_with_large_file(self):
-        import uuid
-        import random
-        import string
-
-        table_name = f'test_row_id_split_{uuid.uuid4().hex[:8]}'
-        schema = Schema.from_pyarrow_schema(
-            pa.schema([('id', pa.int64()), ('name', pa.string())]),
-            options={
-                'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true',
-                'write-only': 'true',
-            }
-        )
-        self.catalog.create_table(
-            f'default.{table_name}', schema, False)
-        table = self.catalog.get_table(f'default.{table_name}')
+        """Even with a tiny ``target-file-size`` the update produces one
+        output file per first_row_id group (rolling is disabled internally)."""
+        from pypaimon.schema.schema_change import SetOption
 
         N = 5000
-        data = pa.table({
+        schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'write-only': 'true',
+        }
+        table = self._create_table(pa_schema=schema, options=opts)
+        table_identifier = table.identifier
+
+        self._write_arrow(table, pa.table({
             'id': list(range(N)),
-            'name': [
-                ''.join(random.choices(
-                    string.ascii_letters, k=200))
-                for _ in range(N)],
-        })
-        wb = table.new_batch_write_builder()
-        tw = wb.new_write()
-        tc = wb.new_commit()
-        tw.write_arrow(data)
-        tc.commit(tw.prepare_commit())
-        tw.close()
-        tc.close()
+            'name': [''.join(random.choices(string.ascii_letters, k=200))
+                     for _ in range(N)],
+        }))
 
-        from pypaimon.schema.schema_change import SetOption
         self.catalog.alter_table(
-            f'default.{table_name}',
-            [SetOption('target-file-size', '10kb')])
-        table = self.catalog.get_table(f'default.{table_name}')
+            table_identifier, [SetOption('target-file-size', '10kb')]
+        )
+        table = self.catalog.get_table(table_identifier)
 
-        wb = table.new_batch_write_builder()
-        updator = wb.new_update()
-        updator.with_update_type(['name'])
-        update_data = pa.table({
-            '_ROW_ID': pa.array(
-                list(range(N)), type=pa.int64()),
-            'name': [
-                ''.join(random.choices(
-                    string.ascii_letters, k=200))
-                for _ in range(N)],
+        msgs = self._do_update(table, pa.table({
+            '_ROW_ID': pa.array(list(range(N)), type=pa.int64()),
+            'name': [''.join(random.choices(string.ascii_letters, k=200))
+                     for _ in range(N)],
+        }), ['name'])
+
+        all_files = [f for m in msgs for f in m.new_files]
+        self.assertEqual(1, len(all_files),
+                         "Update should produce exactly one file per group")
+        self.assertEqual(0, all_files[0].first_row_id)
+        self.assertEqual(N, all_files[0].row_count)
+
+    # ------------------------------------------------------------------
+    # Validation tests
+    # ------------------------------------------------------------------
+
+    def test_nonexistent_column_raises(self):
+        table = self._create_seeded_table()
+        bad = pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 2, 3, 4],
+            'nonexistent_column': [100, 200, 300, 400, 500],
         })
-        msgs = updator.update_by_arrow_with_row_id(update_data)
+        with self.assertRaises(ValueError) as ctx:
+            wb = self._make_write_builder(table)
+            tu = wb.new_update().with_update_type(['nonexistent_column'])
+            self._apply_update(tu, bad, self._next_commit_id())
+        self.assertIn('not in table schema', str(ctx.exception))
 
-        all_files = []
-        for msg in msgs:
-            all_files.extend(msg.new_files)
+    def test_missing_row_id_column_raises(self):
+        table = self._create_seeded_table()
+        bad = pa.Table.from_pydict({'age': [26, 27, 28, 29, 30]})
+        with self.assertRaises(ValueError) as ctx:
+            wb = self._make_write_builder(table)
+            tu = wb.new_update().with_update_type(['age'])
+            self._apply_update(tu, bad, self._next_commit_id())
+        self.assertIn('_ROW_ID column', str(ctx.exception))
 
+    def test_invalid_row_id_raises(self):
+        """row_id outside [0, total_row_count) (both directions) raises."""
+        table = self._create_seeded_table()
+        cases = [
+            ('out_of_range_high', [0, 10], [26, 100]),
+            ('negative',          [-1, 0], [100, 26]),
+        ]
+        for name, row_ids, ages in cases:
+            with self.subTest(case=name):
+                wb = self._make_write_builder(table)
+                tu = wb.new_update().with_update_type(['age'])
+                bad = pa.Table.from_pydict({'_ROW_ID': row_ids, 'age': ages})
+                with self.assertRaises(ValueError) as ctx:
+                    self._apply_update(tu, bad, self._next_commit_id())
+                self.assertIn('out of valid range', str(ctx.exception))
+
+    def test_duplicate_row_id_raises(self):
+        table = self._create_seeded_table()
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(['age'])
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_update(
+                tu,
+                pa.Table.from_pydict({
+                    '_ROW_ID': [0, 0, 1],
+                    'age': [100, 200, 300],
+                }),
+                self._next_commit_id(),
+            )
+        self.assertIn('duplicate _ROW_ID', str(ctx.exception))
+
+    # ------------------------------------------------------------------
+    # Concurrency tests
+    # ------------------------------------------------------------------
+
+    def _run_concurrent_updates(self, table, thread_specs, max_retries):
+        """Run a batch of concurrent updates with conflict-retry; return the
+        commit order (``thread_index`` of the winning commit appended last)."""
+        errors = []
+        completion_order = []
+        lock = threading.Lock()
+        retry_marker = (
+            "multiple 'MERGE INTO' operations have encountered conflicts"
+        )
+
+        def worker(idx, spec):
+            for _ in range(max_retries):
+                try:
+                    self._do_update(table, pa.Table.from_pydict({
+                        '_ROW_ID': spec['row_ids'],
+                        'age': spec['ages'],
+                    }), ['age'])
+                    with lock:
+                        completion_order.append(idx)
+                    return
+                except Exception as e:
+                    if retry_marker not in str(e):
+                        errors.append(f"Thread-{idx} unexpected error: {e}")
+                        return
+            errors.append(f"Thread-{idx} did not succeed in {max_retries} retries")
+
+        threads = [threading.Thread(target=worker, args=(i, s))
+                   for i, s in enumerate(thread_specs)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=120)
+
+        self.assertEqual([], errors)
+        self.assertEqual(len(thread_specs), len(completion_order),
+                         "Not all threads committed successfully")
+        return completion_order
+
+    def test_concurrent_updates_disjoint_rows(self):
+        """Disjoint per-thread updates all materialise into the final state."""
+        table = self._create_seeded_table()
+        specs = [
+            {'row_ids': [0, 1], 'ages': [100, 200]},
+            {'row_ids': [2, 3], 'ages': [300, 400]},
+            {'row_ids': [4],    'ages': [500]},
+        ]
+        self._run_concurrent_updates(table, specs, max_retries=20)
         self.assertEqual(
-            len(all_files), 1,
-            "Update should produce exactly one file per group")
-        self.assertEqual(all_files[0].first_row_id, 0)
-        self.assertEqual(all_files[0].row_count, N)
+            [100, 200, 300, 400, 500],
+            self._read_all(table)['age'].to_pylist(),
+        )
 
-        tc = wb.new_commit()
-        tc.commit(msgs)
+    def test_concurrent_updates_overlapping_rows_last_writer_wins(self):
+        """When threads compete on the same rows, the final commit wins."""
+        table = self._create_seeded_table()
+        specs = [
+            {'row_ids': [0, 1, 2], 'ages': [101, 201, 301]},
+            {'row_ids': [0, 1, 2], 'ages': [102, 202, 302]},
+            {'row_ids': [0, 1, 2], 'ages': [103, 203, 303]},
+        ]
+        completion_order = self._run_concurrent_updates(
+            table, specs, max_retries=30
+        )
+        winner = specs[completion_order[-1]]['ages']
+        ages = self._read_all(table)['age'].to_pylist()
+        self.assertEqual(winner, ages[:3])
+        # Rows 3 & 4 must remain at seed values
+        self.assertEqual([40, 45], ages[3:])
+
+
+# ======================================================================
+# Mode-specific mixins (add the ``update_by_arrow_with_row_id`` primitive)
+# ======================================================================
+
+class _BatchModeMixin(BatchModeMixin):
+    def _apply_update(self, table_update, data, cid):
+        return table_update.update_by_arrow_with_row_id(data)
+
+
+class _StreamModeMixin(StreamModeMixin):
+    def _apply_update(self, table_update, data, cid):
+        return table_update.update_by_arrow_with_row_id(data, cid)
+
+
+# ======================================================================
+# Concrete test classes
+# ======================================================================
+
+class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
+    """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
+
+
+class TableUpdateStreamTest(_StreamModeMixin, _TableUpdateTestBase, unittest.TestCase):
+    """All shared update tests under stream (``StreamWriteBuilder``) semantics,
+    plus stream-only multi-commit scenarios that are impossible to express
+    under :class:`BatchTableCommit` (which forbids re-committing).
+    """
+
+    # ------------------------------------------------------------------
+    # Stream-only helpers
+    # ------------------------------------------------------------------
+
+    def _stream_commit_age_updates_by_row_id(self, tu, tc, commit_ids, row_age_pairs):
+        """Apply one ``age`` update per ``commit_id``; ``tu`` is already
+        ``with_update_type(['age'])``."""
+        for cid, (row_id, age) in zip(commit_ids, row_age_pairs):
+            msgs = tu.update_by_arrow_with_row_id(
+                pa.Table.from_pydict({'_ROW_ID': [row_id], 'age': [age]}),
+                cid,
+            )
+            tc.commit(msgs, cid)
+
+    # ------------------------------------------------------------------
+    # Stream-only tests
+    # ------------------------------------------------------------------
+
+    def test_stream_multi_commit_on_one_write_builder(self):
+        """A single ``StreamWriteBuilder`` drives many update+commit cycles
+        with reused ``tu`` and ``tc`` instances. Each commit produces its own
+        snapshot tagged with the caller-supplied ``commit_identifier`` under
+        a stable ``commit_user`` — the core contract distinguishing stream
+        from batch mode.
+
+        Parameterised over both contiguous and sparse identifier sequences
+        to catch any accidental coupling between ``commit_identifier`` and
+        ``snapshot_id`` ordering.
+        """
+        # (row_id, age) for each of the 3 commits — same triplet for both runs.
+        per_commit_rows = [(0, 100), (2, 300), (4, 500)]
+        expected_ages = [100, 30, 300, 40, 500]
+
+        for case_name, commit_ids in [
+            ('contiguous', [1, 2, 3]),
+            ('sparse',     [42, 100, 1000]),
+        ]:
+            with self.subTest(case=case_name):
+                table = self._create_seeded_table()
+                wb, tc, base_snapshot_id = self._stream_commit_session(table)
+                tu = wb.new_update().with_update_type(['age'])
+                self._stream_commit_age_updates_by_row_id(
+                    tu, tc, commit_ids, per_commit_rows,
+                )
+                tc.close()
+
+                result = self._read_all(table)
+                self.assertEqual(expected_ages, result['age'].to_pylist())
+                self.assertEqual([1, 2, 3, 4, 5], result['id'].to_pylist())
+                self.assertEqual(
+                    ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+                    result['name'].to_pylist(),
+                )
+                self.assertEqual(
+                    ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+                    result['city'].to_pylist(),
+                )
+                self._assert_stream_builder_snapshots(
+                    table, wb, base_snapshot_id, commit_ids,
+                )
+
+    def test_stream_commit_instance_accepts_messages_from_different_updates(self):
+        """``StreamTableCommit`` may be committed many times, and each
+        commit may carry messages from a *different* ``StreamTableUpdate``
+        instance (different ``update_cols``). The one-shot restriction
+        that applies to :class:`BatchTableCommit` does not apply here.
+        """
+        table = self._create_seeded_table()
+        wb, tc, base_snapshot_id = self._stream_commit_session(table)
+
+        # First update: only 'age' projection, fresh tu.
+        tu1 = wb.new_update().with_update_type(['age'])
+        msgs1 = tu1.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [111]}), 1,
+        )
+        tc.commit(msgs1, 1)
+
+        # Second update: different 'city' projection, fresh tu, same tc.
+        tu2 = wb.new_update().with_update_type(['city'])
+        msgs2 = tu2.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0], 'city': ['Beijing']}), 2,
+        )
+        tc.commit(msgs2, 2)
         tc.close()
+
+        result = self._read_all(table)
+        self.assertEqual([111, 30, 35, 40, 45], result['age'].to_pylist())
+        self.assertEqual(
+            ['Beijing', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+        self.assertEqual([1, 2, 3, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            result['name'].to_pylist(),
+        )
+        self._assert_stream_builder_snapshots(
+            table, wb, base_snapshot_id, [1, 2],
+        )
+
+    def test_stream_interleaved_write_and_update_on_same_builder(self):
+        """A single stream builder may perform an initial write followed by
+        an update on the same ``tc``, each tagged with its own
+        ``commit_identifier`` that propagates to its own snapshot.
+        """
+        table = self._create_table()
+        wb, tc, base_snapshot_id = self._stream_commit_session(table)
+        tw = wb.new_write()
+
+        tw.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['A', 'B', 'C'],
+            'age': [10, 20, 30],
+            'city': ['X', 'Y', 'Z'],
+        }, schema=self.pa_schema))
+        tc.commit(tw.prepare_commit(1), 1)
+        tw.close()
+
+        tu = wb.new_update().with_update_type(['age'])
+        msgs = tu.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0, 2], 'age': [111, 333]}), 2,
+        )
+        tc.commit(msgs, 2)
+        tc.close()
+
+        result = self._read_all(table)
+        self.assertEqual([111, 20, 333], result['age'].to_pylist())
+        self.assertEqual([1, 2, 3], result['id'].to_pylist())
+        self.assertEqual(['A', 'B', 'C'], result['name'].to_pylist())
+        self.assertEqual(['X', 'Y', 'Z'], result['city'].to_pylist())
+        self._assert_stream_builder_snapshots(
+            table, wb, base_snapshot_id, [1, 2],
+        )
 
 
 if __name__ == '__main__':
