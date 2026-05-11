@@ -31,24 +31,25 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /** A checker to check strict mode based on last safe snapshot. */
 public class StrictModeChecker {
 
     private final SnapshotManager snapshotManager;
     private final String commitUser;
-    private final FileStoreScan scan;
+    private final Supplier<FileStoreScan> scanSupplier;
 
     private long strictModeLastSafeSnapshot;
 
     public StrictModeChecker(
             SnapshotManager snapshotManager,
             String commitUser,
-            FileStoreScan scan,
+            Supplier<FileStoreScan> scanSupplier,
             long strictModeLastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
-        this.scan = scan;
+        this.scanSupplier = scanSupplier;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
     }
 
@@ -79,7 +80,9 @@ public class StrictModeChecker {
             if (snapshot.commitKind() == CommitKind.APPEND
                     && newCommitKind == CommitKind.OVERWRITE) {
                 Iterator<ManifestEntry> entries =
-                        scan.withSnapshot(snapshot)
+                        scanSupplier
+                                .get()
+                                .withSnapshot(snapshot)
                                 .withKind(ScanMode.DELTA)
                                 .onlyReadRealBuckets()
                                 .dropStats()
@@ -106,7 +109,12 @@ public class StrictModeChecker {
             return false;
         }
         Iterator<ManifestEntry> entries =
-                scan.withSnapshot(snapshot).withKind(ScanMode.DELTA).dropStats().readFileIterator();
+                scanSupplier
+                        .get()
+                        .withSnapshot(snapshot)
+                        .withKind(ScanMode.DELTA)
+                        .dropStats()
+                        .readFileIterator();
         return hasOverlappedPartition(entries, newPartitions);
     }
 

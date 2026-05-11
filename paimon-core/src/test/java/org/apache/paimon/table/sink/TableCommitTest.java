@@ -642,6 +642,89 @@ public class TableCommitTest {
     }
 
     @Test
+    public void testStrictModeScanStateNotLeakedAcrossSnapshots() throws Exception {
+        // Regression test: the FileStoreScan used by StrictModeChecker is mutable.
+        // When the APPEND branch (for an earlier APPEND snapshot) calls
+        // onlyReadRealBuckets(), the flag is latched on the shared scan instance and
+        // must not leak into the later COMPACT/OVERWRITE branch, otherwise entries
+        // whose bucket < 0 (e.g. postpone bucket) are silently filtered out and an
+        // overlapping OVERWRITE snapshot can be missed.
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable fixedTable =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // Switch to postpone bucket so that APPEND/OVERWRITE files land in bucket=-2.
+        Map<String, String> postponeOptions = new HashMap<>();
+        postponeOptions.put(CoreOptions.BUCKET.key(), "-2");
+        postponeOptions.put(CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET.key(), "false");
+        FileStoreTable postponeTable = fixedTable.copy(postponeOptions);
+
+        String user1 = UUID.randomUUID().toString();
+
+        // snapshot 1: APPEND on pt=1 with postpone bucket (bucket=-2).
+        // When later checked in the APPEND branch, onlyReadRealBuckets() will filter
+        // these entries out, so this snapshot alone does not throw; but it DOES
+        // latch onlyReadRealBuckets=true onto the shared scan instance.
+        TableWriteImpl<?> write1 = postponeTable.newWrite(user1);
+        TableCommitImpl commit1 = postponeTable.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+        write1.close();
+        commit1.close();
+
+        // snapshot 2: OVERWRITE on pt=1, also writing postpone bucket files.
+        // The OVERWRITE branch should detect the partition overlap against a later
+        // user's OVERWRITE on pt=1.
+        write1 = postponeTable.newWrite(user1);
+        commit1 = postponeTable.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 1, 1L));
+        commit1.commit(2, write1.prepareCommit(false, 2));
+        write1.close();
+        commit1.close();
+
+        // user2 commits OVERWRITE on pt=1 with strict mode enabled.
+        // Expected: throw because snapshot 2 (another user's OVERWRITE) touches pt=1.
+        // With the leaking onlyReadRealBuckets flag, snapshot 2's bucket=-2 entries
+        // get filtered out and the conflict is silently missed.
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                fixedTable.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "0"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 =
+                tableWithStrict.newCommit(user2).withOverwrite(singletonMap("pt", "1"));
+        write2.write(GenericRow.of(1, 2, 2L));
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
     public void testStrictModeForNonOverwriteNoCheckAppend() throws Exception {
         String path = tempDir.toString();
         RowType rowType =
@@ -695,6 +778,93 @@ public class TableCommitTest {
 
         write2.write(GenericRow.of(3, 3L));
         commit2.commit(2, write2.prepareCommit(false, 3));
+    }
+
+    @Test
+    public void testStrictModeForNonPartitionedTable() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(0, 0L));
+        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit1.commit(1, write1.prepareCommit(true, 1));
+
+        // test skip this commit check
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+
+        write2.write(GenericRow.of(1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // For a non-partitioned table, any COMPACT snapshot from another user must be
+        // detected as a conflict since all entries share BinaryRow.EMPTY_ROW.
+        write1.write(GenericRow.of(2, 2L));
+        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit1.commit(2, write1.prepareCommit(true, 2));
+
+        write2.write(GenericRow.of(3, 3L));
+        assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        // APPEND with fixed bucket files should be caught when user2 commits OVERWRITE,
+        // since non-partitioned table entries share BinaryRow.EMPTY_ROW so they always
+        // overlap with user2's OVERWRITE target.
+        TableWriteImpl<?> write1Append = table.newWrite(user1);
+        TableCommitImpl commit1Append = table.newCommit(user1);
+        write1Append.write(GenericRow.of(4, 4L));
+        commit1Append.commit(3, write1Append.prepareCommit(false, 3));
+
+        FileStoreTable tableWithStrict2 =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "3"));
+        TableWriteImpl<?> write2Ow = tableWithStrict2.newWrite(user2);
+        TableCommitImpl commit2Ow =
+                tableWithStrict2.newCommit(user2).withOverwrite(Collections.emptyMap());
+        write2Ow.write(GenericRow.of(5, 5L));
+        assertThatThrownBy(() -> commit2Ow.commit(4, write2Ow.prepareCommit(false, 4)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1Append.close();
+        commit1Append.close();
+        write2Ow.close();
+        commit2Ow.close();
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
     }
 
     @Test

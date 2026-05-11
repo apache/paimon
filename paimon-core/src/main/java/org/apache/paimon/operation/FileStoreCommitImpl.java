@@ -209,10 +209,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .map(
                                 id ->
                                         new StrictModeChecker(
-                                                snapshotManager,
-                                                commitUser,
-                                                scanSupplier.get(),
-                                                id))
+                                                snapshotManager, commitUser, scanSupplier, id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
