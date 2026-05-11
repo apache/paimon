@@ -71,6 +71,7 @@ import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.execution.datasources.DataSource;
 import org.apache.spark.sql.execution.datasources.FileFormat;
+import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -694,7 +695,8 @@ public class SparkCatalog extends SparkBaseCatalog
             SparkSession spark = SparkSession.active();
             Class<?> cls =
                     DataSource.lookupDataSource(ident.namespace()[0], spark.sessionState().conf());
-            return FileFormat.class.isAssignableFrom(cls);
+            return FileFormat.class.isAssignableFrom(cls)
+                    || cls.newInstance() instanceof FileDataSourceV2;
         } catch (Exception e) {
             return false;
         }
