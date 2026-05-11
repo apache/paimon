@@ -374,6 +374,33 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             ['partial-update.remove-record-on-sequence-group'],
         )
 
+    def test_partial_update_unsupported_options_guard_covers_raw_convertible(self):
+        """The unsupported-options guard must fire even when the scan
+        would dispatch every split through ``RawFileSplitRead`` (i.e. a
+        single-snapshot table where rows don't overlap).
+
+        Before the guard moved to ``TableRead.__init__`` this case
+        silently bypassed validation because raw-convertible splits skip
+        ``MergeFileSplitRead`` entirely — and an option like
+        ``partial-update.remove-record-on-delete`` would be ignored on
+        the read path while the user assumed it was honoured.
+        """
+        table = self._create_pk_table(
+            'pu_rrod_raw_convertible',
+            extra_options={'partial-update.remove-record-on-delete': 'true'},
+        )
+        # Single write -> single snapshot -> splits are raw-convertible.
+        self._write(table, [
+            {'id': 1, 'a': 'A', 'b': None, 'c': None},
+            {'id': 2, 'a': 'B', 'b': None, 'c': None},
+        ])
+        rb = table.new_read_builder()
+        with self.assertRaises(NotImplementedError) as cm:
+            rb.new_read()
+        msg = str(cm.exception)
+        self.assertIn('partial-update', msg)
+        self.assertIn('partial-update.remove-record-on-delete', msg)
+
     def test_partial_update_with_explicit_ignore_delete_false_does_not_raise(self):
         """Explicitly setting ignore-delete=false is equivalent to leaving
         it unset and must not trip the guard."""
