@@ -60,7 +60,7 @@ def maybe_apply_repartition(
         table: "Table",
         *,
         shuffle: bool,
-        num_blocks: Optional[int],
+        override_num_blocks: Optional[int],
 ) -> Tuple["ray.data.Dataset", bool]:
     """Optionally rewrite ``dataset`` so rows are clustered for the writer.
 
@@ -69,7 +69,7 @@ def maybe_apply_repartition(
         table: The Paimon target table (used for bucket mode + schema).
         shuffle: When True, group rows by ``(partition_keys..., bucket)``.
             Falls through to a warning + no-op for non-HASH_FIXED tables.
-        num_blocks: Optional. When ``shuffle=True``, used as the
+        override_num_blocks: Optional. When ``shuffle=True``, used as the
             ``num_partitions`` hint for the groupby shuffle. When
             ``shuffle=False``, triggers a plain block rebalance to that
             count. ``None`` + ``shuffle=False`` means no-op.
@@ -78,7 +78,7 @@ def maybe_apply_repartition(
         ``(dataset, was_shuffle_applied)`` — the dataset to hand to the
         sink, plus a flag the caller can use for telemetry.
     """
-    if not shuffle and num_blocks is None:
+    if not shuffle and override_num_blocks is None:
         return dataset, False
 
     if shuffle:
@@ -100,15 +100,17 @@ def maybe_apply_repartition(
             bucket_udf, batch_format="pyarrow", zero_copy_batch=True,
         )
         group_keys: List[str] = partition_keys + [BUCKET_KEY_COL]
-        grouped = ds_with_bucket.groupby(group_keys, num_partitions=num_blocks)
+        grouped = ds_with_bucket.groupby(
+            group_keys, num_partitions=override_num_blocks,
+        )
         regrouped = grouped.map_groups(_identity_batch, batch_format="pyarrow")
         return regrouped.drop_columns([BUCKET_KEY_COL]), True
 
-    # After a soft fallback, num_blocks may still be None — keep the
-    # contract that num_blocks=None means "no Ray-side repartition".
-    if num_blocks is None:
+    # After a soft fallback, override_num_blocks may still be None —
+    # keep the contract that None means "no Ray-side repartition".
+    if override_num_blocks is None:
         return dataset, False
-    return dataset.repartition(num_blocks, shuffle=False), False
+    return dataset.repartition(override_num_blocks, shuffle=False), False
 
 
 def _identity_batch(batch: pa.Table) -> pa.Table:

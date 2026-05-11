@@ -127,12 +127,12 @@ class NoOpBranchTest(unittest.TestCase):
         table.bucket_mode.return_value = bucket_mode
         return table
 
-    def test_shuffle_off_and_no_num_blocks_is_noop(self):
+    def test_shuffle_off_and_no_override_num_blocks_is_noop(self):
         dataset = object()  # sentinel; not touched
         table = self._make_table(BucketMode.HASH_FIXED)
 
         out_ds, applied = maybe_apply_repartition(
-            dataset, table, shuffle=False, num_blocks=None,
+            dataset, table, shuffle=False, override_num_blocks=None,
         )
 
         self.assertIs(out_ds, dataset)
@@ -141,14 +141,14 @@ class NoOpBranchTest(unittest.TestCase):
 
     def test_shuffle_on_non_fixed_bucket_falls_through_with_warning(self):
         dataset = MagicMock()
-        # repartition is what shuffle=False + num_blocks=None falls into
-        # for the "after-soft-fallback" branch — but we passed num_blocks
-        # = None, so that branch returns the dataset unchanged.
+        # The non-HASH_FIXED branch flips shuffle off internally; with
+        # override_num_blocks=None the helper then returns the dataset
+        # unchanged via the post-fallback early-no-op guard.
         table = self._make_table(BucketMode.BUCKET_UNAWARE)
 
         with self.assertLogs("pypaimon.ray.shuffle", level=logging.WARNING) as cm:
             out_ds, applied = maybe_apply_repartition(
-                dataset, table, shuffle=True, num_blocks=None,
+                dataset, table, shuffle=True, override_num_blocks=None,
             )
 
         self.assertIs(out_ds, dataset)
@@ -164,35 +164,35 @@ class NoOpBranchTest(unittest.TestCase):
 
         with self.assertLogs("pypaimon.ray.shuffle", level=logging.WARNING):
             out_ds, applied = maybe_apply_repartition(
-                dataset, table, shuffle=True, num_blocks=None,
+                dataset, table, shuffle=True, override_num_blocks=None,
             )
 
         self.assertIs(out_ds, dataset)
         self.assertFalse(applied)
 
-    def test_shuffle_off_with_num_blocks_calls_plain_repartition(self):
+    def test_shuffle_off_with_override_num_blocks_calls_plain_repartition(self):
         dataset = MagicMock()
         dataset.repartition.return_value = "rebalanced"
         table = self._make_table(BucketMode.HASH_FIXED)
 
         out_ds, applied = maybe_apply_repartition(
-            dataset, table, shuffle=False, num_blocks=8,
+            dataset, table, shuffle=False, override_num_blocks=8,
         )
 
         self.assertEqual(out_ds, "rebalanced")
         self.assertFalse(applied)
         dataset.repartition.assert_called_once_with(8, shuffle=False)
 
-    def test_soft_fallback_with_num_blocks_runs_plain_repartition(self):
+    def test_soft_fallback_with_override_num_blocks_runs_plain_repartition(self):
         # shuffle=True on a non-fixed bucket table flips to shuffle=False,
-        # so a num_blocks=N caller still gets a block rebalance.
+        # so an override_num_blocks=N caller still gets a block rebalance.
         dataset = MagicMock()
         dataset.repartition.return_value = "rebalanced"
         table = self._make_table(BucketMode.BUCKET_UNAWARE)
 
         with self.assertLogs("pypaimon.ray.shuffle", level=logging.WARNING):
             out_ds, applied = maybe_apply_repartition(
-                dataset, table, shuffle=True, num_blocks=4,
+                dataset, table, shuffle=True, override_num_blocks=4,
             )
 
         self.assertEqual(out_ds, "rebalanced")
