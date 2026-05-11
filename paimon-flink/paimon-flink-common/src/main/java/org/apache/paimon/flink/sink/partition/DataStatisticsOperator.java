@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.partition;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 
@@ -77,7 +78,7 @@ public class DataStatisticsOperator extends AbstractStreamOperator<StatisticsOrR
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
-        this.subtaskIndex = getRuntimeContext().getIndexOfThisSubtask();
+        this.subtaskIndex = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         this.localStatistics = StatisticsUtil.createDataStatistics();
     }
 
