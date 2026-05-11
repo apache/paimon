@@ -31,6 +31,7 @@ import org.apache.spark.sql.connector.distributions.Distribution
 import org.apache.spark.sql.connector.expressions.SortOrder
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.write._
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.mutable
@@ -62,7 +63,12 @@ class PaimonV2Write(
   }
 
   override def toBatch: BatchWrite = {
-    PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+    SparkShimLoader.shim.createPaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan)
   }
 
   override def supportedCustomMetrics(): Array[CustomMetric] = {
