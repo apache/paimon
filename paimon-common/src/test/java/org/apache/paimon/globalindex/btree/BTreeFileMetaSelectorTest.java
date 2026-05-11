@@ -18,12 +18,14 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.VarCharType;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -171,5 +173,63 @@ public class BTreeFileMetaSelectorTest {
         sliceOutput.reset();
         sliceOutput.writeInt(value);
         return sliceOutput.toSlice().copyBytes();
+    }
+
+    @Test
+    public void testMetaSelectorWithEmptyStringKey() {
+        // Simulate the real NPE scenario: btree index file with empty string as firstKey
+        KeySerializer stringSerializer = KeySerializer.create(new VarCharType());
+        byte[] emptyKey = stringSerializer.serialize(BinaryString.EMPTY_UTF8);
+        byte[] normalKey = stringSerializer.serialize(BinaryString.fromString("www.example.com"));
+
+        BTreeIndexMeta metaWithEmptyFirstKey = new BTreeIndexMeta(emptyKey, normalKey, false);
+        BTreeIndexMeta metaWithNormalKeys =
+                new BTreeIndexMeta(
+                        stringSerializer.serialize(BinaryString.fromString("aaa.com")),
+                        stringSerializer.serialize(BinaryString.fromString("zzz.com")),
+                        false);
+        BTreeIndexMeta metaOnlyNulls = new BTreeIndexMeta(null, null, true);
+
+        List<GlobalIndexIOMeta> files =
+                Arrays.asList(
+                        new GlobalIndexIOMeta(
+                                new Path("file_empty"), 1, metaWithEmptyFirstKey.serialize()),
+                        new GlobalIndexIOMeta(
+                                new Path("file_normal"), 1, metaWithNormalKeys.serialize()),
+                        new GlobalIndexIOMeta(
+                                new Path("file_nulls"), 1, metaOnlyNulls.serialize()));
+
+        FieldRef ref = new FieldRef(1, "page_host", new VarCharType());
+        BTreeFileMetaSelector selector = new BTreeFileMetaSelector(files, stringSerializer);
+
+        // visitEqual should not throw NPE
+        Optional<List<GlobalIndexIOMeta>> result =
+                selector.visitEqual(ref, BinaryString.fromString("www.example.com"));
+        Assertions.assertThat(result).isNotEmpty();
+        assertFiles(result.get(), Arrays.asList("file_empty", "file_normal"));
+
+        // visitLessThan should not throw NPE
+        result = selector.visitLessThan(ref, BinaryString.fromString("bbb.com"));
+        Assertions.assertThat(result).isNotEmpty();
+        assertFiles(result.get(), Arrays.asList("file_empty", "file_normal"));
+
+        // visitGreaterThan should not throw NPE
+        result = selector.visitGreaterThan(ref, BinaryString.fromString("www.example.com"));
+        Assertions.assertThat(result).isNotEmpty();
+
+        // visitIn should not throw NPE
+        result =
+                selector.visitIn(
+                        ref,
+                        Arrays.asList(
+                                BinaryString.fromString("www.example.com"),
+                                BinaryString.fromString("zzz.com")));
+        Assertions.assertThat(result).isNotEmpty();
+
+        // visitBetween should not throw NPE
+        result =
+                selector.visitBetween(
+                        ref, BinaryString.EMPTY_UTF8, BinaryString.fromString("zzz.com"));
+        Assertions.assertThat(result).isNotEmpty();
     }
 }

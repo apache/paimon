@@ -70,13 +70,13 @@ public class BTreeIndexMeta {
             sliceOutput.writeInt(firstKey.length);
             sliceOutput.writeBytes(firstKey);
         } else {
-            sliceOutput.writeInt(0);
+            sliceOutput.writeInt(-1);
         }
         if (lastKey != null) {
             sliceOutput.writeInt(lastKey.length);
             sliceOutput.writeBytes(lastKey);
         } else {
-            sliceOutput.writeInt(0);
+            sliceOutput.writeInt(-1);
         }
         sliceOutput.writeByte(hasNulls ? 1 : 0);
         return sliceOutput.toSlice().getHeapMemory();
@@ -86,10 +86,18 @@ public class BTreeIndexMeta {
         MemorySliceInput sliceInput = MemorySlice.wrap(data).toInput();
         int firstKeyLength = sliceInput.readInt();
         byte[] firstKey =
-                firstKeyLength == 0 ? null : sliceInput.readSlice(firstKeyLength).copyBytes();
+                firstKeyLength < 0
+                        ? null
+                        : firstKeyLength == 0
+                                ? new byte[0]
+                                : sliceInput.readSlice(firstKeyLength).copyBytes();
         int lastKeyLength = sliceInput.readInt();
         byte[] lastKey =
-                lastKeyLength == 0 ? null : sliceInput.readSlice(lastKeyLength).copyBytes();
+                lastKeyLength < 0
+                        ? null
+                        : lastKeyLength == 0
+                                ? new byte[0]
+                                : sliceInput.readSlice(lastKeyLength).copyBytes();
         boolean hasNulls = sliceInput.readByte() == 1;
         return new BTreeIndexMeta(firstKey, lastKey, hasNulls);
     }
