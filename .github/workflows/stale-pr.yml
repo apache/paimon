@@ -40,9 +40,10 @@ jobs:
           days-before-pr-close: -1
           stale-pr-label: stale
           stale-pr-message: >
-            This pull request has had no activity for 90 days. If you'd
-            like to keep it open, please push a new commit or leave a
-            comment. Thanks for the contribution.
+            This pull request has had no activity for 90 days and is
+            being marked stale. If you'd like to keep it open, please
+            leave a comment or push a new commit. Thank you for your
+            contribution to Apache Paimon!
           remove-stale-when-updated: true
 
           # Issues are not in scope for this workflow.
