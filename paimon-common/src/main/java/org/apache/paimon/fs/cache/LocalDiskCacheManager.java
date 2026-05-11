@@ -234,9 +234,4 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     public void putFileSize(String filePath, long size) {
         fileSizeCache.put(filePath, size);
     }
-
-    @Override
-    public void close() {
-        fileSizeCache.clear();
-    }
 }

@@ -769,11 +769,4 @@ public abstract class AbstractCatalog implements Catalog {
         schema.ifPresent(s -> s.options().put(PATH.key(), tablePath.toString()));
         return schema;
     }
-
-    @Override
-    public void close() throws Exception {
-        if (cacheManager != null) {
-            cacheManager.close();
-        }
-    }
 }

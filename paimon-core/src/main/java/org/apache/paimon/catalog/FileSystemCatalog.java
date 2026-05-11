@@ -188,9 +188,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void close() throws Exception {
-        super.close();
-    }
+    public void close() throws Exception {}
 
     @Override
     public String warehouse() {

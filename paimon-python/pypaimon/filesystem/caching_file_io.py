@@ -77,12 +77,6 @@ class LocalMemoryCacheManager:
     def put_file_size(self, file_path: str, size: int) -> None:
         self._file_size_cache[file_path] = size
 
-    def close(self) -> None:
-        with self._lock:
-            self._cache.clear()
-            self._current_size = 0
-        self._file_size_cache.clear()
-
 
 class LocalDiskCacheManager:
     """Block-level local disk cache with LRU eviction."""
@@ -196,9 +190,6 @@ class LocalDiskCacheManager:
 
     def put_file_size(self, file_path: str, size: int) -> None:
         self._file_size_cache[file_path] = size
-
-    def close(self) -> None:
-        self._file_size_cache.clear()
 
 
 class CachingInputStream:

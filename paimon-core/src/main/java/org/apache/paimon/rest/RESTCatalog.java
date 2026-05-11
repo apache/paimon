@@ -1188,11 +1188,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void close() throws Exception {
-        if (cacheManager != null) {
-            cacheManager.close();
-        }
-    }
+    public void close() throws Exception {}
 
     @VisibleForTesting
     RESTApi api() {

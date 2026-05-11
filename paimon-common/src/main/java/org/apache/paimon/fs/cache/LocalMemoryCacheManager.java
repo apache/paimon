@@ -20,7 +20,6 @@ package org.apache.paimon.fs.cache;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -88,15 +87,6 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
     @Override
     public void putFileSize(String filePath, long size) {
         fileSizeCache.put(filePath, size);
-    }
-
-    @Override
-    public void close() throws IOException {
-        synchronized (lock) {
-            cache.clear();
-            currentSize = 0;
-        }
-        fileSizeCache.clear();
     }
 
     private static class BlockKey {

@@ -548,7 +548,3 @@ class FileSystemCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         table = self.get_table(identifier)
         return table.branch_manager().branches()
-
-    def close(self):
-        if self._cache_manager is not None:
-            self._cache_manager.close()

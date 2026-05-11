@@ -20,10 +20,8 @@ package org.apache.paimon.fs.cache;
 
 import javax.annotation.Nullable;
 
-import java.io.Closeable;
-
 /** Block-level local cache manager interface for file reads. */
-public interface LocalCacheManager extends Closeable {
+public interface LocalCacheManager {
 
     int blockSize();
 

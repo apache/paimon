@@ -733,7 +733,3 @@ class RESTCatalog(Catalog):
                ) -> FileStoreTable:
         """Create FileStoreTable with dynamic options and catalog environment"""
         return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema, catalog_environment)
-
-    def close(self):
-        if self._cache_manager is not None:
-            self._cache_manager.close()
