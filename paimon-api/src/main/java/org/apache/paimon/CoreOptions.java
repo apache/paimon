@@ -476,6 +476,28 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.");
 
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_SORTED =
+            key("manifest.merge.sorted")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to sort ManifestEntry by partition during manifest full compaction.");
+
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_SORT_ON_COMMIT =
+            key("manifest.merge.sort-on-commit")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to sort ManifestEntry by partition during manifest merge in commit. "
+                                    + "This option does not affect manifest compaction.");
+
+    public static final ConfigOption<Boolean> MANIFEST_DELTA_SORTED =
+            key("manifest.delta.sorted")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to sort ManifestEntry by partition when writing manifest delta.");
+
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
@@ -660,6 +682,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
+
+    public static final ConfigOption<MemorySize> MANIFEST_MERGE_SORT_BUFFER =
+            key("manifest.merge.sort.buffer")
+                    .memoryType()
+                    .defaultValue(WRITE_BUFFER_SIZE.defaultValue())
+                    .withDescription(
+                            "Amount of data to build up in memory for sorting during manifest full compaction before spilling to disk.");
 
     @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<MemorySize> WRITE_BUFFER_MAX_DISK_SIZE =
@@ -2824,6 +2853,22 @@ public class CoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    public boolean manifestMergeSorted() {
+        return options.get(MANIFEST_MERGE_SORTED);
+    }
+
+    public boolean manifestMergeSortOnCommit() {
+        return options.get(MANIFEST_MERGE_SORT_ON_COMMIT);
+    }
+
+    public boolean manifestDeltaSorted() {
+        return options.get(MANIFEST_DELTA_SORTED);
+    }
+
+    public long manifestMergeSortBufferSize() {
+        return options.get(MANIFEST_MERGE_SORT_BUFFER).getBytes();
     }
 
     public MergeEngine mergeEngine() {

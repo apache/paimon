@@ -18,15 +18,34 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.codegen.NormalizedKeyComputer;
+import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.sort.BinaryInMemorySortBuffer;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.MutableObjectIterator;
+import org.apache.paimon.utils.SerializationUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +53,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -45,6 +65,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -66,7 +87,30 @@ public class ManifestFileMerger {
             int suggestedMinMetaCount,
             long manifestFullCompactionSize,
             RowType partitionType,
-            @Nullable Integer manifestReadParallelism) {
+            @Nullable Integer manifestReadParallelism,
+            boolean manifestMergeSorted) {
+        return merge(
+                input,
+                manifestFile,
+                suggestedMetaSize,
+                suggestedMinMetaCount,
+                manifestFullCompactionSize,
+                partitionType,
+                manifestReadParallelism,
+                manifestMergeSorted,
+                CoreOptions.MANIFEST_MERGE_SORT_BUFFER.defaultValue().getBytes());
+    }
+
+    public static List<ManifestFileMeta> merge(
+            List<ManifestFileMeta> input,
+            ManifestFile manifestFile,
+            long suggestedMetaSize,
+            int suggestedMinMetaCount,
+            long manifestFullCompactionSize,
+            RowType partitionType,
+            @Nullable Integer manifestReadParallelism,
+            boolean manifestMergeSorted,
+            long manifestMergeSortBufferSize) {
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
@@ -79,7 +123,9 @@ public class ManifestFileMerger {
                             suggestedMetaSize,
                             manifestFullCompactionSize,
                             partitionType,
-                            manifestReadParallelism);
+                            manifestReadParallelism,
+                            manifestMergeSorted,
+                            manifestMergeSortBufferSize);
             return fullCompacted.orElseGet(
                     () ->
                             tryMinorCompaction(
@@ -162,7 +208,31 @@ public class ManifestFileMerger {
             long suggestedMetaSize,
             long sizeTrigger,
             RowType partitionType,
-            @Nullable Integer manifestReadParallelism)
+            @Nullable Integer manifestReadParallelism,
+            boolean manifestMergeSorted)
+            throws Exception {
+        return tryFullCompaction(
+                inputs,
+                newFilesForAbort,
+                manifestFile,
+                suggestedMetaSize,
+                sizeTrigger,
+                partitionType,
+                manifestReadParallelism,
+                manifestMergeSorted,
+                CoreOptions.MANIFEST_MERGE_SORT_BUFFER.defaultValue().getBytes());
+    }
+
+    public static Optional<List<ManifestFileMeta>> tryFullCompaction(
+            List<ManifestFileMeta> inputs,
+            List<ManifestFileMeta> newFilesForAbort,
+            ManifestFile manifestFile,
+            long suggestedMetaSize,
+            long sizeTrigger,
+            RowType partitionType,
+            @Nullable Integer manifestReadParallelism,
+            boolean manifestMergeSorted,
+            long manifestMergeSortBufferSize)
             throws Exception {
         checkArgument(sizeTrigger > 0, "Manifest full compaction size trigger cannot be zero.");
 
@@ -248,13 +318,26 @@ public class ManifestFileMerger {
                                         file, manifestFile, mustChange, deleteEntries));
         Exception exception = null;
         try {
-            for (FullCompactionReadResult readResult :
-                    sequentialBatchedExecute(reader, toBeMerged, manifestReadParallelism)) {
-                if (readResult.requireChange) {
-                    writer.write(readResult.entries);
-                } else {
-                    result.add(readResult.file);
-                }
+            if (manifestMergeSorted) {
+                actualRewriteCount =
+                        mergeSortedByPartition(
+                                toBeMerged,
+                                mustChange,
+                                deleteEntries,
+                                manifestFile,
+                                partitionType,
+                                manifestMergeSortBufferSize,
+                                writer,
+                                result);
+            } else {
+                actualRewriteCount =
+                        mergeUnsorted(
+                                toBeMerged,
+                                mustChange,
+                                deleteEntries,
+                                manifestFile,
+                                writer,
+                                result);
             }
         } catch (Exception e) {
             exception = e;
@@ -272,27 +355,250 @@ public class ManifestFileMerger {
         return Optional.of(result);
     }
 
-    private static FullCompactionReadResult readForFullCompaction(
-            ManifestFileMeta file,
-            ManifestFile manifestFile,
+    private static final NormalizedKeyComputer NO_NORMALIZED_KEY_COMPUTER =
+            new NormalizedKeyComputer() {
+                @Override
+                public void putKey(InternalRow record, MemorySegment target, int offset) {
+                    // no-op
+                }
+
+                @Override
+                public int compareKey(
+                        MemorySegment segI, int offsetI, MemorySegment segJ, int offsetJ) {
+                    return 0;
+                }
+
+                @Override
+                public void swapKey(
+                        MemorySegment segI, int offsetI, MemorySegment segJ, int offsetJ) {
+                    // no-op
+                }
+
+                @Override
+                public int getNumKeyBytes() {
+                    return 0;
+                }
+
+                @Override
+                public boolean isKeyFullyDetermines() {
+                    return false;
+                }
+
+                @Override
+                public boolean invertKey() {
+                    return false;
+                }
+            };
+
+    private static int mergeUnsorted(
+            List<ManifestFileMeta> toBeMerged,
             Filter<ManifestFileMeta> mustChange,
-            Set<FileEntry.Identifier> deleteEntries) {
-        List<ManifestEntry> entries = new ArrayList<>();
-        boolean requireChange = mustChange.test(file);
-        for (ManifestEntry entry :
-                manifestFile.read(
-                        file.fileName(),
-                        file.fileSize(),
-                        FileEntry.addFilter(),
-                        Filter.alwaysTrue())) {
-            if (deleteEntries.contains(entry.identifier())) {
-                requireChange = true;
+            Set<FileEntry.Identifier> deleteEntries,
+            ManifestFile manifestFile,
+            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer,
+            List<ManifestFileMeta> result)
+            throws Exception {
+        int actualRewriteCount = 0;
+        for (ManifestFileMeta file : toBeMerged) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            boolean requireChange = mustChange.test(file);
+            for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
+                if (entry.kind() == FileKind.DELETE) {
+                    continue;
+                }
+
+                if (deleteEntries.contains(entry.identifier())) {
+                    requireChange = true;
+                } else {
+                    entries.add(entry);
+                }
+            }
+
+            if (requireChange) {
+                writer.write(entries);
+                actualRewriteCount++;
             } else {
-                entries.add(entry);
+                result.add(file);
+            }
+        }
+        return actualRewriteCount;
+    }
+
+    private static int mergeSortedByPartition(
+            List<ManifestFileMeta> toBeMerged,
+            Filter<ManifestFileMeta> mustChange,
+            Set<FileEntry.Identifier> deleteEntries,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            long manifestMergeSortBufferSize,
+            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer,
+            List<ManifestFileMeta> result)
+            throws Exception {
+        IOManager ioManager = null;
+        BinaryExternalSortBuffer sortBuffer = null;
+        RowType sortRowType = null;
+        ManifestEntrySerializer entrySerializer = new ManifestEntrySerializer();
+        int actualRewriteCount = 0;
+
+        try {
+            for (ManifestFileMeta file : toBeMerged) {
+                List<ManifestEntry> entries = new ArrayList<>();
+                boolean requireChange = mustChange.test(file);
+                for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
+                    if (entry.kind() == FileKind.DELETE) {
+                        continue;
+                    }
+
+                    if (deleteEntries.contains(entry.identifier())) {
+                        requireChange = true;
+                    } else {
+                        entries.add(entry);
+                    }
+                }
+
+                if (requireChange) {
+                    if (sortBuffer == null) {
+                        sortRowType = manifestEntrySortRowType(partitionType);
+                        ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
+                        sortBuffer =
+                                createManifestEntrySortBuffer(
+                                        ioManager,
+                                        sortRowType,
+                                        partitionType,
+                                        manifestMergeSortBufferSize);
+                    }
+                    for (ManifestEntry entry : entries) {
+                        GenericRow row = new GenericRow(4);
+                        row.setField(0, entry.partition());
+                        row.setField(1, entry.bucket());
+                        row.setField(2, entry.level());
+                        row.setField(3, entry.toBytes());
+                        sortBuffer.write(row);
+                    }
+                    actualRewriteCount++;
+                } else {
+                    result.add(file);
+                }
+            }
+
+            if (sortBuffer != null) {
+                MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
+                BinaryRow reuse = new BinaryRow(sortRowType.getFieldCount());
+                BinaryRow next;
+                while ((next = iterator.next(reuse)) != null) {
+                    ManifestEntry entry = entrySerializer.deserializeFromBytes(next.getBinary(3));
+                    writer.write(entry);
+                }
+            }
+
+            return actualRewriteCount;
+        } finally {
+            if (sortBuffer != null) {
+                sortBuffer.clear();
+            }
+            if (ioManager != null) {
+                ioManager.close();
+            }
+        }
+    }
+
+    private static BinaryExternalSortBuffer createManifestEntrySortBuffer(
+            IOManager ioManager,
+            RowType sortRowType,
+            RowType partitionType,
+            long manifestMergeSortBufferSize) {
+        int pageSize = (int) CoreOptions.PAGE_SIZE.defaultValue().getBytes();
+        long minBufferSize = 3L * pageSize;
+        checkArgument(
+                manifestMergeSortBufferSize >= minBufferSize,
+                "Manifest merge sort buffer must be at least three pages (" + minBufferSize + ")");
+
+        RecordComparator comparator =
+                (a, b) -> {
+                    if (partitionType.getFieldCount() > 0) {
+                        int cmp =
+                                InternalRowUtils.compare(
+                                        a.getRow(0, partitionType.getFieldCount()),
+                                        b.getRow(0, partitionType.getFieldCount()),
+                                        partitionType);
+                        if (cmp != 0) {
+                            return cmp;
+                        }
+                    }
+
+                    int cmp = Integer.compare(a.getInt(1), b.getInt(1));
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+
+                    return Integer.compare(a.getInt(2), b.getInt(2));
+                };
+
+        MemorySegmentPool memoryPool =
+                new HeapMemorySegmentPool(manifestMergeSortBufferSize, pageSize);
+        InternalRowSerializer serializer = new InternalRowSerializer(sortRowType);
+        BinaryInMemorySortBuffer inMemorySortBuffer =
+                BinaryInMemorySortBuffer.createBuffer(
+                        NO_NORMALIZED_KEY_COMPUTER, serializer, comparator, memoryPool);
+
+        return new BinaryExternalSortBuffer(
+                new BinaryRowSerializer(sortRowType.getFieldCount()),
+                comparator,
+                memoryPool.pageSize(),
+                inMemorySortBuffer,
+                ioManager,
+                CoreOptions.LOCAL_SORT_MAX_NUM_FILE_HANDLES.defaultValue(),
+                CompressOptions.defaultOptions(),
+                CoreOptions.WRITE_BUFFER_MAX_DISK_SIZE.defaultValue());
+    }
+
+    private static RowType manifestEntrySortRowType(RowType partitionType) {
+        return RowType.of(
+                partitionType,
+                new IntType(false),
+                new IntType(false),
+                SerializationUtils.newBytesType(false));
+    }
+
+    static Comparator<ManifestEntry> createManifestEntryComparator(RowType partitionType) {
+        Comparator<BinaryRow> partitionComparator = null;
+        if (partitionType.getFieldCount() > 0) {
+            try {
+                int[] sortFields = new int[partitionType.getFieldCount()];
+                for (int i = 0; i < sortFields.length; i++) {
+                    sortFields[i] = i;
+                }
+                RecordComparator codegenComparator =
+                        newRecordComparator(partitionType.getFieldTypes(), sortFields, true);
+                partitionComparator = (a, b) -> codegenComparator.compare(a, b);
+            } catch (Throwable t) {
+                // Fallback to pure-java comparison for environments where codegen is unavailable.
+                partitionComparator = (a, b) -> InternalRowUtils.compare(a, b, partitionType);
             }
         }
 
-        return new FullCompactionReadResult(file, requireChange, entries);
+        Comparator<BinaryRow> finalPartitionComparator = partitionComparator;
+        return (a, b) -> {
+            int cmp = 0;
+            if (finalPartitionComparator != null) {
+                cmp = finalPartitionComparator.compare(a.partition(), b.partition());
+                if (cmp != 0) {
+                    return cmp;
+                }
+            }
+
+            cmp = Integer.compare(a.bucket(), b.bucket());
+            if (cmp != 0) {
+                return cmp;
+            }
+
+            cmp = Integer.compare(a.level(), b.level());
+            if (cmp != 0) {
+                return cmp;
+            }
+
+            return a.fileName().compareTo(b.fileName());
+        };
     }
 
     private static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {

@@ -880,6 +880,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>For DELETE manifest entry in manifest file, drop stats to reduce memory and storage. Default value is false only for compatibility of old reader.</td>
         </tr>
         <tr>
+            <td><h5>manifest.delta.sorted</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to sort ManifestEntry by partition when writing manifest delta.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.format</h5></td>
             <td style="word-wrap: break-word;">"avro"</td>
             <td>String</td>
@@ -896,6 +902,24 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">30</td>
             <td>Integer</td>
             <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge.sort-on-commit</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to sort ManifestEntry by partition during manifest merge in commit. This option does not affect manifest compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge.sort.buffer</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Amount of data to build up in memory for sorting during manifest full compaction before spilling to disk.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge.sorted</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to sort ManifestEntry by partition during manifest full compaction.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>
