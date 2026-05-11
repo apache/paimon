@@ -140,7 +140,7 @@ public class BTreeIndexMetaTest {
         // Verify that V1 serialized data ends with the VERSION byte (>= 2)
         BTreeIndexMeta meta = new BTreeIndexMeta(new byte[] {1}, new byte[] {2}, false);
         byte[] data = meta.serialize();
-        Assertions.assertThat(data[data.length - 1]).isEqualTo(2);
+        Assertions.assertThat(data[data.length - 1]).isEqualTo((byte) 2);
     }
 
     // ---- V0 format backward compatibility tests ----
