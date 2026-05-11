@@ -34,6 +34,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -48,6 +49,8 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
 
     private static final Logger LOG =
             LoggerFactory.getLogger(StatisticsOrRecordChannelComputer.class);
+
+    private static final int DEFAULT_SUBTASK_COUNT_FOR_UNKNOWN_PARTITION = 4;
 
     private final TableSchema schema;
 
@@ -96,11 +99,17 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
         }
 
         long totalWeight = statistics.values().stream().mapToLong(l -> l).sum();
+        if (totalWeight <= 0) {
+            return new HashMap<>();
+        }
         long targetWeightPerSubtask =
                 (long) Math.ceil(((double) totalWeight) / downstreamParallelism);
 
+        // Sort keys for deterministic assignment across JVMs
+        Map<String, Long> sortedStatistics = new TreeMap<>(statistics);
+
         Map<String, WeightedRandomAssignment> assignmentMap = new HashMap<>(statistics.size());
-        Iterator<String> keyIterator = statistics.keySet().iterator();
+        Iterator<String> keyIterator = sortedStatistics.keySet().iterator();
         int subtaskId = 0;
         String currentKey = null;
         long keyRemainingWeight = 0L;
@@ -174,7 +183,8 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
         int select(String partitionKey, int numChannels) {
             WeightedRandomAssignment assignment = assignments.get(partitionKey);
             if (assignment == null) {
-                int defaultSubtaskCount = Math.min(numChannels, 4);
+                int defaultSubtaskCount =
+                        Math.min(numChannels, DEFAULT_SUBTASK_COUNT_FOR_UNKNOWN_PARTITION);
                 int startChannel = Math.abs(partitionKey.hashCode()) % numChannels;
                 List<Integer> subtasks = new ArrayList<>(defaultSubtaskCount);
                 List<Long> weights = new ArrayList<>(defaultSubtaskCount);

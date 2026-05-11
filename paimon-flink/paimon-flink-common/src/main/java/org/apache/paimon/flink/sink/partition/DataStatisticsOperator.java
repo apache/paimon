@@ -51,7 +51,7 @@ public class DataStatisticsOperator extends AbstractStreamOperator<StatisticsOrR
     private final OperatorEventGateway operatorEventGateway;
 
     private transient int subtaskIndex;
-    private transient volatile DataStatistics localStatistics;
+    private transient DataStatistics localStatistics;
     private transient RowPartitionKeyExtractor extractor;
     private transient TypeSerializer<DataStatistics> statisticsSerializer;
 

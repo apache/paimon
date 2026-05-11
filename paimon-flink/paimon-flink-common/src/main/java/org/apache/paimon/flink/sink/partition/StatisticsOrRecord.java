@@ -58,18 +58,8 @@ public class StatisticsOrRecord {
         return statistics;
     }
 
-    public void setStatistics(DataStatistics newStatistics) {
-        this.statistics = newStatistics;
-        this.record = null;
-    }
-
     public InternalRow record() {
         return record;
-    }
-
-    public void setRecord(InternalRow newRecord) {
-        this.record = newRecord;
-        this.statistics = null;
     }
 
     @Override
