@@ -2198,7 +2198,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> ROW_TRACKING_PARTITION_GROUP_ON_COMMIT =
             key("row-tracking.partition-group-on-commit")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "When row-tracking is enabled, whether to group new file metas by partition "
                                     + "before commit, so that assigned row IDs are contiguous within each partition."

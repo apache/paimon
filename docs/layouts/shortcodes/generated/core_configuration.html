@@ -1171,7 +1171,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>row-tracking.partition-group-on-commit</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>When row-tracking is enabled, whether to group new file metas by partition before commit, so that assigned row IDs are contiguous within each partition.This is useful if you want to build global indices on this table. </td>
         </tr>
