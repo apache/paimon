@@ -18,11 +18,15 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.memory.MemorySliceOutput;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /** Test for {@link BTreeIndexMeta} serialization/deserialization. */
 public class BTreeIndexMetaTest {
+
+    // ---- V1 format tests (current version) ----
 
     @Test
     public void testSerializeDeserializeNormal() {
@@ -50,7 +54,7 @@ public class BTreeIndexMetaTest {
 
     @Test
     public void testSerializeDeserializeEmptyKey() {
-        // This is the core bug scenario: empty byte array (e.g. from empty string)
+        // Core bug scenario: empty byte array (e.g. from empty string key)
         // should NOT be confused with null
         byte[] emptyKey = new byte[0];
         byte[] lastKey = new byte[] {4, 5, 6};
@@ -129,5 +133,84 @@ public class BTreeIndexMetaTest {
                 .isEqualTo(org.apache.paimon.data.BinaryString.EMPTY_UTF8);
         Assertions.assertThat(lastKeyObj)
                 .isEqualTo(org.apache.paimon.data.BinaryString.fromString("abc"));
+    }
+
+    @Test
+    public void testV1SerializedEndsWithVersionByte() {
+        // Verify that V1 serialized data ends with the VERSION byte (>= 2)
+        BTreeIndexMeta meta = new BTreeIndexMeta(new byte[] {1}, new byte[] {2}, false);
+        byte[] data = meta.serialize();
+        Assertions.assertThat(data[data.length - 1]).isEqualTo(2);
+    }
+
+    // ---- V0 format backward compatibility tests ----
+
+    @Test
+    public void testDeserializeV0FormatAllNullKeys() {
+        // V0 format: no version byte, 0 means null
+        // firstKey=null (int 0), lastKey=null (int 0), hasNulls=true (byte 1)
+        MemorySliceOutput out = new MemorySliceOutput(9);
+        out.writeInt(0); // firstKeyLength = 0 means null in V0
+        out.writeInt(0); // lastKeyLength = 0 means null in V0
+        out.writeByte(1); // hasNulls = true, also serves as last byte (1 < VERSION)
+        byte[] v0Data = out.toSlice().copyBytes();
+
+        BTreeIndexMeta deserialized = BTreeIndexMeta.deserialize(v0Data);
+        Assertions.assertThat(deserialized.getFirstKey()).isNull();
+        Assertions.assertThat(deserialized.getLastKey()).isNull();
+        Assertions.assertThat(deserialized.hasNulls()).isTrue();
+        Assertions.assertThat(deserialized.onlyNulls()).isTrue();
+    }
+
+    @Test
+    public void testDeserializeV0FormatAllNullKeysHasNullsFalse() {
+        // V0 format: all null keys with hasNulls=false (last byte is 0, still < VERSION)
+        MemorySliceOutput out = new MemorySliceOutput(9);
+        out.writeInt(0);
+        out.writeInt(0);
+        out.writeByte(0); // hasNulls = false, last byte is 0 < VERSION
+        byte[] v0Data = out.toSlice().copyBytes();
+
+        BTreeIndexMeta deserialized = BTreeIndexMeta.deserialize(v0Data);
+        Assertions.assertThat(deserialized.getFirstKey()).isNull();
+        Assertions.assertThat(deserialized.getLastKey()).isNull();
+        Assertions.assertThat(deserialized.hasNulls()).isFalse();
+        Assertions.assertThat(deserialized.onlyNulls()).isTrue();
+    }
+
+    @Test
+    public void testDeserializeV0FormatNormalKeys() {
+        // V0 format: positive length means key data
+        // firstKey=[1,2,3] (length=3), lastKey=[4,5,6] (length=3), hasNulls=false (byte 0)
+        MemorySliceOutput out = new MemorySliceOutput(15);
+        out.writeInt(3);
+        out.writeBytes(new byte[] {1, 2, 3});
+        out.writeInt(3);
+        out.writeBytes(new byte[] {4, 5, 6});
+        out.writeByte(0);
+        byte[] v0Data = out.toSlice().copyBytes();
+
+        BTreeIndexMeta deserialized = BTreeIndexMeta.deserialize(v0Data);
+        Assertions.assertThat(deserialized.getFirstKey()).isEqualTo(new byte[] {1, 2, 3});
+        Assertions.assertThat(deserialized.getLastKey()).isEqualTo(new byte[] {4, 5, 6});
+        Assertions.assertThat(deserialized.hasNulls()).isFalse();
+        Assertions.assertThat(deserialized.onlyNulls()).isFalse();
+    }
+
+    @Test
+    public void testDeserializeV0FormatFirstKeyNullLastKeyNormal() {
+        // V0 format: firstKey=null (int 0), lastKey=[4,5,6] (length=3)
+        MemorySliceOutput out = new MemorySliceOutput(12);
+        out.writeInt(0);
+        out.writeInt(3);
+        out.writeBytes(new byte[] {4, 5, 6});
+        out.writeByte(1);
+        byte[] v0Data = out.toSlice().copyBytes();
+
+        BTreeIndexMeta deserialized = BTreeIndexMeta.deserialize(v0Data);
+        Assertions.assertThat(deserialized.getFirstKey()).isNull();
+        Assertions.assertThat(deserialized.getLastKey()).isEqualTo(new byte[] {4, 5, 6});
+        Assertions.assertThat(deserialized.hasNulls()).isTrue();
+        Assertions.assertThat(deserialized.onlyNulls()).isFalse();
     }
 }
