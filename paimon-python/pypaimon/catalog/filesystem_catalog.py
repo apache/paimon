@@ -54,8 +54,10 @@ class FileSystemCatalog(Catalog):
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
         self.catalog_context = CatalogContext.create_from_options(catalog_options)
+        self._cache_manager = CachingFileIO.create_cache_manager(self.catalog_options)
         self.file_io = CachingFileIO.wrap_with_caching_if_needed(
-            FileIO.get(self.warehouse, self.catalog_options), self.catalog_options)
+            FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,
+            self._cache_manager)
 
     def list_databases(self) -> list:
         statuses = self.file_io.list_status(self.warehouse)
@@ -546,3 +548,7 @@ class FileSystemCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         table = self.get_table(identifier)
         return table.branch_manager().branches()
+
+    def close(self):
+        if self._cache_manager is not None:
+            self._cache_manager.close()

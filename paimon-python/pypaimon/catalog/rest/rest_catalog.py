@@ -67,6 +67,7 @@ class RESTCatalog(Catalog):
         self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
+        self._cache_manager = CachingFileIO.create_cache_manager(self.context.options)
 
         # FUSE support (lazy import only when enabled)
         self.fuse_enabled = self.context.options.get(FuseOptions.FUSE_ENABLED, False)
@@ -616,7 +617,8 @@ class RESTCatalog(Catalog):
 
     def file_io_from_options(self, table_path: str) -> FileIO:
         return CachingFileIO.wrap_with_caching_if_needed(
-            FileIO.get(table_path, self.context.options), self.context.options)
+            FileIO.get(table_path, self.context.options), self.context.options,
+            self._cache_manager)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
         """
@@ -731,3 +733,7 @@ class RESTCatalog(Catalog):
                ) -> FileStoreTable:
         """Create FileStoreTable with dynamic options and catalog environment"""
         return FileStoreTable(file_io, catalog_environment.identifier, table_path, table_schema, catalog_environment)
+
+    def close(self):
+        if self._cache_manager is not None:
+            self._cache_manager.close()

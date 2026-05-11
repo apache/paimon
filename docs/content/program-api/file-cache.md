@@ -120,3 +120,11 @@ table = catalog.get_table("db.my_table")
 - Subsequent reads of the same block are served from the local cache, skipping remote I/O.
 - When using disk cache, cache files are keyed by remote file path and block offset, so they persist across process restarts and can be reused.
 - When the cache exceeds `max-size`, the least recently used blocks are evicted automatically.
+
+## Cache Lifecycle
+
+The cache is created and managed by the Catalog. All tables obtained from the same catalog share a single cache instance. When the catalog is closed, the cache is closed as well.
+
+In distributed computing frameworks (Flink, Spark), the `FileIO` is serialized and shipped to task managers. After deserialization, the cache is **not** recreated — reads fall through directly to the remote storage. This is by design: the cache lifecycle is bound to the Catalog that created it, and a deserialized `FileIO` is no longer managed by any Catalog.
+
+If you need caching on task managers, create a new Catalog with cache options enabled on each worker node.
