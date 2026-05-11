@@ -19,19 +19,15 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.LogChangelogMode;
-import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
-import org.apache.paimon.flink.log.LogSourceProvider;
-import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.flink.lookup.partitioner.BucketIdExtractor;
 import org.apache.paimon.flink.lookup.partitioner.BucketShufflePartitioner;
 import org.apache.paimon.flink.lookup.partitioner.BucketShuffleStrategy;
 import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
+import org.apache.paimon.flink.sink.AdaptiveParallelism;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -42,10 +38,10 @@ import org.apache.paimon.table.BucketSpec;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -71,13 +67,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.configuration.ExecutionOptions.RUNTIME_MODE;
+import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
-import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.paimon.CoreOptions.LOG_IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC_THREAD_NUMBER;
@@ -113,7 +109,6 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     protected final ObjectIdentifier tableIdentifier;
     protected final boolean unbounded;
     protected final DynamicTableFactory.Context context;
-    @Nullable protected final LogStoreTableFactory logStoreTableFactory;
     @Nullable private BucketShufflePartitioner bucketShufflePartitioner;
     @Nullable protected WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable protected Long countPushed;
@@ -123,7 +118,6 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             Table table,
             boolean unbounded,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
@@ -134,7 +128,6 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         this.tableIdentifier = tableIdentifier;
         this.unbounded = unbounded;
         this.context = context;
-        this.logStoreTableFactory = logStoreTableFactory;
 
         this.watermarkStrategy = watermarkStrategy;
         this.countPushed = countPushed;
@@ -149,45 +142,29 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
         if (table.primaryKeys().isEmpty()) {
             return ChangelogMode.insertOnly();
-        } else {
-            Options options = Options.fromMap(table.options());
-
-            if (new CoreOptions(options).mergeEngine() == FIRST_ROW) {
-                return ChangelogMode.insertOnly();
-            }
-
-            if (options.get(SCAN_REMOVE_NORMALIZE)) {
-                return ChangelogMode.all();
-            }
-
-            if (logStoreTableFactory == null
-                    && options.get(CHANGELOG_PRODUCER) != ChangelogProducer.NONE) {
-                return ChangelogMode.all();
-            }
-
-            if (logStoreTableFactory != null && options.get(LOG_IGNORE_DELETE)) {
-                return ChangelogMode.insertOnly();
-            }
-
-            // optimization: transaction consistency and all changelog mode avoid the generation of
-            // normalized nodes. See FlinkTableSink.getChangelogMode validation.
-            return options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL
-                            && options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL
-                    ? ChangelogMode.all()
-                    : ChangelogMode.upsert();
         }
+
+        Options options = Options.fromMap(table.options());
+
+        if (new CoreOptions(options).mergeEngine() == FIRST_ROW) {
+            return ChangelogMode.insertOnly();
+        }
+
+        if (options.get(SCAN_REMOVE_NORMALIZE)) {
+            return ChangelogMode.all();
+        }
+
+        if (options.get(CHANGELOG_PRODUCER) != CoreOptions.ChangelogProducer.NONE) {
+            return ChangelogMode.all();
+        }
+
+        return ChangelogMode.upsert();
     }
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
         if (countPushed != null) {
             return createCountStarScan();
-        }
-
-        LogSourceProvider logSourceProvider = null;
-        if (logStoreTableFactory != null) {
-            logSourceProvider =
-                    logStoreTableFactory.createSourceProvider(context, scanContext, projectFields);
         }
 
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
@@ -216,21 +193,21 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                 new FlinkSourceBuilder(table)
                         .sourceName(tableIdentifier.asSummaryString())
                         .sourceBounded(!unbounded)
-                        .logSourceProvider(logSourceProvider)
                         .projection(projectFields)
                         .predicate(predicate)
                         .partitionPredicate(partitionPredicate)
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
-
         return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->
                         sourceBuilder
                                 .sourceParallelism(inferSourceParallelism(env))
                                 .env(env)
-                                .build());
+                                .build(),
+                tableIdentifier.asSummaryString(),
+                table);
     }
 
     private ScanRuntimeProvider createCountStarScan() {
@@ -306,6 +283,18 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         int numBuckets;
         ShuffleStrategy strategy = null;
         if (useCustomShuffle) {
+            try {
+                checkArgument(
+                        this.context
+                                        .getConfiguration()
+                                        .get(RUNTIME_MODE)
+                                        .equals(RuntimeExecutionMode.STREAMING)
+                                || !AdaptiveParallelism.isEnabled(this.context.getConfiguration()),
+                        "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
+            } catch (NoClassDefFoundError ignored) {
+                // before 1.17, there is no adaptive parallelism
+            }
+
             numBuckets = table.store().options().bucket();
             BucketIdExtractor extractor =
                     new BucketIdExtractor(
@@ -381,15 +370,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .splits();
         long countPushed = 0;
         for (Split s : splits) {
-            if (!(s instanceof DataSplit)) {
+            OptionalLong mergedRowCount = s.mergedRowCount();
+            if (!mergedRowCount.isPresent()) {
                 return false;
             }
-            DataSplit split = (DataSplit) s;
-            if (!split.mergedRowCountAvailable()) {
-                return false;
-            }
-
-            countPushed += split.mergedRowCount();
+            countPushed += mergedRowCount.getAsLong();
         }
 
         this.countPushed = countPushed;

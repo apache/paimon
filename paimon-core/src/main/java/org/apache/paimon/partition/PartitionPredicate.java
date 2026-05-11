@@ -28,6 +28,8 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -35,6 +37,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -48,18 +51,18 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
-import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * A special predicate to filter partition only, just like {@link Predicate}.
+ * A special predicate to filter partition only, just like {@link Predicate}, this should be thread
+ * safe.
  *
  * @since 1.3.0
  */
+@ThreadSafe
 public interface PartitionPredicate extends Serializable {
 
     /**
@@ -455,6 +458,12 @@ public interface PartitionPredicate extends Serializable {
                 partitionType, createBinaryPartitions(values, partitionType, defaultPartValue));
     }
 
+    static Optional<PartitionPredicate> splitPartitionPredicate(
+            Predicate dataPredicates, RowType tableType, List<String> partitionKeys) {
+        return splitPartitionPredicatesAndDataPredicates(dataPredicates, tableType, partitionKeys)
+                .getLeft();
+    }
+
     static Pair<Optional<PartitionPredicate>, List<Predicate>>
             splitPartitionPredicatesAndDataPredicates(
                     Predicate dataPredicates, RowType tableType, List<String> partitionKeys) {
@@ -470,15 +479,17 @@ public interface PartitionPredicate extends Serializable {
         }
 
         RowType partitionType = tableType.project(partitionKeys);
-        int[] partitionIdx = fieldIdxToPartitionIdx(tableType, partitionKeys);
+        PredicateProjectionConverter partitionProjection =
+                PredicateProjectionConverter.fromProjection(
+                        tableType.projectIndexes(partitionKeys));
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
+        Set<String> partitionKeySet = new HashSet<>(partitionKeys);
         for (Predicate p : dataPredicates) {
-            Optional<Predicate> mapped = transformFieldMapping(p, partitionIdx);
-            if (mapped.isPresent()) {
-                partitionFilters.add(mapped.get());
-            } else {
+            Optional<Predicate> projected = p.visit(partitionProjection);
+            projected.ifPresent(partitionFilters::add);
+            if (!partitionKeySet.containsAll(PredicateVisitor.collectFieldNames(p))) {
                 nonPartitionFilters.add(p);
             }
         }

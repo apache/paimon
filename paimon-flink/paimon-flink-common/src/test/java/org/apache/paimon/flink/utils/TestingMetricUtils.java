@@ -24,6 +24,7 @@ import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.metrics.groups.AbstractMetricGroup;
+import org.apache.flink.runtime.metrics.groups.ProxyMetricGroup;
 
 import java.lang.reflect.Field;
 import java.util.Map;
@@ -46,6 +47,14 @@ public class TestingMetricUtils {
     @SuppressWarnings("unchecked")
     private static Metric getMetric(MetricGroup group, String metricName) {
         try {
+            // Handle ProxyMetricGroup wrapper class
+            if (ProxyMetricGroup.class.isAssignableFrom(group.getClass())) {
+                Field parentField =
+                        group.getClass().getSuperclass().getDeclaredField("parentMetricGroup");
+                parentField.setAccessible(true);
+                group = (MetricGroup) parentField.get(group);
+            }
+
             Field field = AbstractMetricGroup.class.getDeclaredField("metrics");
             field.setAccessible(true);
             return ((Map<String, Metric>) field.get(group)).get(metricName);

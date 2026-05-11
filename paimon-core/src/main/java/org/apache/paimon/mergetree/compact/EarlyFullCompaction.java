@@ -87,6 +87,7 @@ public class EarlyFullCompaction {
                 totalSize += run.run().totalSize();
             }
             if (totalSize < totalSizeThreshold) {
+                updateLastFullCompaction();
                 return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
             }
         }
@@ -98,6 +99,7 @@ public class EarlyFullCompaction {
                 }
             }
             if (incrementalSize > incrementalSizeThreshold) {
+                updateLastFullCompaction();
                 return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
             }
         }

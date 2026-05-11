@@ -125,10 +125,10 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         List<RichSegments> segments = manifestSegments.segments();
 
         // try to do fast filter first
-        Optional<BinaryRow> partition = extractSinglePartition(partitionFilter);
-        if (partition.isPresent()) {
+        Optional<BinaryRow> singlePartition = extractSinglePartition(partitionFilter);
+        if (singlePartition.isPresent()) {
             Map<Integer, List<RichSegments>> segMap =
-                    manifestSegments.indexedSegments().get(partition.get());
+                    manifestSegments.indexedSegments().get(singlePartition.get());
             if (segMap == null) {
                 return Collections.emptyList();
             }
@@ -147,11 +147,13 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         // do force loop filter
         List<Segments> segmentsList = new ArrayList<>();
         for (RichSegments richSegments : segments) {
-            if (partitionFilter != null && !partitionFilter.test(richSegments.partition())) {
+            BinaryRow partition = richSegments.partition();
+            if (partitionFilter != null && !partitionFilter.test(partition)) {
                 continue;
             }
             if (bucketFilter != null
-                    && !bucketFilter.test(richSegments.bucket(), richSegments.totalBucket())) {
+                    && !bucketFilter.test(
+                            partition, richSegments.bucket(), richSegments.totalBucket())) {
                 continue;
             }
             segmentsList.add(richSegments.segments());

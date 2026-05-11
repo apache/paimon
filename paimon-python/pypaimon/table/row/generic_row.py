@@ -51,6 +51,16 @@ class GenericRow(InternalRow):
     def __len__(self) -> int:
         return len(self.values)
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, GenericRow):
+            return False
+        return self.values == other.values and self.row_kind == other.row_kind
+
+    def __hash__(self):
+        return hash((tuple(self.values), tuple(self.fields), self.row_kind))
+
     def __str__(self):
         field_strs = [f"{field.name}={repr(value)}" for field, value in zip(self.fields, self.values)]
         return f"GenericRow(row_kind={self.row_kind.name}, {', '.join(field_strs)})"

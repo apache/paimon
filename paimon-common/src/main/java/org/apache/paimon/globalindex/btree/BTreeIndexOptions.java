@@ -32,7 +32,7 @@ public class BTreeIndexOptions {
                     .withDescription("The compression algorithm to use for BTreeIndex");
 
     public static final ConfigOption<Integer> BTREE_INDEX_COMPRESSION_LEVEL =
-            ConfigOptions.key("btree-index.compression")
+            ConfigOptions.key("btree-index.compression-level")
                     .intType()
                     .defaultValue(1)
                     .withDescription("The compression level of the compression algorithm");
@@ -54,4 +54,16 @@ public class BTreeIndexOptions {
                     .doubleType()
                     .defaultValue(0.1)
                     .withDescription("The high priority pool ratio to use for BTreeIndex");
+
+    public static final ConfigOption<Long> BTREE_INDEX_RECORDS_PER_RANGE =
+            ConfigOptions.key("btree-index.records-per-range")
+                    .longType()
+                    .defaultValue(1000_000L)
+                    .withDescription("The expected number of records per BTree Index File.");
+
+    public static final ConfigOption<Integer> BTREE_INDEX_BUILD_MAX_PARALLELISM =
+            ConfigOptions.key("btree-index.build.max-parallelism")
+                    .intType()
+                    .defaultValue(4096)
+                    .withDescription("The max parallelism of Flink/Spark for building BTreeIndex.");
 }

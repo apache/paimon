@@ -56,7 +56,7 @@ For streaming engines like Apache Flink, there are typically three types of conn
   intermediate stages in this pipeline, to guarantee the latency stay
   within seconds.
 - OLAP system, such as ClickHouse, it receives processed data in
-  streaming fashion and serving user’s ad-hoc queries. 
+  streaming fashion and serving user's ad-hoc queries.
 - Batch storage, such as Apache Hive, it supports various operations
   of the traditional batch processing, including `INSERT OVERWRITE`.
 

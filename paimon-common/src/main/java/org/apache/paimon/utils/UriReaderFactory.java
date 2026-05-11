@@ -25,16 +25,18 @@ import org.apache.paimon.fs.Path;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.Serializable;
 import java.net.URI;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** A factory to create and cache {@link UriReader}. */
-public class UriReaderFactory {
+public class UriReaderFactory implements Serializable {
 
     private final CatalogContext context;
-    private final Map<UriKey, UriReader> readers;
+    private transient Map<UriKey, UriReader> readers;
 
     public UriReaderFactory(CatalogContext context) {
         this.context = context;
@@ -45,6 +47,11 @@ public class UriReaderFactory {
         URI uri = URI.create(input);
         UriKey key = new UriKey(uri.getScheme(), uri.getAuthority());
         return readers.computeIfAbsent(key, k -> newReader(k, uri));
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        this.readers = new ConcurrentHashMap<>();
     }
 
     private UriReader newReader(UriKey key, URI uri) {

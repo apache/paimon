@@ -25,7 +25,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
 import org.apache.paimon.fs.FileIO;
@@ -89,7 +88,6 @@ public class LookupTableTest extends TableTestBase {
 
     @TempDir Path tempDir;
     private RowType rowType;
-    private IOManager ioManager;
     private FullCacheLookupTable table;
 
     public LookupTableTest(boolean inMemory) {
@@ -105,7 +103,6 @@ public class LookupTableTest extends TableTestBase {
     @BeforeEach
     public void before() throws IOException {
         this.rowType = RowType.of(new IntType(), new IntType(), new IntType());
-        this.ioManager = new IOManagerImpl(tempDir.toString());
     }
 
     @AfterEach

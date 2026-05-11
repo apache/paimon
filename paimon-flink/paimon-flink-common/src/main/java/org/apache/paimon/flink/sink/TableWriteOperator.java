@@ -75,17 +75,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
 
-        boolean containLogSystem = containLogSystem();
         int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         int subtaskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
         StateValueFilter stateFilter =
-                (tableName, partition, bucket) -> {
-                    int task =
-                            containLogSystem
-                                    ? ChannelComputer.select(bucket, numTasks)
-                                    : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == subtaskId;
-                };
+                (tableName, partition, bucket) ->
+                        subtaskId == ChannelComputer.select(partition, bucket, numTasks);
 
         state = createState(subtaskId, context, stateFilter);
         write =
@@ -126,8 +120,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         return commitUser;
     }
-
-    protected abstract boolean containLogSystem();
 
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {

@@ -153,10 +153,11 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")
                     .booleanType()
-                    // We should set default value to true in case of hive metastore losing table
+                    // We should set default value to true in case of metastore losing table
                     // properties.
                     .defaultValue(true)
-                    .withDescription("Sync all table properties to hive metastore");
+                    .withDescription(
+                            "Sync all table properties to the catalog metastore (e.g. Hive metastore, JDBC catalog store)");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
             ConfigOptions.key("format-table.enabled")

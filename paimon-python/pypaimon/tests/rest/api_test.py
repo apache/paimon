@@ -31,7 +31,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, DataTypeParser, MapType,
-                                        RowType)
+                                        RowType, VectorType)
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.tests.rest.rest_server import RESTCatalogServer
 
@@ -124,6 +124,17 @@ class ApiTest(unittest.TestCase):
         value_type: RowType = element_type.value
         self.assertEqual(value_type.fields[0].type.type, 'BIGINT')
         self.assertEqual(value_type.fields[1].type.type, 'DOUBLE')
+
+        vector_json = {
+            "type": "VECTOR",
+            "element": "BOOLEAN NOT NULL",
+            "length": 7
+        }
+        vector_type: VectorType = DataTypeParser.parse_data_type(vector_json, field_id)
+        self.assertTrue(vector_type.nullable)
+        self.assertEqual(vector_type.element.type, "BOOLEAN")
+        self.assertFalse(vector_type.element.nullable)
+        self.assertEqual(vector_type.length, 7)
 
     def test_api(self):
         """Example usage of RESTCatalogServer"""
@@ -331,3 +342,133 @@ class ApiTest(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             rest_api.commit_snapshot(Mock(), "uuid", Mock(), None)
         self.assertIn("Statistics cannot be None", str(context.exception))
+
+    def test_list_tables_paged_with_table_type_param(self):
+        config = ConfigResponse(defaults={"prefix": "mock-test"})
+        token = str(uuid.uuid4())
+        server = RESTCatalogServer(
+            data_path="/tmp/test_warehouse",
+            auth_provider=BearTokenAuthProvider(token),
+            config=config,
+            warehouse="test_warehouse"
+        )
+        try:
+            server.start()
+
+            server.database_store.update({
+                "default": server.mock_database("default", {"env": "test"})
+            })
+
+            data_fields = [
+                DataField(0, "id", AtomicType("INT"), "id"),
+            ]
+            table_schema = TableSchema(
+                TableSchema.CURRENT_VERSION,
+                len(data_fields),
+                data_fields,
+                len(data_fields),
+                [],
+                [],
+                {"type": "table"},
+                "",
+            )
+            format_table_schema = TableSchema(
+                TableSchema.CURRENT_VERSION,
+                len(data_fields),
+                data_fields,
+                len(data_fields),
+                [],
+                [],
+                {"type": "format-table"},
+                "",
+            )
+            iceberg_table_schema = TableSchema(
+                TableSchema.CURRENT_VERSION,
+                len(data_fields),
+                data_fields,
+                len(data_fields),
+                [],
+                [],
+                {"type": "iceberg-table"},
+                "",
+            )
+            server.table_metadata_store.update({
+                "default.normal_table_1": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=table_schema
+                ),
+                "default.format_table_1": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=format_table_schema
+                ),
+                "default.iceberg_table_1": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=iceberg_table_schema
+                ),
+                "default.normal_table_2": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=table_schema
+                ),
+                "default.format_table_2": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=format_table_schema
+                ),
+                "default.iceberg_table_2": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=iceberg_table_schema
+                ),
+            })
+
+            options = {
+                'uri': f"http://localhost:{server.port}",
+                'warehouse': 'test_warehouse',
+                'dlf.region': 'cn-hangzhou',
+                "token.provider": "bear",
+                'token': token
+            }
+            rest_api = RESTApi(options)
+
+            all_result = rest_api.list_tables_paged("default")
+            table_result = rest_api.list_tables_paged("default", table_type="table")
+            format_table_result = rest_api.list_tables_paged("default", table_type="format-table")
+            iceberg_table_result = rest_api.list_tables_paged("default", table_type="iceberg-table")
+
+            self.assertEqual(
+                [
+                    "format_table_1",
+                    "format_table_2",
+                    "iceberg_table_1",
+                    "iceberg_table_2",
+                    "normal_table_1",
+                    "normal_table_2",
+                ],
+                all_result.elements,
+            )
+            self.assertEqual(["normal_table_1", "normal_table_2"], table_result.elements)
+            self.assertEqual(["format_table_1", "format_table_2"], format_table_result.elements)
+            self.assertEqual(["iceberg_table_1", "iceberg_table_2"], iceberg_table_result.elements)
+
+            filtered_with_pattern = rest_api.list_tables_paged(
+                "default", table_type="table", table_name_pattern="%_2"
+            )
+            self.assertEqual(["normal_table_2"], filtered_with_pattern.elements)
+
+            first_page = rest_api.list_tables_paged(
+                "default", max_results=1, table_type="table"
+            )
+            self.assertEqual(["normal_table_1"], first_page.elements)
+            self.assertIsNotNone(first_page.next_page_token)
+
+            second_page = rest_api.list_tables_paged(
+                "default", max_results=1, page_token=first_page.next_page_token, table_type="table"
+            )
+            self.assertEqual(["normal_table_2"], second_page.elements)
+            self.assertEqual("normal_table_2", second_page.next_page_token)
+        finally:
+            server.shutdown()

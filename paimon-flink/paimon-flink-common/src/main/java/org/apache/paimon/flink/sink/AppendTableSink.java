@@ -55,18 +55,15 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
     private static final long serialVersionUID = 1L;
 
     protected final FileStoreTable table;
-    protected final LogSinkFunction logSinkFunction;
 
     @Nullable protected final Integer parallelism;
 
     public AppendTableSink(
             FileStoreTable table,
             @Nullable Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction,
             @Nullable Integer parallelism) {
         super(table, overwritePartitions);
         this.table = table;
-        this.logSinkFunction = logSinkFunction;
         this.parallelism = parallelism;
     }
 

@@ -22,6 +22,7 @@ import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
@@ -31,10 +32,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -60,6 +61,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.PartitionPredicateHelper;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
@@ -72,11 +74,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -117,7 +121,9 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(14, "max_sequence_number", new BigIntType(true)),
                             new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
-                            new DataField(17, "file_source", DataTypes.STRING())));
+                            new DataField(17, "file_source", DataTypes.STRING()),
+                            new DataField(18, "first_row_id", DataTypes.BIGINT()),
+                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING()))));
 
     private final FileStoreTable storeTable;
 
@@ -189,25 +195,13 @@ public class FilesTable implements ReadonlyTable {
         @Override
         public Plan innerPlan() {
             SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
-            if (partitionPredicate != null && partitionPredicate.function() instanceof Equal) {
-                String partitionStr = partitionPredicate.literals().get(0).toString();
-                if (partitionStr.startsWith("{")) {
-                    partitionStr = partitionStr.substring(1);
-                }
-                if (partitionStr.endsWith("}")) {
-                    partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
-                }
-                String[] partFields = partitionStr.split(", ");
-                LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
-                List<String> partitionKeys = fileStoreTable.partitionKeys();
-                if (partitionKeys.size() != partFields.length) {
-                    return Collections::emptyList;
-                }
-                for (int i = 0; i < partitionKeys.size(); i++) {
-                    partSpec.put(partitionKeys.get(i), partFields[i]);
-                }
-                snapshotReader.withPartitionFilter(partSpec);
-                // TODO support range?
+            List<String> partitionKeys = fileStoreTable.partitionKeys();
+            RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+            boolean hasResults =
+                    PartitionPredicateHelper.applyPartitionFilter(
+                            snapshotReader, partitionPredicate, partitionKeys, partitionType);
+            if (!hasResults) {
+                return Collections::emptyList;
             }
 
             return () ->
@@ -217,13 +211,13 @@ public class FilesTable implements ReadonlyTable {
         }
     }
 
-    private static class FilesSplit extends SingletonSplit {
+    static class FilesSplit extends SingletonSplit {
 
         @Nullable private final BinaryRow partition;
         @Nullable private final LeafPredicate bucketPredicate;
         @Nullable private final LeafPredicate levelPredicate;
 
-        private FilesSplit(
+        FilesSplit(
                 @Nullable BinaryRow partition,
                 @Nullable LeafPredicate bucketPredicate,
                 @Nullable LeafPredicate levelPredicate) {
@@ -280,15 +274,32 @@ public class FilesTable implements ReadonlyTable {
             }
             return scan.plan();
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private static class FilesRead implements InnerTableRead {
+
+        private static final Set<String> SCAN_PUSHDOWN_FIELDS = scanPushdownFields();
+
+        private static Set<String> scanPushdownFields() {
+            Set<String> fields = new HashSet<>();
+            fields.add("partition");
+            fields.add("bucket");
+            fields.add("level");
+            return Collections.unmodifiableSet(fields);
+        }
 
         private final SchemaManager schemaManager;
 
         private final FileStoreTable storeTable;
 
         private RowType readType;
+
+        @Nullable private Predicate predicate;
 
         private FilesRead(SchemaManager schemaManager, FileStoreTable fileStoreTable) {
             this.schemaManager = schemaManager;
@@ -297,7 +308,14 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                this.predicate = null;
+                return this;
+            }
+            List<Predicate> remaining =
+                    PredicateBuilder.excludePredicateWithFields(
+                            PredicateBuilder.splitAnd(predicate), SCAN_PUSHDOWN_FIELDS);
+            this.predicate = remaining.isEmpty() ? null : PredicateBuilder.and(remaining);
             return this;
         }
 
@@ -370,6 +388,11 @@ public class FilesTable implements ReadonlyTable {
                                                 simpleStatsEvolutions)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());
+
+            if (predicate != null) {
+                rows = Iterators.filter(rows, predicate::test);
+            }
+
             if (readType != null) {
                 rows =
                         Iterators.transform(
@@ -435,7 +458,16 @@ public class FilesTable implements ReadonlyTable {
                         () -> file.deleteRowCount().orElse(null),
                         () ->
                                 BinaryString.fromString(
-                                        file.fileSource().map(FileSource::toString).orElse(null))
+                                        file.fileSource().map(FileSource::toString).orElse(null)),
+                        file::firstRowId,
+                        () -> {
+                            List<String> writeCols = file.writeCols();
+                            if (writeCols == null) {
+                                return null;
+                            }
+                            return new GenericArray(
+                                    writeCols.stream().map(BinaryString::fromString).toArray());
+                        },
                     };
 
             return new LazyGenericRow(fields);
@@ -457,7 +489,8 @@ public class FilesTable implements ReadonlyTable {
         }
 
         private void initialize() {
-            SimpleStatsEvolution evolution = simpleStatsEvolutions.getOrCreate(file.schemaId());
+            SimpleStatsEvolution evolution =
+                    simpleStatsEvolutions.getOrCreate(file.schemaId(), file.writeCols());
             // Create value stats
             SimpleStatsEvolution.Result result =
                     evolution.evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());

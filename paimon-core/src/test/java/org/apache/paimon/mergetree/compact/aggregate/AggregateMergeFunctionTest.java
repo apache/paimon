@@ -23,12 +23,13 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.Collections;
 
 import static org.apache.paimon.CoreOptions.FIELDS_DEFAULT_AGG_FUNC;
@@ -45,13 +46,17 @@ class AggregateMergeFunctionTest {
         MergeFunction<KeyValue> aggregateFunction =
                 AggregateMergeFunction.factory(
                                 options,
-                                Arrays.asList("k", "a", "b", "c", "d"),
-                                Arrays.asList(
-                                        DataTypes.INT(),
-                                        DataTypes.INT(),
-                                        DataTypes.INT(),
-                                        DataTypes.INT(),
-                                        DataTypes.INT()),
+                                RowType.builder()
+                                        .fields(
+                                                new DataType[] {
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT()
+                                                },
+                                                new String[] {"k", "a", "b", "c", "d"})
+                                        .build(),
                                 Collections.singletonList("k"))
                         .create();
         aggregateFunction.reset();
@@ -76,13 +81,17 @@ class AggregateMergeFunctionTest {
         MergeFunction<KeyValue> aggregateFunction =
                 AggregateMergeFunction.factory(
                                 options,
-                                Arrays.asList("k", "a", "b", "c", "d"),
-                                Arrays.asList(
-                                        DataTypes.INT(),
-                                        DataTypes.STRING(),
-                                        DataTypes.STRING(),
-                                        DataTypes.INT(),
-                                        DataTypes.STRING()),
+                                RowType.builder()
+                                        .fields(
+                                                new DataType[] {
+                                                    DataTypes.INT(),
+                                                    DataTypes.STRING(),
+                                                    DataTypes.STRING(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.STRING()
+                                                },
+                                                new String[] {"k", "a", "b", "c", "d"})
+                                        .build(),
                                 Collections.singletonList("k"))
                         .create();
         aggregateFunction.reset();
@@ -132,9 +141,44 @@ class AggregateMergeFunctionTest {
                                 BinaryString.fromString("1/2/3/4/5")));
     }
 
+    @Test
+    void testInitRowWithNullableFieldOnDelete() {
+        Options options = new Options();
+        options.set(FIELDS_DEFAULT_AGG_FUNC, "sum");
+        options.set("aggregation.remove-record-on-delete", "true");
+        MergeFunction<KeyValue> aggregateFunction =
+                AggregateMergeFunction.factory(
+                                options,
+                                RowType.builder()
+                                        .fields(
+                                                new DataType[] {
+                                                    DataTypes.INT().notNull(),
+                                                    DataTypes.INT().notNull(),
+                                                    DataTypes.INT(),
+                                                    DataTypes.INT()
+                                                },
+                                                new String[] {"k", "a", "b", "c"})
+                                        .build(),
+                                Collections.singletonList("k"))
+                        .create();
+        aggregateFunction.reset();
+
+        // insert some data first
+        aggregateFunction.add(value(1, 0, 0, 5));
+        // send a DELETE with nullable field as null, triggers initRow
+        aggregateFunction.add(deleteValue(1, 2, 2, null));
+        // after delete with removeRecordOnDelete, row is re-initialized via initRow
+        assertThat(aggregateFunction.getResult().value()).isEqualTo(GenericRow.of(1, 2, 2, null));
+    }
+
     private KeyValue value(Integer... values) {
         return new KeyValue()
                 .replace(GenericRow.of(values[0]), RowKind.INSERT, GenericRow.of(values));
+    }
+
+    private KeyValue deleteValue(Integer... values) {
+        return new KeyValue()
+                .replace(GenericRow.of(values[0]), RowKind.DELETE, GenericRow.of(values));
     }
 
     private KeyValue value(

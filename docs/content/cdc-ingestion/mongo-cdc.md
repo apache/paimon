@@ -34,10 +34,7 @@ under the License.
 | 3.5.0   | <li> <a href="https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-mongodb-cdc/3.5.0/flink-sql-connector-mongodb-cdc-3.5.0.jar">flink-sql-connector-mongodb-cdc-3.5.0.jar</a> |
 
 {{< hint danger >}}
-Currently, only CDC 3.5.0 or above is supported.
-
-You can download the `flink-sql-connector-mongodb-cdc` jar package by clicking [here](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-mongodb-cdc/).
-
+Only CDC 3.5.0 or above is supported.
 {{< /hint >}}
 
 ## Synchronizing Tables

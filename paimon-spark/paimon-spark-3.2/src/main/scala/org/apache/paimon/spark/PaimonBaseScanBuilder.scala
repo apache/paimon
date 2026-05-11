@@ -21,7 +21,8 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
+import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
+import org.apache.paimon.predicate.FullTextSearch
 import org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking
 import org.apache.paimon.table.Table
 import org.apache.paimon.types.RowType
@@ -50,6 +51,10 @@ abstract class PaimonBaseScanBuilder
 
   protected var pushedPartitionFilters: Array[PartitionPredicate] = Array.empty
   protected var pushedDataFilters: Array[Predicate] = Array.empty
+  protected var pushedLimit: Option[Int] = None
+  protected var pushedTopN: Option[TopN] = None
+  protected var pushedVectorSearch: Option[VectorSearch] = None
+  protected var pushedFullTextSearch: Option[FullTextSearch] = None
 
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 

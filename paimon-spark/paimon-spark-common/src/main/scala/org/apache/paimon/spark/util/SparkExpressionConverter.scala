@@ -37,6 +37,11 @@ object SparkExpressionConverter {
   // Supported general scalar transform names
   private val CONCAT = "CONCAT"
   private val UPPER = "UPPER"
+  private val LOWER = "LOWER"
+  private val SUBSTRING = "SUBSTRING"
+  private val TRIM = "TRIM"
+  private val LTRIM = "LTRIM"
+  private val RTRIM = "RTRIM"
 
   /** Convert Spark [[Expression]] to Paimon [[Transform]], return None if not supported. */
   def toPaimonTransform(exp: Expression, rowType: RowType): Option[Transform] = {
@@ -60,6 +65,15 @@ object SparkExpressionConverter {
         s.name() match {
           case CONCAT => convertChildren(s.children()).map(i => new ConcatTransform(i))
           case UPPER => convertChildren(s.children()).map(i => new UpperTransform(i))
+          case LOWER => convertChildren(s.children()).map(i => new LowerTransform(i))
+          case SUBSTRING => convertChildren(s.children()).map(i => new SubstringTransform(i))
+          case TRIM =>
+            convertChildren(s.children()).map(i => new TrimTransform(i, TrimTransform.Flag.BOTH))
+          case LTRIM =>
+            convertChildren(s.children()).map(i => new TrimTransform(i, TrimTransform.Flag.LEADING))
+          case RTRIM =>
+            convertChildren(s.children()).map(
+              i => new TrimTransform(i, TrimTransform.Flag.TRAILING))
           case _ => None
         }
       case c: Cast =>

@@ -19,16 +19,10 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{Predicate, TopN}
+import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.table.InnerTable
 
-import org.apache.spark.sql.PaimonUtils.fieldReference
-import org.apache.spark.sql.connector.expressions.NamedReference
-import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
-import org.apache.spark.sql.sources.{Filter, In}
 import org.apache.spark.sql.types.StructType
-
-import scala.collection.JavaConverters._
 
 case class PaimonScan(
     table: InnerTable,
@@ -37,32 +31,7 @@ case class PaimonScan(
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int] = None,
     override val pushedTopN: Option[TopN] = None,
+    override val pushedVectorSearch: Option[VectorSearch] = None,
+    override val pushedFullTextSearch: Option[FullTextSearch] = None,
     bucketedScanDisabled: Boolean = true)
-  extends PaimonBaseScan(table)
-  with SupportsRuntimeFiltering {
-
-  override def filterAttributes(): Array[NamedReference] = {
-    val requiredFields = readBuilder.readType().getFieldNames.asScala
-    table
-      .partitionKeys()
-      .asScala
-      .toArray
-      .filter(requiredFields.contains)
-      .map(fieldReference)
-  }
-
-  override def filter(filters: Array[Filter]): Unit = {
-    val converter = new SparkFilterConverter(table.rowType())
-    val partitionFilter = filters.flatMap {
-      case in @ In(attr, _) if table.partitionKeys().contains(attr) =>
-        Some(converter.convert(in))
-      case _ => None
-    }
-    if (partitionFilter.nonEmpty) {
-      readBuilder.withFilter(partitionFilter.head)
-      // set inputPartitions null to trigger to get the new splits.
-      _inputSplits = null
-      _inputPartitions = null
-    }
-  }
-}
+  extends PaimonBaseScan(table) {}

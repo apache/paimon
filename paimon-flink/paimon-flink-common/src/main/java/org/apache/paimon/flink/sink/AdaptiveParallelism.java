@@ -27,7 +27,11 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 public class AdaptiveParallelism {
 
     public static boolean isEnabled(StreamExecutionEnvironment env) {
-        return env.getConfiguration().get(BatchExecutionOptions.ADAPTIVE_AUTO_PARALLELISM_ENABLED);
+        return isEnabled(env.getConfiguration());
+    }
+
+    public static boolean isEnabled(ReadableConfig config) {
+        return config.get(BatchExecutionOptions.ADAPTIVE_AUTO_PARALLELISM_ENABLED);
     }
 
     /**

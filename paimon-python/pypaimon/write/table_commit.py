@@ -16,9 +16,12 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+import logging
+from typing import Dict, List, Optional
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+
+logger = logging.getLogger(__name__)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -45,24 +48,31 @@ class TableCommit:
         self._check_committed()
 
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
-        if not non_empty_messages:
-            return
 
-        try:
-            if self.overwrite_partition is not None:
-                self.file_store_commit.overwrite(
-                    overwrite_partition=self.overwrite_partition,
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-            else:
-                self.file_store_commit.commit(
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-        except Exception as e:
-            self.file_store_commit.abort(commit_messages)
-            raise RuntimeError(f"Failed to commit: {str(e)}") from e
+        if self.overwrite_partition is not None:
+            # Always call overwrite() even with empty messages, so that
+            # FileStoreCommit.overwrite can handle the empty case properly
+            # (e.g. static overwrite with empty data should delete the partition).
+            logger.info(
+                "Committing overwrite to table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
+            self.file_store_commit.overwrite(
+                overwrite_partition=self.overwrite_partition,
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
+        else:
+            if not non_empty_messages:
+                return
+            logger.info(
+                "Committing batch table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
+            self.file_store_commit.commit(
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
 
     def abort(self, commit_messages: List[CommitMessage]):
         self.file_store_commit.abort(commit_messages)
@@ -79,6 +89,15 @@ class TableCommit:
 class BatchTableCommit(TableCommit):
     def commit(self, commit_messages: List[CommitMessage]):
         self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
+
+    def truncate_table(self) -> None:
+        """Truncate the entire table, deleting all data."""
+        self._check_committed()
+        self.file_store_commit.truncate_table(BATCH_COMMIT_IDENTIFIER)
+
+    def truncate_partitions(self, partitions: List[Dict[str, str]]) -> None:
+        self._check_committed()
+        self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableCommit(TableCommit):

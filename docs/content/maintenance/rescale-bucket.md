@@ -66,10 +66,6 @@ Please note that
   ```
 - During overwrite period, make sure there are no other jobs writing the same table/partition.
 
-{{< hint info >}}
-__Note:__ For the table which enables log system(*e.g.* Kafka), please rescale the topic's partition as well to keep consistency.
-{{< /hint >}}
-
 ## Use Case
 
 Rescale bucket helps to handle sudden spikes in throughput. Suppose there is a daily streaming ETL task to sync transaction data. The table's DDL and pipeline

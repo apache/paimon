@@ -219,7 +219,7 @@ CREATE TABLE my_table (
 ```
 
 Furthermore, if there is already data stored in the specified location, you can create the table without explicitly specifying the fields, partitions and props or other information. 
-In this case, the new table will inherit them all from the existing table’s metadata. 
+In this case, the new table will inherit them all from the existing table's metadata.
 
 However, if you manually specify them, you need to ensure that they are consistent with those of the existing table (props can be a subset). Therefore, it is strongly recommended not to specify them.
 
@@ -283,6 +283,39 @@ CREATE TABLE my_table_all (
     'primary-key' = 'dt,hh,user_id'
 );
 CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
+```
+
+### Create Table Like
+
+A new table can be created from an existing source table. Available from **Spark 3.4**.
+
+```sql
+CREATE TABLE target_table LIKE source_table;
+```
+
+`CREATE TABLE LIKE` copies the source schema and partitioning.
+
+In `SparkCatalog`, if `USING xxx` is not specified, the target inherits the source provider.
+
+In `SparkGenericCatalog`, use `USING paimon` to enable Paimon `CREATE TABLE LIKE` semantics.
+
+When Paimon handles the command, comments and table properties are copied only when the source and target providers are the same. If the providers are different, only the comment is copied.
+
+`path`, `provider`, `location`, `owner`, `external` and `is-managed-location` are never copied. Users can still override the target table with `TBLPROPERTIES`.
+
+`STORED AS` is not supported in `SparkCatalog`. In `SparkGenericCatalog`, commands without `USING paimon` use Spark native behavior.
+
+```sql
+CREATE TABLE source_tbl (
+    id INT,
+    name STRING,
+    pt STRING
+) COMMENT 'source comment'
+PARTITIONED BY (pt)
+TBLPROPERTIES ('primary-key' = 'id,pt', 'bucket' = '5');
+
+-- target inherits the source provider
+CREATE TABLE target_tbl LIKE source_tbl;
 ```
 
 ## View
@@ -366,4 +399,3 @@ List all tags of a table.
 ```sql
 SHOW TAGS T;
 ```
-

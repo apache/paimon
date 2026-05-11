@@ -68,14 +68,27 @@ public class CatalogBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName) {
-        executePost(catalog -> catalog.createBranch(identifier, branchName, null));
+        createBranch(branchName, false);
     }
 
     @Override
     public void createBranch(String branchName, @Nullable String tagName) {
+        createBranch(branchName, tagName, false);
+    }
+
+    @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        createBranch(branchName, null, ignoreIfExists);
+    }
+
+    @Override
+    public void createBranch(String branchName, @Nullable String tagName, boolean ignoreIfExists) {
         executePost(
                 catalog -> {
                     BranchManager.validateBranch(branchName);
+                    if (ignoreIfExists && catalog.listBranches(identifier).contains(branchName)) {
+                        return;
+                    }
                     catalog.createBranch(identifier, branchName, tagName);
                 });
     }
@@ -93,6 +106,11 @@ public class CatalogBranchManager implements BranchManager {
                             branchName, identifier.getBranchNameOrDefault());
                     catalog.fastForward(identifier, branchName);
                 });
+    }
+
+    @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        executePost(catalog -> catalog.renameBranch(identifier, fromBranch, toBranch));
     }
 
     @Override

@@ -47,6 +47,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
@@ -147,6 +148,11 @@ public class CatalogOptionsTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return catalogOptions.hashCode();
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 

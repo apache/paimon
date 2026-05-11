@@ -78,6 +78,10 @@ public final class DataTypeJsonParser {
             if (typeString.startsWith("ARRAY")) {
                 DataType element = parseDataType(json.get("element"), fieldId);
                 return new ArrayType(!typeString.contains("NOT NULL"), element);
+            } else if (typeString.startsWith("VECTOR")) {
+                DataType element = parseDataType(json.get("element"), fieldId);
+                int length = json.get("length").asInt();
+                return new VectorType(!typeString.contains("NOT NULL"), length, element);
             } else if (typeString.startsWith("MULTISET")) {
                 DataType element = parseDataType(json.get("element"), fieldId);
                 return new MultisetType(!typeString.contains("NOT NULL"), element);
@@ -318,6 +322,7 @@ public final class DataTypeJsonParser {
         SECOND,
         TO,
         ARRAY,
+        VECTOR,
         MULTISET,
         MAP,
         ROW,
@@ -544,6 +549,8 @@ public final class DataTypeJsonParser {
                     return new VariantType();
                 case BLOB:
                     return new BlobType();
+                case VECTOR:
+                    return parseVectorType();
                 default:
                     throw parsingError("Unsupported type: " + token().value);
             }
@@ -664,6 +671,17 @@ public final class DataTypeJsonParser {
                 nextToken(TokenType.END_PARAMETER);
             }
             return precision;
+        }
+
+        private DataType parseVectorType() {
+            // VECTOR<elementType, length>
+            nextToken(TokenType.BEGIN_SUBTYPE);
+            DataType elementType = parseTypeWithNullability();
+            nextToken(TokenType.LIST_SEPARATOR);
+            nextToken(TokenType.LITERAL_INT);
+            int length = tokenAsInt();
+            nextToken(TokenType.END_SUBTYPE);
+            return DataTypes.VECTOR(length, elementType);
         }
     }
 }

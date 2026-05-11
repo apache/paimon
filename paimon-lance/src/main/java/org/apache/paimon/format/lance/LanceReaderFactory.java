@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -33,7 +34,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.format.lance.LanceUtils.toLanceSpecified;
+import static org.apache.paimon.format.lance.LanceUtils.toLanceSpecifiedForReader;
 
 /** A factory to create Lance Reader. */
 public class LanceReaderFactory implements FormatReaderFactory {
@@ -52,10 +53,13 @@ public class LanceReaderFactory implements FormatReaderFactory {
         RoaringBitmap32 roaringBitmap32 = context.selection();
         if (roaringBitmap32 != null) {
             selectionRangesArray = toRangeArray(roaringBitmap32);
+            if (selectionRangesArray.isEmpty()) {
+                return new EmptyFileRecordReader<>();
+            }
         }
 
         Pair<Path, Map<String, String>> lanceSpecified =
-                toLanceSpecified(context.fileIO(), context.filePath());
+                toLanceSpecifiedForReader(context.fileIO(), context.filePath());
         return new LanceRecordsReader(
                 lanceSpecified.getLeft(),
                 selectionRangesArray,

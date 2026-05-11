@@ -20,7 +20,6 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
@@ -52,10 +51,10 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
             RowType valueType,
             FormatReaderMapping.Builder formatReaderMappingBuilder,
             DataFilePathFactory pathFactory,
-            long asyncThreshold,
             BinaryRow partition,
             DeletionVector.Factory dvFactory,
-            ChainReadContext chainReadContext) {
+            ChainReadContext chainReadContext,
+            CoreOptions coreOptions) {
         super(
                 fileIO,
                 schemaManager,
@@ -64,9 +63,9 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                 valueType,
                 formatReaderMappingBuilder,
                 pathFactory,
-                asyncThreshold,
                 partition,
-                dvFactory);
+                dvFactory,
+                coreOptions);
         this.chainReadContext = chainReadContext;
         CoreOptions options = new CoreOptions(schema.options());
         this.currentBranch = options.branch();
@@ -120,10 +119,9 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess,
                 @Nullable ChainReadContext chainReadContext) {
             FormatReaderMapping.Builder builder =
-                    wrapped.formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+                    wrapped.formatReaderMappingBuilder(projectKeys, filters);
             return new ChainKeyValueFileReaderFactory(
                     wrapped.fileIO,
                     wrapped.schemaManager,
@@ -132,10 +130,10 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                     wrapped.readValueType,
                     builder,
                     wrapped.pathFactory.createChainReadDataFilePathFactory(chainReadContext),
-                    wrapped.options.fileReaderAsyncThreshold().getBytes(),
                     partition,
                     dvFactory,
-                    chainReadContext);
+                    chainReadContext,
+                    wrapped.options);
         }
     }
 }

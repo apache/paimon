@@ -58,18 +58,6 @@ public class IncrementalClusterManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testNonUnAwareBucketTable() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.BUCKET.key(), "1");
-        options.put(CoreOptions.BUCKET_KEY.key(), "f0");
-
-        assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Cannot define bucket for incremental clustering  table, it only support bucket = -1");
-    }
-
-    @Test
     public void testNonClusterIncremental() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");

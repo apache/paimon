@@ -101,6 +101,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -142,6 +143,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -248,6 +250,33 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFiles().get(0);
         assertThat(file.level()).isEqualTo(5);
         assertThat(file.valueStats().maxValues().getFieldCount()).isGreaterThan(4);
+
+        if (file.valueStatsCols() == null) {
+            int expectedFieldCount = table.schema().fields().size();
+            int actualFieldCount = file.valueStats().minValues().getFieldCount();
+            assertThat(actualFieldCount)
+                    .as(
+                            "When value_stats_cols is null, value_stats field count should match table.fields count. "
+                                    + "This ensures value_stats does NOT contain system fields.")
+                    .isEqualTo(expectedFieldCount);
+        } else {
+            for (String fieldName : Objects.requireNonNull(file.valueStatsCols())) {
+                boolean isSystemField =
+                        fieldName.startsWith(KEY_FIELD_PREFIX)
+                                || SpecialFields.isSystemField(fieldName);
+                assertThat(isSystemField)
+                        .as("value_stats_cols should NOT contain system field: " + fieldName)
+                        .isFalse();
+            }
+            assertThat(file.valueStats().minValues().getFieldCount())
+                    .as("value_stats field count should match value_stats_cols size")
+                    .isEqualTo(Objects.requireNonNull(file.valueStatsCols()).size());
+        }
+
+        assertThat(file.valueStats().minValues().getFieldCount())
+                .isEqualTo(file.valueStats().maxValues().getFieldCount());
+        assertThat(file.valueStats().nullCounts().size())
+                .isEqualTo(file.valueStats().minValues().getFieldCount());
     }
 
     @Test
@@ -1682,18 +1711,19 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             options.set("partial-update.remove-record-on-sequence-group", "seq2");
                         },
                         rowType);
-        FileStoreTable wrongTable =
-                createFileStoreTable(
-                        options -> {
-                            options.set("merge-engine", "partial-update");
-                            options.set("fields.seq1.sequence-group", "b");
-                            options.set("fields.seq2.sequence-group", "c,d");
-                            options.set("partial-update.remove-record-on-sequence-group", "b");
-                        },
-                        rowType);
-        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
 
-        assertThatThrownBy(() -> wrongTable.newWrite(""))
+        assertThatThrownBy(
+                        () ->
+                                createFileStoreTable(
+                                        options -> {
+                                            options.set("merge-engine", "partial-update");
+                                            options.set("fields.seq1.sequence-group", "b");
+                                            options.set("fields.seq2.sequence-group", "c,d");
+                                            options.set(
+                                                    "partial-update.remove-record-on-sequence-group",
+                                                    "b");
+                                        },
+                                        rowType))
                 .hasMessageContaining(
                         "field 'b' defined in 'partial-update.remove-record-on-sequence-group' option must be part of sequence groups");
 
@@ -1701,6 +1731,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+
         // 1. Inserts
         write.write(GenericRow.of(1, 1, 10, 1, 20, 20, 1));
         write.write(GenericRow.of(1, 1, 11, 2, 25, 25, 0));
@@ -2439,6 +2471,33 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testEqualsAndHashCode() throws Exception {
+        // Test same table equals and hashCode consistency
+        FileStoreTable table1 = createFileStoreTable();
+        FileStoreTable table2 = table1.copy(table1.schema());
+        assertThat(table1.equals(table2)).isTrue();
+        assertThat(table1.hashCode()).isEqualTo(table2.hashCode());
+
+        // Test with different options
+        Map<String, String> optionsWithMock = new HashMap<>(table1.schema().options());
+        optionsWithMock.put("mockKey", "mockValue");
+        TableSchema schemaWithMock = table1.schema().copy(optionsWithMock);
+        FileStoreTable tableWithMock = table1.copy(schemaWithMock);
+
+        assertThat(table1.equals(tableWithMock)).isFalse();
+        assertThat(table1.hashCode()).isNotEqualTo(tableWithMock.hashCode());
+
+        // Test same options should be equal
+        Map<String, String> sameOptionsWithMock = new HashMap<>(table1.schema().options());
+        sameOptionsWithMock.put("mockKey", "mockValue");
+        TableSchema sameSchemaWithMock = table1.schema().copy(sameOptionsWithMock);
+        FileStoreTable sameTableWithMock = table1.copy(sameSchemaWithMock);
+
+        assertThat(tableWithMock.equals(sameTableWithMock)).isTrue();
+        assertThat(tableWithMock.hashCode()).isEqualTo(sameTableWithMock.hashCode());
     }
 
     private void assertReadChangelog(int id, FileStoreTable table) throws Exception {

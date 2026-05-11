@@ -34,6 +34,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
+import org.apache.paimon.utils.TriFilter;
 
 import javax.annotation.Nullable;
 
@@ -43,8 +45,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.manifest.ManifestEntry.recordCount;
 
 /** Scan operation which produces a plan. */
 public interface FileStoreScan {
@@ -57,13 +57,15 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(PartitionPredicate predicate);
 
+    FileStoreScan withCompleteFilter(Predicate predicate);
+
     FileStoreScan withBucket(int bucket);
 
     FileStoreScan onlyReadRealBuckets();
 
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
 
-    FileStoreScan withTotalAwareBucketFilter(BiFilter<Integer, Integer> bucketFilter);
+    FileStoreScan withTotalAwareBucketFilter(TriFilter<BinaryRow, Integer, Integer> bucketFilter);
 
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
 
@@ -93,6 +95,8 @@ public interface FileStoreScan {
 
     FileStoreScan withRowRanges(List<Range> rowRanges);
 
+    FileStoreScan withRowRangeIndex(RowRangeIndex rowRangeIndex);
+
     FileStoreScan withReadType(RowType readType);
 
     FileStoreScan withLimit(long limit);
@@ -108,17 +112,6 @@ public interface FileStoreScan {
     Plan plan();
 
     /**
-     * Return record count of all changes occurred in this snapshot given the scan.
-     *
-     * @return total record count of Snapshot.
-     */
-    default Long totalRecordCount(Snapshot snapshot) {
-        return snapshot.totalRecordCount() == null
-                ? (Long) recordCount(withSnapshot(snapshot.id()).plan().files())
-                : snapshot.totalRecordCount();
-    }
-
-    /**
      * Read {@link SimpleFileEntry}s, SimpleFileEntry only retains some critical information, so it
      * cannot perform filtering based on statistical information.
      */
@@ -129,6 +122,8 @@ public interface FileStoreScan {
     List<BucketEntry> readBucketEntries();
 
     Iterator<ManifestEntry> readFileIterator();
+
+    Iterator<ManifestEntry> readFileIterator(List<ManifestFileMeta> manifestFileMetas);
 
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()

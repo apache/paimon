@@ -20,11 +20,12 @@ from dataclasses import dataclass
 
 from pypaimon.manifest.schema.data_file_meta import (DATA_FILE_META_SCHEMA,
                                                      DataFileMeta)
+from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
-class ManifestEntry:
+class ManifestEntry(FileEntry):
     kind: int
     partition: GenericRow
     bucket: int

@@ -304,7 +304,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'merge-engine'='partial-update', "
                                                 + "'fields.g_1.sequence-group'='a1,b', "
                                                 + "'fields.g_2.sequence-group'='c,d');"))
-                .hasRootCauseMessage("Field a1 can not be found in table schema.");
+                .hasRootCauseMessage("Field a1 can not be found in table schema");
 
         Assertions.assertThatThrownBy(
                         () ->
@@ -315,8 +315,8 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'merge-engine'='partial-update', "
                                                 + "'fields.g_1.sequence-group'='a,b', "
                                                 + "'fields.g_2.sequence-group'='a,d');"))
-                .hasRootCauseMessage(
-                        "Field a is defined repeatedly by multiple groups: [[g_1], [g_2]].");
+                .rootCause()
+                .hasMessageContaining("Field a is defined repeatedly by multiple groups");
 
         Assertions.assertThatThrownBy(
                         () ->
@@ -327,8 +327,8 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'merge-engine'='partial-update', "
                                                 + "'fields.g_1.sequence-group'='a,b', "
                                                 + "'fields.g_2,g_3.sequence-group'='a,d');"))
-                .hasRootCauseMessage(
-                        "Field a is defined repeatedly by multiple groups: [[g_1], [g_2, g_3]].");
+                .rootCause()
+                .hasMessageContaining("Field a is defined repeatedly by multiple groups");
     }
 
     @Test

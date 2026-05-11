@@ -75,7 +75,7 @@ data.write.format("paimon")
 You can achieve REPLACE TABLE semantics by setting the mode to `overwrite` with `saveAsTable` or `save`.
 
 It first drops the existing table and then create a new one,
-so you need to specify the table’s properties or partition columns if needed.
+so you need to specify the table's properties or partition columns if needed.
 
 ```scala
 val data: DataFrame = ...

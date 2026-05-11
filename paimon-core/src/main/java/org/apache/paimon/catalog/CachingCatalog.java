@@ -324,6 +324,13 @@ public class CachingCatalog extends DelegateCatalog {
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
         }
+        // clear all branches of this table
+        for (Identifier i : tableCache.asMap().keySet()) {
+            if (identifier.getTableName().equals(i.getTableName())
+                    && identifier.getDatabaseName().equals(i.getDatabaseName())) {
+                tableCache.invalidate(i);
+            }
+        }
     }
 
     // ================================== Cache Public API

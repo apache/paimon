@@ -488,7 +488,7 @@ this means that there are at least 5 files in a bucket. If you want to reduce th
 By default, Append also does automatic compaction to reduce the number of small files.
 
 However, for Bucketed Append table, it will only compact the files within the Bucket for sequential
-purposes, which may keep more small files. See [Bucketed Append]({{< ref "append-table/streaming#bucketed-append" >}}).
+purposes, which may keep more small files. See [Bucketed Append]({{< ref "append-table/bucketed" >}}).
 
 ### Understand Full-Compaction
 
@@ -496,5 +496,5 @@ Maybe you think the 5 files for the primary key table are actually okay, but the
 may have 50 small files in a single bucket, which is very difficult to accept. Worse still, partitions that
 are no longer active also keep so many small files.
 
-Configure ‘full-compaction.delta-commits’ perform full-compaction periodically in Flink writing. And it can ensure
+Configure 'full-compaction.delta-commits' perform full-compaction periodically in Flink writing. And it can ensure
 that partitions are full compacted before writing ends.

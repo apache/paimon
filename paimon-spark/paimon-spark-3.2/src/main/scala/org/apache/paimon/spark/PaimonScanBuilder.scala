@@ -25,6 +25,13 @@ import org.apache.spark.sql.connector.read.Scan
 class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushedPartitionFilters, pushedDataFilters)
+    PaimonScan(
+      table,
+      requiredSchema,
+      pushedPartitionFilters,
+      pushedDataFilters,
+      pushedLimit,
+      pushedTopN,
+      pushedVectorSearch)
   }
 }

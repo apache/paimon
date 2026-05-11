@@ -1,0 +1,37 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from pypaimon.read.plan import Plan
+from pypaimon.table.object.object_split import ObjectSplit
+
+
+class ObjectTableScan:
+    """Scan for ObjectTable.
+
+    Always produces exactly one ObjectSplit containing the file_io and location.
+    File enumeration happens during the read phase, not the scan phase.
+    """
+
+    def __init__(self, table):
+        from pypaimon.table.object.object_table import ObjectTable
+        self.table: ObjectTable = table
+
+    def plan(self) -> Plan:
+        split = ObjectSplit(
+            file_io=self.table.file_io,
+            location=self.table.location(),
+        )
+        return Plan(_splits=[split])

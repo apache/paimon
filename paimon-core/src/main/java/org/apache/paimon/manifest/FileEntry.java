@@ -67,11 +67,17 @@ public interface FileEntry {
 
     List<String> extraFiles();
 
+    long rowCount();
+
+    @Nullable
+    Long firstRowId();
+
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
      */
     class Identifier {
+
         public final BinaryRow partition;
         public final int bucket;
         public final int level;
@@ -190,10 +196,12 @@ public interface FileEntry {
             Identifier identifier = entry.identifier();
             switch (entry.kind()) {
                 case ADD:
+                    T old = map.get(identifier);
                     checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add file %s which is already added.",
-                            identifier);
+                            old == null,
+                            "Trying to add file %s which is already in the the map: %s",
+                            identifier,
+                            old);
                     map.put(identifier, entry);
                     break;
                 case DELETE:

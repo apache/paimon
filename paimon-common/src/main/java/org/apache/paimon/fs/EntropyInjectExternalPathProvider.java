@@ -26,7 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** Provider for entropy inject external data paths. */
-public class EntropyInjectExternalPathProvider extends ExternalPathProvider {
+public class EntropyInjectExternalPathProvider implements ExternalPathProvider {
 
     private static final HashFunction HASH_FUNC = Hashing.murmur3_32();
     private static final int HASH_BINARY_STRING_BITS = 20;
@@ -35,9 +35,15 @@ public class EntropyInjectExternalPathProvider extends ExternalPathProvider {
     // Will create DEPTH many dirs from the entropy
     private static final int ENTROPY_DIR_DEPTH = 3;
 
+    private final List<Path> externalTablePaths;
+    private final Path relativeBucketPath;
+
+    private int position;
+
     public EntropyInjectExternalPathProvider(
             List<Path> externalTablePaths, Path relativeBucketPath) {
-        super(externalTablePaths, relativeBucketPath);
+        this.externalTablePaths = externalTablePaths;
+        this.relativeBucketPath = relativeBucketPath;
     }
 
     @Override

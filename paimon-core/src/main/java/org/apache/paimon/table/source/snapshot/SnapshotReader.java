@@ -40,6 +40,7 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -114,9 +115,14 @@ public interface SnapshotReader {
 
     SnapshotReader withRowRanges(List<Range> rowRanges);
 
+    SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex);
+
     SnapshotReader withReadType(RowType readType);
 
     SnapshotReader withLimit(int limit);
+
+    /** Whether the pushed filter still contains non-partition predicates. */
+    boolean hasNonPartitionFilter();
 
     /** Get splits plan from snapshot. */
     Plan read();

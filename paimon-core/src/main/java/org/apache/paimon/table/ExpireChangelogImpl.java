@@ -149,6 +149,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         List<Snapshot> skippingSnapshots =
                 findSkippingTags(taggedSnapshots, earliestId, endExclusiveId);
         skippingSnapshots.add(changelogManager.changelog(endExclusiveId));
+        skippingSnapshots.add(snapshotManager.earliestSnapshot());
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {

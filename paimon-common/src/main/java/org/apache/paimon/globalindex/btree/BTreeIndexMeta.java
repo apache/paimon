@@ -22,23 +22,30 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.memory.MemorySliceOutput;
 
-/** Index Meta of each BTree index file. */
+import javax.annotation.Nullable;
+
+/**
+ * Index Meta of each BTree index file. The first key and last key of this meta could be null if the
+ * entire btree index file only contains nulls.
+ */
 public class BTreeIndexMeta {
 
-    private final byte[] firstKey;
-    private final byte[] lastKey;
+    @Nullable private final byte[] firstKey;
+    @Nullable private final byte[] lastKey;
     private final boolean hasNulls;
 
-    public BTreeIndexMeta(byte[] firstKey, byte[] lastKey, boolean hasNulls) {
+    public BTreeIndexMeta(@Nullable byte[] firstKey, @Nullable byte[] lastKey, boolean hasNulls) {
         this.firstKey = firstKey;
         this.lastKey = lastKey;
         this.hasNulls = hasNulls;
     }
 
+    @Nullable
     public byte[] getFirstKey() {
         return firstKey;
     }
 
+    @Nullable
     public byte[] getLastKey() {
         return lastKey;
     }
@@ -47,12 +54,30 @@ public class BTreeIndexMeta {
         return hasNulls;
     }
 
+    public boolean onlyNulls() {
+        return firstKey == null && lastKey == null;
+    }
+
+    private int memorySize() {
+        return (firstKey == null ? 0 : firstKey.length)
+                + (lastKey == null ? 0 : lastKey.length)
+                + 9;
+    }
+
     public byte[] serialize() {
-        MemorySliceOutput sliceOutput = new MemorySliceOutput(firstKey.length + lastKey.length + 8);
-        sliceOutput.writeInt(firstKey.length);
-        sliceOutput.writeBytes(firstKey);
-        sliceOutput.writeInt(lastKey.length);
-        sliceOutput.writeBytes(lastKey);
+        MemorySliceOutput sliceOutput = new MemorySliceOutput(memorySize());
+        if (firstKey != null) {
+            sliceOutput.writeInt(firstKey.length);
+            sliceOutput.writeBytes(firstKey);
+        } else {
+            sliceOutput.writeInt(0);
+        }
+        if (lastKey != null) {
+            sliceOutput.writeInt(lastKey.length);
+            sliceOutput.writeBytes(lastKey);
+        } else {
+            sliceOutput.writeInt(0);
+        }
         sliceOutput.writeByte(hasNulls ? 1 : 0);
         return sliceOutput.toSlice().getHeapMemory();
     }
@@ -60,9 +85,11 @@ public class BTreeIndexMeta {
     public static BTreeIndexMeta deserialize(byte[] data) {
         MemorySliceInput sliceInput = MemorySlice.wrap(data).toInput();
         int firstKeyLength = sliceInput.readInt();
-        byte[] firstKey = sliceInput.readSlice(firstKeyLength).copyBytes();
+        byte[] firstKey =
+                firstKeyLength == 0 ? null : sliceInput.readSlice(firstKeyLength).copyBytes();
         int lastKeyLength = sliceInput.readInt();
-        byte[] lastKey = sliceInput.readSlice(lastKeyLength).copyBytes();
+        byte[] lastKey =
+                lastKeyLength == 0 ? null : sliceInput.readSlice(lastKeyLength).copyBytes();
         boolean hasNulls = sliceInput.readByte() == 1;
         return new BTreeIndexMeta(firstKey, lastKey, hasNulls);
     }

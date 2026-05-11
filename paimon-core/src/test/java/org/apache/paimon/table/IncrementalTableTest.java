@@ -42,7 +42,6 @@ import org.apache.paimon.utils.TagManager;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
@@ -367,30 +366,15 @@ public class IncrementalTableTest extends TableTestBase {
 
         write.write(GenericRow.of(1, BinaryString.fromString("a")));
         List<CommitMessage> commitMessages = write.prepareCommit(false, 0);
-        commit.commit(
-                new ManifestCommittable(
-                        0,
-                        utcMills("2024-12-02T10:00:00"),
-                        Collections.emptyMap(),
-                        commitMessages));
+        commit.commit(new ManifestCommittable(0, utcMills("2024-12-02T10:00:00"), commitMessages));
 
         write.write(GenericRow.of(2, BinaryString.fromString("b")));
         commitMessages = write.prepareCommit(false, 1);
-        commit.commit(
-                new ManifestCommittable(
-                        1,
-                        utcMills("2024-12-03T10:00:00"),
-                        Collections.emptyMap(),
-                        commitMessages));
+        commit.commit(new ManifestCommittable(1, utcMills("2024-12-03T10:00:00"), commitMessages));
 
         write.write(GenericRow.of(3, BinaryString.fromString("c")));
         commitMessages = write.prepareCommit(false, 2);
-        commit.commit(
-                new ManifestCommittable(
-                        2,
-                        utcMills("2024-12-05T10:00:00"),
-                        Collections.emptyMap(),
-                        commitMessages));
+        commit.commit(new ManifestCommittable(2, utcMills("2024-12-05T10:00:00"), commitMessages));
 
         assertIncrementalToAutoTag(table);
     }

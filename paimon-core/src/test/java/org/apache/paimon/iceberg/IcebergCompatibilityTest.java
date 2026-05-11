@@ -185,6 +185,16 @@ public class IcebergCompatibilityTest {
         // In dv mode, full compaction will remove all dv index and rewrite data files
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(2, 21)");
 
+        FileIO fileIO = table.fileIO();
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO,
+                        new Path(
+                                table.location(),
+                                "metadata/v" + latestSnapshotId + ".metadata.json"));
+        assertThat(metadata.currentSnapshot().summary().operation()).isEqualTo("replace");
+
         write.close();
         commit.close();
     }
@@ -740,6 +750,51 @@ public class IcebergCompatibilityTest {
                 .containsExactlyInAnyOrder(
                         "Record(1, {10=[Record(apple, 100), Record(banana, 101)]})",
                         "Record(2, {20=[Record(cherry, 200), Record(pear, 201)]})");
+    }
+
+    @Test
+    public void testDoublePartitionContainsNan() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.DOUBLE(), DataTypes.INT()},
+                        new String[] {"value", "id"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("value"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1.0, 100), 1);
+        write.write(GenericRow.of(2.0, 200), 1);
+        write.write(GenericRow.of(Double.NaN, 300), 1);
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        FileIO fileIO = table.fileIO();
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(table.location(), "metadata/v1.metadata.json"));
+
+        String currentSnapshotManifest = metadata.currentSnapshot().manifestList();
+        File snapShotAvroFile = new File(currentSnapshotManifest);
+
+        boolean sawNanPartitionSummary = false;
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(snapShotAvroFile), new GenericDatumReader<>())) {
+            while (dataFileReader.hasNext()) {
+                GenericRecord record = dataFileReader.next();
+                String partitionSummary = record.get("partitions").toString();
+                if (partitionSummary.contains("contains_nan\": true")) {
+                    sawNanPartitionSummary = true;
+                }
+            }
+        }
+
+        assertThat(sawNanPartitionSummary).isTrue();
     }
 
     @Test

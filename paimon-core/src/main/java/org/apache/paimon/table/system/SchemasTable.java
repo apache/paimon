@@ -73,6 +73,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
@@ -171,6 +172,11 @@ public class SchemasTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return 0;
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 

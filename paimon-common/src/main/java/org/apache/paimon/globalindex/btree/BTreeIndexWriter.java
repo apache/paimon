@@ -167,14 +167,14 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
             throw new RuntimeException("Error in closing BTree index writer", e);
         }
 
-        if (firstKey == null) {
+        if (firstKey == null && !nullBitmap.initialized()) {
             throw new RuntimeException("Should never write an empty btree index file.");
         }
 
         byte[] metaBytes =
                 new BTreeIndexMeta(
-                                keySerializer.serialize(firstKey),
-                                keySerializer.serialize(lastKey),
+                                firstKey == null ? null : keySerializer.serialize(firstKey),
+                                lastKey == null ? null : keySerializer.serialize(lastKey),
                                 nullBitmap.initialized())
                         .serialize();
         return Collections.singletonList(new ResultEntry(fileName, rowCount, metaBytes));

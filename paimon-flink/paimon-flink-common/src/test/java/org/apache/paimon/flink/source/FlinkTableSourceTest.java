@@ -54,7 +54,7 @@ public class FlinkTableSourceTest extends TableTestBase {
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         DataTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null, null);
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
 
         // col1 = 1
         List<ResolvedExpression> filters = ImmutableList.of(col1Equal1());
@@ -78,7 +78,7 @@ public class FlinkTableSourceTest extends TableTestBase {
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         FlinkTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null, null);
+                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
 
         // col1 = 1 && p1 = 1 => [p1 = 1]
         List<ResolvedExpression> filters = ImmutableList.of(col1Equal1(), p1Equal1());

@@ -229,9 +229,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     @Override
     public Optional<String> externalPathDir() {
-        return Optional.ofNullable(externalPath)
-                .map(Path::new)
-                .map(p -> p.getParent().toUri().toString());
+        return Optional.ofNullable(externalPath).map(Path::new).map(p -> p.getParent().toString());
     }
 
     @Override
@@ -465,11 +463,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                         "firstRowId is null, can't convert to file selection");
             }
             selection = new RoaringBitmap32();
-            long start = firstRowId();
-            long end = start + rowCount() - 1;
-
-            Range fileRange = new Range(start, end);
-
+            Range fileRange = nonNullRowIdRange();
             List<Range> result = new ArrayList<>();
             for (Range expected : rowRanges) {
                 Range intersection = Range.intersection(fileRange, expected);
@@ -484,7 +478,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
             for (Range range : result) {
                 for (long rowId = range.from; rowId <= range.to; rowId++) {
-                    selection.add((int) (rowId - start));
+                    selection.add((int) (rowId - fileRange.from));
                 }
             }
         }

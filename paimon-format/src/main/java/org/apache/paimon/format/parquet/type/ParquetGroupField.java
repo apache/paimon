@@ -18,12 +18,9 @@
 
 package org.apache.paimon.format.parquet.type;
 
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
-
-import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -41,7 +38,7 @@ public class ParquetGroupField extends ParquetField {
             boolean required,
             List<ParquetField> children,
             String[] path) {
-        this(type, repetitionLevel, definitionLevel, required, children, path, null, null);
+        this(type, repetitionLevel, definitionLevel, required, children, path, null);
     }
 
     public ParquetGroupField(
@@ -51,16 +48,8 @@ public class ParquetGroupField extends ParquetField {
             boolean required,
             List<ParquetField> children,
             String[] path,
-            ParquetGroupField variantFileType,
-            @Nullable List<VariantAccessInfo.VariantField> variantFields) {
-        super(
-                type,
-                repetitionLevel,
-                definitionLevel,
-                required,
-                path,
-                variantFileType,
-                variantFields);
+            ParquetGroupField variantFileType) {
+        super(type, repetitionLevel, definitionLevel, required, path, variantFileType);
         this.children = ImmutableList.copyOf(requireNonNull(children, "children is null"));
     }
 

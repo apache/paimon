@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.DockerImageVersions;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;

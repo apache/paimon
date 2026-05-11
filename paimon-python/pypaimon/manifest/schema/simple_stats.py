@@ -37,7 +37,7 @@ class SimpleStats:
         if cls._empty_stats is None:
             min_values = GenericRow([], [])
             max_values = GenericRow([], [])
-            cls._empty_stats = cls(min_values, max_values, None)
+            cls._empty_stats = cls(min_values, max_values, [])
         return cls._empty_stats
 
 

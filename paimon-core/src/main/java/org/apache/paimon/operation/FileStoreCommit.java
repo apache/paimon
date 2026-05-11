@@ -26,6 +26,8 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Map;
 
@@ -37,6 +39,8 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);
 
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
+
+    FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
 
     /** Find out which committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);

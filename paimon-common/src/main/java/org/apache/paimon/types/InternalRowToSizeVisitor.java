@@ -22,6 +22,7 @@ import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 
 import java.util.List;
 import java.util.function.BiFunction;
@@ -246,6 +247,28 @@ public class InternalRowToSizeVisitor
                 int size = 0;
                 for (int i = 0; i < internalArray.size(); i++) {
                     size += function.apply(internalArray, i);
+                }
+
+                return size;
+            }
+        };
+    }
+
+    @Override
+    public BiFunction<DataGetters, Integer, Integer> visit(VectorType vectorType) {
+        return (row, index) -> {
+            if (row.isNullAt(index)) {
+                return NULL_SIZE;
+            } else {
+                // If it is ensured that the element type
+                // must be primitive type, then this can be simplified.
+                BiFunction<DataGetters, Integer, Integer> function =
+                        vectorType.getElementType().accept(this);
+                InternalVector internalVector = row.getVector(index);
+
+                int size = 0;
+                for (int i = 0; i < internalVector.size(); i++) {
+                    size += function.apply(internalVector, i);
                 }
 
                 return size;

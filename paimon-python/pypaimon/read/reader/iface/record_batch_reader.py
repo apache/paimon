@@ -126,3 +126,12 @@ class RowPositionRecordIterator(RecordIterator[tuple]):
 
     def __next__(self):
         return self.next()
+
+
+class EmptyRecordBatchReader(RecordBatchReader):
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        return None
+
+    def close(self):
+        return None

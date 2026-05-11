@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
@@ -41,15 +40,14 @@ import java.util.stream.Collectors;
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
-public final class AppendTableRead extends AbstractDataTableRead {
+public class AppendTableRead extends AbstractDataTableRead {
 
     private final List<SplitReadProvider> readProviders;
 
     @Nullable private RowType readType = null;
     private Predicate predicate = null;
-    private TopN topN = null;
-    private Integer limit = null;
-    @Nullable private VariantAccessInfo[] variantAccess;
+    protected TopN topN = null;
+    protected Integer limit = null;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -78,19 +76,12 @@ public final class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
-        read.withVariantAccess(variantAccess);
     }
 
     @Override
     public void applyReadType(RowType readType) {
         initialized().forEach(r -> r.withReadType(readType));
         this.readType = readType;
-    }
-
-    @Override
-    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
-        initialized().forEach(r -> r.withVariantAccess(variantAccess));
-        this.variantAccess = variantAccess;
     }
 
     @Override
@@ -122,6 +113,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
             }
         }
 
-        throw new RuntimeException("Should not happen.");
+        throw new RuntimeException("Unsupported split: " + split.getClass());
     }
 }

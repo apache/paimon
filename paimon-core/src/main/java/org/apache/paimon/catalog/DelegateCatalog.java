@@ -127,6 +127,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listTableDetails(databaseName);
+    }
+
+    @Override
     public PagedList<Identifier> listTablesPagedGlobally(
             String databaseNamePattern,
             String tableNamePattern,
@@ -146,6 +151,11 @@ public abstract class DelegateCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         wrapped.createTable(identifier, schema, ignoreIfExists);
+    }
+
+    @Override
+    public Table getTableById(String tableId) throws TableIdNotExistException {
+        return wrapped.getTableById(tableId);
     }
 
     @Override
@@ -213,14 +223,33 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        wrapped.rollbackSchema(identifier, schemaId);
+    }
+
+    @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         wrapped.createBranch(identifier, branch, fromTag);
     }
 
     @Override
+    public void createBranch(
+            Identifier identifier, String branch, @Nullable String fromTag, boolean ignoreIfExists)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        wrapped.createBranch(identifier, branch, fromTag, ignoreIfExists);
+    }
+
+    @Override
     public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
         wrapped.dropBranch(identifier, branch);
+    }
+
+    @Override
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException {
+        wrapped.renameBranch(identifier, fromBranch, toBranch);
     }
 
     @Override
@@ -252,9 +281,12 @@ public abstract class DelegateCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTagsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
             throws TableNotExistException {
-        return wrapped.listTagsPaged(identifier, maxResults, pageToken);
+        return wrapped.listTagsPaged(identifier, maxResults, pageToken, tagNamePrefix);
     }
 
     @Override
@@ -271,6 +303,11 @@ public abstract class DelegateCatalog implements Catalog {
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
         return wrapped.commitSnapshot(identifier, tableUuid, snapshot, statistics);
+    }
+
+    @Override
+    public boolean supportsPartitionModification() {
+        return wrapped.supportsPartitionModification();
     }
 
     @Override
@@ -406,7 +443,14 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByNames(identifier, partitions);
+    }
+
+    @Override
+    public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         return wrapped.authTableQuery(identifier, select);
     }

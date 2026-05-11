@@ -50,7 +50,8 @@ public class CompactionTaskSimpleSerializerTest {
     public void testSerializer() throws IOException {
 
         AppendCompactTask task1 = new AppendCompactTask(partition, newFiles(20));
-        AppendCompactTask task2 = serializer.deserialize(2, serializer.serialize(task1));
+        AppendCompactTask task2 =
+                serializer.deserialize(serializer.getVersion(), serializer.serialize(task1));
 
         assertThat(task1).isEqualTo(task2);
     }

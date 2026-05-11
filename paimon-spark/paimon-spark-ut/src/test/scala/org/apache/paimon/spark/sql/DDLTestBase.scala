@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Assertions
 import java.sql.{Date, Timestamp}
 import java.time.LocalDateTime
 
+import scala.collection.JavaConverters._
+
 abstract class DDLTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
@@ -130,6 +132,147 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     withTable("paimon_tbl") {
       sql("CREATE TABLE paimon_tbl (id int)")
       assert(!loadTable("paimon_tbl").options().containsKey("provider"))
+    }
+  }
+
+  test("Paimon DDL: create table like with paimon SparkCatalog") {
+    assume(gteqSpark3_4)
+    withTable("source_tbl", "target_tbl") {
+      sql("""
+            |CREATE TABLE source_tbl (
+            |  id INT,
+            |  name STRING COMMENT 'name column',
+            |  pt STRING
+            |) COMMENT 'source comment'
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id,pt',
+            |  'bucket' = '5',
+            |  'target-file-size' = '128MB'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE target_tbl
+            |LIKE source_tbl
+            |TBLPROPERTIES ('bucket' = '8')
+            |""".stripMargin)
+
+      val source = loadTable("source_tbl")
+      val target = loadTable("target_tbl")
+
+      Assertions.assertEquals(spark.table("source_tbl").schema, spark.table("target_tbl").schema)
+      Assertions.assertEquals("source comment", target.comment().get())
+      Assertions.assertEquals(List("pt"), target.partitionKeys().asScala.toList)
+      Assertions.assertEquals(List("id", "pt"), target.primaryKeys().asScala.toList)
+      Assertions.assertEquals("8", target.options().get("bucket"))
+      Assertions.assertEquals("128MB", target.options().get("target-file-size"))
+      Assertions.assertNotEquals(source.location().toString, target.location().toString)
+    }
+  }
+
+  test("Paimon DDL: create table like from branch with paimon SparkCatalog") {
+    assume(gteqSpark3_4)
+    withTable("source_tbl", "target_tbl") {
+      sql("""
+            |CREATE TABLE source_tbl (
+            |  id INT,
+            |  name STRING COMMENT 'name column',
+            |  pt STRING
+            |) COMMENT 'source comment'
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id,pt',
+            |  'bucket' = '5'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO source_tbl VALUES (1, 'a', 'p1')")
+
+      checkAnswer(
+        sql("CALL paimon.sys.create_branch(table => 'test.source_tbl', branch => 'test_branch')"),
+        Row(true) :: Nil)
+      sql("ALTER TABLE `source_tbl$branch_test_branch` ADD COLUMNS(extra STRING)")
+
+      sql("""
+            |CREATE TABLE target_tbl
+            |LIKE `source_tbl$branch_test_branch`
+            |""".stripMargin)
+
+      val target = loadTable("target_tbl")
+
+      Assertions.assertFalse(spark.table("source_tbl").schema.fieldNames.contains("extra"))
+      Assertions.assertTrue(spark.table("target_tbl").schema.fieldNames.contains("extra"))
+      Assertions.assertEquals(
+        sql("SELECT * FROM `source_tbl$branch_test_branch`").schema,
+        spark.table("target_tbl").schema)
+      Assertions.assertEquals("source comment", target.comment().get())
+      Assertions.assertEquals(List("pt"), target.partitionKeys().asScala.toList)
+      Assertions.assertEquals(List("id", "pt"), target.primaryKeys().asScala.toList)
+      Assertions.assertEquals("5", target.options().get("bucket"))
+    }
+  }
+
+  test("Paimon DDL: create table like if not exists with paimon SparkCatalog") {
+    assume(gteqSpark3_4)
+    withTable("source_tbl", "target_tbl") {
+      sql("""
+            |CREATE TABLE source_tbl (
+            |  id INT,
+            |  name STRING,
+            |  pt STRING
+            |)
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id,pt',
+            |  'bucket' = '5'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE target_tbl (
+            |  id BIGINT,
+            |  pt STRING
+            |) COMMENT 'target comment'
+            |PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id,pt',
+            |  'bucket' = '3'
+            |)
+            |""".stripMargin)
+
+      val targetSchema = spark.table("target_tbl").schema
+      val targetLocation = loadTable("target_tbl").location().toString
+
+      sql("""
+            |CREATE TABLE IF NOT EXISTS target_tbl
+            |LIKE source_tbl
+            |""".stripMargin)
+
+      val target = loadTable("target_tbl")
+
+      Assertions.assertEquals(targetSchema, spark.table("target_tbl").schema)
+      Assertions.assertFalse(spark.table("target_tbl").schema.fieldNames.contains("name"))
+      Assertions.assertEquals("target comment", target.comment().get())
+      Assertions.assertEquals("3", target.options().get("bucket"))
+      Assertions.assertEquals(targetLocation, target.location().toString)
+    }
+  }
+
+  test("Paimon DDL: create table like stored as is unsupported with paimon SparkCatalog") {
+    assume(gteqSpark3_4)
+    withTable("source_tbl", "target_tbl") {
+      sql("CREATE TABLE source_tbl (id INT)")
+
+      val error = intercept[Exception] {
+        sql("""
+              |CREATE TABLE target_tbl
+              |LIKE source_tbl
+              |STORED AS PARQUET
+              |""".stripMargin)
+      }.getMessage
+
+      Assertions.assertTrue(
+        error.contains("CREATE TABLE LIKE ... STORED AS is not supported for SparkCatalog."))
     }
   }
 

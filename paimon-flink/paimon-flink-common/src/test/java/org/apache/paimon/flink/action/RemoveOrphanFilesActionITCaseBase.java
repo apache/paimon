@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaChange;
@@ -41,15 +42,21 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -171,8 +178,11 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThat(fileIO.listDirectories(bucketDir)).isEmpty();
 
         // clean empty directories
+        setLastModifiedToPastIfLocal(bucketDir, 2);
         ImmutableList.copyOf(executeSQL(withOlderThan));
-        assertThat(fileIO.exists(bucketDir)).isFalse();
+        if ("file".equals(bucketDir.toUri().getScheme())) {
+            assertThat(fileIO.exists(bucketDir)).isFalse();
+        }
         // table should not be deleted
         assertThat(fileIO.exists(location)).isTrue();
     }
@@ -390,6 +400,114 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThatCode(() -> executeSQL(withInvalidMode))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Unknown mode");
+    }
+
+    @Test
+    public void testEmptyPartitionDirectories() throws Exception {
+        FileStoreTable table = createPartitionedTableWithData();
+        table = getFileStoreTable(tableName);
+        FileIO fileIO = table.fileIO();
+        Path location = table.location();
+        Path partitionPath1 = new Path(location, "part1=0/part2=a");
+        Path partitionPath2 = new Path(location, "part1=0/part2=b");
+        Path emptyNonLeaf = new Path(location, "part1=1");
+
+        emptyPartitionDir(fileIO, partitionPath2);
+        fileIO.mkdirs(emptyNonLeaf);
+
+        boolean localFs = "file".equals(partitionPath2.toUri().getScheme());
+        if (localFs) {
+            setLastModifiedToPastIfLocal(partitionPath2, emptyNonLeaf, 2);
+            executeSQL(String.format("CALL sys.remove_orphan_files('%s.%s')", database, tableName));
+            assertThat(fileIO.exists(partitionPath2)).isFalse();
+            assertThat(fileIO.exists(emptyNonLeaf)).isFalse();
+            assertThat(fileIO.exists(partitionPath1)).isTrue();
+        }
+
+        Path recentEmpty = new Path(location, "part1=2");
+        fileIO.mkdirs(recentEmpty);
+        executeSQL(
+                String.format(
+                        "CALL sys.remove_orphan_files('%s.%s', '%s')",
+                        database, tableName, olderThanNowMinusMillis(1000)));
+        assertThat(fileIO.exists(recentEmpty)).isTrue();
+    }
+
+    private FileStoreTable createPartitionedTableWithData() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"pk", "part1", "part2", "value"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        tableName,
+                        rowType,
+                        Arrays.asList("part1", "part2"),
+                        Arrays.asList("pk", "part1", "part2", "value"),
+                        Collections.emptyList(),
+                        Collections.singletonMap("bucket", "2"));
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+        writeData(
+                rowData(1, 0, BinaryString.fromString("a"), BinaryString.fromString("v1")),
+                rowData(2, 0, BinaryString.fromString("a"), BinaryString.fromString("v2")));
+        writeData(rowData(3, 0, BinaryString.fromString("b"), BinaryString.fromString("v3")));
+        write.close();
+        commit.close();
+        write = null;
+        commit = null;
+        return table;
+    }
+
+    private void emptyPartitionDir(FileIO fileIO, Path partitionPath) throws IOException {
+        for (FileStatus file : fileIO.listStatus(partitionPath)) {
+            if (file.isDir() && file.getPath().getName().startsWith("bucket-")) {
+                for (FileStatus bucketFile : fileIO.listStatus(file.getPath())) {
+                    fileIO.deleteQuietly(bucketFile.getPath());
+                }
+                fileIO.deleteQuietly(file.getPath());
+            }
+        }
+    }
+
+    private void setLastModifiedToPastIfLocal(Path path1, Path path2, int daysAgo) {
+        setLastModifiedToPastIfLocal(path1, daysAgo);
+        setLastModifiedToPastIfLocal(path2, daysAgo);
+    }
+
+    private void setLastModifiedToPastIfLocal(Path path, int daysAgo) {
+        try {
+            if (path.toUri().getScheme() != null && "file".equals(path.toUri().getScheme())) {
+                Files.setLastModifiedTime(
+                        Paths.get(path.toUri()),
+                        FileTime.fromMillis(
+                                System.currentTimeMillis() - TimeUnit.DAYS.toMillis(daysAgo)));
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String olderThanNowMinusMillis(long millis) {
+        return DateTimeUtils.formatLocalDateTime(
+                DateTimeUtils.toLocalDateTime(System.currentTimeMillis() - millis), 3);
+    }
+
+    @Test
+    public void testNonEmptyPartitionDir() throws Exception {
+        createPartitionedTableWithData();
+        FileStoreTable table = getFileStoreTable(tableName);
+        FileIO fileIO = table.fileIO();
+        Path nonEmptyPath = new Path(table.location(), "part1=0/part2=c");
+        fileIO.mkdirs(nonEmptyPath);
+        fileIO.writeFile(new Path(nonEmptyPath, "guard.txt"), "must not delete", true);
+
+        executeSQL(String.format("CALL sys.remove_orphan_files('%s.%s')", database, tableName));
+
+        assertThat(fileIO.exists(nonEmptyPath)).isTrue();
+        assertThat(fileIO.exists(new Path(nonEmptyPath, "guard.txt"))).isTrue();
     }
 
     protected boolean supportNamedArgument() {

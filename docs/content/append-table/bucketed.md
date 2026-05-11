@@ -1,6 +1,6 @@
 ---
 title: "Bucketed"
-weight: 5
+weight: 3
 type: docs
 aliases:
 - /append-table/bucketed.html
@@ -46,7 +46,46 @@ CREATE TABLE my_table (
 {{< /tab >}}
 {{< /tabs >}}
 
-## Streaming
+## Data Skipping
+
+The primary and most significant advantage of a bucketed append table is **data skipping**. When queries contain
+equality (`=`) or `IN` filter conditions on the `bucket-key`, Paimon can efficiently push these predicates down to
+skip irrelevant bucket files entirely. This means a large number of files that do not match the filter are pruned
+before reading, drastically reducing I/O and accelerating queries.
+
+For example, if `bucket-key` is `product_id` and you query:
+
+```sql
+SELECT * FROM my_table WHERE product_id = 12345;
+
+SELECT * FROM my_table WHERE product_id IN (1, 2, 3);
+```
+
+Paimon will only read the bucket that contains the matching `product_id` values, filtering out all other bucket files.
+This is extremely effective when the table has many buckets and you are querying a small subset of bucket-key values.
+
+## Bucketed Join
+
+Bucketed table can also be used to accelerate join queries by avoiding costly shuffle operations in batch processing.
+For example, you can use the following Spark SQL to read a Paimon table:
+
+```sql
+SET spark.sql.sources.v2.bucketing.enabled = true;
+
+CREATE TABLE FACT_TABLE (order_id INT, f1 STRING) TBLPROPERTIES ('bucket'='10', 'bucket-key' = 'order_id');
+
+CREATE TABLE DIM_TABLE (order_id INT, f2 STRING) TBLPROPERTIES ('bucket'='10', 'primary-key' = 'order_id');
+
+SELECT * FROM FACT_TABLE JOIN DIM_TABLE on t1.order_id = t4.order_id;
+```
+
+The `spark.sql.sources.v2.bucketing.enabled` config is used to enable bucketing for V2 data sources. When turned on,
+Spark will recognize the specific distribution reported by a V2 data source through SupportsReportPartitioning, and
+will try to avoid shuffle if necessary.
+
+The costly join shuffle will be avoided if two tables have the same bucketing strategy and same number of buckets.
+
+## Bucketed Streaming
 
 An ordinary Append table has no strict ordering guarantees for its streaming writes and reads, but there are some cases
 where you need to define a key similar to Kafka's.
@@ -57,43 +96,7 @@ bucket as a queue.
 
 {{< img src="/img/for-queue.png">}}
 
-### Compaction in Bucket
-
-By default, the sink node will automatically perform compaction to control the number of files. The following options
-control the strategy of compaction:
-
-<table class="configuration table table-bordered">
-    <thead>
-        <tr>
-            <th class="text-left" style="width: 20%">Key</th>
-            <th class="text-left" style="width: 15%">Default</th>
-            <th class="text-left" style="width: 10%">Type</th>
-            <th class="text-left" style="width: 55%">Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><h5>write-only</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
-        </tr>
-        <tr>
-            <td><h5>compaction.min.file-num</h5></td>
-            <td style="word-wrap: break-word;">5</td>
-            <td>Integer</td>
-            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append table.</td>
-        </tr>
-        <tr>
-            <td><h5>full-compaction.delta-commits</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Full compaction will be constantly triggered after delta commits.</td>
-        </tr>
-    </tbody>
-</table>
-
-### Streaming Read Order
+**Streaming Read Order**
 
 For streaming reads, records are produced in the following order:
 
@@ -103,7 +106,7 @@ For streaming reads, records are produced in the following order:
 * For any two records from the same partition and the same bucket, the first written record will be produced first.
 * For any two records from the same partition but two different buckets, different buckets are processed by different tasks, there is no order guarantee between them.
 
-### Watermark Definition
+**Watermark Definition**
 
 You can define watermark for reading Paimon tables:
 
@@ -148,7 +151,7 @@ which will make sure no sources/splits/shards/partitions increase their watermar
     </tbody>
 </table>
 
-### Bounded Stream
+**Bounded Stream**
 
 Streaming Source can also be bounded, you can specify 'scan.bounded.watermark' to define the end condition for bounded streaming mode, stream reading will end until a larger watermark snapshot is encountered.
 
@@ -170,7 +173,3 @@ INSERT INTO paimon_table SELECT * FROM kakfa_table;
 -- launch a bounded streaming job to read paimon_table
 SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
 ```
-
-## Bucketed Join
-
-Bucketed table can be used to avoid shuffle if necessary in batch query, see [Bucketed Join]({{< ref "append-table/query-performance#bucketed-join" >}}).

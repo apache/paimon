@@ -26,7 +26,7 @@ under the License.
 
 # Procedures
 
-Flink 1.18 and later versions support [Call Statements](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/call/),
+Flink 1.18 and later versions support [Call Statements](https://nightlies.apache.org/flink/flink-docs-master/docs/sql/reference/utility/call/),
 which make it easier to manipulate data and metadata of Paimon table by writing SQLs instead of submitting Flink jobs.
 
 In 1.18, the procedure only supports passing arguments by position. You must pass all arguments in order, and if you
@@ -329,6 +329,35 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>data_evolution_merge_into</td>
+      <td>
+         -- Use indexed argument<br/>
+         CALL [catalog].sys.data_evolution_merge_into('targetTable','targetAlias',<br/>
+            'sourceSqls','sourceTable','mergeCondition','matchedUpdateSet',sinkParallelism)<br/><br/>
+         -- Use named argument<br/>
+         CALL [catalog].sys.data_evolution_merge_into(<br/>
+            target_table => 'identifier',<br/>
+            target_alias => 'targetAlias',<br/>
+            source_sqls => 'sourceSqls',<br/>
+            source_table => 'sourceTable',<br/>
+            merge_condition => 'mergeCondition',<br/>
+            matched_update_set => 'matchedUpdateSet',<br/>
+            sink_parallelism => sinkParallelism) <br/><br/>
+      </td>
+      <td>To perform "MERGE INTO" syntax specially implemented for data-evolution tables. Please see <a href="/docs/master/append-table/data-evolution/">data evolution</a> for more information. </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL [catalog].sys.data_evolution_merge_into('default.T', '', '', 'S', 'T.id=S.id', 'name=S.name', 2) <br/><br/>
+         -- for Flink 1.19 and later <br/>
+         CALL [catalog].sys.data_evolution_merge_into(<br/>
+            target_table => 'default.T',<br/>
+            source_table => 'S',<br/>
+            merge_condition => 'T.id=S.id',<br/>
+            matched_update_set => 'name=S.name',<br/>
+            sink_parallelism => 2)
+      </td>
+   </tr>
+   <tr>
       <td>remove_orphan_files</td>
       <td>
          -- Use named argument<br/>
@@ -353,15 +382,15 @@ All available procedures are listed below.
       <td>CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5)<br/><br/>
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5, mode => 'local')
       </td>
    </tr>
    <tr>
       <td>remove_unexisting_files</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => 'parallelism') <br/><br/>
+         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => parallelism) <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier')<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier', 'dryRun', 'parallelism')
@@ -674,7 +703,7 @@ All available procedures are listed below.
       <td>
          To expire partitions. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
+            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
@@ -731,21 +760,14 @@ All available procedures are listed below.
    <tr>
       <td>create_branch</td>
       <td>
-         -- Use named argument<br/>
          CALL [catalog.]sys.create_branch(`table` => 'identifier', branch => 'branchName', tag => 'tagName')<br/><br/>
-         -- Use indexed argument<br/>
-         -- based on the specified tag <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName', 'tagName')<br/>
-         -- based on the specified branch's tag <br/>
-         CALL [catalog.]sys.create_branch('branch_table', 'branchName', 'tagName')<br/>
-         -- create empty branch <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName')
       </td>
       <td>
          To create a branch based on given tag, or just create empty branch. Arguments:
             <li>table: the target table identifier or branch identifier. Cannot be empty.</li>
-            <li>branchName: name of the new branch.</li>
-            <li>tagName: name of the tag which the new branch is based on.</li>
+            <li>branch: name of the new branch.</li>
+            <li>tag: name of the tag which the new branch is based on.</li>
+            <li>ignoreIfExists: ignore if branch exists, default is false.</li>
       </td>
       <td>
          CALL sys.create_branch(`table` => 'default.T', branch => 'branch1', tag => 'tag1')<br/>
@@ -769,6 +791,24 @@ All available procedures are listed below.
       </td>
       <td>
          CALL sys.delete_branch(`table` => 'default.T', branch => 'branch1')
+      </td>
+   </tr>
+   <tr>
+      <td>rename_branch</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.rename_branch(`table` => 'identifier', from_branch => 'branchName', to_branch => 'newBranchName')<br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.rename_branch('identifier', 'branchName', 'newBranchName')
+      </td>
+      <td>
+         To rename a branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>from_branch: name of the branch to be renamed.</li>
+            <li>to_branch: new name of the branch.</li>
+      </td>
+      <td>
+         CALL sys.rename_branch(`table` => 'default.T', from_branch => 'branch1', to_branch => 'branch2')
       </td>
    </tr>
    <tr>
@@ -806,7 +846,7 @@ All available procedures are listed below.
    <tr>
       <td>rescale</td>
       <td>
-         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => 'scan_parallelism', `sink_parallelism` => 'sink_parallelism')
+         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => scan_parallelism, `sink_parallelism` => sink_parallelism)
       </td>
       <td>
          Rescale one partition of a table. Arguments:
@@ -909,6 +949,40 @@ All available procedures are listed below.
       </td>
       <td>
          CALL sys.drop_function(`function` => 'function_identifier')<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>vector_search</td>
+      <td>
+         CALL [catalog.]sys.vector_search(<br/>
+            `table` => 'identifier',<br/>
+            vector_column => 'columnName',<br/>
+            query_vector => 'v1,v2,...',<br/>
+            top_k => topK,<br/>
+            projection => 'col1,col2',<br/>
+            options => 'key1=value1;key2=value2')<br/>
+      </td>
+      <td>
+         To perform vector similarity search on a table with a global vector index. Returns JSON-serialized rows. Arguments:
+            <li>table(required): the target table identifier.</li>
+            <li>vector_column(required): the name of the vector column to search.</li>
+            <li>query_vector(required): comma-separated float values representing the query vector, e.g. '1.0,2.0,3.0'.</li>
+            <li>top_k(required): the number of nearest neighbors to return.</li>
+            <li>projection(optional): comma-separated column names to include in the result. If omitted, all columns are returned.</li>
+            <li>options(optional): additional dynamic options of the table.</li>
+      </td>
+      <td>
+         CALL sys.vector_search(<br/>
+            `table` => 'default.T',<br/>
+            vector_column => 'embedding',<br/>
+            query_vector => '1.0,2.0,3.0',<br/>
+            top_k => 5)<br/><br/>
+         CALL sys.vector_search(<br/>
+            `table` => 'default.T',<br/>
+            vector_column => 'embedding',<br/>
+            query_vector => '1.0,2.0,3.0',<br/>
+            top_k => 5,<br/>
+            projection => 'id,name')
       </td>
    </tr>
    </tbody>

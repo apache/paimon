@@ -27,6 +27,13 @@ class ResourcePaths:
     DATABASES = "databases"
     TABLES = "tables"
     TABLE_DETAILS = "table-details"
+    PARTITIONS = "partitions"
+    FUNCTIONS = "functions"
+    FUNCTION_DETAILS = "function-details"
+    TAGS = "tags"
+    BRANCHES = "branches"
+    RENAME = "rename"
+    FORWARD = "forward"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -70,3 +77,59 @@ class ResourcePaths:
     def commit_table(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/commit".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def rollback_table(self, database_name: str, table_name: str) -> str:
+        return ("{}/{}/{}/{}/{}/rollback".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def table_snapshot(self, database_name: str, table_name: str) -> str:
+        return ("{}/{}/{}/{}/{}/snapshot".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def partitions(self, database_name: str, table_name: str) -> str:
+        return ("{}/{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                           self.TABLES, RESTUtil.encode_string(table_name), self.PARTITIONS))
+
+    def functions(self, database_name: Optional[str] = None) -> str:
+        if database_name:
+            return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                        RESTUtil.encode_string(database_name), self.FUNCTIONS)
+        return "{}/{}".format(self.base_path, self.FUNCTIONS)
+
+    def function_details(self, database_name: str) -> str:
+        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                    RESTUtil.encode_string(database_name), self.FUNCTION_DETAILS)
+
+    def function(self, database_name: str, function_name: str) -> str:
+        return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                       self.FUNCTIONS, RESTUtil.encode_string(function_name))
+
+    def tags(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.TAGS)
+
+    def tag(self, database_name: str, table_name: str, tag_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.TAGS,
+            RESTUtil.encode_string(tag_name))
+
+    def branches(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES)
+
+    def branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES,
+            RESTUtil.encode_string(branch_name))
+
+    def rename_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}".format(
+            self.branch(database_name, table_name, branch_name), self.RENAME)
+
+    def forward_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}".format(
+            self.branch(database_name, table_name, branch_name), self.FORWARD)

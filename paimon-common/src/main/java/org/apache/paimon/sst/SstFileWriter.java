@@ -182,9 +182,11 @@ public class SstFileWriter {
     @Nullable
     public BlockHandle writeIndexBlock() throws IOException {
         BlockHandle indexBlock = writeBlock(indexBlockWriter);
-        LOG.info("Number of record: {}", recordCount);
-        LOG.info("totalUncompressedSize: {}", MemorySize.ofBytes(totalUncompressedSize));
-        LOG.info("totalCompressedSize: {}", MemorySize.ofBytes(totalCompressedSize));
+        LOG.info(
+                "SST written: records={}, uncompressed={}, compressed={}",
+                recordCount,
+                MemorySize.ofBytes(totalUncompressedSize),
+                MemorySize.ofBytes(totalCompressedSize));
         return indexBlock;
     }
 

@@ -22,8 +22,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
-
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -760,7 +759,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     @Test
     public void testCannotSetEmptyFallbackBranch() {
         String errMsg =
-                "Cannot set 'scan.fallback-branch' = 'test' because the branch 'test' isn't existed.";
+                "Cannot set 'scan.fallback-branch' = 'test' because the branch 'test' does not exist.";
         assertThatThrownBy(
                         () ->
                                 sql(
@@ -867,6 +866,102 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         collectResult(
                                 "SELECT branch_name FROM `T$branches` WHERE branch_name = 'non_existent'"))
                 .isEmpty();
+    }
+
+    @Test
+    public void testRenameBranch() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " pt INT"
+                        + ", k INT"
+                        + ", v STRING"
+                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
+                        + " ) PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '2'"
+                        + " )");
+
+        // snapshot 1.
+        sql("INSERT INTO T VALUES (1, 10, 'apple'), (1, 20, 'banana')");
+        // snapshot 2.
+        sql("INSERT INTO T VALUES (2, 10, 'cat'), (2, 20, 'dog')");
+
+        // create tag
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        // create branch from tag
+        sql("CALL sys.create_branch('default.T', 'branch1', 'tag1')");
+
+        // verify branch exists
+        FileStoreTable table = paimonTable("T");
+        assertThat(table.branchManager().branchExists("branch1")).isTrue();
+
+        // rename branch
+        sql("CALL sys.rename_branch('default.T', 'branch1', 'branch2')");
+
+        // verify old branch does not exist
+        table = paimonTable("T");
+        assertThat(table.branchManager().branchExists("branch1")).isFalse();
+
+        // verify new branch exists
+        assertThat(table.branchManager().branchExists("branch2")).isTrue();
+
+        // verify data in renamed branch
+        assertThat(collectResult("SELECT * FROM T$branch_branch2"))
+                .containsExactlyInAnyOrder("+I[1, 10, apple]", "+I[1, 20, banana]");
+
+        // rename non-existent branch should fail
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.rename_branch('default.T', 'nonexistent', 'new_branch')"))
+                .hasMessageContaining("Branch");
+
+        // rename to existing branch should fail
+        sql("CALL sys.create_branch('default.T', 'branch3')");
+        assertThatThrownBy(() -> sql("CALL sys.rename_branch('default.T', 'branch2', 'branch3')"))
+                .hasMessageContaining("Branch");
+    }
+
+    @Test
+    public void testPrimaryBranchBatchRead() throws Exception {
+        // Create non-PK table, then create branch, then ALTER main to add PKs.
+        // This results in main = PK table, branch = non-PK table.
+        sql(
+                "CREATE TABLE t ( pt INT NOT NULL, k INT NOT NULL, v STRING ) "
+                        + "PARTITIONED BY (pt) WITH ( 'bucket' = '-1' )");
+
+        sql("CALL sys.create_branch('default.t', 'nb')");
+        sql("ALTER TABLE t SET ( 'primary-key' = 'pt, k', 'bucket' = '2' )");
+        sql("ALTER TABLE t SET ( 'scan.primary-branch' = 'nb' )");
+
+        // Insert into non-PK branch (primary, has priority)
+        sql("INSERT INTO `t$branch_nb` VALUES (1, 20, 'cat'), (1, 30, 'dog')");
+        // Insert overlapping partition into PK main (fallback)
+        sql("INSERT INTO t VALUES (1, 10, 'apple'), (1, 20, 'banana')");
+
+        // pt=1 exists in primary branch → read from branch
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder("+I[cat, 20]", "+I[dog, 30]");
+        assertThat(collectResult("SELECT v, k FROM `t$branch_nb`"))
+                .containsExactlyInAnyOrder("+I[cat, 20]", "+I[dog, 30]");
+
+        // Insert pt=2 into primary branch, pt=3 only into main
+        sql("INSERT INTO `t$branch_nb` VALUES (2, 10, 'tiger'), (2, 20, 'wolf')");
+        sql("INSERT INTO t VALUES (3, 10, 'horse')");
+
+        // pt=1,2 from primary branch; pt=3 from main (fallback)
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder(
+                        "+I[cat, 20]",
+                        "+I[dog, 30]",
+                        "+I[tiger, 10]",
+                        "+I[wolf, 20]",
+                        "+I[horse, 10]");
+
+        // Unset scan.primary-branch, main table should show its own data
+        sql("ALTER TABLE t RESET ( 'scan.primary-branch' )");
+        assertThat(collectResult("SELECT v, k FROM t"))
+                .containsExactlyInAnyOrder("+I[apple, 10]", "+I[banana, 20]", "+I[horse, 10]");
     }
 
     private List<String> collectResult(String sql) throws Exception {

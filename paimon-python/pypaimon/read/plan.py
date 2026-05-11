@@ -16,8 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 from pypaimon.read.split import Split
@@ -27,6 +27,7 @@ from pypaimon.read.split import Split
 class Plan:
     """Implementation of Plan for native Python reading."""
     _splits: List[Split]
+    snapshot_id: Optional[int] = field(default=None)
 
     def splits(self) -> List[Split]:
         return self._splits

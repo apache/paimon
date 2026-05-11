@@ -489,7 +489,7 @@ public class WriterOperatorTest {
         commit.commit(
                 1,
                 harness.extractOutputValues().stream()
-                        .map(c -> (CommitMessage) c.wrappedCommittable())
+                        .map(Committable::commitMessage)
                         .collect(Collectors.toList()));
         assertThat(numWriters.getValue()).isEqualTo(3);
 
@@ -507,7 +507,7 @@ public class WriterOperatorTest {
         commit.commit(
                 2,
                 harness.extractOutputValues().stream()
-                        .map(c -> (CommitMessage) c.wrappedCommittable())
+                        .map(Committable::commitMessage)
                         .collect(Collectors.toList()));
         harness.prepareSnapshotPreBarrier(3);
 
@@ -529,7 +529,6 @@ public class WriterOperatorTest {
             FileStoreTable fileStoreTable) {
         return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
-                null,
                 (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                         new StoreSinkWriteImpl(
                                 table,
@@ -548,7 +547,6 @@ public class WriterOperatorTest {
             FileStoreTable fileStoreTable, boolean waitCompaction) {
         return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
-                null,
                 (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                         new LookupSinkWrite(
                                 table,
@@ -572,8 +570,7 @@ public class WriterOperatorTest {
         while (!harness.getOutput().isEmpty()) {
             Committable committable =
                     ((StreamRecord<Committable>) harness.getOutput().poll()).getValue();
-            assertThat(committable.kind()).isEqualTo(Committable.Kind.FILE);
-            commitMessages.add((CommitMessage) committable.wrappedCommittable());
+            commitMessages.add(committable.commitMessage());
         }
         commit.commit(commitIdentifier, commitMessages);
     }
@@ -587,8 +584,7 @@ public class WriterOperatorTest {
         while (!harness.getOutput().isEmpty()) {
             Committable committable =
                     ((StreamRecord<Committable>) harness.getOutput().poll()).getValue();
-            assertThat(committable.kind()).isEqualTo(Committable.Kind.FILE);
-            CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+            CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
             CommitMessageImpl newMessage =
                     new CommitMessageImpl(
                             message.partition(),

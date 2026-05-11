@@ -17,8 +17,10 @@ limitations under the License.
 """
 import unittest
 from parameterized import parameterized
+import pyarrow as pa
 
-from pypaimon.schema.data_types import DataField, AtomicType, ArrayType, MultisetType, MapType, RowType
+from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
+                                        RowType, VectorType, PyarrowFieldParser)
 
 
 class DataTypesTest(unittest.TestCase):
@@ -57,6 +59,32 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(str(MapType(True, AtomicType("STRING"), AtomicType("TIMESTAMP(6)"))),
                          "MAP<STRING, TIMESTAMP(6)>")
 
+    def test_vector_type(self):
+        vector_type = VectorType(True, AtomicType("FLOAT"), 3)
+        self.assertEqual(str(vector_type), "VECTOR<FLOAT, 3>")
+        self.assertEqual(
+            vector_type.to_dict(),
+            {
+                "type": "VECTOR",
+                "element": "FLOAT",
+                "length": 3,
+                "nullable": True
+            }
+        )
+        self.assertEqual(vector_type, VectorType.from_dict(vector_type.to_dict()))
+        self.assertEqual(hash(vector_type), hash(VectorType(True, AtomicType("FLOAT"), 3)))
+
+        not_null_vector = VectorType(False, AtomicType("FLOAT", nullable=False), 3)
+        self.assertEqual(str(not_null_vector), "VECTOR<FLOAT NOT NULL, 3> NOT NULL")
+        self.assertEqual(not_null_vector, VectorType.from_dict(not_null_vector.to_dict()))
+
+        with self.assertRaises(ValueError):
+            VectorType(True, AtomicType("FLOAT"), 0)
+        with self.assertRaises(ValueError):
+            VectorType(True, AtomicType("STRING"), 3)
+        with self.assertRaises(ValueError):
+            VectorType(True, ArrayType(True, AtomicType("INT")), 3)
+
     def test_row_type(self):
         self.assertEqual(str(RowType(True, [DataField(0, "a", AtomicType("STRING"), "Someone's desc."),
                                             DataField(1, "b", AtomicType("TIMESTAMP(6)"),)])),
@@ -65,3 +93,94 @@ class DataTypesTest(unittest.TestCase):
                                   DataField(1, "b", AtomicType("TIMESTAMP(6)"),)])
         self.assertEqual(str(row_data),
                          str(RowType.from_dict(row_data.to_dict())))
+
+    def test_struct_from_paimon_to_pyarrow(self):
+        paimon_row = RowType(
+            nullable=True,
+            fields=[
+                DataField(0, "field1", AtomicType("INT")),
+                DataField(1, "field2", AtomicType("STRING")),
+                DataField(2, "field3", AtomicType("DOUBLE"))
+            ]
+        )
+        pa_struct = PyarrowFieldParser.from_paimon_type(paimon_row)
+
+        self.assertTrue(pa.types.is_struct(pa_struct))
+        self.assertEqual(len(pa_struct), 3)
+        self.assertEqual(pa_struct[0].name, "field1")
+        self.assertEqual(pa_struct[1].name, "field2")
+        self.assertEqual(pa_struct[2].name, "field3")
+        self.assertTrue(pa.types.is_int32(pa_struct[0].type))
+        self.assertTrue(pa.types.is_string(pa_struct[1].type))
+        self.assertTrue(pa.types.is_float64(pa_struct[2].type))
+
+    def test_struct_from_pyarrow_to_paimon(self):
+        pa_struct = pa.struct([
+            pa.field("name", pa.string()),
+            pa.field("age", pa.int32()),
+            pa.field("score", pa.float64())
+        ])
+        paimon_row = PyarrowFieldParser.to_paimon_type(pa_struct, nullable=True)
+        
+        self.assertIsInstance(paimon_row, RowType)
+        self.assertTrue(paimon_row.nullable)
+        self.assertEqual(len(paimon_row.fields), 3)
+        self.assertEqual(paimon_row.fields[0].name, "name")
+        self.assertEqual(paimon_row.fields[1].name, "age")
+        self.assertEqual(paimon_row.fields[2].name, "score")
+        self.assertEqual(paimon_row.fields[0].type.type, "STRING")
+        self.assertEqual(paimon_row.fields[1].type.type, "INT")
+        self.assertEqual(paimon_row.fields[2].type.type, "DOUBLE")
+
+    def test_nested_field_roundtrip(self):
+        nested_field = RowType(
+            nullable=True,
+            fields=[
+                DataField(0, "inner_field1", AtomicType("STRING")),
+                DataField(1, "inner_field2", AtomicType("INT"))
+            ]
+        )
+        paimon_row = RowType(
+            nullable=True,
+            fields=[
+                DataField(0, "outer_field1", AtomicType("BIGINT")),
+                DataField(1, "nested", nested_field)
+            ]
+        )
+        pa_struct = PyarrowFieldParser.from_paimon_type(paimon_row)
+
+        converted_paimon_row = PyarrowFieldParser.to_paimon_type(pa_struct, nullable=True)
+        self.assertIsInstance(converted_paimon_row, RowType)
+        self.assertEqual(len(converted_paimon_row.fields), 2)
+        self.assertEqual(converted_paimon_row.fields[0].name, "outer_field1")
+        self.assertEqual(converted_paimon_row.fields[1].name, "nested")
+        
+        converted_nested_field = converted_paimon_row.fields[1].type
+        self.assertIsInstance(converted_nested_field, RowType)
+        self.assertEqual(len(converted_nested_field.fields), 2)
+        self.assertEqual(converted_nested_field.fields[0].name, "inner_field1")
+        self.assertEqual(converted_nested_field.fields[1].name, "inner_field2")
+
+    def test_vector_pyarrow_roundtrip(self):
+        paimon_vector = VectorType(True, AtomicType("FLOAT"), 3)
+        pa_type = PyarrowFieldParser.from_paimon_type(paimon_vector)
+
+        self.assertTrue(pa.types.is_fixed_size_list(pa_type))
+        self.assertEqual(pa_type.list_size, 3)
+        self.assertTrue(pa.types.is_float32(pa_type.value_type))
+
+        converted_paimon_vector = PyarrowFieldParser.to_paimon_type(pa_type, nullable=True)
+        self.assertEqual(converted_paimon_vector, paimon_vector)
+
+        avro_type = PyarrowFieldParser.to_avro_type(pa_type, "embedding")
+        self.assertEqual(avro_type, {"type": "array", "items": "float"})
+
+    def test_time_type(self):
+        pa_type = PyarrowFieldParser.from_paimon_type(AtomicType("TIME"))
+        self.assertEqual(pa_type, pa.time32('ms'))
+
+        pa_type_with_precision = PyarrowFieldParser.from_paimon_type(AtomicType("TIME(3)"))
+        self.assertEqual(pa_type_with_precision, pa.time32('ms'))
+
+        paimon_type = PyarrowFieldParser.to_paimon_type(pa.time32('ms'), nullable=True)
+        self.assertEqual(paimon_type.type, "TIME(0)")

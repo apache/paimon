@@ -203,6 +203,11 @@ public final class GenericRow implements InternalRow, Serializable {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        return (InternalVector) this.fields[pos];
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         return (InternalMap) this.fields[pos];
     }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
@@ -57,20 +56,8 @@ public class DataTableSource extends BaseDataTableSource
             ObjectIdentifier tableIdentifier,
             Table table,
             boolean unbounded,
-            DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory) {
-        this(
-                tableIdentifier,
-                table,
-                unbounded,
-                context,
-                logStoreTableFactory,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null);
+            DynamicTableFactory.Context context) {
+        this(tableIdentifier, table, unbounded, context, null, null, null, null, null, null);
     }
 
     public DataTableSource(
@@ -78,7 +65,6 @@ public class DataTableSource extends BaseDataTableSource
             Table table,
             boolean unbounded,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
@@ -90,7 +76,6 @@ public class DataTableSource extends BaseDataTableSource
                 table,
                 unbounded,
                 context,
-                logStoreTableFactory,
                 predicate,
                 projectFields,
                 limit,
@@ -106,7 +91,6 @@ public class DataTableSource extends BaseDataTableSource
                 table,
                 unbounded,
                 context,
-                logStoreTableFactory,
                 predicate,
                 projectFields,
                 limit,

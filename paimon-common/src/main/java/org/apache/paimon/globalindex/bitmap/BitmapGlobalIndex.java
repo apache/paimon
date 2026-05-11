@@ -61,7 +61,7 @@ public class BitmapGlobalIndex implements GlobalIndexer {
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
         checkArgument(files.size() == 1);
         GlobalIndexIOMeta indexMeta = files.get(0);
-        SeekableInputStream input = fileReader.getInputStream(indexMeta.fileName());
+        SeekableInputStream input = fileReader.getInputStream(indexMeta);
         FileIndexReader reader = index.createReader(input, 0, (int) indexMeta.fileSize());
         return new FileIndexReaderWrapper(reader, this::toGlobalResult, input);
     }

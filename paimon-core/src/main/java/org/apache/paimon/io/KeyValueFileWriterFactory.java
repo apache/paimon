@@ -120,8 +120,37 @@ public class KeyValueFileWriterFactory {
                 suggestedFileSize);
     }
 
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingClusteringFileWriter() {
+        WriteFormatKey key = new WriteFormatKey(1, false);
+        return new RollingFileWriterImpl<>(
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(key);
+                    return createKvSeparatedFileWriter(
+                            pathFactory.newPath(), key, pathFactory.isExternalPath());
+                },
+                suggestedFileSize);
+    }
+
+    private KeyValueClusteringFileWriter createKvSeparatedFileWriter(
+            Path path, WriteFormatKey key, boolean isExternalPath) {
+        return new KeyValueClusteringFileWriter(
+                fileIO,
+                formatContext.fileWriterContext(key),
+                path,
+                keyType,
+                valueType,
+                schemaId,
+                key.level,
+                formatContext.thinModeEnabled,
+                options,
+                fileIndexOptions,
+                isExternalPath);
+    }
+
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, WriteFormatKey key, FileSource fileSource, boolean isExternalPath) {
+        // Changelog is sequentially consumed, file index is unnecessary.
+        FileIndexOptions indexOptions = key.isChangelog ? new FileIndexOptions() : fileIndexOptions;
         return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -134,7 +163,7 @@ public class KeyValueFileWriterFactory {
                         key.level,
                         options,
                         fileSource,
-                        fileIndexOptions,
+                        indexOptions,
                         isExternalPath)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
@@ -147,7 +176,7 @@ public class KeyValueFileWriterFactory {
                         key.level,
                         options,
                         fileSource,
-                        fileIndexOptions,
+                        indexOptions,
                         isExternalPath);
     }
 

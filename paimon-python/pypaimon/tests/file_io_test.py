@@ -20,19 +20,23 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from pyarrow.fs import S3FileSystem, LocalFileSystem
+import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 
 class FileIOTest(unittest.TestCase):
     """Test cases for FileIO.to_filesystem_path method."""
 
-    def test_s3_filesystem_path_conversion(self):
+    def test_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
-        file_io = FileIO("s3://bucket/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, S3FileSystem)
+        file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
+        self.assertIsInstance(file_io.filesystem, pafs.S3FileSystem)
 
         # Test bucket and path
         self.assertEqual(file_io.to_filesystem_path("s3://my-bucket/path/to/file.txt"),
@@ -61,10 +65,83 @@ class FileIOTest(unittest.TestCase):
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
+        lt7 = _pyarrow_lt_7()
+        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+            OssOptions.OSS_IMPL.key(): 'legacy',
+        }))
+        got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+        self.assertEqual(got, "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
+        if lt7:
+            self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx/data.parquet"),
+                             "db-xxx.db/tbl-xxx/data.parquet")
+            self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx"), "db-xxx.db/tbl-xxx")
+            manifest_uri = "oss://test-bucket/warehouse/db.db/table/manifest/manifest-list-abc-0"
+            manifest_key = oss_io.to_filesystem_path(manifest_uri)
+            self.assertEqual(manifest_key, "warehouse/db.db/table/manifest/manifest-list-abc-0",
+                             "OSS+PyArrow6 must pass key only to PyArrow so manifest is written to correct bucket")
+            self.assertFalse(manifest_key.startswith("test-bucket/"),
+                             "path must not start with bucket name or PyArrow 6 writes to wrong bucket")
+        nf = MagicMock(type=pafs.FileType.NotFound)
+        get_file_info_calls = []
+
+        def record_get_file_info(paths):
+            get_file_info_calls.append(list(paths))
+            return [MagicMock(type=pafs.FileType.NotFound) for _ in paths]
+
+        mock_fs = MagicMock()
+        mock_fs.get_file_info.side_effect = record_get_file_info if lt7 else [[nf], [nf]]
+        mock_fs.create_dir = MagicMock()
+        mock_fs.open_output_stream.return_value = MagicMock()
+        oss_io.filesystem = mock_fs
+        oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
+        mock_fs.create_dir.assert_called_once()
+        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+        if lt7:
+            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
+        else:
+            expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
+        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+        if lt7:
+            for call_paths in get_file_info_calls:
+                for p in call_paths:
+                    self.assertFalse(
+                        p.startswith("test-bucket/"),
+                        "OSS+PyArrow<7 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
+                    )
+
+    def test_exists(self):
+        lt7 = _pyarrow_lt_7()
+        with tempfile.TemporaryDirectory(prefix="file_io_nonexistent_") as tmpdir:
+            file_io = LocalFileIO("file://" + tmpdir, Options({}))
+            missing_uri = "file://" + os.path.join(tmpdir, "nonexistent_xyz")
+            path_str = file_io.to_filesystem_path(missing_uri)
+            raised = None
+            infos = None
+            try:
+                infos = file_io.filesystem.get_file_info([path_str])
+            except OSError as e:
+                raised = e
+            if lt7:
+                if raised is not None:
+                    err = str(raised).lower()
+                    self.assertTrue("133" in err or "does not exist" in err or "not exist" in err, str(raised))
+                else:
+                    self.assertEqual(len(infos), 1)
+                    self.assertEqual(infos[0].type, pafs.FileType.NotFound)
+            else:
+                self.assertIsNone(raised)
+                self.assertEqual(len(infos), 1)
+                self.assertEqual(infos[0].type, pafs.FileType.NotFound)
+            self.assertFalse(file_io.exists(missing_uri))
+            with self.assertRaises(FileNotFoundError):
+                file_io.get_file_status(missing_uri)
+
     def test_local_filesystem_path_conversion(self):
-        """Test LocalFileSystem path conversion with various formats."""
-        file_io = FileIO("file:///tmp/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, LocalFileSystem)
+        file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
+        self.assertIsInstance(file_io, LocalFileIO)
 
         # Test file:// scheme
         self.assertEqual(file_io.to_filesystem_path("file:///tmp/path/to/file.txt"),
@@ -91,11 +168,9 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
     def test_windows_path_handling(self):
-        """Test Windows path handling (drive letters, file:// scheme)."""
-        file_io = FileIO("file:///tmp/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, LocalFileSystem)
+        file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
+        self.assertIsInstance(file_io, LocalFileIO)
 
-        # Windows absolute paths
         self.assertEqual(file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
         self.assertEqual(file_io.to_filesystem_path("C:/path/to/file.txt"),
@@ -111,17 +186,17 @@ class FileIOTest(unittest.TestCase):
                          "/C:/path/to/file.txt")
 
         # Windows path with S3FileSystem (should preserve)
-        s3_file_io = FileIO("s3://bucket/warehouse", {})
+        s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
 
     def test_path_normalization(self):
         """Test path normalization (multiple slashes)."""
-        file_io = FileIO("file:///tmp/warehouse", {})
+        file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
         self.assertEqual(file_io.to_filesystem_path("file://///tmp///path///file.txt"),
                          "/tmp/path/file.txt")
 
-        s3_file_io = FileIO("s3://bucket/warehouse", {})
+        s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("s3://my-bucket///path///to///file.txt"),
                          "my-bucket/path/to/file.txt")
 
@@ -129,7 +204,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_write_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             test_file_uri = f"file://{temp_dir}/overwrite_test.txt"
             expected_path = os.path.join(temp_dir, "overwrite_test.txt")
@@ -154,6 +229,338 @@ class FileIOTest(unittest.TestCase):
                 self.assertEqual(f.read(), "overwritten content")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_exists_does_not_catch_exception(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_exists_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            test_file = os.path.join(temp_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test")
+            self.assertTrue(file_io.exists(f"file://{test_file}"))
+            self.assertFalse(file_io.exists(f"file://{temp_dir}/nonexistent.txt"))
+
+            mock_path = MagicMock(spec=Path)
+            mock_path.exists.side_effect = OSError("Permission denied")
+            with patch.object(file_io, '_to_file', return_value=mock_path):
+                with self.assertRaises(OSError) as context:
+                    file_io.exists("file:///some/path")
+                self.assertIn("Permission denied", str(context.exception))
+
+            with patch('builtins.open', side_effect=OSError("Permission denied")):
+                with self.assertRaises(OSError):
+                    file_io.new_output_stream("file:///some/path/file.txt")
+
+            mock_path = MagicMock(spec=Path)
+            mock_path.is_dir.side_effect = OSError("Permission denied")
+            with patch.object(file_io, '_to_file', return_value=mock_path):
+                with self.assertRaises(OSError):
+                    file_io.check_or_mkdirs("file:///some/path")
+
+            with patch('builtins.open', side_effect=OSError("Permission denied")):
+                with self.assertRaises(OSError):
+                    file_io.write_file("file:///some/path", "content", overwrite=False)
+
+            with patch('builtins.open', side_effect=OSError("Permission denied")):
+                with self.assertRaises(OSError):
+                    file_io.copy_file("file:///src", "file:///dst", overwrite=False)
+
+            with patch.object(file_io, 'exists', return_value=True):
+                with patch.object(file_io, 'read_file_utf8', side_effect=OSError("Read error")):
+                    with self.assertRaises(OSError) as context:
+                        file_io.read_overwritten_file_utf8("file:///some/path")
+                    self.assertIn("Read error", str(context.exception))
+
+            # rename() catches OSError and returns False (consistent with Java implementation)
+            mock_src_path = MagicMock(spec=Path)
+            mock_dst_path = MagicMock(spec=Path)
+            mock_dst_path.parent = MagicMock()
+            mock_dst_path.parent.exists.return_value = True
+            mock_dst_path.exists.return_value = False
+            mock_src_path.rename.side_effect = OSError("Network error")
+            with patch.object(file_io, '_to_file', side_effect=[mock_src_path, mock_dst_path]):
+                # rename() catches OSError and returns False, doesn't raise
+                result = file_io.rename("file:///src", "file:///dst")
+                self.assertFalse(result, "rename() should return False when OSError occurs")
+
+            file_io.delete_quietly("file:///some/path")
+            file_io.delete_directory_quietly("file:///some/path")
+
+            oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+                OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+                OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+                OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+                OssOptions.OSS_IMPL.key(): 'legacy',
+            }))
+            mock_fs = MagicMock()
+            mock_fs.get_file_info.return_value = [
+                MagicMock(type=pafs.FileType.NotFound)]
+            oss_io.filesystem = mock_fs
+            self.assertFalse(oss_io.exists("oss://test-bucket/path/to/file.txt"))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_delete_non_empty_directory_raises_error(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            test_dir = os.path.join(temp_dir, "test_dir")
+            os.makedirs(test_dir)
+            test_file = os.path.join(test_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test")
+
+            with self.assertRaises(OSError) as context:
+                file_io.delete(f"file://{test_dir}", recursive=False)
+            self.assertIn("is not empty", str(context.exception))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_delete_returns_false_when_file_not_exists(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            result = file_io.delete(f"file://{temp_dir}/nonexistent.txt")
+            self.assertFalse(result, "delete() should return False when file does not exist")
+
+            result = file_io.delete(f"file://{temp_dir}/nonexistent_dir", recursive=False)
+            self.assertFalse(result, "delete() should return False when directory does not exist")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_mkdirs_raises_error_when_path_is_file(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_mkdirs_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            test_file = os.path.join(temp_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test")
+
+            with self.assertRaises(FileExistsError) as context:
+                file_io.mkdirs(f"file://{test_file}")
+            self.assertIn("is not a directory", str(context.exception))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_rename_returns_false_when_dst_exists(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_rename_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            src_file = os.path.join(temp_dir, "src.txt")
+            dst_file = os.path.join(temp_dir, "dst.txt")
+            with open(src_file, "w") as f:
+                f.write("src")
+            with open(dst_file, "w") as f:
+                f.write("dst")
+
+            result = file_io.rename(f"file://{src_file}", f"file://{dst_file}")
+            self.assertFalse(result)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_get_file_status_raises_error_when_file_not_exists(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_get_file_status_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            with self.assertRaises(FileNotFoundError) as context:
+                file_io.get_file_status(f"file://{temp_dir}/nonexistent.txt")
+            self.assertIn("does not exist", str(context.exception))
+
+            test_file = os.path.join(temp_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test content")
+            
+            file_info = file_io.get_file_status(f"file://{test_file}")
+            self.assertEqual(file_info.type, pafs.FileType.File)
+            self.assertIsNotNone(file_info.size)
+
+            with self.assertRaises(FileNotFoundError) as context:
+                file_io.get_file_size(f"file://{temp_dir}/nonexistent.txt")
+            self.assertIn("does not exist", str(context.exception))
+
+            with self.assertRaises(FileNotFoundError) as context:
+                file_io.is_dir(f"file://{temp_dir}/nonexistent_dir")
+            self.assertIn("does not exist", str(context.exception))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_copy_file(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_copy_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = LocalFileIO(warehouse_path, Options({}))
+
+            source_file = os.path.join(temp_dir, "source.txt")
+            target_file = os.path.join(temp_dir, "target.txt")
+            
+            with open(source_file, "w") as f:
+                f.write("source content")
+            
+            # Test 1: Raises FileExistsError when target exists and overwrite=False
+            with open(target_file, "w") as f:
+                f.write("target content")
+            
+            with self.assertRaises(FileExistsError) as context:
+                file_io.copy_file(f"file://{source_file}", f"file://{target_file}", overwrite=False)
+            self.assertIn("already exists", str(context.exception))
+            
+            with open(target_file, "r") as f:
+                self.assertEqual(f.read(), "target content")
+            
+            # Test 2: Overwrites when overwrite=True
+            file_io.copy_file(f"file://{source_file}", f"file://{target_file}", overwrite=True)
+            with open(target_file, "r") as f:
+                self.assertEqual(f.read(), "source content")
+            
+            # Test 3: Creates parent directory if it doesn't exist
+            target_file_in_subdir = os.path.join(temp_dir, "subdir", "target.txt")
+            file_io.copy_file(f"file://{source_file}", f"file://{target_file_in_subdir}", overwrite=False)
+            self.assertTrue(os.path.exists(target_file_in_subdir))
+            with open(target_file_in_subdir, "r") as f:
+                self.assertEqual(f.read(), "source content")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_try_to_write_atomic(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_try_write_atomic_test_")
+        try:
+            target_dir = os.path.join(temp_dir, "target_dir")
+            normal_file = os.path.join(temp_dir, "normal_file.txt")
+            
+            from pypaimon.filesystem.local_file_io import LocalFileIO
+            local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
+            os.makedirs(target_dir)
+            self.assertFalse(
+                local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                "LocalFileIO should return False when target is a directory")
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+            
+            os.remove(normal_file)
+            local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
+            self.assertFalse(
+                local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                "LocalFileIO should return False when target is a directory")
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_path_on_windows(self):
+        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
+            OssOptions.OSS_IMPL.key(): 'legacy',
+        }))
+        mock_fs = MagicMock()
+        mock_fs.get_file_info.return_value = [MagicMock(type=pafs.FileType.NotFound)]
+        mock_fs.create_dir = MagicMock()
+        mock_fs.open_output_stream.return_value = MagicMock()
+        mock_fs.move = MagicMock()
+        mock_fs.copy_file = MagicMock()
+        oss_io.filesystem = mock_fs
+
+        oss_io.new_output_stream("oss://test-bucket/db.db/tbl/bucket-0/data.parquet")
+        oss_io.rename("oss://test-bucket/db.db/tbl/old.parquet",
+                      "oss://test-bucket/db.db/tbl/new.parquet")
+        oss_io.copy_file("oss://test-bucket/db.db/tbl/src.parquet",
+                         "oss://test-bucket/db.db/tbl/dst.parquet")
+
+        for call in mock_fs.create_dir.call_args_list:
+            self.assertNotIn("\\", call[0][0], f"backslash in path: {call[0][0]}")
+
+
+class HdfsFileIOTest(unittest.TestCase):
+    """Cases for HDFS / ViewFS URI handling in PyArrowFileIO._initialize_hdfs_fs."""
+
+    def _make_hdfs_env(self, env_patch):
+        env_patch.setdefault('HADOOP_HOME', '/opt/hadoop')
+        env_patch.setdefault('HADOOP_CONF_DIR', '/opt/hadoop/etc/hadoop')
+        env_patch.setdefault('CLASSPATH', '')
+        env_patch.setdefault('LD_LIBRARY_PATH', '')
+        return env_patch
+
+    def _make_file_io(self):
+        file_io = PyArrowFileIO.__new__(PyArrowFileIO)
+        file_io.properties = Options({})
+        return file_io
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_viewfs_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('viewfs', 'clusterName')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_viewfs_without_netloc_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('viewfs', '')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_hdfs_with_port_uses_explicit_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('hdfs', 'namenode:8020')
+        mock_hadoop_fs.assert_called_once_with(host='namenode', port=8020, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_hdfs_ha_nameservice_without_port_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('hdfs', 'nameservice1')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    @patch('pypaimon.filesystem.pyarrow_file_io.subprocess.run')
+    @patch('pypaimon.filesystem.pyarrow_file_io.pafs.HadoopFileSystem')
+    def test_hdfs_without_netloc_uses_default_host(self, mock_hadoop_fs, mock_run):
+        mock_run.return_value = MagicMock(stdout='/opt/hadoop/share/hadoop/common/*')
+        mock_hadoop_fs.return_value = MagicMock()
+        with patch.dict(os.environ, self._make_hdfs_env({}), clear=True):
+            self._make_file_io()._initialize_hdfs_fs('hdfs', '')
+        mock_hadoop_fs.assert_called_once_with(host='default', port=0, user='hadoop')
+
+    def test_hdfs_missing_hadoop_home_raises(self):
+        with patch.dict(os.environ, {'HADOOP_CONF_DIR': '/opt/hadoop/etc/hadoop'}, clear=True):
+            with self.assertRaises(RuntimeError) as ctx:
+                self._make_file_io()._initialize_hdfs_fs('hdfs', 'namenode:8020')
+            self.assertIn('HADOOP_HOME', str(ctx.exception))
+
+    def test_hdfs_missing_hadoop_conf_dir_raises(self):
+        with patch.dict(os.environ, {'HADOOP_HOME': '/opt/hadoop'}, clear=True):
+            with self.assertRaises(RuntimeError) as ctx:
+                self._make_file_io()._initialize_hdfs_fs('hdfs', 'namenode:8020')
+            self.assertIn('HADOOP_CONF_DIR', str(ctx.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

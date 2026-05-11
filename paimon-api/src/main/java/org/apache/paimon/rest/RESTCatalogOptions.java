@@ -103,4 +103,38 @@ public class RESTCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription("REST Catalog DLF OSS endpoint.");
+
+    public static final ConfigOption<String> DLF_SIGNING_ALGORITHM =
+            ConfigOptions.key("dlf.signing-algorithm")
+                    .stringType()
+                    .defaultValue("default")
+                    .withDescription(
+                            "DLF signing algorithm. Options: 'default' (for default VPC endpoint), "
+                                    + "'openapi' (for DlfNext/2026-01-18). "
+                                    + "If not set, will be automatically selected based on endpoint host.");
+
+    public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
+            ConfigOptions.key("io-cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
+
+    public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
+            ConfigOptions.key("io-cache.whitelist-path")
+                    .stringType()
+                    .defaultValue("bucket,manifest,index")
+                    .withDescription(
+                            "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
+
+    public static final ConfigOption<String> IO_CACHE_POLICY =
+            ConfigOptions.key("io-cache.policy")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The table-level cache policy provided by the REST server, combined with: meta,read,write."
+                                    + "`meta`: meta cache is enabled for visiting files; "
+                                    + "`read`: cache is enabled when reading files; "
+                                    + "`write`: data is also cached when writing files; "
+                                    + "`none`: cache is all disabled.");
 }

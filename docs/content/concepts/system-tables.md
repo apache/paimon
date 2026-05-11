@@ -136,6 +136,49 @@ SELECT * FROM my_table$audit_log;
 */
 ```
 
+For primary key tables, you can enable the `table-read.sequence-number.enabled` option to include the `_SEQUENCE_NUMBER` field in the output.
+
+{{< tabs "audit-log-sequence-number" >}}
+
+{{< tab "Enable via ALTER TABLE" >}}
+```sql
+ALTER TABLE my_table SET ('table-read.sequence-number.enabled' = 'true');
+```
+{{< /tab >}}
+
+{{< tab "Enable via CREATE TABLE" >}}
+```sql
+CREATE TABLE my_table (
+    ...
+) WITH (
+    'table-read.sequence-number.enabled' = 'true'
+);
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
+```sql
+SELECT * FROM my_table$audit_log;
+
+/*
++------------------+--------------------+-----------------+-----------------+
+|     rowkind      | _SEQUENCE_NUMBER   |     column_0    |     column_1    |
++------------------+--------------------+-----------------+-----------------+
+|        +I        |                 0  |      ...        |      ...        |
++------------------+--------------------+-----------------+-----------------+
+|        -U        |                 0  |      ...        |      ...        |
++------------------+--------------------+-----------------+-----------------+
+|        +U        |                 1  |      ...        |      ...        |
++------------------+--------------------+-----------------+-----------------+
+3 rows in set
+*/
+```
+
+{{< hint info >}}
+The `table-read.sequence-number.enabled` option cannot be set via SQL hints.
+{{< /hint >}}
+
 ### Binlog Table
 
 You can query the binlog through binlog table. In the binlog system table, the update before and update after will be packed in one row.
@@ -155,6 +198,24 @@ SELECT * FROM T$binlog;
 +------------------+----------------------+-----------------------+
 |        -D        |       [col_0]        |       [col_1]         |
 +------------------+----------------------+-----------------------+
+*/
+```
+
+Similar to the audit_log table, you can also enable `table-read.sequence-number.enabled` to include `_SEQUENCE_NUMBER` in the binlog table output:
+
+```sql
+SELECT * FROM T$binlog;
+
+/*
++------------------+--------------------+----------------------+-----------------------+
+|     rowkind      | _SEQUENCE_NUMBER   |       column_0       |       column_1        |
++------------------+--------------------+----------------------+-----------------------+
+|        +I        |                 0  |       [col_0]        |       [col_1]         |
++------------------+--------------------+----------------------+-----------------------+
+|        +U        |                 1  | [col_0_ub, col_0_ua] | [col_1_ub, col_1_ua]  |
++------------------+--------------------+----------------------+-----------------------+
+|        -D        |                 2  |       [col_0]        |       [col_1]         |
++------------------+--------------------+----------------------+-----------------------+
 */
 ```
 
@@ -213,6 +274,26 @@ SELECT * FROM my_table$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 |       {2} |      0 | data-8b369068-0d37-4011-aa5... |         orc |         0 |     0 |            1 |                593 |     [b] |     [b] | {cnt=0, val=0, word=0} | {cnt=2, val=22, word=b} | {cnt=2, val=22, word=b} |       1691551246233 |       1691551246732 |2023-02-24T16:06:21.166|
 |       {1} |      0 | data-10abb5bc-0170-43ae-b6a... |         orc |         0 |     0 |            1 |                595 |     [a] |     [a] | {cnt=0, val=0, word=0} | {cnt=1, val=11, word=a} | {cnt=1, val=11, word=a} |       1691551246267 |       1691551246798 |2023-02-24T16:06:21.166|
 +-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+------------------------+-------------------------+-------------------------+---------------------+---------------------+-----------------------+
+3 rows in set
+*/
+```
+
+### File Key Ranges Table
+
+You can query the key ranges and file location of each data file through the file key ranges table.
+This is useful for diagnosing data distribution and Global Index coverage.
+
+```sql
+SELECT * FROM my_table$file_key_ranges;
+
+/*
++-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+--------------+
+| partition | bucket |                      file_path | file_format | schema_id | level | record_count | file_size_in_bytes | min_key | max_key | first_row_id |
++-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+--------------+
+|       {3} |      0 | data-8f64af95-29cc-4342-adc... |         orc |         0 |     0 |            1 |                593 |     [c] |     [c] |            1 |
+|       {2} |      0 | data-8b369068-0d37-4011-aa5... |         orc |         0 |     0 |            1 |                593 |     [b] |     [b] |            2 |
+|       {1} |      0 | data-10abb5bc-0170-43ae-b6a... |         orc |         0 |     0 |            1 |                595 |     [a] |     [a] |            3 |
++-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+--------------+
 3 rows in set
 */
 ```
@@ -351,11 +432,11 @@ You can query the partition files of the table.
 SELECT * FROM my_table$partitions;
 
 /*
-+-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
-| partition | record_count | file_size_in_bytes| file_count | last_update_time    | created_at          | created_by | updated_by | options |
-+-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
-| {1}       |            1 |               645 |          1 | 2024-06-24 10:25:57 | 2024-06-24 10:20:00 | admin      | test_user  | {}      |
-+-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+
+| partition | record_count | file_size_in_bytes| file_count | last_update_time    | created_at          | created_by | updated_by | options | total_buckets | done  |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+
+| {1}       |            1 |               645 |          1 | 2024-06-24 10:25:57 | 2024-06-24 10:20:00 | admin      | test_user  | {}      |             1 | false |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+---------------+-------+
 */
 ```
 

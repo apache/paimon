@@ -29,6 +29,8 @@ import java.util.Objects;
 /** Range represents from (inclusive) and to (inclusive). */
 public class Range implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
     public final long from;
     public final long to;
 
@@ -45,6 +47,10 @@ public class Range implements Serializable {
 
     public Range addOffset(long offset) {
         return new Range(from + offset, to + offset);
+    }
+
+    public boolean hasIntersection(Range range) {
+        return from <= range.to && to >= range.from;
     }
 
     public boolean isBefore(Range other) {

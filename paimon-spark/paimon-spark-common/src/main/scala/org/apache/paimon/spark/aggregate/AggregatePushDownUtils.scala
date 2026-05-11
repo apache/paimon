@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.aggregate
 
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.source.{DataSplit, ReadBuilder}
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
 import org.apache.paimon.table.source.PushDownUtils.minmaxAvailable
 import org.apache.paimon.types._
 
@@ -29,6 +29,7 @@ import org.apache.spark.sql.execution.datasources.v2.V2ColumnUtils.extractV2Colu
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.language.postfixOps
 
 object AggregatePushDownUtils {
 
@@ -64,18 +65,23 @@ object AggregatePushDownUtils {
       case None => return None
     }
 
-    if (!splits.forall(_.mergedRowCountAvailable())) {
+    if (!splits.forall(_.isInstanceOf[DataSplit])) {
+      return None
+    }
+    val dataSplits = splits.map(_.asInstanceOf[DataSplit])
+
+    if (!dataSplits.forall(_.mergedRowCount().isPresent)) {
       return None
     }
 
     val aggregator = new LocalAggregator(table)
     aggregator.initialize(aggregation)
-    splits.foreach(aggregator.update)
+    dataSplits.foreach(aggregator.update)
     Option(aggregator)
   }
 
-  private def generateSplits(readBuilder: ReadBuilder): mutable.Seq[DataSplit] = {
-    readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
+  private def generateSplits(readBuilder: ReadBuilder): mutable.Seq[Split] = {
+    readBuilder.newScan().plan().splits().asScala
   }
 
   private def extractMinMaxColumns(

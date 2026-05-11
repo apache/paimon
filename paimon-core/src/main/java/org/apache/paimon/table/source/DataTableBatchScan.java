@@ -31,14 +31,20 @@ import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.types.DataType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataTableBatchScan.class);
 
     private StartingScanner startingScanner;
     private boolean hasNext;
@@ -90,9 +96,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     @Override
-    public TableScan.Plan plan() {
-        authQuery();
-
+    protected TableScan.Plan planWithoutAuth() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -122,7 +126,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (pushDownLimit == null) {
+        if (pushDownLimit == null || snapshotReader.hasNonPartitionFilter()) {
             return Optional.empty();
         }
 
@@ -133,20 +137,26 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         long scannedRowCount = 0;
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
 
+        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
         List<Split> limitedSplits = new ArrayList<>();
-        for (DataSplit dataSplit : splits) {
-            if (dataSplit.rawConvertible()) {
-                long partialMergedRowCount = dataSplit.partialMergedRowCount();
-                limitedSplits.add(dataSplit);
-                scannedRowCount += partialMergedRowCount;
+        for (Split split : splits) {
+            OptionalLong mergedRowCount = split.mergedRowCount();
+            if (mergedRowCount.isPresent()) {
+                limitedSplits.add(split);
+                scannedRowCount += mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit) {
                     SnapshotReader.Plan newPlan =
                             new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                    LOG.info(
+                            "Limit pushdown applied successfully. Original splits: {}, Limited splits: {}, Pushdown limit: {}",
+                            splits.size(),
+                            limitedSplits.size(),
+                            pushDownLimit);
                     return Optional.of(new ScannedResult(newPlan));
                 }
             }
@@ -183,7 +193,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }

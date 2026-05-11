@@ -18,6 +18,8 @@ from pypaimon.common.options.config_options import ConfigOptions
 
 
 class OssOptions:
+    OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("jindo").with_description(
+        "OSS filesystem implementation: legacy or jindo")
     OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
         "OSS access key ID")
     OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
@@ -74,7 +76,68 @@ class CatalogOptions:
         "dlf.token-ecs-role-name").string_type().no_default_value().with_description("DLF ECS role name")
     DLF_TOKEN_ECS_METADATA_URL = ConfigOptions.key(
         "dlf.token-ecs-metadata-url").string_type().no_default_value().with_description("DLF ECS metadata URL")
+    DLF_SIGNING_ALGORITHM = ConfigOptions.key(
+        "dlf.signing-algorithm").string_type().default_value("default").with_description(
+        "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
+        "'openapi' (for DlfNext/2026-01-18). "
+        "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class SecurityOptions:
+    KERBEROS_PRINCIPAL = (
+        ConfigOptions.key("security.kerberos.login.principal")
+        .string_type()
+        .no_default_value()
+        .with_description("Kerberos principal name associated with the keytab")
+    )
+    KERBEROS_KEYTAB = (
+        ConfigOptions.key("security.kerberos.login.keytab")
+        .string_type()
+        .no_default_value()
+        .with_description("Absolute path to a Kerberos keytab file that contains the user credentials")
+    )
+    KERBEROS_USE_TICKET_CACHE = (
+        ConfigOptions.key("security.kerberos.login.use-ticket-cache")
+        .boolean_type()
+        .default_value(True)
+        .with_description("Whether to read from the Kerberos ticket cache")
+    )
+
+
+class FuseOptions:
+    """FUSE configuration options."""
+
+    FUSE_ENABLED = (
+        ConfigOptions.key("fuse.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable FUSE local path mapping")
+    )
+
+    FUSE_ROOT = (
+        ConfigOptions.key("fuse.root")
+        .string_type()
+        .no_default_value()
+        .with_description("FUSE mounted local root path, e.g., /mnt/fuse/warehouse")
+    )
+
+    FUSE_VALIDATION_MODE = (
+        ConfigOptions.key("fuse.validation-mode")
+        .string_type()
+        .default_value("strict")
+        .with_description("Validation mode: strict, warn, or none")
+    )
+
+    FUSE_MODE = (
+        ConfigOptions.key("fuse.mode")
+        .string_type()
+        .default_value("pvfs")
+        .with_description(
+            "FUSE path mode: 'pvfs' uses database/table logical names, "
+            "'raw' uses URI path segments directly"
+        )
+    )

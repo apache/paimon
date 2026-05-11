@@ -21,7 +21,8 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN}
+import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
+import org.apache.paimon.predicate.FullTextSearch
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.types.RowType
 
@@ -52,6 +53,8 @@ abstract class PaimonBaseScanBuilder
   protected var pushedDataFilters: Array[Predicate] = Array.empty
   protected var pushedLimit: Option[Int] = None
   protected var pushedTopN: Option[TopN] = None
+  protected var pushedVectorSearch: Option[VectorSearch] = None
+  protected var pushedFullTextSearch: Option[FullTextSearch] = None
 
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
@@ -66,7 +69,10 @@ abstract class PaimonBaseScanBuilder
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
 
     var newRowType = rowType
-    if (coreOptions.rowTrackingEnabled() && coreOptions.dataEvolutionEnabled()) {
+    if (
+      coreOptions.rowTrackingEnabled() && coreOptions
+        .dataEvolutionEnabled() && !rowType.containsField(SpecialFields.ROW_ID.name())
+    ) {
       newRowType = SpecialFields.rowTypeWithRowTracking(newRowType);
     }
     val converter = SparkV2FilterConverter(newRowType)

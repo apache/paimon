@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataField;
@@ -174,6 +175,14 @@ public class DefaultValueRow implements InternalRow {
             return row.getArray(pos);
         }
         return defaultValueRow.getArray(pos);
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        if (!row.isNullAt(pos)) {
+            return row.getVector(pos);
+        }
+        return defaultValueRow.getVector(pos);
     }
 
     @Override

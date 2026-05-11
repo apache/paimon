@@ -117,7 +117,7 @@ abstract class abstractInnerTableDataWrite[T] extends InnerTableDataWrite[T] wit
   /** For batch write, batchId is None, for streaming write, batchId is the current batch id (>= 0). */
   val batchId: Option[Long]
 
-  private val needFullCompaction: Boolean = {
+  private lazy val needFullCompaction: Boolean = {
     fullCompactionDeltaCommits match {
       case Some(deltaCommits) if deltaCommits > 0 =>
         batchId match {

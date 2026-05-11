@@ -34,7 +34,7 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.apache.kerby:kerby-asn1:1.0.1
 - org.apache.kerby:kerby-util:1.0.1
 - com.fasterxml.woodstox:woodstox-core:5.3.0
-- org.xerial.snappy:snappy-java:1.1.8.2
+- org.xerial.snappy:snappy-java:1.1.10.8
 - org.apache.hadoop:hadoop-cos:3.3.5
 - com.qcloud:cos_api-bundle:5.6.69
 - com.qcloud:cos_api:5.6.139

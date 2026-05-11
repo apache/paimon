@@ -17,6 +17,7 @@ limitations under the License.
 """
 import logging
 import time
+import random
 from datetime import date
 from decimal import Decimal
 from unittest.mock import Mock
@@ -36,7 +37,6 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.row_kind import RowKind
@@ -128,6 +128,71 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         pd.testing.assert_frame_equal(
             actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
 
+    def test_dynamic_partition_overwrite(self):
+        pa_schema = pa.schema([
+            ('f0', pa.string()),
+            ('f1', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['f0'])
+        self.rest_catalog.create_table('default.test_dynamic_overwrite', schema, False)
+        table = self.rest_catalog.get_table('default.test_dynamic_overwrite')
+        read_builder = table.new_read_builder()
+
+        # Write initial non-null and null partitions
+        self._batch_write(table, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['apple', 'banana', 'cherry'],
+        }))
+
+        # Dynamic overwrite partition f0='a' only; 'b' and null untouched
+        self._batch_overwrite(table, pd.DataFrame({
+            'f0': ['a'],
+            'f1': ['watermelon'],
+        }))
+
+        self._assert_table_equals(read_builder, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['watermelon', 'banana', 'cherry'],
+        }), sort_by='f0')
+
+        # Dynamic overwrite partitions f0='a' and f0=None; 'b' untouched
+        self._batch_overwrite(table, pd.DataFrame({
+            'f0': ['a', None],
+            'f1': ['mango', 'grape'],
+        }))
+
+        self._assert_table_equals(read_builder, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['mango', 'banana', 'grape'],
+        }), sort_by='f0')
+
+    def _batch_write(self, table, df):
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _batch_overwrite(self, table, df, partition=None):
+        write_builder = table.new_batch_write_builder().overwrite(partition)
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _assert_table_equals(self, read_builder, expected_df, sort_by=None):
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df = table_read.to_pandas(table_scan.plan().splits())
+        if sort_by:
+            actual_df = actual_df.sort_values(by=sort_by)
+        pd.testing.assert_frame_equal(
+            actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
+
     def test_full_data_types(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int8()),
@@ -143,7 +208,9 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             ('f10', pa.decimal128(10, 2)),
             ('f11', pa.date32()),
         ])
-        schema = Schema.from_pyarrow_schema(simple_pa_schema)
+        stats_enabled = random.random() < 0.5
+        options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, options=options)
         self.rest_catalog.create_table('default.test_full_data_types', schema, False)
         table = self.rest_catalog.get_table('default.test_full_data_types')
 
@@ -177,20 +244,31 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         self.assertEqual(actual_data, expect_data)
 
         # to test GenericRow ability
-        latest_snapshot = SnapshotManager(table).get_latest_snapshot()
-        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
             drop_stats=False)
-        min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
-                                                            table.fields).values
-        max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
-                                                            table.fields).values
-        expected_min_values = [col[0].as_py() for col in expect_data]
-        expected_max_values = [col[1].as_py() for col in expect_data]
-        self.assertEqual(min_value_stats, expected_min_values)
-        self.assertEqual(max_value_stats, expected_max_values)
+        # Python write does not produce value stats
+        if stats_enabled:
+            self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
+            min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                                table.fields).values
+            max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                                table.fields).values
+            expected_min_values = [col[0].as_py() for col in expect_data]
+            expected_max_values = [col[1].as_py() for col in expect_data]
+            self.assertEqual(min_value_stats, expected_min_values)
+            self.assertEqual(max_value_stats, expected_max_values)
+        else:
+            self.assertEqual(manifest_entries[0].file.value_stats_cols, [])
+            min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
+                                                                []).values
+            max_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.max_values.data,
+                                                                []).values
+            self.assertEqual(min_value_stats, [])
+            self.assertEqual(max_value_stats, [])
 
     def test_mixed_add_and_delete_entries_same_partition(self):
         """Test record_count calculation with mixed ADD/DELETE entries in same partition."""
@@ -458,7 +536,8 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         self.assertEqual(result.to_dict(), test_df.to_dict())
 
     def test_append_only_reader_with_filter(self):
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        options = {'metadata.stats-mode': 'full'}
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options=options)
         self.rest_catalog.create_table('default.test_append_only_filter', schema, False)
         table = self.rest_catalog.get_table('default.test_append_only_filter')
         self._write_test_table(table)
@@ -756,7 +835,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1

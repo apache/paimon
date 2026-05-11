@@ -21,6 +21,8 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
 
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,7 @@ import java.util.List;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomDeletionVectorIndexFile;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for IndexManifestFileHandler. */
 public class IndexManifestFileHandlerTest {
@@ -113,5 +116,114 @@ public class IndexManifestFileHandlerTest {
         assertThat(entries.contains(entry2)).isFalse();
         assertThat(entries.contains(entry3)).isTrue();
         assertThat(entries.contains(entry4)).isTrue();
+    }
+
+    @Test
+    public void testGlobalIndexOverlappingRangeRejectedWhenPreviousFileKept() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler indexManifestFileHandler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
+        String manifestFileName = indexManifestFileHandler.write(null, Arrays.asList(previous));
+
+        IndexManifestEntry added = globalIndexEntry("new-index", 50, 149, 1);
+        assertThatThrownBy(
+                        () ->
+                                indexManifestFileHandler.write(
+                                        manifestFileName, Arrays.asList(added)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("prev-index")
+                .hasMessageContaining("new-index")
+                .hasMessageContaining("overlapping row range");
+    }
+
+    @Test
+    public void testGlobalIndexOverlappingRangeAllowedAfterDelete() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler indexManifestFileHandler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
+        String manifestFileName = indexManifestFileHandler.write(null, Arrays.asList(previous));
+
+        IndexManifestEntry added = globalIndexEntry("new-index", 50, 149, 1);
+        String newManifestFileName =
+                indexManifestFileHandler.write(
+                        manifestFileName, Arrays.asList(previous.toDeleteEntry(), added));
+
+        List<IndexManifestEntry> entries = indexManifestFile.read(newManifestFileName);
+        assertThat(entries).containsExactly(added);
+    }
+
+    @Test
+    public void testGlobalIndexOverlappingRangeAllowedForDifferentFieldId() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler indexManifestFileHandler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
+        String manifestFileName = indexManifestFileHandler.write(null, Arrays.asList(previous));
+
+        IndexManifestEntry added = globalIndexEntry("new-index", 50, 149, 2);
+        String newManifestFileName =
+                indexManifestFileHandler.write(manifestFileName, Arrays.asList(added));
+
+        List<IndexManifestEntry> entries = indexManifestFile.read(newManifestFileName);
+        assertThat(entries).containsExactlyInAnyOrder(previous, added);
+    }
+
+    @Test
+    public void testGlobalIndexNonOverlappingRangeAllowedForSameFieldId() throws Exception {
+        TestAppendFileStore fileStore =
+                TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+
+        IndexManifestFile indexManifestFile = createIndexManifestFile(fileStore);
+        IndexManifestFileHandler indexManifestFileHandler =
+                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+
+        IndexManifestEntry previous = globalIndexEntry("prev-index", 0, 99, 1);
+        String manifestFileName = indexManifestFileHandler.write(null, Arrays.asList(previous));
+
+        IndexManifestEntry added = globalIndexEntry("new-index", 100, 199, 1);
+        String newManifestFileName =
+                indexManifestFileHandler.write(manifestFileName, Arrays.asList(added));
+
+        List<IndexManifestEntry> entries = indexManifestFile.read(newManifestFileName);
+        assertThat(entries).containsExactlyInAnyOrder(previous, added);
+    }
+
+    private IndexManifestFile createIndexManifestFile(TestAppendFileStore fileStore) {
+        return new IndexManifestFile.Factory(
+                        fileStore.fileIO(),
+                        FileFormat.manifestFormat(fileStore.options()),
+                        "zstd",
+                        fileStore.pathFactory(),
+                        null)
+                .create();
+    }
+
+    private IndexManifestEntry globalIndexEntry(
+            String fileName, long rowRangeStart, long rowRangeEnd, int indexFieldId) {
+        return new IndexManifestEntry(
+                FileKind.ADD,
+                BinaryRow.EMPTY_ROW,
+                0,
+                new IndexFileMeta(
+                        "btree",
+                        fileName,
+                        1L,
+                        rowRangeEnd - rowRangeStart + 1,
+                        new GlobalIndexMeta(rowRangeStart, rowRangeEnd, indexFieldId, null, null),
+                        null));
     }
 }

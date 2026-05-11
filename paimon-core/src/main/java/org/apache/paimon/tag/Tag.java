@@ -58,7 +58,7 @@ public class Tag extends Snapshot {
 
     @JsonCreator
     public Tag(
-            @JsonProperty(FIELD_VERSION) @Nullable Integer version,
+            @JsonProperty(FIELD_VERSION) int version,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -73,9 +73,8 @@ public class Tag extends Snapshot {
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
-            @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets,
-            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) @Nullable Long totalRecordCount,
-            @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
+            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) long totalRecordCount,
+            @JsonProperty(FIELD_DELTA_RECORD_COUNT) long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
@@ -98,7 +97,6 @@ public class Tag extends Snapshot {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
@@ -120,11 +118,6 @@ public class Tag extends Snapshot {
         return tagTimeRetained;
     }
 
-    @Override
-    public String toJson() {
-        return JsonSerdeUtil.toJson(this);
-    }
-
     public static Tag fromSnapshotAndTagTtl(
             Snapshot snapshot, Duration tagTimeRetained, LocalDateTime tagCreateTime) {
         return new Tag(
@@ -142,7 +135,6 @@ public class Tag extends Snapshot {
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
-                snapshot.logOffsets(),
                 snapshot.totalRecordCount(),
                 snapshot.deltaRecordCount(),
                 snapshot.changelogRecordCount(),
@@ -170,7 +162,6 @@ public class Tag extends Snapshot {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,

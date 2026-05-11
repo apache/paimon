@@ -30,6 +30,7 @@ import org.apache.paimon.utils.LongCounter;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /** {@link RollingFileWriterImpl} for data files containing {@link InternalRow}. */
 public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow, DataFileMeta> {
@@ -41,7 +42,7 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             long targetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
-            LongCounter seqNumCounter,
+            Supplier<LongCounter> seqNumCounterSupplier,
             String fileCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,
@@ -58,7 +59,7 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                                 pathFactory.newPath(),
                                 writeSchema,
                                 schemaId,
-                                seqNumCounter,
+                                seqNumCounterSupplier,
                                 fileIndexOptions,
                                 fileSource,
                                 asyncFileWrite,

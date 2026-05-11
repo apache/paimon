@@ -30,7 +30,7 @@ Chain table is a new capability for primary key tables that transforms how you p
 Imagine a scenario where you periodically store a full snapshot of data (for example, once a day), even 
 though only a small portion changes between snapshots. ODS binlog dump is a typical example of this pattern.
 
-Taking a daily binlog dump job as an example. A batch job merges yesterday’s full dataset with today’s 
+Taking a daily binlog dump job as an example. A batch job merges yesterday's full dataset with today's
 incremental changes to produce a new full dataset. This approach has two clear drawbacks:
 * Full computation: Merge operation includes all data, and it will involve shuffle, which results in poor performance.
 * Full storage: Store a full set of data every day, and the changed data usually accounts for a very small proportion.
@@ -88,6 +88,7 @@ Notice that:
 - Chain table should ensure that the schema of each branch is consistent.
 - Only spark support now, flink will be supported later.
 - Chain compact is not supported for now, and it will be supported later.
+- Deletion vector is not supported for chain table.
 
 After creating a chain table, you can read and write data in the following ways.
 
@@ -146,3 +147,62 @@ you will get the following result:
 | 2 |   1|   1 |               
 +---+----+-----+ 
 ```
+
+## Group Partition
+
+In real-world scenarios, a table often has multiple partition dimensions. For example, data may be
+partitioned by both `region` and `date`. In such cases, different regions are independent data silos —
+each should maintain its own chain independently rather than sharing one global chain across all regions.
+
+Paimon supports this pattern via **group partition**: partition keys are divided into two parts:
+- **Group partition keys** (prefix fields): Dimensions that identify independent data silos (e.g., `region`).
+  Each distinct combination of group partition values forms its own independent chain.
+- **Chain partition keys** (suffix fields): Dimensions that form the time-ordered chain within a group
+  (e.g., `date`).
+
+Use `chain-table.chain-partition-keys` to specify the chain dimension. This value must be a
+**contiguous suffix** of the table's partition keys. Partition fields before it automatically become the
+group dimension. If this option is not set, all partitions belong to a single implicit group (the
+default behavior for single-dimension partitioned tables).
+
+Consider an example where the table is partitioned by `region` and `date`, and you want each region to
+have its own chain:
+
+```sql
+CREATE TABLE default.t (
+    `t1` string ,
+    `t2` string ,
+    `t3` string
+) PARTITIONED BY (`region` string, `date` string)
+TBLPROPERTIES (
+  'chain-table.enabled' = 'true',
+  'primary-key' = 'region,date,t1',
+  'sequence.field' = 't2',
+  'bucket-key' = 't1',
+  'bucket' = '2',
+  'partition.timestamp-pattern' = '$date',
+  'partition.timestamp-formatter' = 'yyyyMMdd',
+  -- specify that only `date` is the chain dimension; `region` becomes the group dimension
+  'chain-table.chain-partition-keys' = 'date'
+);
+```
+
+With this configuration:
+- Partition keys: `[region, date]`
+- Group partition keys: `[region]` — CN and US each have their own independent chain
+- Chain partition keys: `[date]` — time-ordered chain within each region
+
+When reading a partition like `(region='CN', date='20250811')`, Paimon finds the nearest earlier
+snapshot partition **within the same region** (e.g., `(region='CN', date='20250810')`) as the chain
+anchor, and merges forward through the delta data for the CN group only. The US group is resolved
+independently using its own anchor.
+
+For hourly partitioned tables with a regional dimension, you can set both `dt` and `hour` as chain
+partition keys:
+
+```sql
+'chain-table.chain-partition-keys' = 'dt,hour'
+```
+
+This treats `(dt, hour)` as the composite chain dimension and everything before it (e.g., `region`) as
+the group dimension.

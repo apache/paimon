@@ -20,14 +20,19 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link NullFalseLeafBinaryFunction} to eval is null. */
+/** A {@link LeafBinaryFunction} to eval is null. */
 public class IsNull extends LeafUnaryFunction {
+
+    public static final String NAME = "IS_NULL";
 
     public static final IsNull INSTANCE = new IsNull();
 
+    @JsonCreator
     private IsNull() {}
 
     @Override
@@ -48,5 +53,10 @@ public class IsNull extends LeafUnaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitIsNull(fieldRef);
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

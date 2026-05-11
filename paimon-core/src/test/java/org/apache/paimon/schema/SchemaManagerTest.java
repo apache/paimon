@@ -40,7 +40,10 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -458,6 +461,51 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testDropPrimaryKeyOnEmptyTable() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        // drop primary keys on empty table should succeed
+        manager.commitChanges(SchemaChange.dropPrimaryKey());
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        assertThat(table.schema().primaryKeys()).isEmpty();
+    }
+
+    @Test
+    public void testDropPrimaryKeyOnNonEmptyTable() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>(options);
+        tableOptions.put("bucket", "1");
+        Schema pkSchema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        primaryKeys,
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(pkSchema);
+
+        // write data to create a snapshot
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // drop primary keys on non-empty table should fail
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropPrimaryKey()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary keys on a non-empty table.");
+    }
+
+    @Test
     public void testAddAndDropNestedColumns() throws Exception {
         RowType innerType =
                 RowType.of(
@@ -790,5 +838,105 @@ public class SchemaManagerTest {
         manager.commitChanges(SchemaChange.setOption(DELETION_VECTORS_ENABLED.key(), "true"));
         table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
         assertThat(table.options().get(DELETION_VECTORS_ENABLED.key())).isEqualTo("true");
+    }
+
+    @Test
+    public void testRollbackSchemaSuccess() throws Exception {
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+        long firstSchemaId = manager.latest().get().id();
+
+        manager.commitChanges(SchemaChange.setOption("aa", "bb"));
+        long secondSchemaId = manager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        manager.commitChanges(SchemaChange.setOption("cc", "dd"));
+        long thirdSchemaId = manager.latest().get().id();
+        assertThat(thirdSchemaId).isEqualTo(firstSchemaId + 2);
+
+        // rollback to first schema
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), path, null, null, null);
+        TagManager tagManager = new TagManager(LocalFileIO.create(), path);
+        ChangelogManager changelogManager = new ChangelogManager(LocalFileIO.create(), path, null);
+        manager.rollbackTo(firstSchemaId, snapshotManager, tagManager, changelogManager);
+
+        assertThat(manager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(manager.schemaExists(secondSchemaId)).isFalse();
+        assertThat(manager.schemaExists(thirdSchemaId)).isFalse();
+    }
+
+    @Test
+    public void testRollbackSchemaFailedDueToSnapshotReference() throws Exception {
+        Schema appendOnlySchema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(appendOnlySchema);
+        long firstSchemaId = manager.latest().get().id();
+
+        // write data to create a snapshot referencing firstSchemaId
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // evolve schema
+        manager.commitChanges(SchemaChange.setOption("aa", "bb"));
+        long secondSchemaId = manager.latest().get().id();
+
+        // write data to create a snapshot referencing secondSchemaId
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        write = table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(2, 20L, BinaryString.fromString("banana")));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        // rollback to first schema should fail because snapshot references secondSchemaId
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), tableRoot, null, null, null);
+        TagManager tagManager = new TagManager(LocalFileIO.create(), tableRoot);
+        ChangelogManager changelogManager =
+                new ChangelogManager(LocalFileIO.create(), tableRoot, null);
+        assertThatThrownBy(
+                        () ->
+                                manager.rollbackTo(
+                                        firstSchemaId,
+                                        snapshotManager,
+                                        tagManager,
+                                        changelogManager))
+                .hasMessageContaining("Cannot rollback to schema " + firstSchemaId)
+                .hasMessageContaining(
+                        "schema "
+                                + secondSchemaId
+                                + " is still referenced by snapshots/tags/changelogs");
+    }
+
+    @Test
+    public void testRollbackSchemaNotExist() throws Exception {
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.rollbackTo(
+                                        999,
+                                        new SnapshotManager(
+                                                LocalFileIO.create(), path, null, null, null),
+                                        new TagManager(LocalFileIO.create(), path),
+                                        new ChangelogManager(LocalFileIO.create(), path, null)))
+                .hasMessageContaining("Schema 999 does not exist");
     }
 }

@@ -19,7 +19,8 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
@@ -32,14 +33,13 @@ public class VectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    // float[] or byte[]
-    private final Object vector;
+    private final float[] vector;
     private final String fieldName;
     private final int limit;
 
     @Nullable private RoaringNavigableMap64 includeRowIds;
 
-    public VectorSearch(Object vector, int limit, String fieldName) {
+    public VectorSearch(float[] vector, int limit, String fieldName) {
         if (vector == null) {
             throw new IllegalArgumentException("Search cannot be null");
         }
@@ -54,8 +54,7 @@ public class VectorSearch implements Serializable {
         this.fieldName = fieldName;
     }
 
-    // float[] or byte[]
-    public Object vector() {
+    public float[] vector() {
         return vector;
     }
 
@@ -76,7 +75,23 @@ public class VectorSearch implements Serializable {
         return this;
     }
 
-    public Optional<GlobalIndexResult> visit(GlobalIndexReader visitor) {
+    public VectorSearch offsetRange(long from, long to) {
+        if (includeRowIds != null) {
+            RoaringNavigableMap64 range = new RoaringNavigableMap64();
+            range.addRange(new Range(from, to));
+            RoaringNavigableMap64 and64 = RoaringNavigableMap64.and(range, includeRowIds);
+            final RoaringNavigableMap64 roaringNavigableMap64Offset = new RoaringNavigableMap64();
+            for (long rowId : and64) {
+                roaringNavigableMap64Offset.add(rowId - from);
+            }
+            VectorSearch target = new VectorSearch(vector, limit, fieldName);
+            target.withIncludeRowIds(roaringNavigableMap64Offset);
+            return target;
+        }
+        return this;
+    }
+
+    public Optional<ScoredGlobalIndexResult> visit(GlobalIndexReader visitor) {
         return visitor.visitVectorSearch(this);
     }
 

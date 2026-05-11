@@ -66,11 +66,3 @@ RESTCatalog supports multiple access authentication methods, including the follo
 ## REST Open API
 
 See [REST API]({{< ref "concepts/rest/rest-api" >}}).
-
-## REST Java API
-
-See [REST Java API]({{< ref "program-api/rest-api" >}}).
-
-## REST Python API
-
-See [REST Python API]({{< ref "program-api/python-api" >}}).

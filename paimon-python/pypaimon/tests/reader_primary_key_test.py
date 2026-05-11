@@ -26,7 +26,6 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class PkReaderTest(unittest.TestCase):
@@ -271,6 +270,103 @@ class PkReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
+    def _assert_value_only_projection_works(self, file_format: str, table_suffix: str):
+        # Two commits force the split through the merge path. The merge
+        # reader still needs the PK column to assemble its key, even
+        # though the user-visible projection drops it — regress the
+        # case where narrowing to value-only fields broke the file
+        # column lookup.
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '2', 'file.format': file_format})
+        self.catalog.create_table(
+            'default.test_pk_projection_no_pk_' + table_suffix, schema, False)
+        table = self.catalog.get_table(
+            'default.test_pk_projection_no_pk_' + table_suffix)
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['behavior'])
+        actual = self._read_test_table(read_builder)
+        expected = self.expected.select(['behavior'])
+        # Projection drops PKs so we can only compare bag semantics.
+        self.assertEqual(
+            sorted([r['behavior'] for r in actual.to_pylist()],
+                   key=lambda v: '' if v is None else v),
+            sorted([r['behavior'] for r in expected.to_pylist()],
+                   key=lambda v: '' if v is None else v))
+
+    def test_pk_reader_with_projection_excluding_pk(self):
+        self._assert_value_only_projection_works('parquet', 'parquet')
+
+    def test_pk_reader_with_projection_excluding_pk_orc(self):
+        self._assert_value_only_projection_works('orc', 'orc')
+
+    def test_pk_reader_with_projection_excluding_pk_avro(self):
+        # Avro path resolves DataField names through ``full_fields_map``
+        # built from ``self.read_fields``; the alias-safe lookup must also
+        # cover the bare PK name (``user_id``) the file actually stores.
+        self._assert_value_only_projection_works('avro', 'avro')
+
+    def test_pk_reader_with_limit(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_limit', schema, False)
+        table = self.catalog.get_table('default.test_pk_limit')
+
+        num_commits = 5
+        rows_per_commit = 25
+
+        for commit_idx in range(num_commits):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+
+            start_id = commit_idx * rows_per_commit
+            end_id = start_id + rows_per_commit
+
+            if commit_idx > 0:
+                start_id -= 10
+
+            batch = pa.Table.from_pydict({
+                'user_id': list(range(start_id, end_id)),
+                'item_id': [1000 + i for i in range(start_id, end_id)],
+                'behavior': [f'val-{i}' for i in range(start_id, end_id)],
+                'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(start_id, end_id)],
+            }, schema=self.pa_schema)
+
+            writer.write_arrow(batch)
+            commit_messages = writer.prepare_commit()
+            commit = write_builder.new_commit()
+            commit.commit(commit_messages)
+            writer.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        all_splits = table_scan.plan().splits()
+        merge_splits = [s for s in all_splits if not s.raw_convertible]
+        self.assertGreater(
+            len(merge_splits), 0,
+            "Should have at least one merge split to test limit with merge scenario")
+
+        total_unique_rows = 125
+        for limit in [5, 10, 20, 50]:
+            read_builder = table.new_read_builder().with_limit(limit)
+            table_read = read_builder.new_read()
+            table_scan = read_builder.new_scan()
+            splits = table_scan.plan().splits()
+            self.assertGreater(
+                len(splits), 0,
+                f"with_limit({limit}) should not produce empty splits for PK table")
+            result = table_read.to_arrow(splits)
+            row_count = result.num_rows if result is not None else 0
+            self.assertEqual(
+                row_count, total_unique_rows,
+                f"with_limit({limit}) should return all rows for PK table "
+                f"(read-level limit not yet implemented)")
+
     def test_incremental_timestamp(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
@@ -281,7 +377,7 @@ class PkReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
@@ -328,7 +424,7 @@ class PkReaderTest(unittest.TestCase):
             table_write.close()
             table_commit.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
         t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
 
@@ -354,14 +450,14 @@ class PkReaderTest(unittest.TestCase):
 
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
-        manifest_list_manager = table_scan.starting_scanner.manifest_list_manager
+        manifest_list_manager = table_scan.file_scanner.manifest_list_manager
         manifest_files = manifest_list_manager.read_all(latest_snapshot)
 
-        manifest_file_manager = table_scan.starting_scanner.manifest_file_manager
+        manifest_file_manager = table_scan.file_scanner.manifest_file_manager
         creation_times_found = []
         for manifest_file_meta in manifest_files:
             entries = manifest_file_manager.read(manifest_file_meta.file_name, drop_stats=False)
@@ -422,3 +518,107 @@ class PkReaderTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         return table_read.to_arrow(splits)
+
+    def test_concurrent_writes_with_retry(self):
+        """Test concurrent writes to verify retry mechanism works correctly for PK tables."""
+        import threading
+
+        # Run the test 3 times to verify stability
+        iter_num = 3
+        for test_iteration in range(iter_num):
+            # Create a unique table for each iteration
+            table_name = f'default.test_pk_concurrent_writes_{test_iteration}'
+            schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                                partition_keys=['dt'],
+                                                primary_keys=['user_id', 'dt'],
+                                                options={'bucket': '2'})
+            self.catalog.create_table(table_name, schema, False)
+            table = self.catalog.get_table(table_name)
+
+            write_results = []
+            write_errors = []
+
+            def write_data(thread_id, start_user_id):
+                """Write data in a separate thread."""
+                try:
+                    threading.current_thread().name = f"Iter{test_iteration}-Thread-{thread_id}"
+                    write_builder = table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
+
+                    # Create unique data for this thread
+                    data = {
+                        'user_id': list(range(start_user_id, start_user_id + 5)),
+                        'item_id': [1000 + i for i in range(start_user_id, start_user_id + 5)],
+                        'behavior': [f'thread{thread_id}_{i}' for i in range(5)],
+                        'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(5)],
+                    }
+                    pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+
+                    table_write.write_arrow(pa_table)
+                    commit_messages = table_write.prepare_commit()
+
+                    table_commit.commit(commit_messages)
+                    table_write.close()
+                    table_commit.close()
+
+                    write_results.append({
+                        'thread_id': thread_id,
+                        'start_user_id': start_user_id,
+                        'success': True
+                    })
+                except Exception as e:
+                    write_errors.append({
+                        'thread_id': thread_id,
+                        'error': str(e)
+                    })
+
+            # Create and start multiple threads
+            threads = []
+            num_threads = 10
+            for i in range(num_threads):
+                thread = threading.Thread(
+                    target=write_data,
+                    args=(i, i * 10)
+                )
+                threads.append(thread)
+                thread.start()
+
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
+
+            # Verify all writes succeeded (retry mechanism should handle conflicts)
+            self.assertEqual(num_threads, len(write_results),
+                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, "
+                             f"got {len(write_results)}. Errors: {write_errors}")
+            self.assertEqual(0, len(write_errors),
+                             f"Iteration {test_iteration}: Expected no errors, but got: {write_errors}")
+
+            read_builder = table.new_read_builder()
+            actual = self._read_test_table(read_builder).sort_by('user_id')
+
+            # Verify data rows (PK table should have unique user_id+dt combinations)
+            self.assertEqual(num_threads * 5, actual.num_rows,
+                             f"Iteration {test_iteration}: Expected {num_threads * 5} rows")
+
+            # Verify user_id
+            user_ids = actual.column('user_id').to_pylist()
+            expected_user_ids = []
+            for i in range(num_threads):
+                expected_user_ids.extend(range(i * 10, i * 10 + 5))
+            expected_user_ids.sort()
+
+            self.assertEqual(user_ids, expected_user_ids,
+                             f"Iteration {test_iteration}: User IDs mismatch")
+
+            # Verify snapshot count (should have num_threads snapshots)
+            snapshot_manager = table.snapshot_manager()
+            latest_snapshot = snapshot_manager.get_latest_snapshot()
+            self.assertIsNotNone(latest_snapshot,
+                                 f"Iteration {test_iteration}: Latest snapshot should not be None")
+            self.assertEqual(latest_snapshot.id, num_threads,
+                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, "
+                             f"got {latest_snapshot.id}")
+
+            print(f"✓ PK Table Iteration {test_iteration + 1}/{iter_num} completed successfully")

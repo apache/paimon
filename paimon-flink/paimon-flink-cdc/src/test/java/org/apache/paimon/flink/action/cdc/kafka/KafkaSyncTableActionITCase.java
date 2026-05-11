@@ -535,6 +535,60 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 Arrays.asList("_id", "_year"));
     }
 
+    public void testMetadataColumn(String format) throws Exception {
+        String topic = "metadata_column";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/%s/table/metadatacolumn/%s-data-1.txt", format, format);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .withMetadataColumnPrefix("__kafka_")
+                        .withMetadataColumns(
+                                "topic", "offset", "partition", "timestamp", "timestamp_type")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        // Column order matches the order specified in withMetadataColumns above
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.BIGINT(),
+                            DataTypes.INT(),
+                            DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                            DataTypes.STRING()
+                        },
+                        new String[] {
+                            "_id",
+                            "_date",
+                            "_year",
+                            "__kafka_topic",
+                            "__kafka_offset",
+                            "__kafka_partition",
+                            "__kafka_timestamp",
+                            "__kafka_timestamp_type"
+                        });
+
+        // Use regex matching because offset and timestamp values are unpredictable
+        waitForResult(
+                true,
+                Collections.singletonList(
+                        "\\+I\\[101, 2023-03-23, 2023, metadata_column, 0, 0, .+, .+\\]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("_id", "_year"));
+    }
+
     protected void testCDCOperations(String format) throws Exception {
         String topic = "event";
         createTestTopic(topic, 1, 1);

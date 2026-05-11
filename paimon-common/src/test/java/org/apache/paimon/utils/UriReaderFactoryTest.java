@@ -77,4 +77,12 @@ public class UriReaderFactoryTest {
         UriReader reader = factory.create("/local/path/to/file.txt");
         assertThat(reader).isInstanceOf(FileUriReader.class);
     }
+
+    @Test
+    public void testReadersReinitializedAfterDeserialization() throws Exception {
+        UriReaderFactory deserializedFactory = InstantiationUtil.clone(factory);
+        UriReader reader1 = deserializedFactory.create("http://my_bucket/path/to/file1.txt");
+        UriReader reader2 = deserializedFactory.create("http://my_bucket/path/to/file2.txt");
+        assertThat(reader1).isSameAs(reader2);
+    }
 }

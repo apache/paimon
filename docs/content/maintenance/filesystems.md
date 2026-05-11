@@ -391,7 +391,7 @@ Please refer to [Trino S3](https://trino.io/docs/current/object-storage/file-sys
 
 ### S3 Compliant Object Stores
 
-The S3 Filesystem also support using S3 compliant object stores such as MinIO, Tencent's COS and IBM’s Cloud Object
+The S3 Filesystem also support using S3 compliant object stores such as MinIO, Tencent's COS and IBM's Cloud Object
 Storage. Just configure your endpoint to the provider of the object store service.
 
 ```yaml

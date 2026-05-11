@@ -23,9 +23,19 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.ObjectCodec;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationContext;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonDeserializer;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -34,6 +44,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public abstract class StringTransform implements Transform {
 
     private static final long serialVersionUID = 1L;
+
+    static final String FIELD_INPUTS = "inputs";
 
     private final List<Object> inputs;
 
@@ -52,9 +64,59 @@ public abstract class StringTransform implements Transform {
         }
     }
 
+    /** Deserializer for {@link StringTransform} inputs. */
+    public static class InputDeserializer extends JsonDeserializer<Object> implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public Object deserialize(JsonParser parser, DeserializationContext context)
+                throws java.io.IOException {
+            ObjectCodec codec = parser.getCodec();
+            JsonNode node = codec.readTree(parser);
+
+            if (node == null || node.isNull()) {
+                return null;
+            }
+
+            if (node.isTextual()) {
+                return BinaryString.fromString(node.asText());
+            }
+
+            if (node.isObject()) {
+                try {
+                    return codec.treeToValue(node, FieldRef.class);
+                } catch (Exception e) {
+                    context.reportInputMismatch(
+                            Object.class,
+                            "Failed to deserialize StringTransform input as FieldRef: %s",
+                            node.toString());
+                }
+            }
+
+            context.reportInputMismatch(
+                    Object.class, "Unsupported StringTransform input JSON: %s", node.toString());
+            return null;
+        }
+    }
+
     @Override
+    @JsonIgnore
     public final List<Object> inputs() {
         return inputs;
+    }
+
+    @JsonGetter(FIELD_INPUTS)
+    public final List<Object> inputsForJson() {
+        List<Object> serialized = new ArrayList<>(inputs.size());
+        for (Object input : inputs) {
+            if (input instanceof BinaryString) {
+                serialized.add(input.toString());
+            } else {
+                serialized.add(input);
+            }
+        }
+        return serialized;
     }
 
     @Override
@@ -95,6 +157,8 @@ public abstract class StringTransform implements Transform {
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{" + "inputs=" + inputs + '}';
+        List<String> inputs =
+                this.inputs.stream().map(Object::toString).collect(Collectors.toList());
+        return name() + "(" + String.join(", ", inputs) + ')';
     }
 }

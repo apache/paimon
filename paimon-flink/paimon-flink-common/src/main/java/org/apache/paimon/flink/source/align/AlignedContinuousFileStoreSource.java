@@ -82,6 +82,9 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
         Options options = Options.fromMap(this.options);
+        int bucketNum = options.get(CoreOptions.BUCKET);
+        int sourceParallelismUpperBound = bucketNum < 0 ? MAX_PARALLELISM_OF_SOURCE : bucketNum;
+
         return new AlignedContinuousFileSplitEnumerator(
                 context,
                 splits,
@@ -92,6 +95,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis(),
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));
+                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT),
+                sourceParallelismUpperBound);
     }
 }

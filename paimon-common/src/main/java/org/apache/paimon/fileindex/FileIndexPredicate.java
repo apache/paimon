@@ -31,7 +31,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.types.RowType;
 
 import org.slf4j.Logger;
@@ -42,11 +41,11 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
@@ -121,7 +120,7 @@ public class FileIndexPredicate implements Closeable {
 
                     @Override
                     public Set<String> visit(LeafPredicate predicate) {
-                        return Collections.singleton(predicate.fieldName());
+                        return new HashSet<>(predicate.fieldNames());
                     }
 
                     @Override
@@ -132,11 +131,6 @@ public class FileIndexPredicate implements Closeable {
                             result.addAll(child.visit(this));
                         }
                         return result;
-                    }
-
-                    @Override
-                    public Set<String> visit(TransformPredicate predicate) {
-                        return new HashSet<>(predicate.fieldNames());
                     }
                 });
     }
@@ -161,10 +155,14 @@ public class FileIndexPredicate implements Closeable {
 
         @Override
         public FileIndexResult visit(LeafPredicate predicate) {
+            Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+            if (!fieldRefOptional.isPresent()) {
+                return REMAIN;
+            }
+
             FileIndexResult compoundResult = REMAIN;
-            FieldRef fieldRef =
-                    new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
-            for (FileIndexReader fileIndexReader : columnIndexReaders.get(predicate.fieldName())) {
+            FieldRef fieldRef = fieldRefOptional.get();
+            for (FileIndexReader fileIndexReader : columnIndexReaders.get(fieldRef.name())) {
                 compoundResult =
                         compoundResult.and(
                                 predicate
@@ -203,11 +201,6 @@ public class FileIndexPredicate implements Closeable {
                 }
                 return compoundResult == null ? REMAIN : compoundResult;
             }
-        }
-
-        @Override
-        public FileIndexResult visit(TransformPredicate predicate) {
-            return REMAIN;
         }
     }
 }

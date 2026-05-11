@@ -63,6 +63,7 @@ public class CloneHiveSchemaFunction
     protected final Map<String, String> sourceCatalogConfig;
     protected final Map<String, String> targetCatalogConfig;
     @Nullable protected final String preferFileFormat;
+    protected final boolean cloneIfExists;
 
     protected transient HiveCatalog hiveCatalog;
     protected transient Catalog targetCatalog;
@@ -70,10 +71,12 @@ public class CloneHiveSchemaFunction
     public CloneHiveSchemaFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
-            @Nullable String preferFileFormat) {
+            @Nullable String preferFileFormat,
+            boolean cloneIfExists) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
         this.preferFileFormat = preferFileFormat;
+        this.cloneIfExists = cloneIfExists;
     }
 
     /**
@@ -131,6 +134,13 @@ public class CloneHiveSchemaFunction
         try {
             Table existedTable = targetCatalog.getTable(tuple.f1);
 
+            if (!cloneIfExists) {
+                LOG.info(
+                        "Target table '{}' already exists and clone_if_exists is false, skipping clone operation.",
+                        tuple.f1);
+                return;
+            }
+
             checkState(
                     existedTable instanceof FileStoreTable,
                     String.format(
@@ -156,20 +166,21 @@ public class CloneHiveSchemaFunction
         checkState(
                 existedSchema.primaryKeys().isEmpty(),
                 "Can not clone data to existed paimon table which has primary keys. Existed paimon table is "
-                        + existedTable.name());
+                        + existedTable.fullName());
 
         // check bucket
         checkState(
                 existedTable.coreOptions().bucket() == -1,
                 "Can not clone data to existed paimon table which bucket is not -1. Existed paimon table is "
-                        + existedTable.name());
+                        + existedTable.fullName());
 
         // check format
         checkState(
                 Objects.equals(
                         sourceSchema.options().get(FILE_FORMAT.key()),
                         existedTable.coreOptions().formatType()),
-                "source table format is not compatible with existed paimon table format.");
+                "source table format is not compatible with existed paimon table format. Existed paimon table is "
+                        + existedTable.fullName());
 
         // check partition keys
         List<String> sourcePartitionFields = sourceSchema.partitionKeys();
@@ -178,7 +189,8 @@ public class CloneHiveSchemaFunction
         checkState(
                 sourcePartitionFields.size() == existedPartitionFields.size()
                         && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
-                "source table partition keys is not compatible with existed paimon table partition keys.");
+                "source table partition keys is not compatible with existed paimon table partition keys. Existed paimon table is "
+                        + existedTable.fullName());
 
         // check all fields
         List<DataField> sourceFields = sourceSchema.fields();
@@ -187,6 +199,7 @@ public class CloneHiveSchemaFunction
         checkState(
                 existedFields.size() >= sourceFields.size()
                         && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
-                "source table partition keys is not compatible with existed paimon table partition keys.");
+                "source table partition keys is not compatible with existed paimon table partition keys. Existed paimon table is "
+                        + existedTable.fullName());
     }
 }

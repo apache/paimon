@@ -36,6 +36,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -256,6 +258,70 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(nullCounts.getInt(0)).isEqualTo(0);
         assertThat(nullCounts.getInt(1)).isEqualTo(1);
         assertThat(nullCounts.isNullAt(2)).isTrue();
+    }
+
+    @Test
+    public void testEvolutionStatsSkipsStatsAfterColumnTypeChange() {
+        Schema baseSchema = createSchema("f0", "f1");
+        TableSchema baseTableSchema = TableSchema.create(0L, baseSchema);
+        schemas.put(0L, baseTableSchema);
+
+        Schema evolvedSchema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.STRING())
+                        .column("f1", DataTypes.STRING())
+                        .build();
+        TableSchema evolvedTableSchema = TableSchema.create(1L, evolvedSchema);
+        schemas.put(1L, evolvedTableSchema);
+
+        ManifestEntry oldTypeEntry =
+                createManifestEntry(
+                        0L,
+                        createSimpleStats(
+                                GenericRow.of(10, BinaryString.fromString("a")),
+                                GenericRow.of(99, BinaryString.fromString("z")),
+                                createBinaryArray(new int[] {0, 0}),
+                                new int[] {0, 1}));
+
+        BinaryRow newTypeMin = new BinaryRow(2);
+        BinaryRowWriter newTypeMinWriter = new BinaryRowWriter(newTypeMin);
+        newTypeMinWriter.writeString(0, BinaryString.fromString("apple"));
+        newTypeMinWriter.writeString(1, BinaryString.fromString("banana"));
+        newTypeMinWriter.complete();
+        BinaryRow newTypeMax = new BinaryRow(2);
+        BinaryRowWriter newTypeMaxWriter = new BinaryRowWriter(newTypeMax);
+        newTypeMaxWriter.writeString(0, BinaryString.fromString("yam"));
+        newTypeMaxWriter.writeString(1, BinaryString.fromString("zebra"));
+        newTypeMaxWriter.complete();
+        SimpleStats newTypeStats =
+                new SimpleStats(newTypeMin, newTypeMax, createBinaryArray(new int[] {0, 0}));
+        ManifestEntry newTypeEntry = createManifestEntry(1L, newTypeStats);
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        evolvedTableSchema,
+                        scanTableSchema,
+                        Arrays.asList(oldTypeEntry, newTypeEntry));
+
+        DataEvolutionRow minRow = (DataEvolutionRow) result.minValues();
+        DataEvolutionRow maxRow = (DataEvolutionRow) result.maxValues();
+
+        assertThat(minRow.getString(0).toString()).isEqualTo("apple");
+        assertThat(maxRow.getString(0).toString()).isEqualTo("yam");
+    }
+
+    @Test
+    public void testIntersectsRowRanges() {
+        List<Range> rowRanges =
+                Arrays.asList(
+                        new Range(20, 30), new Range(0, 10), new Range(5, 15), new Range(35, 40));
+        RowRangeIndex index = RowRangeIndex.create(rowRanges);
+
+        assertThat(index.intersects(14, 14)).isTrue();
+        assertThat(index.intersects(16, 19)).isFalse();
+        assertThat(index.intersects(31, 34)).isFalse();
+        assertThat(index.intersects(29, 31)).isTrue();
+        assertThat(index.intersects(100, 200)).isFalse();
     }
 
     private Schema createSchema(String... fieldNames) {

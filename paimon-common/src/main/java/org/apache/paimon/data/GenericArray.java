@@ -241,6 +241,11 @@ public final class GenericArray implements InternalArray, Serializable {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        return (InternalVector) getObject(pos);
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         return (InternalMap) getObject(pos);
     }

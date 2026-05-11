@@ -21,6 +21,7 @@ package org.apache.paimon.data;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
@@ -89,6 +90,12 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         BinaryArray binary = serializer.toBinaryArray(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+    }
+
+    @Override
+    public void writeVector(int pos, InternalVector input, InternalVectorSerializer serializer) {
+        BinaryVector binary = serializer.toBinaryVector(input);
+        writeVectorToVarLenPart(pos, binary);
     }
 
     @Override
@@ -268,6 +275,35 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
         // move the cursor forward.
         cursor += roundedSize;
+    }
+
+    private void writeVectorToVarLenPart(int pos, BinaryVector vector) {
+        // Memory layout: [numElements][segments]
+        final int numElementsWidth = 4;
+        final int size = vector.getSizeInBytes();
+
+        final int roundedSize = roundNumberOfBytesToNearestWord(size + numElementsWidth);
+
+        // grow the global buffer before writing data.
+        ensureCapacity(roundedSize);
+
+        zeroOutPaddingBytes(size + numElementsWidth);
+
+        // write numElements value first
+        segment.putInt(cursor, vector.size());
+        cursor += numElementsWidth;
+
+        // then vector values
+        if (vector.getSegments().length == 1) {
+            vector.getSegments()[0].copyTo(vector.getOffset(), segment, cursor, size);
+        } else {
+            writeMultiSegmentsToVarLenPart(vector.getSegments(), vector.getOffset(), size);
+        }
+
+        setOffsetAndSize(pos, cursor - numElementsWidth, size + numElementsWidth);
+
+        // move the cursor forward.
+        cursor += (roundedSize - numElementsWidth);
     }
 
     /** Increases the capacity to ensure that it can hold at least the minimum capacity argument. */

@@ -128,8 +128,7 @@ public abstract class RocksDBState<K, V, CacheV> implements State<K, V> {
                 options.pageSize(),
                 options.localSortMaxNumFileHandles(),
                 options.spillCompressOptions(),
-                options.writeBufferSpillDiskSize(),
-                options.sequenceFieldSortOrderIsAscending());
+                options.writeBufferSpillDiskSize());
     }
 
     /** A class wraps byte[] to indicate contain or not contain. */

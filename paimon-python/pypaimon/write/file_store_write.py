@@ -46,6 +46,11 @@ class FileStoreWrite:
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
                               f"-s-{random.randint(0, 2 ** 31 - 2)}-w-"))
 
+    def disable_rolling(self):
+        """Disable file rolling by setting target_file_size to max."""
+        self.options.set(
+            CoreOptions.TARGET_FILE_SIZE, str(2 ** 63 - 1))
+
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
         if key not in self.data_writers:

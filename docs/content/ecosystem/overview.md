@@ -58,7 +58,7 @@ implemented, but you must accept the mechanism of mini-batch.
 
 Spark Batch is the most widely used batch computing engine.
 
-Recommended version is Spark 3.5.7.
+Recommended version is Spark 3.5.8.
 
 ### Flink Batch
 

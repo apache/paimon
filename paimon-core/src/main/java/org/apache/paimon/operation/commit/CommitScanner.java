@@ -68,6 +68,15 @@ public class CommitScanner {
         return entries;
     }
 
+    public List<ManifestEntry> readIncrementalEntries(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        return scan.withSnapshot(snapshot)
+                .withKind(ScanMode.DELTA)
+                .withPartitionFilter(changedPartitions)
+                .plan()
+                .files();
+    }
+
     public List<SimpleFileEntry> readAllEntriesFromChangedPartitions(
             Snapshot snapshot, List<BinaryRow> changedPartitions) {
         try {
@@ -121,9 +130,5 @@ public class CommitScanner {
         changesWithOverwrite.addAll(changes);
         indexChangesWithOverwrite.addAll(indexFiles);
         return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
-    }
-
-    public long totalRecordCount(Snapshot snapshot) {
-        return scan.totalRecordCount(snapshot);
     }
 }

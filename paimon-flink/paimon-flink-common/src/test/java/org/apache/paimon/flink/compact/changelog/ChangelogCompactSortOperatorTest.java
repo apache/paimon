@@ -81,8 +81,7 @@ public class ChangelogCompactSortOperatorTest {
                                 Collections.emptyList(),
                                 Collections.emptyList()),
                         CompactIncrement.emptyIncrement());
-        testHarness.processElement(
-                new StreamRecord<>(new Committable(1, Committable.Kind.FILE, onlyData)));
+        testHarness.processElement(new StreamRecord<>(new Committable(1, onlyData)));
 
         CommitMessageImpl onlyChangelogBucket0 =
                 new CommitMessageImpl(
@@ -94,9 +93,7 @@ public class ChangelogCompactSortOperatorTest {
                                 Collections.emptyList(),
                                 Arrays.asList(files.get(4), files.get(3))),
                         CompactIncrement.emptyIncrement());
-        testHarness.processElement(
-                new StreamRecord<>(
-                        new Committable(1, Committable.Kind.FILE, onlyChangelogBucket0)));
+        testHarness.processElement(new StreamRecord<>(new Committable(1, onlyChangelogBucket0)));
 
         CommitMessageImpl onlyChangelogBucket1 =
                 new CommitMessageImpl(
@@ -108,9 +105,7 @@ public class ChangelogCompactSortOperatorTest {
                                 Collections.emptyList(),
                                 Arrays.asList(files.get(7), files.get(8))),
                         CompactIncrement.emptyIncrement());
-        testHarness.processElement(
-                new StreamRecord<>(
-                        new Committable(1, Committable.Kind.FILE, onlyChangelogBucket1)));
+        testHarness.processElement(new StreamRecord<>(new Committable(1, onlyChangelogBucket1)));
 
         CommitMessageImpl mixed =
                 new CommitMessageImpl(
@@ -122,8 +117,7 @@ public class ChangelogCompactSortOperatorTest {
                                 Collections.emptyList(),
                                 Arrays.asList(files.get(6), files.get(5))),
                         CompactIncrement.emptyIncrement());
-        testHarness.processElement(
-                new StreamRecord<>(new Committable(1, Committable.Kind.FILE, mixed)));
+        testHarness.processElement(new StreamRecord<>(new Committable(1, mixed)));
 
         testHarness.prepareSnapshotPreBarrier(1);
 
@@ -133,8 +127,7 @@ public class ChangelogCompactSortOperatorTest {
         List<CommitMessageImpl> actual = new ArrayList<>();
         for (Object o : output) {
             actual.add(
-                    (CommitMessageImpl)
-                            ((StreamRecord<Committable>) o).getValue().wrappedCommittable());
+                    (CommitMessageImpl) ((StreamRecord<Committable>) o).getValue().commitMessage());
         }
 
         assertThat(actual.get(0)).isEqualTo(onlyData);

@@ -24,11 +24,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
 import javax.annotation.Nullable;
@@ -42,9 +44,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.TreeMap;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact coordinator to compact data evolution table. */
@@ -55,14 +58,16 @@ public class DataEvolutionCompactCoordinator {
     private final CompactScanner scanner;
     private final CompactPlanner planner;
 
-    public DataEvolutionCompactCoordinator(FileStoreTable table, boolean compactBlob) {
-        this(table, null, compactBlob);
+    public DataEvolutionCompactCoordinator(
+            FileStoreTable table, boolean compactBlob, boolean compactVector) {
+        this(table, null, compactBlob, compactVector);
     }
 
     public DataEvolutionCompactCoordinator(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
-            boolean compactBlob) {
+            boolean compactBlob,
+            boolean compactVector) {
         CoreOptions options = table.coreOptions();
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
@@ -70,9 +75,15 @@ public class DataEvolutionCompactCoordinator {
 
         this.scanner =
                 new CompactScanner(
-                        table.newSnapshotReader().withPartitionFilter(partitionPredicate));
+                        table.newSnapshotReader().withPartitionFilter(partitionPredicate),
+                        table.store().newScan());
         this.planner =
-                new CompactPlanner(compactBlob, targetFileSize, openFileCost, compactMinFileNum);
+                new CompactPlanner(
+                        compactBlob,
+                        compactVector,
+                        targetFileSize,
+                        openFileCost,
+                        compactMinFileNum);
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -89,31 +100,33 @@ public class DataEvolutionCompactCoordinator {
     /** Scanner to generate sorted ManifestEntries. */
     static class CompactScanner {
 
-        private final SnapshotReader snapshotReader;
+        private final FileStoreScan scan;
         private final Queue<List<ManifestFileMeta>> metas;
 
-        private CompactScanner(SnapshotReader snapshotReader) {
-            this.snapshotReader = snapshotReader;
+        private CompactScanner(SnapshotReader snapshotReader, FileStoreScan scan) {
+            this.scan = scan;
             Snapshot snapshot = snapshotReader.snapshotManager().latestSnapshot();
 
             List<ManifestFileMeta> manifestFileMetas =
                     snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
-            RangeHelper<ManifestFileMeta> rangeHelper =
-                    new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
-            this.metas = new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+
+            if (allContainsRowId(manifestFileMetas)) {
+                RangeHelper<ManifestFileMeta> rangeHelper =
+                        new RangeHelper<>(
+                                manifest -> new Range(manifest.minRowId(), manifest.maxRowId()));
+                this.metas =
+                        new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+            } else {
+                this.metas = new ArrayDeque<>(Collections.singletonList(manifestFileMetas));
+            }
         }
 
         List<ManifestEntry> scan() {
             List<ManifestEntry> result = new ArrayList<>();
             while (metas.peek() != null && result.size() < FILES_BATCH) {
                 List<ManifestFileMeta> currentMetas = metas.poll();
-                List<ManifestEntry> targetEntries =
-                        currentMetas.stream()
-                                .flatMap(meta -> snapshotReader.readManifest(meta).stream())
-                                // we don't need stats for compaction
-                                .map(ManifestEntry::copyWithoutStats)
-                                .collect(Collectors.toList());
-                result.addAll(targetEntries);
+                scan.readFileIterator(currentMetas)
+                        .forEachRemaining(entry -> result.add(entry.copyWithoutStats()));
             }
             if (result.isEmpty()) {
                 throw new EndOfScanException();
@@ -126,16 +139,19 @@ public class DataEvolutionCompactCoordinator {
     static class CompactPlanner {
 
         private final boolean compactBlob;
+        private final boolean compactVector;
         private final long targetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
 
         CompactPlanner(
                 boolean compactBlob,
+                boolean compactVector,
                 long targetFileSize,
                 long openFileCost,
                 long compactMinFileNum) {
             this.compactBlob = compactBlob;
+            this.compactVector = compactVector;
             this.targetFileSize = targetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
@@ -156,23 +172,30 @@ public class DataEvolutionCompactCoordinator {
                 List<DataFileMeta> files = partitionFiles.getValue();
                 RangeHelper<DataFileMeta> rangeHelper =
                         new RangeHelper<>(
-                                DataFileMeta::nonNullFirstRowId,
-                                // merge adjacent files
-                                f -> f.nonNullFirstRowId() + f.rowCount());
+                                f ->
+                                        new Range(
+                                                f.nonNullFirstRowId(),
+                                                // merge adjacent files
+                                                f.nonNullFirstRowId() + f.rowCount()));
 
                 List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(files);
 
                 for (List<DataFileMeta> group : ranges) {
                     List<DataFileMeta> dataFiles = new ArrayList<>();
                     List<DataFileMeta> blobFiles = new ArrayList<>();
+                    List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
                     TreeMap<Long, DataFileMeta> treeMap = new TreeMap<>();
                     Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles = new HashMap<>();
+                    Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles =
+                            new HashMap<>();
                     for (DataFileMeta f : group) {
-                        if (!isBlobFile(f.fileName())) {
+                        if (isBlobFile(f.fileName())) {
+                            blobFiles.add(f);
+                        } else if (isVectorStoreFile(f.fileName())) {
+                            vectorStoreFiles.add(f);
+                        } else {
                             treeMap.put(f.nonNullFirstRowId(), f);
                             dataFiles.add(f);
-                        } else {
-                            blobFiles.add(f);
                         }
                     }
 
@@ -194,12 +217,28 @@ public class DataEvolutionCompactCoordinator {
                             }
                         }
                     }
+                    if (compactVector) {
+                        // associate vector-store files to data files
+                        for (DataFileMeta vectorStoreFile : vectorStoreFiles) {
+                            Long key = treeMap.floorKey(vectorStoreFile.nonNullFirstRowId());
+                            if (key != null) {
+                                DataFileMeta dataFile = treeMap.get(key);
+                                if (vectorStoreFile.nonNullFirstRowId()
+                                                >= dataFile.nonNullFirstRowId()
+                                        && vectorStoreFile.nonNullFirstRowId()
+                                                <= dataFile.nonNullFirstRowId()
+                                                        + dataFile.rowCount()
+                                                        - 1) {
+                                    dataFileToVectorStoreFiles
+                                            .computeIfAbsent(dataFile, k -> new ArrayList<>())
+                                            .add(vectorStoreFile);
+                                }
+                            }
+                        }
+                    }
 
                     RangeHelper<DataFileMeta> rangeHelper2 =
-                            new RangeHelper<>(
-                                    DataFileMeta::nonNullFirstRowId,
-                                    // files group
-                                    f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+                            new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
                     List<List<DataFileMeta>> groupedFiles =
                             rangeHelper2.mergeOverlappingRanges(dataFiles);
                     List<DataFileMeta> waitCompactFiles = new ArrayList<>();
@@ -216,10 +255,19 @@ public class DataEvolutionCompactCoordinator {
                                         .sum();
                         if (currentGroupWeight > targetFileSize) {
                             // compact current file group to merge field files
-                            tasks.addAll(triggerTask(fileGroup, partition, dataFileToBlobFiles));
+                            tasks.addAll(
+                                    triggerTask(
+                                            fileGroup,
+                                            partition,
+                                            dataFileToBlobFiles,
+                                            dataFileToVectorStoreFiles));
                             // compact wait compact files
                             tasks.addAll(
-                                    triggerTask(waitCompactFiles, partition, dataFileToBlobFiles));
+                                    triggerTask(
+                                            waitCompactFiles,
+                                            partition,
+                                            dataFileToBlobFiles,
+                                            dataFileToVectorStoreFiles));
                             waitCompactFiles = new ArrayList<>();
                             weightSum = 0;
                         } else {
@@ -228,13 +276,21 @@ public class DataEvolutionCompactCoordinator {
                             if (weightSum > targetFileSize) {
                                 tasks.addAll(
                                         triggerTask(
-                                                waitCompactFiles, partition, dataFileToBlobFiles));
+                                                waitCompactFiles,
+                                                partition,
+                                                dataFileToBlobFiles,
+                                                dataFileToVectorStoreFiles));
                                 waitCompactFiles = new ArrayList<>();
                                 weightSum = 0L;
                             }
                         }
                     }
-                    tasks.addAll(triggerTask(waitCompactFiles, partition, dataFileToBlobFiles));
+                    tasks.addAll(
+                            triggerTask(
+                                    waitCompactFiles,
+                                    partition,
+                                    dataFileToBlobFiles,
+                                    dataFileToVectorStoreFiles));
                 }
             }
             return tasks;
@@ -243,7 +299,8 @@ public class DataEvolutionCompactCoordinator {
         private List<DataEvolutionCompactTask> triggerTask(
                 List<DataFileMeta> dataFiles,
                 BinaryRow partition,
-                Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles) {
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
+                Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
             if (dataFiles.size() >= compactMinFileNum) {
                 tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
@@ -257,6 +314,18 @@ public class DataEvolutionCompactCoordinator {
                 }
                 if (blobFiles.size() >= compactMinFileNum) {
                     tasks.add(new DataEvolutionCompactTask(partition, blobFiles, true));
+                }
+            }
+
+            if (compactVector) {
+                List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
+                for (DataFileMeta dataFile : dataFiles) {
+                    vectorStoreFiles.addAll(
+                            dataFileToVectorStoreFiles.getOrDefault(
+                                    dataFile, Collections.emptyList()));
+                }
+                if (vectorStoreFiles.size() >= compactMinFileNum) {
+                    tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
                 }
             }
             return tasks;

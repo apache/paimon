@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -53,6 +54,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.AbstractMap;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +63,9 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
@@ -112,6 +117,10 @@ public class JdbcCatalog extends AbstractCatalog {
         return connections;
     }
 
+    public String getCatalogKey() {
+        return catalogKey;
+    }
+
     /** Initialize catalog tables. */
     private void initializeCatalogTablesIfNeed() throws SQLException, InterruptedException {
         String uri = options.get(CatalogOptions.URI.key());
@@ -140,6 +149,19 @@ public class JdbcCatalog extends AbstractCatalog {
                     }
                     return conn.prepareStatement(JdbcUtils.CREATE_DATABASE_PROPERTIES_TABLE)
                             .execute();
+                });
+
+        // Check and create table properties table.
+        connections.run(
+                conn -> {
+                    DatabaseMetaData dbMeta = conn.getMetaData();
+                    ResultSet tableExists =
+                            dbMeta.getTables(
+                                    null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null);
+                    if (tableExists.next()) {
+                        return true;
+                    }
+                    return conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE).execute();
                 });
 
         // if lock enabled, Check and create distributed lock table.
@@ -210,6 +232,14 @@ public class JdbcCatalog extends AbstractCatalog {
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
         execute(connections, JdbcUtils.DELETE_ALL_DATABASE_PROPERTIES_SQL, catalogKey, name);
+        // Delete table properties from paimon_table_properties
+        if (syncTableProperties()) {
+            execute(
+                    connections,
+                    JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_FOR_DB_SQL,
+                    catalogKey,
+                    name);
+        }
     }
 
     @Override
@@ -275,6 +305,14 @@ public class JdbcCatalog extends AbstractCatalog {
                 LOG.info("Skipping drop, table does not exist: {}", identifier);
                 return;
             }
+            if (syncTableProperties()) {
+                execute(
+                        connections,
+                        JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName());
+            }
             Path path = getTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
@@ -298,22 +336,15 @@ public class JdbcCatalog extends AbstractCatalog {
         try {
             // create table file
             SchemaManager schemaManager = getSchemaManager(identifier);
-            runWithLock(identifier, () -> schemaManager.createTable(schema));
+            TableSchema tableSchema =
+                    runWithLock(identifier, () -> schemaManager.createTable(schema));
             // Update schema metadata
             Path path = getTableLocation(identifier);
-            int insertRecord =
-                    connections.run(
-                            conn -> {
-                                try (PreparedStatement sql =
-                                        conn.prepareStatement(
-                                                JdbcUtils.DO_COMMIT_CREATE_TABLE_SQL)) {
-                                    sql.setString(1, catalogKey);
-                                    sql.setString(2, identifier.getDatabaseName());
-                                    sql.setString(3, identifier.getTableName());
-                                    return sql.executeUpdate();
-                                }
-                            });
-            if (insertRecord == 1) {
+            if (JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
                 LOG.debug("Successfully committed to new table: {}", identifier);
             } else {
                 try {
@@ -326,6 +357,14 @@ public class JdbcCatalog extends AbstractCatalog {
                                 "Failed to create table %s in catalog %s",
                                 identifier.getFullName(), catalogKey));
             }
+            if (syncTableProperties()) {
+                JdbcUtils.insertTableProperties(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        collectTableProperties(tableSchema));
+            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
@@ -336,6 +375,16 @@ public class JdbcCatalog extends AbstractCatalog {
         try {
             // update table metadata info
             updateTable(connections, catalogKey, fromTable, toTable);
+            if (syncTableProperties()) {
+                execute(
+                        connections,
+                        JdbcUtils.RENAME_TABLE_PROPERTIES_SQL,
+                        toTable.getDatabaseName(),
+                        toTable.getObjectName(),
+                        catalogKey,
+                        fromTable.getDatabaseName(),
+                        fromTable.getObjectName());
+            }
 
             Path fromPath = getTableLocation(fromTable);
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
@@ -364,6 +413,21 @@ public class JdbcCatalog extends AbstractCatalog {
         SchemaManager schemaManager = getSchemaManager(identifier);
         try {
             runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+            if (syncTableProperties()) {
+                TableSchema updatedSchema = schemaManager.latest().get();
+                execute(
+                        connections,
+                        JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName());
+                JdbcUtils.insertTableProperties(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        collectTableProperties(updatedSchema));
+            }
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException
@@ -416,8 +480,123 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void repairCatalog() {
+        List<String> databases;
+        try {
+            databases = listDatabasesInFileSystem(new Path(warehouse));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list databases in file system", e);
+        }
+        for (String database : databases) {
+            repairDatabase(database);
+        }
+    }
+
+    @Override
+    public void repairDatabase(String databaseName) {
+        checkNotSystemDatabase(databaseName);
+
+        // First check if database exists in file system
+        Path databasePath = newDatabasePath(databaseName);
+        List<String> tables;
+        try {
+            if (!fileIO.exists(databasePath)) {
+                throw new RuntimeException("Database directory does not exist: " + databasePath);
+            }
+            tables = listTablesInFileSystem(databasePath);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
+            createDatabaseImpl(databaseName, Collections.emptyMap());
+        }
+
+        // Repair tables
+        for (String table : tables) {
+            try {
+                repairTable(Identifier.create(databaseName, table));
+            } catch (TableNotExistException ignore) {
+                // Table might not exist due to concurrent operations
+            }
+        }
+    }
+
+    @Override
+    public void repairTable(Identifier identifier) throws TableNotExistException {
+        checkNotBranch(identifier, "repairTable");
+        checkNotSystemTable(identifier, "repairTable");
+
+        // First check if table exists in file system
+        Path tableLocation = getTableLocation(identifier);
+        TableSchema tableSchema =
+                tableSchemaInFileSystem(tableLocation, identifier.getBranchNameOrDefault())
+                        .orElseThrow(() -> new TableNotExistException(identifier));
+
+        if (!JdbcUtils.databaseExists(connections, catalogKey, identifier.getDatabaseName())) {
+            createDatabaseImpl(identifier.getDatabaseName(), Collections.emptyMap());
+        }
+        // Table exists in file system, now check if it exists in JDBC catalog
+        if (!JdbcUtils.tableExists(
+                connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName())) {
+            // Table missing from JDBC catalog, repair it
+            if (JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
+                LOG.debug("Successfully repaired table: {}", identifier);
+            } else {
+                LOG.error("Failed to repair table: {}", identifier);
+            }
+        }
+        if (syncTableProperties()) {
+            // Delete existing properties and reinsert from filesystem schema
+            execute(
+                    connections,
+                    JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName());
+            JdbcUtils.insertTableProperties(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName(),
+                    collectTableProperties(tableSchema));
+        }
+    }
+
+    @Override
     public void close() throws Exception {
         connections.close();
+    }
+
+    private boolean syncTableProperties() {
+        return options.get(CatalogOptions.SYNC_ALL_PROPERTIES);
+    }
+
+    private Map<String, String> convertToPropertiesTableKey(TableSchema tableSchema) {
+        Map<String, String> properties = new HashMap<>();
+        if (!tableSchema.primaryKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.PRIMARY_KEY.key(), String.join(",", tableSchema.primaryKeys()));
+        }
+        if (!tableSchema.partitionKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.PARTITION.key(), String.join(",", tableSchema.partitionKeys()));
+        }
+        if (!tableSchema.bucketKeys().isEmpty()) {
+            properties.put(
+                    CoreOptions.BUCKET_KEY.key(), String.join(",", tableSchema.bucketKeys()));
+        }
+        return properties;
+    }
+
+    private Map<String, String> collectTableProperties(TableSchema tableSchema) {
+        Map<String, String> properties = new HashMap<>(tableSchema.options());
+        properties.putAll(convertToPropertiesTableKey(tableSchema));
+        return properties;
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {

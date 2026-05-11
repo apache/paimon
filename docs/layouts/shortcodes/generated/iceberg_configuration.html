@@ -42,7 +42,7 @@ under the License.
             <td><h5>metadata.iceberg.database</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Metastore database name for Iceberg Catalog. Set this as an iceberg database alias if using a centralized Catalog.</td>
+            <td>Metastore database name for Iceberg Catalog. Set this as an iceberg database alias if using a centralized Catalog. Multiple databases can be specified with semicolons, e.g. 'db1;db2'. The table will be registered in each database.</td>
         </tr>
         <tr>
             <td><h5>metadata.iceberg.delete-after-commit.enabled</h5></td>

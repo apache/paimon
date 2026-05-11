@@ -22,12 +22,15 @@ import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
@@ -45,6 +48,7 @@ import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Instant;
@@ -135,14 +139,16 @@ public class ArrowUtils {
                         fieldType.getDictionary(),
                         Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId)));
         List<Field> children = null;
-        if (dataType instanceof ArrayType) {
+        if (dataType instanceof ArrayType || dataType instanceof VectorType) {
+            final DataType elementType;
+            if (dataType instanceof VectorType) {
+                elementType = ((VectorType) dataType).getElementType();
+            } else {
+                elementType = ((ArrayType) dataType).getElementType();
+            }
             Field field =
                     toArrowField(
-                            ListVector.DATA_VECTOR_NAME,
-                            fieldId,
-                            ((ArrayType) dataType).getElementType(),
-                            depth + 1,
-                            visitor);
+                            ListVector.DATA_VECTOR_NAME, fieldId, elementType, depth + 1, visitor);
             FieldType typeInner = field.getFieldType();
             field =
                     new Field(
@@ -219,6 +225,17 @@ public class ArrowUtils {
                             Arrays.asList(keyField, valueField));
 
             children = Collections.singletonList(mapField);
+        } else if (dataType instanceof VariantType) {
+            children =
+                    Arrays.asList(
+                            new Field(
+                                    Variant.VALUE,
+                                    new FieldType(false, Types.MinorType.VARBINARY.getType(), null),
+                                    null),
+                            new Field(
+                                    Variant.METADATA,
+                                    new FieldType(false, Types.MinorType.VARBINARY.getType(), null),
+                                    null));
         } else if (dataType instanceof RowType) {
             RowType rowType = (RowType) dataType;
             children = new ArrayList<>();
@@ -260,11 +277,15 @@ public class ArrowUtils {
         return ArrowCStruct.of(array, schema);
     }
 
+    public static byte[] serializeToIpc(VectorSchemaRoot vsr) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        serializeToIpc(vsr, out);
+        return out.toByteArray();
+    }
+
     public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
         try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
-            writer.start();
             writer.writeBatch();
-            writer.end();
         } catch (IOException e) {
             throw new RuntimeException("Failed to serialize VectorSchemaRoot to IPC", e);
         }

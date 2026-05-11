@@ -73,6 +73,14 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName) {
+        createBranch(branchName, false);
+    }
+
+    @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        if (ignoreIfExists && branchExists(branchName)) {
+            return;
+        }
         validateBranch(branchName);
         try {
             TableSchema latestSchema = schemaManager.latest().get();
@@ -88,6 +96,14 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName, String tagName) {
+        createBranch(branchName, tagName, false);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        if (ignoreIfExists && branchExists(branchName)) {
+            return;
+        }
         validateBranch(branchName);
         Snapshot snapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
 
@@ -179,10 +195,11 @@ public class FileSystemBranchManager implements BranchManager {
                     schemaManager.copyWithBranch(branchName).schemaDirectory(),
                     schemaManager.schemaDirectory(),
                     true);
-            fileIO.copyFiles(
-                    tagManager.copyWithBranch(branchName).tagDirectory(),
-                    tagManager.tagDirectory(),
-                    true);
+            // Continue fast-forward even without tags.
+            Path branchTagDirectory = tagManager.copyWithBranch(branchName).tagDirectory();
+            if (fileIO.exists(branchTagDirectory)) {
+                fileIO.copyFiles(branchTagDirectory, tagManager.tagDirectory(), true);
+            }
             snapshotManager.invalidateCache();
         } catch (IOException e) {
             throw new RuntimeException(
@@ -202,6 +219,25 @@ public class FileSystemBranchManager implements BranchManager {
     public void validateBranch(String branchName) {
         BranchManager.validateBranch(branchName);
         checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
+    }
+
+    @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        checkArgument(!BranchManager.isMainBranch(fromBranch), "Cannot rename the main branch.");
+        checkArgument(branchExists(fromBranch), "Branch name '%s' doesn't exist.", fromBranch);
+        checkArgument(!branchExists(toBranch), "Branch name '%s' already exists.", toBranch);
+        BranchManager.validateBranch(toBranch);
+
+        try {
+            // Use rename for atomic operation and better performance
+            fileIO.rename(branchPath(fromBranch), branchPath(toBranch));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when rename branch from '%s' to '%s'.",
+                            fromBranch, toBranch),
+                    e);
+        }
     }
 
     @Override

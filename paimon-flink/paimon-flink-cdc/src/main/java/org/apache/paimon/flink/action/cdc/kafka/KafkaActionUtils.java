@@ -29,7 +29,6 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
@@ -37,6 +36,7 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -58,7 +58,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -73,7 +72,7 @@ public class KafkaActionUtils {
 
     public static KafkaSource<CdcSourceRecord> buildKafkaSource(
             Configuration kafkaConfig,
-            KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema) {
+            KafkaRecordDeserializationSchema<CdcSourceRecord> deserializationSchema) {
         KafkaSourceBuilder<CdcSourceRecord> kafkaSourceBuilder = KafkaSource.builder();
 
         if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
@@ -88,7 +87,7 @@ public class KafkaActionUtils {
         }
 
         kafkaSourceBuilder
-                .setDeserializer(KafkaRecordDeserializationSchema.of(deserializationSchema))
+                .setDeserializer(deserializationSchema)
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
 
         Properties properties = createKafkaProperties(kafkaConfig);
@@ -249,7 +248,7 @@ public class KafkaActionUtils {
 
     public static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
             Configuration kafkaConfig,
-            KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema) {
+            KafkaRecordDeserializationSchema<CdcSourceRecord> deserializationSchema) {
         Properties props = createKafkaProperties(kafkaConfig);
 
         props.put(
@@ -320,16 +319,28 @@ public class KafkaActionUtils {
         }
     }
 
+    protected static Map<String, Object> extractKafkaMetadata(
+            ConsumerRecord<byte[], byte[]> message) {
+        // Add the Kafka message metadata that can be used with --metadata_column
+        Map<String, Object> kafkaMetadata = new HashMap<>();
+        kafkaMetadata.put("topic", message.topic());
+        kafkaMetadata.put("partition", message.partition());
+        kafkaMetadata.put("offset", message.offset());
+        kafkaMetadata.put("timestamp", message.timestamp());
+        kafkaMetadata.put("timestamp_type", message.timestampType().name);
+        return kafkaMetadata;
+    }
+
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
         private final KafkaConsumer<byte[], byte[]> consumer;
         private final String topic;
-        private final KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema;
+        private final KafkaRecordDeserializationSchema<CdcSourceRecord> deserializationSchema;
 
         KafkaConsumerWrapper(
                 KafkaConsumer<byte[], byte[]> kafkaConsumer,
                 String topic,
-                KafkaDeserializationSchema<CdcSourceRecord> deserializationSchema) {
+                KafkaRecordDeserializationSchema<CdcSourceRecord> deserializationSchema) {
             this.consumer = kafkaConsumer;
             this.topic = topic;
             this.deserializationSchema = deserializationSchema;
@@ -339,16 +350,18 @@ public class KafkaActionUtils {
         public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             ConsumerRecords<byte[], byte[]> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
-            return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
-                    .map(
-                            consumerRecord -> {
-                                try {
-                                    return deserializationSchema.deserialize(consumerRecord);
-                                } catch (Exception e) {
-                                    throw new RuntimeException(e);
-                                }
-                            })
-                    .collect(Collectors.toList());
+            List<CdcSourceRecord> results = new java.util.ArrayList<>();
+            org.apache.flink.api.common.functions.util.ListCollector<CdcSourceRecord> collector =
+                    new org.apache.flink.api.common.functions.util.ListCollector<>(results);
+            for (org.apache.kafka.clients.consumer.ConsumerRecord<byte[], byte[]> consumerRecord :
+                    consumerRecords.records(topic)) {
+                try {
+                    deserializationSchema.deserialize(consumerRecord, collector);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            return results;
         }
 
         @Override

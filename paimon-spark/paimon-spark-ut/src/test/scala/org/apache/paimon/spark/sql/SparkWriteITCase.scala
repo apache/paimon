@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
@@ -304,6 +305,28 @@ class SparkWriteITCase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT ts3, __paimon_bucket FROM t WHERE id = 1"),
         sql("SELECT ts3, __paimon_bucket FROM t WHERE id = 2")
+      )
+    }
+  }
+
+  test("Paimon Write: clustering strategy auto should use clustering columns size") {
+    withTable("T") {
+      // 6 fields but only 1 clustering column -> auto should pick ORDER, not HILBERT
+      spark.sql(s"""
+                   |CREATE TABLE T (a INT, b INT, c INT, d INT, e INT, f STRING)
+                   |TBLPROPERTIES ('bucket'='-1', 'clustering.columns'='a')
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+      val coreOptions = new CoreOptions(table.options())
+      val clusteringColumns = coreOptions.clusteringColumns()
+      val strategy = coreOptions.clusteringStrategy(clusteringColumns.size())
+      Assertions.assertEquals(CoreOptions.OrderType.ORDER, strategy)
+
+      spark.sql("INSERT INTO T VALUES (3,1,1,1,1,'c'), (1,2,2,2,2,'a'), (2,3,3,3,3,'b')")
+      checkAnswer(
+        spark.sql("SELECT a FROM T"),
+        Row(1) :: Row(2) :: Row(3) :: Nil
       )
     }
   }

@@ -41,4 +41,6 @@ public interface LookupTable extends Closeable {
     void refresh() throws Exception;
 
     void specifyCacheRowFilter(Filter<InternalRow> filter);
+
+    Long nextSnapshotId();
 }

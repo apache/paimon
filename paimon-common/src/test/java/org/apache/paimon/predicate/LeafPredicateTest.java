@@ -1,0 +1,169 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.predicate;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class LeafPredicateTest {
+
+    @Test
+    public void testReturnTrue() {
+        LeafPredicate predicate = create();
+        boolean result =
+                predicate.test(
+                        GenericRow.of(
+                                BinaryString.fromString("ha"), BinaryString.fromString("-he")));
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    public void testReturnFalse() {
+        LeafPredicate predicate = create();
+        boolean result =
+                predicate.test(
+                        GenericRow.of(
+                                BinaryString.fromString("he"), BinaryString.fromString("-he")));
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    public void testMinMax() {
+        LeafPredicate predicate = create();
+        boolean result = predicate.test(1, null, null, null);
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    public void testClass() throws IOException, ClassNotFoundException {
+        LeafPredicate predicate = create();
+        LeafPredicate clone = InstantiationUtil.clone(predicate);
+        assertThat(clone).isEqualTo(predicate);
+        assertThat(clone.hashCode()).isEqualTo(predicate.hashCode());
+        assertThat(clone.toString()).isEqualTo(predicate.toString());
+    }
+
+    private LeafPredicate create() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));
+        inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));
+        ConcatTransform transform = new ConcatTransform(inputs);
+        List<Object> literals = new ArrayList<>();
+        literals.add(BinaryString.fromString("ha-he"));
+        return LeafPredicate.of(transform, Equal.INSTANCE, literals);
+    }
+
+    @Test
+    public void testAlwaysTrueRow() {
+        LeafPredicate predicate = alwaysTrue();
+        assertThat(predicate.test(GenericRow.of(1))).isTrue();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isTrue();
+    }
+
+    @Test
+    public void testAlwaysFalseRow() {
+        LeafPredicate predicate = alwaysFalse();
+        assertThat(predicate.test(GenericRow.of(1))).isFalse();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isFalse();
+    }
+
+    @Test
+    public void testAlwaysTrueMinMax() {
+        LeafPredicate predicate = alwaysTrue();
+        assertThat(
+                        predicate.test(
+                                10,
+                                GenericRow.of(1),
+                                GenericRow.of(10),
+                                new GenericArray(new long[] {0})))
+                .isTrue();
+        assertThat(predicate.test(1, null, null, null)).isTrue();
+    }
+
+    @Test
+    public void testAlwaysFalseMinMax() {
+        LeafPredicate predicate = alwaysFalse();
+        assertThat(
+                        predicate.test(
+                                10,
+                                GenericRow.of(1),
+                                GenericRow.of(10),
+                                new GenericArray(new long[] {0})))
+                .isFalse();
+        assertThat(predicate.test(1, null, null, null)).isFalse();
+    }
+
+    @Test
+    public void testAlwaysTrueNegate() {
+        LeafPredicate predicate = alwaysTrue();
+        Predicate negated = predicate.negate().get();
+        assertThat(negated).isInstanceOf(LeafPredicate.class);
+        LeafPredicate negatedLeaf = (LeafPredicate) negated;
+        assertThat(negatedLeaf.function()).isEqualTo(AlwaysFalse.INSTANCE);
+        assertThat(negatedLeaf.test(GenericRow.of(1))).isFalse();
+    }
+
+    @Test
+    public void testAlwaysFalseNegate() {
+        LeafPredicate predicate = alwaysFalse();
+        Predicate negated = predicate.negate().get();
+        assertThat(negated).isInstanceOf(LeafPredicate.class);
+        LeafPredicate negatedLeaf = (LeafPredicate) negated;
+        assertThat(negatedLeaf.function()).isEqualTo(AlwaysTrue.INSTANCE);
+        assertThat(negatedLeaf.test(GenericRow.of(1))).isTrue();
+    }
+
+    @Test
+    public void testAlwaysTrueSerialization() throws IOException, ClassNotFoundException {
+        LeafPredicate predicate = alwaysTrue();
+        LeafPredicate clone = InstantiationUtil.clone(predicate);
+        assertThat(clone).isEqualTo(predicate);
+        assertThat(clone.hashCode()).isEqualTo(predicate.hashCode());
+    }
+
+    @Test
+    public void testAlwaysFalseSerialization() throws IOException, ClassNotFoundException {
+        LeafPredicate predicate = alwaysFalse();
+        LeafPredicate clone = InstantiationUtil.clone(predicate);
+        assertThat(clone).isEqualTo(predicate);
+        assertThat(clone.hashCode()).isEqualTo(predicate.hashCode());
+    }
+
+    private LeafPredicate alwaysTrue() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of());
+        return (LeafPredicate) builder.alwaysTrue();
+    }
+
+    private LeafPredicate alwaysFalse() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of());
+        return (LeafPredicate) builder.alwaysFalse();
+    }
+}

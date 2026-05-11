@@ -121,7 +121,7 @@ def main():
         print(f"Number of splits: {len(splits)}")
 
         # Convert to Ray Dataset
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
         print("✓ Ray Dataset created successfully")
         print(f"  - Total rows: {ray_dataset.count()}")
         # Note: num_blocks() requires materialized dataset, so we skip it for simplicity
@@ -135,7 +135,7 @@ def main():
         print("\n" + "="*60)
         print("Step 3: Comparison with simple read mode")
         print("="*60)
-        ray_dataset_simple = table_read.to_ray(splits, parallelism=1)
+        ray_dataset_simple = table_read.to_ray(splits, override_num_blocks=1)
         df_simple = ray_dataset_simple.to_pandas()
 
         print(f"Distributed mode rows: {ray_dataset.count()}")
@@ -193,7 +193,7 @@ def main():
         table_scan_filtered = read_builder_filtered.new_scan()
         splits_filtered = table_scan_filtered.plan().splits()
 
-        ray_dataset_filtered = table_read_filtered.to_ray(splits_filtered, parallelism=2)
+        ray_dataset_filtered = table_read_filtered.to_ray(splits_filtered, override_num_blocks=2)
         df_filtered_at_read = ray_dataset_filtered.to_pandas()
         print(f"✓ Filtered at read time: {ray_dataset_filtered.count()} rows")
         print(f"  - All categories are 'A': {all(df_filtered_at_read['category'] == 'A')}")
@@ -207,7 +207,7 @@ def main():
         table_scan_projected = read_builder_projected.new_scan()
         splits_projected = table_scan_projected.plan().splits()
 
-        ray_dataset_projected = table_read_projected.to_ray(splits_projected, parallelism=2)
+        ray_dataset_projected = table_read_projected.to_ray(splits_projected, override_num_blocks=2)
         df_projected = ray_dataset_projected.to_pandas()
         print(f"✓ Projected columns: {list(df_projected.columns)}")
         print("  - Expected: ['id', 'name', 'value']")
@@ -218,7 +218,7 @@ def main():
         # print("Step 7: Blob data handling (Optional)")
         # print("="*60)
         # print("Paimon supports storing blob data (images, audio, etc.)")
-        # print("For blob data examples, see: pypaimon/sample/oss_blob_as_descriptor.py")
+        # print("For blob data examples, see: pypaimon/sample/rest_catalog_blob_as_descriptor_sample.py")
 
         print("\n" + "="*60)
         print("Summary")
@@ -232,7 +232,7 @@ def main():
         print("  - Scalable data processing with Ray operations")
         print("  - Integration with Ray ecosystem (Ray Train, Ray Serve, etc.)")
         print("\nFor blob data (images, audio) examples, see:")
-        print("  - pypaimon/sample/oss_blob_as_descriptor.py")
+        print("  - pypaimon/sample/rest_catalog_blob_as_descriptor_sample.py")
 
     finally:
         server.shutdown()

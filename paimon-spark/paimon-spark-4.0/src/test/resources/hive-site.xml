@@ -50,7 +50,7 @@
 
     <property>
         <name>hive.metastore.uris</name>
-        <value>thrift://localhost:9090</value>
+        <value>thrift://localhost:9091</value>
         <description>Thrift URI for the remote metastore. Used by metastore client to connect to remote metastore.</description>
     </property>
 </configuration>

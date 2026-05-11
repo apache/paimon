@@ -22,5 +22,14 @@ import javax.annotation.Nullable;
 
 /** Parallel Index writer for global index with relative row id (from 0 to rowCnt - 1). */
 public interface GlobalIndexParallelWriter extends GlobalIndexWriter {
+
+    /**
+     * Write the indexed key and its related localRowId to the index File. The input row id is
+     * "local" which means it is calculated by the original row id minus the start row id of current
+     * index range.
+     *
+     * @param key nullable index key
+     * @param relativeRowId local row id calculated by {@code rowId - rangeStart}.
+     */
     void write(@Nullable Object key, long relativeRowId);
 }

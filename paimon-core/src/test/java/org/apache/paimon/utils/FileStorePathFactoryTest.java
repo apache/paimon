@@ -95,7 +95,9 @@ public class FileStorePathFactoryTest {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
-                        false);
+                        null,
+                        false,
+                        null);
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");
@@ -140,6 +142,8 @@ public class FileStorePathFactoryTest {
                 null,
                 null,
                 CoreOptions.ExternalPathStrategy.NONE,
-                false);
+                null,
+                false,
+                null);
     }
 }

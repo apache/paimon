@@ -25,6 +25,8 @@ from pyarrow import RecordBatch
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
+_MIN_BATCH_SIZE_TO_REFILL = 1024
+
 
 class ConcatBatchReader(RecordBatchReader):
 
@@ -60,7 +62,7 @@ class MergeAllBatchReader(RecordBatchReader):
     into a single batch for processing.
     """
 
-    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 4096):
+    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 1024):
         self.reader_suppliers = reader_suppliers
         self.merged_batch: Optional[RecordBatch] = None
         self.reader = None
@@ -113,7 +115,7 @@ class MergeAllBatchReader(RecordBatchReader):
                         combined_arrays.append(pa.concat_arrays(column_arrays))
                     self.merged_batch = pa.RecordBatch.from_arrays(
                         combined_arrays,
-                        names=all_concatenated_batches[0].schema.names
+                        schema=all_concatenated_batches[0].schema
                     )
         else:
             self.merged_batch = None
@@ -141,7 +143,13 @@ class DataEvolutionMergeReader(RecordBatchReader):
      - The sixth field comes from batch1, and it is at offset 0 in batch1.
     """
 
-    def __init__(self, row_offsets: List[int], field_offsets: List[int], readers: List[Optional[RecordBatchReader]]):
+    def __init__(
+        self,
+        row_offsets: List[int],
+        field_offsets: List[int],
+        readers: List[Optional[RecordBatchReader]],
+        schema: pa.Schema,
+    ):
         if row_offsets is None:
             raise ValueError("Row offsets must not be null")
         if field_offsets is None:
@@ -155,32 +163,64 @@ class DataEvolutionMergeReader(RecordBatchReader):
         self.row_offsets = row_offsets
         self.field_offsets = field_offsets
         self.readers = readers
+        self.schema = schema
+        self._buffers: List[Optional[RecordBatch]] = [None] * len(readers)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         batches: List[Optional[RecordBatch]] = [None] * len(self.readers)
         for i, reader in enumerate(self.readers):
             if reader is not None:
-                batch = reader.read_arrow_batch()
-                if batch is None:
-                    # all readers are aligned, as long as one returns null, the others will also have no data
-                    return None
-                batches[i] = batch
-        # Assemble record batches from batches based on row_offsets and field_offsets
+                if self._buffers[i] is not None:
+                    remainder = self._buffers[i]
+                    self._buffers[i] = None
+                    if remainder.num_rows >= _MIN_BATCH_SIZE_TO_REFILL:
+                        batches[i] = remainder
+                    else:
+                        new_batch = reader.read_arrow_batch()
+                        if new_batch is not None and new_batch.num_rows > 0:
+                            combined_arrays = [
+                                pa.concat_arrays([remainder.column(j), new_batch.column(j)])
+                                for j in range(remainder.num_columns)
+                            ]
+                            batches[i] = pa.RecordBatch.from_arrays(
+                                combined_arrays, schema=remainder.schema
+                            )
+                        else:
+                            batches[i] = remainder
+                else:
+                    batch = reader.read_arrow_batch()
+                    if batch is None:
+                        batches[i] = None
+                    else:
+                        batches[i] = batch
+            else:
+                batches[i] = None
+
+        if not any(b is not None for b in batches):
+            return None
+
+        min_rows = min(b.num_rows for b in batches if b is not None)
+        if min_rows == 0:
+            return None
+
         columns = []
-        names = []
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
-            if batches[batch_index] is not None:
-                column = batches[batch_index].column(field_index)
-                columns.append(column)
-                names.append(batches[batch_index].schema.names[field_index])
-        if columns:
-            return pa.RecordBatch.from_arrays(columns, names)
-        return None
+            if batch_index >= 0 and batches[batch_index] is not None:
+                columns.append(batches[batch_index].column(field_index).slice(0, min_rows))
+            else:
+                columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
+
+        for i in range(len(self.readers)):
+            if batches[i] is not None and batches[i].num_rows > min_rows:
+                self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
+
+        return pa.RecordBatch.from_arrays(columns, schema=self.schema)
 
     def close(self) -> None:
         try:
+            self._buffers = [None] * len(self.readers)
             for reader in self.readers:
                 if reader is not None:
                     reader.close()

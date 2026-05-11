@@ -16,6 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -32,6 +33,10 @@ class DataEvolutionTest(unittest.TestCase):
             'warehouse': cls.warehouse
         })
         cls.catalog.create_database('default', False)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_basic(self):
         simple_pa_schema = pa.schema([

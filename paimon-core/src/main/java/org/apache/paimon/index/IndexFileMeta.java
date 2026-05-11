@@ -103,8 +103,9 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable GlobalIndexMeta globalIndexMeta) {
-        this(indexType, fileName, fileSize, rowCount, null, null, globalIndexMeta);
+            @Nullable GlobalIndexMeta globalIndexMeta,
+            @Nullable String externalPath) {
+        this(indexType, fileName, fileSize, rowCount, null, externalPath, globalIndexMeta);
     }
 
     public String indexType() {

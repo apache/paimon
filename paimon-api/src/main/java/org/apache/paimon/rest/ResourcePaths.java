@@ -34,6 +34,7 @@ public class ResourcePaths {
     protected static final String BRANCHES = "branches";
     protected static final String TAGS = "tags";
     protected static final String SNAPSHOTS = "snapshots";
+    protected static final String CONSUMERS = "consumers";
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
@@ -41,6 +42,7 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
@@ -78,6 +80,10 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, TABLES);
     }
 
+    public String table(String tableId) {
+        return SLASH.join(V1, prefix, TABLES, ID, encodeString(tableId));
+    }
+
     public String table(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -112,6 +118,17 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 ROLLBACK);
+    }
+
+    public String rollbackSchemaTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "rollback-schema");
     }
 
     public String registerTable(String databaseName) {
@@ -197,6 +214,18 @@ public class ResourcePaths {
                 "mark");
     }
 
+    public String listPartitionsByNames(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "list-by-names");
+    }
+
     public String branches(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -233,6 +262,19 @@ public class ResourcePaths {
                 "forward");
     }
 
+    public String renameBranch(String databaseName, String tableName, String branch) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(tableName),
+                BRANCHES,
+                encodeString(branch),
+                "rename");
+    }
+
     public String tags(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -242,6 +284,29 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 TAGS);
+    }
+
+    public String consumers(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                CONSUMERS);
+    }
+
+    public String resetConsumer(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                CONSUMERS,
+                "reset");
     }
 
     public String tag(String databaseName, String objectName, String tagName) {

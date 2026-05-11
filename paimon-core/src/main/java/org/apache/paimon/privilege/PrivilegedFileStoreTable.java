@@ -181,6 +181,18 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createBranch(branchName, ignoreIfExists);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createBranch(branchName, tagName, ignoreIfExists);
+    }
+
+    @Override
     public void deleteBranch(String branchName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.deleteBranch(branchName);

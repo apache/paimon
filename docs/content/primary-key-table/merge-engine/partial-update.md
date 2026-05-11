@@ -152,6 +152,22 @@ FROM SG;
 You can specify aggregation function for the input field, all the functions in the
 [Aggregation]({{< ref "primary-key-table/merge-engine/aggregation" >}}) are supported.
 
+{{< hint info >}}
+**Sequence-group behavior changes when aggregate functions are involved.**
+
+Without aggregate functions, a sequence-group field acts as a **version filter**: incoming records whose
+sequence value does not exceed the stored value are ignored for the associated columns.
+
+With aggregate functions, the sequence-group field acts as an **ordering key**: every incoming record with
+a non-NULL sequence value participates in the aggregation, regardless of whether its sequence value is
+larger or smaller than the stored one. The stored sequence value is only advanced when the incoming value
+is larger. For order-independent functions (`sum`, `product`, `max`, `min`) the ordering has no effect on
+the result; for order-dependent functions (`last_non_null_value`, `first_value`, `listagg`) the
+sequence-group value determines which record's contribution is considered "last" or "first".
+
+Records with a NULL sequence-group value are always skipped.
+{{< /hint >}}
+
 See example:
 
 ```sql
@@ -219,7 +235,8 @@ SELECT *
 FROM AGG;
 -- output 1, 3, 2, 2, "1", 1, 2
 
--- g_1, g_3 are smaller, a should not beupdated
+-- (g_1, g_3) = (2, 1) is smaller than stored (2, 2), so the stored sequence values are not advanced,
+-- but the sum aggregate for a still applies: a = 3 + 3 = 6
 INSERT INTO AGG
 VALUES (1, 3, 3, 2, '3', 3, 1);
 

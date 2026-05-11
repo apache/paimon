@@ -22,3 +22,18 @@ import org.apache.paimon.table.Table
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
 case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table) {}
+
+/**
+ * Per-version companion: Spark 3.3 does not ship the V2 row-level op plumbing that
+ * `paimon-spark-common`'s factory uses, so we only return the plain case class here. Both `of`
+ * (called from `SparkCatalog.loadSparkTable`) and `supportsV2RowLevelOps` (called from
+ * `RowLevelHelper.shouldFallbackToV1`) must exist so the shaded call sites linked against the
+ * common companion resolve at runtime — the per-version `SparkTable` class shadows the one shaded
+ * in from paimon-spark-common. V2 row-level ops require Spark 3.5+, so on 3.3 we always report
+ * `false` and DML goes through Paimon's V1 postHoc fallback path.
+ */
+object SparkTable {
+  def of(table: Table): SparkTable = SparkTable(table)
+
+  private[spark] def supportsV2RowLevelOps(sparkTable: SparkTable): Boolean = false
+}

@@ -58,7 +58,7 @@ public class StaticFromTagStartingScannerTest extends ScannerTestBase {
         StartingScanner.ScannedResult result =
                 (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(2);
-        assertThat(getResult(table.newRead(), toSplits(result.splits())))
+        assertThat(getResult(table.newRead(), result.splits()))
                 .hasSameElementsAs(
                         Arrays.asList("+I 1|10|100", "+I 1|20|200", "+I 2|30|101", "+I 2|40|201"));
 

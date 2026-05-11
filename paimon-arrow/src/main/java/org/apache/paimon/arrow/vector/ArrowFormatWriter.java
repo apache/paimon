@@ -22,9 +22,14 @@ import org.apache.paimon.arrow.ArrowFieldTypeConversion;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
+import org.apache.paimon.arrow.writer.ArrowFieldWriters;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -35,6 +40,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Write from {@link InternalRow} to {@link VectorSchemaRoot}. */
 public class ArrowFormatWriter implements AutoCloseable {
@@ -49,7 +57,7 @@ public class ArrowFormatWriter implements AutoCloseable {
     private int rowId;
 
     public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null);
+        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null, null);
     }
 
     public ArrowFormatWriter(
@@ -57,7 +65,13 @@ public class ArrowFormatWriter implements AutoCloseable {
             int writeBatchSize,
             boolean caseSensitive,
             @Nullable Long memoryUsedMaxInBytes) {
-        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), memoryUsedMaxInBytes);
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                new RootAllocator(),
+                memoryUsedMaxInBytes,
+                null);
     }
 
     public ArrowFormatWriter(
@@ -66,12 +80,38 @@ public class ArrowFormatWriter implements AutoCloseable {
             boolean caseSensitive,
             BufferAllocator allocator,
             @Nullable Long memoryUsedMaxInBytes) {
+        this(rowType, writeBatchSize, caseSensitive, allocator, memoryUsedMaxInBytes, null);
+    }
+
+    public ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas) {
         this(
                 rowType,
                 writeBatchSize,
                 caseSensitive,
                 new RootAllocator(),
                 memoryUsedMaxInBytes,
+                shreddingSchemas);
+    }
+
+    public ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas) {
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                shreddingSchemas,
                 ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR,
                 ArrowFieldWriterFactoryVisitor.INSTANCE);
     }
@@ -82,21 +122,34 @@ public class ArrowFormatWriter implements AutoCloseable {
             boolean caseSensitive,
             BufferAllocator allocator,
             @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas,
             ArrowFieldTypeConversion.ArrowFieldTypeVisitor fieldTypeVisitor,
             ArrowFieldWriterFactoryVisitor fieldWriterFactory) {
         this.allocator = allocator;
 
+        RowType outputRowType = replaceWithShreddingType(rowType, shreddingSchemas);
         vectorSchemaRoot =
                 ArrowUtils.createVectorSchemaRoot(
-                        rowType, allocator, caseSensitive, fieldTypeVisitor);
+                        outputRowType, allocator, caseSensitive, fieldTypeVisitor);
 
         fieldWriters = new ArrowFieldWriter[rowType.getFieldCount()];
 
         for (int i = 0; i < fieldWriters.length; i++) {
-            DataType type = rowType.getFields().get(i).type();
-            fieldWriters[i] =
-                    type.accept(fieldWriterFactory)
-                            .create(vectorSchemaRoot.getVector(i), type.isNullable());
+            DataField field = rowType.getFields().get(i);
+            DataType type = field.type();
+            if (type instanceof VariantType) {
+                RowType shreddingSchema =
+                        shreddingSchemas != null && shreddingSchemas.containsField(field.name())
+                                ? (RowType) shreddingSchemas.getField(field.name()).type()
+                                : null;
+                fieldWriters[i] =
+                        new ArrowFieldWriters.VariantWriter(
+                                vectorSchemaRoot.getVector(i), type.isNullable(), shreddingSchema);
+            } else {
+                fieldWriters[i] =
+                        type.accept(fieldWriterFactory)
+                                .create(vectorSchemaRoot.getVector(i), type.isNullable());
+            }
         }
 
         this.batchSize = writeBatchSize;
@@ -136,6 +189,15 @@ public class ArrowFormatWriter implements AutoCloseable {
         return true;
     }
 
+    public void write(
+            ColumnVector[] columns, @Nullable int[] pickedInColumn, int startIndex, int batchRows) {
+        Preconditions.checkState(rowId == 0, "rowId must be 0 before writing columns.");
+        for (int i = 0; i < columns.length; i++) {
+            fieldWriters[i].write(columns[i], pickedInColumn, startIndex, batchRows);
+        }
+        rowId = batchRows;
+    }
+
     public long memoryUsed() {
         vectorSchemaRoot.setRowCount(rowId);
         long memoryUsed = 0;
@@ -162,11 +224,38 @@ public class ArrowFormatWriter implements AutoCloseable {
         allocator.close();
     }
 
+    public int getBatchSize() {
+        return batchSize;
+    }
+
+    public ArrowFieldWriter[] getFieldWriters() {
+        return fieldWriters;
+    }
+
     public VectorSchemaRoot getVectorSchemaRoot() {
         return vectorSchemaRoot;
     }
 
     public BufferAllocator getAllocator() {
         return allocator;
+    }
+
+    private static RowType replaceWithShreddingType(
+            RowType rowType, @Nullable RowType shreddingSchemas) {
+        if (shreddingSchemas == null) {
+            return rowType;
+        }
+
+        List<DataField> newFields = new ArrayList<>();
+        for (DataField field : rowType.getFields()) {
+            if (field.type() instanceof VariantType
+                    && shreddingSchemas.containsField(field.name())) {
+                RowType shreddingSchema = (RowType) shreddingSchemas.getField(field.name()).type();
+                newFields.add(field.newType(shreddingSchema));
+            } else {
+                newFields.add(field);
+            }
+        }
+        return new RowType(rowType.isNullable(), newFields);
     }
 }

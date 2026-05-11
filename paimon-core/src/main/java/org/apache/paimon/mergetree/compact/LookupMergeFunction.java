@@ -143,7 +143,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     /** Factory to create {@link LookupMergeFunction}. */
     public static class Factory implements MergeFunctionFactory<KeyValue> {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
         private final MergeFunctionFactory<KeyValue> wrapped;
         private final CoreOptions options;
@@ -168,14 +168,14 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         }
 
         @Override
-        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+        public MergeFunction<KeyValue> create(@Nullable RowType readType) {
             return new LookupMergeFunction(
-                    wrapped.create(projection), options, keyType, valueType, ioManager);
+                    wrapped.create(readType), options, keyType, valueType, ioManager);
         }
 
         @Override
-        public AdjustedProjection adjustProjection(@Nullable int[][] projection) {
-            return wrapped.adjustProjection(projection);
+        public RowType adjustReadType(RowType readType) {
+            return wrapped.adjustReadType(readType);
         }
     }
 }

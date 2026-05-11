@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.IOException;
@@ -33,10 +34,12 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
 
     private final GlobalIndexReader wrapped;
     private final long offset;
+    private final long to;
 
-    public OffsetGlobalIndexReader(GlobalIndexReader wrapped, long offset) {
+    public OffsetGlobalIndexReader(GlobalIndexReader wrapped, long offset, long to) {
         this.wrapped = wrapped;
         this.offset = offset;
+        this.to = to;
     }
 
     @Override
@@ -110,8 +113,19 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
-        return applyOffset(wrapped.visitVectorSearch(vectorSearch));
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        return applyOffset(wrapped.visitBetween(fieldRef, from, to));
+    }
+
+    @Override
+    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+        return wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to))
+                .map(r -> r.offset(offset));
+    }
+
+    @Override
+    public Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
+        return wrapped.visitFullTextSearch(fullTextSearch).map(r -> r.offset(offset));
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {

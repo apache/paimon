@@ -21,24 +21,54 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.SimpleFileEntry;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Need to retry commit of {@link CommitResult}. */
-public class RetryCommitResult implements CommitResult {
+public abstract class RetryCommitResult implements CommitResult {
 
-    public final Snapshot latestSnapshot;
-    public final List<SimpleFileEntry> baseDataFiles;
     public final Exception exception;
 
-    public RetryCommitResult(
-            Snapshot latestSnapshot, List<SimpleFileEntry> baseDataFiles, Exception exception) {
-        this.latestSnapshot = latestSnapshot;
-        this.baseDataFiles = baseDataFiles;
+    private RetryCommitResult(Exception exception) {
         this.exception = exception;
+    }
+
+    public static RetryCommitResult forCommitFail(
+            Snapshot snapshot, List<SimpleFileEntry> baseDataFiles, Exception exception) {
+        return new CommitFailRetryResult(snapshot, baseDataFiles, exception);
+    }
+
+    public static RetryCommitResult forRollback(Exception exception) {
+        return new RollbackRetryResult(exception);
     }
 
     @Override
     public boolean isSuccess() {
         return false;
+    }
+
+    /** Retry result for commit failing. */
+    public static class CommitFailRetryResult extends RetryCommitResult {
+
+        public final @Nullable Snapshot latestSnapshot;
+        public final @Nullable List<SimpleFileEntry> baseDataFiles;
+
+        private CommitFailRetryResult(
+                @Nullable Snapshot latestSnapshot,
+                @Nullable List<SimpleFileEntry> baseDataFiles,
+                Exception exception) {
+            super(exception);
+            this.latestSnapshot = latestSnapshot;
+            this.baseDataFiles = baseDataFiles;
+        }
+    }
+
+    /** Retry result for rollback. */
+    public static class RollbackRetryResult extends RetryCommitResult {
+
+        private RollbackRetryResult(Exception exception) {
+            super(exception);
+        }
     }
 }

@@ -66,7 +66,7 @@ CREATE CATALOG `paimon_hms` PROPERTIES (
     "hadoop.username" = "hadoop"
 );
 
--- Integrate with Aliyun DLF
+-- Integrate with Aliyun DLF 1.0
 CREATE CATALOG paimon_dlf PROPERTIES (
     'type' = 'paimon',
     'paimon.catalog.type' = 'dlf',
@@ -76,6 +76,17 @@ CREATE CATALOG paimon_dlf PROPERTIES (
     'dlf.region' = 'cn-beijing',
     'dlf.access_key' = 'ak',
     'dlf.secret_key' = 'sk'
+);
+
+-- Integrate with Aliyun DLF 3.0 Paimon Rest
+-- Apache Doris supported since version 3.1.0
+CREATE CATALOG dlf_paimon_rest PROPERTIES (
+    'type' = 'paimon',
+    'uri' = 'http://cn-beijing-vpc.dlf.aliyuncs.com',
+    'warehouse' = 'catalog_name',
+    'paimon.rest.token.provider' = 'dlf',
+    'paimon.rest.dlf.access-key-id' = 'ak',
+    'paimon.rest.dlf.access-key-secret' = 'sk'
 );
 ```
 

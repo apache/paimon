@@ -44,7 +44,7 @@ Contributing to Apache Paimon goes beyond writing code for the project. Below, w
   <tbody>
     <tr>
       <td><span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span> Report Bug</td>
-      <td>To report a problem with Paimon, open <a href="https://github.com/apache/paimon/issues">Paimon’s issues</a>. <br/>
+      <td>To report a problem with Paimon, open <a href="https://github.com/apache/paimon/issues">Paimon's issues</a>. <br/>
       Please give detailed information about the problem you encountered and, if possible, add a description that helps to reproduce the problem.</td>
     </tr>
     <tr>

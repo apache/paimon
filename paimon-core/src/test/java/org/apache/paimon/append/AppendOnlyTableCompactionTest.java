@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -43,13 +44,18 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for append table compaction. */
 public class AppendOnlyTableCompactionTest {
@@ -206,6 +212,78 @@ public class AppendOnlyTableCompactionTest {
             result.add(task.doCompact(appendOnlyFileStoreTable, write));
         }
         return result;
+    }
+
+    @Test
+    public void testBatchScanFileNumLimitWithRemainingFiles() throws Exception {
+        commit(writeCommit(10));
+
+        Map<String, String> options = new HashMap<>();
+        options.put("compaction.file-num-limit", "5");
+        AppendCompactCoordinator batchCoordinator = createBatchCoordinator(options);
+
+        assertThat(batchCoordinator.scan()).isTrue();
+        assertThat(batchCoordinator.batchRemainFiles()).isTrue();
+        assertThat(batchCoordinator.listRestoredFiles().size()).isEqualTo(5);
+    }
+
+    @Test
+    public void testBatchScanFileNumLimitNoRemainingFiles() throws Exception {
+        commit(writeCommit(10));
+
+        // default 100_000
+        AppendCompactCoordinator batchCoordinator = createBatchCoordinator(Collections.emptyMap());
+
+        assertThat(batchCoordinator.scan()).isTrue();
+        assertThat(batchCoordinator.batchRemainFiles()).isFalse();
+        assertThat(batchCoordinator.listRestoredFiles().size()).isEqualTo(10);
+    }
+
+    @Test
+    public void testBatchScanFileNumLimitExactMatch() throws Exception {
+        commit(writeCommit(5));
+
+        Map<String, String> options = new HashMap<>();
+        options.put("compaction.file-num-limit", "5");
+        AppendCompactCoordinator batchCoordinator = createBatchCoordinator(options);
+
+        assertThat(batchCoordinator.scan()).isTrue();
+        assertThat(batchCoordinator.batchRemainFiles()).isFalse();
+        assertThat(batchCoordinator.listRestoredFiles().size()).isEqualTo(5);
+    }
+
+    @Test
+    public void testBatchScanEmptyTableBatchRemainFiles() {
+        AppendCompactCoordinator batchCoordinator = createBatchCoordinator(Collections.emptyMap());
+
+        assertThatThrownBy(batchCoordinator::scan)
+                .satisfies(anyCauseMatches(EndOfScanException.class));
+        assertThat(batchCoordinator.batchRemainFiles()).isFalse();
+    }
+
+    @Test
+    public void testBatchScanAllFilesFilteredOut() throws Exception {
+        commit(writeCommit(10));
+
+        // Set target-file-size to 1 byte, making compactionFileSize = 0,
+        // so shouldCompact returns false for all files
+        Map<String, String> options = new HashMap<>();
+        options.put("target-file-size", "1 b");
+        AppendCompactCoordinator batchCoordinator = createBatchCoordinator(options);
+
+        assertThatThrownBy(batchCoordinator::scan)
+                .satisfies(anyCauseMatches(EndOfScanException.class));
+        assertThat(batchCoordinator.batchRemainFiles()).isFalse();
+    }
+
+    private AppendCompactCoordinator createBatchCoordinator(Map<String, String> extraOptions) {
+        TableSchema schema = tableSchema.copy(extraOptions);
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new org.apache.paimon.fs.Path(tempDir.toString()),
+                        schema);
+        return new AppendCompactCoordinator(table, false);
     }
 
     private InternalRow randomRow() {

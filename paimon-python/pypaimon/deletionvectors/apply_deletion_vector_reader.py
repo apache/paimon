@@ -23,9 +23,7 @@ from pyarrow import RecordBatch
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
-
-from pyroaring import BitMap
-
+from pypaimon.utils.roaring_bitmap import RoaringBitmap
 from pypaimon.read.reader.iface.record_reader import RecordReader
 
 
@@ -57,10 +55,11 @@ class ApplyDeletionVectorReader(RecordBatchReader):
         if arrow_batch is None:
             return None
         # Remove the deleted rows from the batch
-        range_bitmap = BitMap(
-            range(self._reader.return_batch_pos() - arrow_batch.num_rows, self._reader.return_batch_pos()))
-        intersection_bitmap = range_bitmap - self._deletion_vector.bit_map()
-        added_row_list = [x - (self._reader.return_batch_pos() - arrow_batch.num_rows) for x in
+        range_bitmap = RoaringBitmap()
+        return_batch_pos = self._reader.return_batch_pos()
+        range_bitmap.add_range(return_batch_pos - arrow_batch.num_rows, return_batch_pos - 1)
+        intersection_bitmap = RoaringBitmap.remove_all(range_bitmap, self._deletion_vector.bit_map())
+        added_row_list = [x - (return_batch_pos - arrow_batch.num_rows) for x in
                           list(intersection_bitmap)]
         return arrow_batch.take(pyarrow.array(added_row_list, type=pyarrow.int32()))
 

@@ -25,14 +25,14 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-spark</artifactId>
-        <version>1.4-SNAPSHOT</version>
+        <version>1.5-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-spark-3.5_${scala.binary.version}</artifactId>
     <name>Paimon : Spark : 3.5: ${scala.binary.version}</name>
 
     <properties>
-        <spark.version>3.5.7</spark.version>
+        <spark.version>3.5.8</spark.version>
     </properties>
 
     <dependencies>
@@ -79,6 +79,12 @@ under the License.
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

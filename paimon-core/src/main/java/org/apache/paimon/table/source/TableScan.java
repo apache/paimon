@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
@@ -37,6 +38,12 @@ public interface TableScan {
 
     /** Set {@link MetricRegistry} to table scan. */
     TableScan withMetricRegistry(MetricRegistry registry);
+
+    /**
+     * Specify the global index result to be read. This is usually used to search vector index in
+     * data-evolution table.
+     */
+    TableScan withGlobalIndexResult(GlobalIndexResult globalIndexResult);
 
     /** Plan splits, throws {@link EndOfScanException} if the scan is ended. */
     Plan plan();

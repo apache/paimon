@@ -48,6 +48,7 @@ org.apache.paimon.flink.action.RemoveUnexistingManifestsActionFactory
 org.apache.paimon.flink.action.ClearConsumerActionFactory
 org.apache.paimon.flink.action.RescaleActionFactory
 org.apache.paimon.flink.action.CloneActionFactory
+org.apache.paimon.flink.action.DataEvolutionMergeIntoActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
@@ -61,6 +62,7 @@ org.apache.paimon.flink.procedure.ExpireTagsProcedure
 org.apache.paimon.flink.procedure.ReplaceTagProcedure
 org.apache.paimon.flink.procedure.CreateBranchProcedure
 org.apache.paimon.flink.procedure.DeleteBranchProcedure
+org.apache.paimon.flink.procedure.RenameBranchProcedure
 org.apache.paimon.flink.procedure.DropPartitionProcedure
 org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
@@ -89,7 +91,6 @@ org.apache.paimon.flink.procedure.CloneProcedure
 org.apache.paimon.flink.procedure.CompactManifestProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingFilesProcedure
 org.apache.paimon.flink.procedure.ClearConsumersProcedure
-org.apache.paimon.flink.procedure.MigrateIcebergTableProcedure
 org.apache.paimon.flink.procedure.RescaleProcedure
 org.apache.paimon.flink.procedure.AlterViewDialectProcedure
 org.apache.paimon.flink.procedure.CreateFunctionProcedure
@@ -98,3 +99,6 @@ org.apache.paimon.flink.procedure.AlterFunctionProcedure
 org.apache.paimon.flink.procedure.AlterColumnDefaultValueProcedure
 org.apache.paimon.flink.procedure.TriggerTagAutomaticCreationProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingManifestsProcedure
+org.apache.paimon.flink.procedure.DataEvolutionMergeIntoProcedure
+org.apache.paimon.flink.procedure.CreateGlobalIndexProcedure
+org.apache.paimon.flink.procedure.VectorSearchProcedure

@@ -202,6 +202,17 @@ Run the following command:
     --branch_name <branch-name> \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
+
+{{< /tab >}}
+
+{{< tab "Spark SQL" >}}
+
+Run the following sql:
+
+```sql
+CALL sys.fast_forward('default.T', 'branch1');
+```
+
 {{< /tab >}}
 
 {{< /tabs >}}

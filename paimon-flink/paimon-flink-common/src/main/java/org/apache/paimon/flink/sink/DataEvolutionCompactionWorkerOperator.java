@@ -57,10 +57,7 @@ public class DataEvolutionCompactionWorkerOperator
     public void processElement(StreamRecord<DataEvolutionCompactTask> element) throws Exception {
         DataEvolutionCompactTask task = element.getValue();
         committables.add(
-                new Committable(
-                        Long.MAX_VALUE,
-                        Committable.Kind.FILE,
-                        task.doCompact(fileStoreTable, commitUser)));
+                new Committable(Long.MAX_VALUE, task.doCompact(fileStoreTable, commitUser)));
     }
 
     @Override

@@ -60,7 +60,13 @@ object ScalarOperatorGens {
     }
     // array types
     else if (isArray(left.resultType) && canEqual) {
-      generateArrayComparison(ctx, left, right, resultType)
+      val elementType = left.resultType.asInstanceOf[ArrayType].getElementType
+      generateArrayComparison(ctx, left, right, elementType, resultType)
+    }
+    // vector type
+    else if (isVector(left.resultType) && canEqual) {
+      val elementType = left.resultType.asInstanceOf[VectorType].getElementType
+      generateArrayComparison(ctx, left, right, elementType, resultType)
     }
     // map types
     else if (isMap(left.resultType) && canEqual) {
@@ -196,6 +202,7 @@ object ScalarOperatorGens {
       ctx: CodeGeneratorContext,
       left: GeneratedExpression,
       right: GeneratedExpression,
+      elementType: DataType,
       resultType: DataType): GeneratedExpression = {
     generateCallWithStmtIfArgsNotNull(ctx, resultType, Seq(left, right)) {
       args =>
@@ -204,7 +211,6 @@ object ScalarOperatorGens {
 
         val resultTerm = newName("compareResult")
 
-        val elementType = left.resultType.asInstanceOf[ArrayType].getElementType
         val elementCls = primitiveTypeTermForType(elementType)
         val elementDefault = primitiveDefaultValue(elementType)
 
@@ -225,6 +231,7 @@ object ScalarOperatorGens {
           rightElementExpr,
           new BooleanType(elementType.isNullable))
 
+        // TODO: With BinaryVector available, we can use it here.
         val stmt =
           s"""
              |boolean $resultTerm;

@@ -44,7 +44,9 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.function.LongConsumer;
 import java.util.zip.CRC32;
 
 /** The {@link GlobalIndexReader} implementation for btree index. */
@@ -58,6 +60,71 @@ public class BTreeIndexReader implements GlobalIndexReader {
     private final Object minKey;
     private final Object maxKey;
 
+    /** A key and its local row ids stored in one btree entry. */
+    public static class KeyRowIds {
+        private final Object key;
+        private final long[] rowIds;
+
+        public KeyRowIds(Object key, long[] rowIds) {
+            this.key = key;
+            this.rowIds = rowIds;
+        }
+
+        public Object key() {
+            return key;
+        }
+
+        public long[] rowIds() {
+            return rowIds;
+        }
+    }
+
+    /**
+     * Sequential iterator over all non-null key entries.
+     *
+     * <p>Each returned element contains one key and all local row ids belonging to this key.
+     */
+    public class EntryIterator {
+        private final SstFileReader.SstFileIterator fileIter;
+        private BlockIterator dataIter;
+        private KeyRowIds next;
+
+        private EntryIterator() {
+            this.fileIter = reader.createIterator();
+            this.dataIter = null;
+            this.next = null;
+        }
+
+        public boolean hasNext() throws IOException {
+            if (next != null) {
+                return true;
+            }
+
+            while (true) {
+                if (dataIter != null && dataIter.hasNext()) {
+                    Map.Entry<MemorySlice, MemorySlice> entry = dataIter.next();
+                    Object key = keySerializer.deserialize(entry.getKey());
+                    next = new KeyRowIds(key, deserializeRowIds(entry.getValue()));
+                    return true;
+                }
+
+                dataIter = fileIter.readBatch();
+                if (dataIter == null) {
+                    return false;
+                }
+            }
+        }
+
+        public KeyRowIds next() throws IOException {
+            if (!hasNext()) {
+                throw new NoSuchElementException("No more entries in btree index file.");
+            }
+            KeyRowIds current = next;
+            next = null;
+            return current;
+        }
+    }
+
     public BTreeIndexReader(
             KeySerializer keySerializer,
             GlobalIndexFileReader fileReader,
@@ -67,13 +134,19 @@ public class BTreeIndexReader implements GlobalIndexReader {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
         BTreeIndexMeta indexMeta = BTreeIndexMeta.deserialize(globalIndexIOMeta.metadata());
-        this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
-        this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
-        this.input = fileReader.getInputStream(globalIndexIOMeta.fileName());
+        if (indexMeta.getFirstKey() != null) {
+            this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
+            this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));
+        } else {
+            // this is possible if this btree index file only stores nulls.
+            this.minKey = null;
+            this.maxKey = null;
+        }
+        this.input = fileReader.getInputStream(globalIndexIOMeta);
 
         // prepare file footer
         long fileSize = globalIndexIOMeta.fileSize();
-        Path filePath = fileReader.filePath(globalIndexIOMeta.fileName());
+        Path filePath = globalIndexIOMeta.filePath();
         BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
         BTreeFileFooter footer = readFooter(blockCache, fileSize);
 
@@ -149,6 +222,18 @@ public class BTreeIndexReader implements GlobalIndexReader {
     public void close() throws IOException {
         reader.close();
         input.close();
+    }
+
+    /** Returns a sequential iterator over all non-null key entries in this index file. */
+    public EntryIterator entryIterator() {
+        return new EntryIterator();
+    }
+
+    /** Visits all local row ids belonging to null keys. */
+    public void scanNullRowIds(LongConsumer consumer) {
+        for (long rowId : nullBitmap.get()) {
+            consumer.accept(rowId);
+        }
     }
 
     @Override
@@ -336,10 +421,26 @@ public class BTreeIndexReader implements GlobalIndexReader {
                         }));
     }
 
+    @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        return Optional.of(
+                GlobalIndexResult.create(
+                        () -> {
+                            try {
+                                return rangeQuery(from, to, true, true);
+                            } catch (IOException ioe) {
+                                throw new RuntimeException("fail to read btree index file.", ioe);
+                            }
+                        }));
+    }
+
     private RoaringNavigableMap64 allNonNullRows() throws IOException {
         // Traverse all data to avoid returning null values, which is very advantageous in
         // situations where there are many null values
         // TODO do not traverse all data if less null values
+        if (minKey == null) {
+            return new RoaringNavigableMap64();
+        }
         return rangeQuery(minKey, maxKey, true, true);
     }
 
@@ -357,21 +458,19 @@ public class BTreeIndexReader implements GlobalIndexReader {
         SstFileReader.SstFileIterator fileIter = reader.createIterator();
         fileIter.seekTo(keySerializer.serialize(from));
 
-        boolean skipped = false;
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
         BlockIterator dataIter;
         Map.Entry<MemorySlice, MemorySlice> entry;
         while ((dataIter = fileIter.readBatch()) != null) {
             while (dataIter.hasNext()) {
                 entry = dataIter.next();
+                Object key = keySerializer.deserialize(entry.getKey());
 
-                if (!fromInclusive && !skipped) {
-                    // this is correct only if the underlying file do not have duplicated keys.
-                    skipped = true;
+                if (!fromInclusive && comparator.compare(key, from) == 0) {
                     continue;
                 }
 
-                int difference = comparator.compare(keySerializer.deserialize(entry.getKey()), to);
+                int difference = comparator.compare(key, to);
                 if (difference > 0 || !toInclusive && difference == 0) {
                     return result;
                 }

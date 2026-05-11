@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import logging
 from typing import List
 
 from pypaimon.catalog.catalog import Catalog
@@ -23,6 +24,8 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
+
+logger = logging.getLogger(__name__)
 
 
 class CatalogSnapshotCommit(SnapshotCommit):
@@ -34,20 +37,19 @@ class CatalogSnapshotCommit(SnapshotCommit):
 
         Args:
             catalog: The catalog instance to use for committing
-            identifier: The table identifier
+            identifier: The table identifier (already encodes branch in object name)
             uuid: Optional table UUID for verification
         """
         self.catalog = catalog
         self.identifier = identifier
         self.uuid = uuid
 
-    def commit(self, snapshot: Snapshot, branch: str, statistics: List[PartitionStatistics]) -> bool:
+    def commit(self, snapshot: Snapshot, statistics: List[PartitionStatistics]) -> bool:
         """
         Commit the snapshot using the catalog.
 
         Args:
             snapshot: The snapshot to commit
-            branch: The branch name to commit to
             statistics: List of partition statistics
 
         Returns:
@@ -56,15 +58,12 @@ class CatalogSnapshotCommit(SnapshotCommit):
         Raises:
             Exception: If commit fails
         """
-        new_identifier = Identifier(
-            database=self.identifier.get_database_name(),
-            object=self.identifier.get_table_name(),
-            branch=branch
-        )
-
         # Call catalog's commit_snapshot method
         if hasattr(self.catalog, 'commit_snapshot'):
-            return self.catalog.commit_snapshot(new_identifier, self.uuid, snapshot, statistics)
+            success = self.catalog.commit_snapshot(self.identifier, self.uuid, snapshot, statistics)
+            if success:
+                logger.info("Catalog snapshot commit succeeded for %s, snapshot id %d", self.identifier, snapshot.id)
+            return success
         else:
             # Fallback for catalogs that don't support snapshot commits
             raise NotImplementedError(

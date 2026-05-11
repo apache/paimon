@@ -47,31 +47,11 @@ public class CommittableSerializerTest {
         CommitMessage committable =
                 new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement);
         CommitMessage newCommittable =
-                (CommitMessage)
-                        serializer
-                                .deserialize(
-                                        2,
-                                        serializer.serialize(
-                                                new Committable(
-                                                        9, Committable.Kind.FILE, committable)))
-                                .wrappedCommittable();
-        assertThat(newCommittable).isEqualTo(committable);
-    }
-
-    @Test
-    public void testLogOffset() throws IOException {
-        LogOffsetCommittable committable = new LogOffsetCommittable(2, 3);
-        LogOffsetCommittable newCommittable =
-                (LogOffsetCommittable)
-                        serializer
-                                .deserialize(
-                                        2,
-                                        serializer.serialize(
-                                                new Committable(
-                                                        8,
-                                                        Committable.Kind.LOG_OFFSET,
-                                                        committable)))
-                                .wrappedCommittable();
+                serializer
+                        .deserialize(
+                                serializer.getVersion(),
+                                serializer.serialize(new Committable(9, committable)))
+                        .commitMessage();
         assertThat(newCommittable).isEqualTo(committable);
     }
 }

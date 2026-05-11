@@ -108,7 +108,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 "delta_record_count",
                                 "changelog_record_count")
                         .collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[1,3,3,0]]");
+        assertThat(rows.toString()).isEqualTo("[[1,3,3,null]]");
     }
 
     @Test
