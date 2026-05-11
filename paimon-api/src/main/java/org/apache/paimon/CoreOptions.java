@@ -1660,7 +1660,11 @@ public class CoreOptions implements Serializable {
                                                             + " this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism."),
                                             text(
                                                     "hash: Hash the partitions value,"
-                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."))
+                                                            + " this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism."),
+                                            text(
+                                                    "partition_dynamic: Dynamically adjusts shuffle strategy based on partition key traffic patterns."
+                                                            + " This mode monitors data distribution across partitions and rebalances load across downstream subtasks."
+                                                            + " Suitable when partition traffic is skewed and you want balanced write throughput."))
                                     .build());
 
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
@@ -4528,8 +4532,8 @@ public class CoreOptions implements Serializable {
     /** Partition strategy for unaware bucket partitioned append only table. */
     public enum PartitionSinkStrategy {
         NONE,
-        HASH
-        // TODO : Supports range-partition strategy.
+        HASH,
+        PARTITION_DYNAMIC
     }
 
     /** Specifies the implementation of format table. */
