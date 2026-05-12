@@ -736,8 +736,7 @@ public class SchemaValidation {
         }
     }
 
-    private static Set<String> validateBlobDescriptorFields(
-            RowType rowType, CoreOptions options) {
+    private static Set<String> validateBlobDescriptorFields(RowType rowType, CoreOptions options) {
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
                         .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)

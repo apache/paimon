@@ -268,8 +268,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
                                 + " '%s'='picture')",
                         tableName, optionKey));
 
-        assertThat(paimonTable(tableName).rowType().getTypeAt(1).is(DataTypeRoot.BLOB))
-                .isTrue();
+        assertThat(paimonTable(tableName).rowType().getTypeAt(1).is(DataTypeRoot.BLOB)).isTrue();
     }
 
     @Test
