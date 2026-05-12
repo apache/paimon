@@ -47,6 +47,8 @@ case class PaimonBatchWrite(
 
   protected val metricRegistry = SparkMetricRegistry()
 
+  @volatile private var commitStarted: Boolean = false
+
   protected val batchWriteBuilder: BatchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
     overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
@@ -68,6 +70,7 @@ case class PaimonBatchWrite(
   override def useCommitCoordinator(): Boolean = false
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
+    commitStarted = true
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
@@ -107,7 +110,19 @@ case class PaimonBatchWrite(
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
-    // TODO clean uncommitted files
+    if (commitStarted) {
+      logWarning(s"Skip abort cleanup for table ${table.name()} because commit has already started")
+      return
+    }
+
+    logInfo(s"Aborting write to table ${table.name()}")
+    val batchTableCommit = batchWriteBuilder.newCommit()
+    try {
+      val commitMessages = WriteTaskResult.merge(messages)
+      batchTableCommit.abort(commitMessages.asJava)
+    } finally {
+      batchTableCommit.close()
+    }
   }
 
   private def buildDeletedCommitMessage(
