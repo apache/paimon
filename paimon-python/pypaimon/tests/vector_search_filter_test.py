@@ -595,8 +595,10 @@ class VectorSearchManySplitsTest(unittest.TestCase):
                 query_vector=[1.0], filter_=None)
             result = reader.read(splits)
 
-        self.assertGreater(result.results().cardinality(), 0)
-        self.assertIsNotNone(result.score_getter()(0))
+        self.assertLessEqual(result.results().cardinality(), 10)
+        self.assertEqual(result.results().cardinality(), 10)
+        scores = sorted(result.score_getter()(rid) for rid in result.results())
+        self.assertEqual(scores, [float(i) for i in range(1190, 1200)])
 
     def tearDown(self):
         mock.patch.stopall()
@@ -652,8 +654,10 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
                 query_text="test")
             result = reader.read(splits)
 
-        self.assertGreater(result.results().cardinality(), 0)
-        self.assertIsNotNone(result.score_getter()(0))
+        self.assertLessEqual(result.results().cardinality(), 10)
+        self.assertEqual(result.results().cardinality(), 10)
+        scores = sorted(result.score_getter()(rid) for rid in result.results())
+        self.assertEqual(scores, [float(i) for i in range(1190, 1200)])
 
     def tearDown(self):
         mock.patch.stopall()
