@@ -27,7 +27,7 @@ under the License.
 # Mosaic File Format
 
 Mosaic is a columnar-bucket hybrid format optimized for wide tables (10,000+ columns). Columns are hashed into buckets
-by name, stored row-oriented within each bucket, and independently compressed. This enables efficient projection
+by name, stored column-oriented within each bucket, and independently compressed. This enables efficient projection
 pushdown at bucket granularity — reading 10 columns out of 10,000 only decompresses the buckets that contain those
 10 columns.
 
@@ -83,7 +83,11 @@ repeated nonEmptyCount times:
 ## Schema Block
 
 Prefixed with a 4-byte big-endian int (uncompressed size), followed by the schema data (compressed with the file's
-compression method):
+compression method).
+
+Column names are stored using **front coding** (incremental encoding): each name shares a prefix with the previous name,
+and only the suffix is stored. This is the same technique used by Lucene, LevelDB, and RocksDB for their block index
+entries.
 
 ```
 varint   numColumns
@@ -92,10 +96,14 @@ repeated numColumns times:
     varint   fieldId
     varint   bucketId
     varint   indexInBucket
-    varint   nameLength
-    bytes    name (UTF-8)
+    varint   sharedPrefixLen     (bytes shared with previous column name)
+    varint   suffixLen           (bytes of new suffix)
+    bytes    suffix (UTF-8)     (suffixLen bytes)
     TypeDescriptor
 ```
+
+The first column has `sharedPrefixLen = 0`. To reconstruct a column name, take the first `sharedPrefixLen` bytes from
+the previous name and append the suffix.
 
 ### TypeDescriptor
 
@@ -139,30 +147,68 @@ Complex types (ARRAY, MAP, ROW, etc.), VARIANT, and BLOB are not supported.
 
 ## Bucket Data
 
-Each bucket's data block (before compression):
+Each bucket is stored as a **column-oriented** block. Within a bucket, each column is independently encoded using one
+of four encodings (PLAIN, CONST, DICT, or ALL_NULL), chosen automatically based on the column's value distribution.
+
+### Bucket Block Layout (before compression)
 
 ```
-+----------------------------------+
-|  Row Size Table (delta varints)  |
-+----------------------------------+
-|  Row 0                           |
-|  Row 1                           |
-|  ...                             |
-+----------------------------------+
++--------------------------------------------+
+|  Encoding Flags                            |
+|    2 bits per column, packed into bytes     |
++--------------------------------------------+
+|  Has-Nulls Flags                           |
+|    1 bit per column, packed into bytes      |
++--------------------------------------------+
+|  Const Metadata (CONST columns only)       |
+|    serialized value for each CONST column   |
++--------------------------------------------+
+|  Dict Metadata (DICT columns only)         |
+|    for each DICT column:                   |
+|      varint    numEntries                  |
+|      repeated: serialized value per entry  |
++--------------------------------------------+
+|  Null Bitmaps                              |
+|    ceil(numRows/8) bytes per column        |
+|    (only for columns with nulls,           |
+|     excluding ALL_NULL columns)            |
++--------------------------------------------+
+|  Column Data                               |
+|    PLAIN: raw serialized values            |
+|    DICT: 1-byte index per non-null cell    |
+|    CONST/ALL_NULL: (nothing)               |
++--------------------------------------------+
 ```
 
-**Row Size Table**: Delta-varint encoded. Each entry is the byte size of one row (null bitmap + column values).
-Used to compute absolute offsets for row access within the bucket.
+**Encoding Flags**: 2 bits per column, packed left-to-right. Encoding values:
 
-**Row format**:
+| Value | Encoding | Description |
+|-------|----------|-------------|
+| 0     | PLAIN    | Raw serialized values for each non-null cell |
+| 1     | CONST    | All non-null values are identical; the single value is stored in metadata |
+| 2     | DICT     | 2-255 distinct values; each non-null cell stores a 1-byte dictionary index |
+| 3     | ALL_NULL | Every cell in this column is null; no data or null bitmap stored |
 
-```
-[null bitmap]    ceil(numColumnsInBucket / 8) bytes
-                 bit i = 1 means column i is null
-[column values]  non-null columns written in order, no padding
-```
+**Has-Nulls Flags**: 1 bit per column. If set, a null bitmap exists for that column.
 
-## Column Value Encoding
+**Null Bitmap**: `ceil(numRows / 8)` bytes per column. Bit `i` = 1 means row `i` is null. Only present for columns
+where has-nulls flag is set and encoding is not ALL_NULL.
+
+### Column Encoding Selection
+
+The encoding for each column is chosen automatically during writing:
+
+- **ALL_NULL**: 0 non-null values
+- **CONST**: exactly 1 distinct non-null value (any number of nulls allowed)
+- **DICT**: 2-255 distinct non-null values — values stored as a dictionary with 1-byte indices
+- **PLAIN**: 256+ distinct values, or dict tracking was abandoned
+
+Dictionary encoding works for all data types including variable-width types (VARCHAR, VARBINARY, DECIMAL). The writer
+tracks distinct values using their serialized byte representation.
+
+## Value Serialization
+
+Values are serialized in the same format for PLAIN data, CONST metadata, and DICT entries:
 
 <table class="table table-bordered">
     <thead>
@@ -177,16 +223,29 @@ Used to compute absolute offsets for row access within the bucket.
     <tr><td>SMALLINT</td><td>2 bytes big-endian</td></tr>
     <tr><td>INTEGER / DATE / TIME</td><td>4 bytes big-endian</td></tr>
     <tr><td>BIGINT</td><td>8 bytes big-endian</td></tr>
-    <tr><td>FLOAT</td><td>4 bytes IEEE 754</td></tr>
-    <tr><td>DOUBLE</td><td>8 bytes IEEE 754</td></tr>
+    <tr><td>FLOAT</td><td>4 bytes IEEE 754 (big-endian)</td></tr>
+    <tr><td>DOUBLE</td><td>8 bytes IEEE 754 (big-endian)</td></tr>
     <tr><td>DECIMAL (compact, precision &le; 18)</td><td>8 bytes big-endian (unscaled long)</td></tr>
     <tr><td>DECIMAL (large, precision &gt; 18)</td><td>varint length + unscaled BigInteger bytes</td></tr>
-    <tr><td>TIMESTAMP (precision &le; 3)</td><td>8 bytes (epoch millis)</td></tr>
+    <tr><td>TIMESTAMP (precision &le; 3)</td><td>8 bytes (epoch millis, big-endian)</td></tr>
     <tr><td>TIMESTAMP (precision &gt; 3)</td><td>8 bytes (epoch millis) + 4 bytes (nanos of millis)</td></tr>
     <tr><td>CHAR / VARCHAR / STRING</td><td>varint length + UTF-8 bytes</td></tr>
     <tr><td>BINARY / VARBINARY / BYTES</td><td>varint length + raw bytes</td></tr>
     </tbody>
 </table>
+
+## ALL_NULL Column Pruning
+
+For single-row-group files (the common case with small files), columns where every value is null are pruned from both
+the schema and bucket data. This reduces schema size for wide sparse tables where many columns are entirely null.
+
+- The writer detects ALL_NULL columns after buffering all rows
+- ALL_NULL columns are removed from the encoding/null flags in bucket data
+- ALL_NULL columns are removed from the schema block
+- The reader treats any projected column not found in the schema as all-null (returns null for every row)
+
+This optimization only applies to single-row-group files. Multi-row-group files retain all columns because a column may
+be ALL_NULL in one row group but have values in another.
 
 ## Column-to-Bucket Assignment
 
@@ -209,7 +268,7 @@ Compression is applied independently to each bucket data block and to the schema
 
 Test setup: 10,000 columns (90% STRING, 10% INT), column names ~80 bytes each, Zstd compression (level 9).
 
-### File Size (10 rows)
+**File Size (10 rows):**
 
 | Format  | Size       | vs Mosaic |
 |---------|------------|-----------|
@@ -217,31 +276,26 @@ Test setup: 10,000 columns (90% STRING, 10% INT), column names ~80 bytes each, Z
 | ORC     | 6,377 KB   | 9.7x      |
 | Mosaic  | 654 KB     | 1x        |
 
-Mosaic's compact binary schema and bucket-level compression produce significantly smaller files for wide tables,
-since columnar formats like Parquet and ORC store per-column metadata that scales linearly with column count.
-
-### Projection Read (500 rows, ~57 MB Parquet)
+**Projection Read (500 rows):**
 
 | Projected Columns | Parquet    | ORC        | Mosaic    |
 |-------------------|------------|------------|-----------|
 | 10 / 10,000       | 53,170 us  | 72,729 us  | 25,081 us |
 | 1 / 10,000        | 50,919 us  | 70,712 us  | 2,374  us |
 
-File size — Parquet: 57.4 MB, ORC: 95.4 MB, Mosaic: 13.5 MB
+File size — Parquet: 57.4 MB, ORC: 95.4 MB, Mosaic: 11.5 MB
 
-### Projection Read (4,500 rows, ~458 MB Parquet)
+**Projection Read (4,500 rows, ~458 MB Parquet):**
 
 | Projected Columns | Parquet     | ORC        | Mosaic     |
 |-------------------|-------------|------------|------------|
 | 10 / 10,000       | 369,627 us  | 89,344 us  | 67,314 us  |
 | 1 / 10,000        | 360,458 us  | 81,934 us  | 26,924 us  |
 
-File size — Parquet: 458.4 MB, ORC: 827.9 MB, Mosaic: 115.8 MB
+File size — Parquet: 458.4 MB, ORC: 827.9 MB, Mosaic: 100.2 MB
 
 When projecting a small subset of columns, Mosaic only decompresses the buckets containing the requested columns,
-avoiding I/O on the remaining data. Mosaic's file size advantage is consistent across both scales (~4x smaller than
-Parquet, ~7x smaller than ORC), and single-column projection read performance is comparable to ORC and significantly
-faster than Parquet.
+avoiding I/O on the remaining data.
 
 ## Limitations
 

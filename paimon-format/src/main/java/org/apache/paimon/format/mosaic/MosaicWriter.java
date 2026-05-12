@@ -43,6 +43,7 @@ public class MosaicWriter implements FormatWriter {
 
     private final PositionOutputStream out;
     private final MosaicSchema schema;
+    private MosaicSchema prunedSchema;
     private final MosaicBucketWriter[] bucketWriters;
     private final int numBuckets;
     private final int zstdLevel;
@@ -95,7 +96,7 @@ public class MosaicWriter implements FormatWriter {
             }
         }
         currentRowGroupRows++;
-        currentBufferedSize = size;
+        currentBufferedSize += size;
 
         if (currentBufferedSize >= rowGroupMaxSize) {
             flushRowGroup();
@@ -120,35 +121,12 @@ public class MosaicWriter implements FormatWriter {
         for (int b = 0; b < numBuckets; b++) {
             MosaicBucketWriter bucketWriter = bucketWriters[b];
             if (bucketWriter == null || bucketWriter.isEmpty()) {
-                bucketOffsets[b] = 0;
-                compressedSizes[b] = 0;
-                uncompressedSizes[b] = 0;
                 continue;
             }
-
             byte[] raw = bucketWriter.finish();
+            compressedSizes[b] = writeCompressed(raw);
             uncompressedSizes[b] = raw.length;
-            bucketOffsets[b] = out.getPos();
-
-            switch (compressionByte) {
-                case COMPRESSION_NONE:
-                    compressedSizes[b] = raw.length;
-                    out.write(raw);
-                    break;
-                case COMPRESSION_ZSTD:
-                    int bound = (int) Zstd.compressBound(raw.length);
-                    if (compressBuffer.length < bound) {
-                        compressBuffer = new byte[bound];
-                    }
-                    long compLen = Zstd.compress(compressBuffer, raw, zstdLevel);
-                    compressedSizes[b] = (int) compLen;
-                    out.write(compressBuffer, 0, (int) compLen);
-                    break;
-                default:
-                    throw new UnsupportedEncodingException(
-                            "Unsupported compression: " + compressionByte);
-            }
-
+            bucketOffsets[b] = out.getPos() - compressedSizes[b];
             bucketWriter.reset();
         }
 
@@ -170,6 +148,58 @@ public class MosaicWriter implements FormatWriter {
         currentBufferedSize = 0;
     }
 
+    private void flushRowGroupPruned() throws IOException {
+        if (currentRowGroupRows == 0) {
+            return;
+        }
+
+        boolean[][] allNullByBucket = new boolean[numBuckets][];
+        long[] bucketOffsets = new long[numBuckets];
+        int[] compressedSizes = new int[numBuckets];
+        int[] uncompressedSizes = new int[numBuckets];
+
+        for (int b = 0; b < numBuckets; b++) {
+            MosaicBucketWriter bucketWriter = bucketWriters[b];
+            if (bucketWriter == null || bucketWriter.isEmpty()) {
+                continue;
+            }
+            allNullByBucket[b] = bucketWriter.getAllNullFlags();
+            byte[] raw = bucketWriter.finish(true);
+            compressedSizes[b] = writeCompressed(raw);
+            uncompressedSizes[b] = raw.length;
+            bucketOffsets[b] = out.getPos() - compressedSizes[b];
+            bucketWriter.reset();
+        }
+
+        rowGroupMetas.add(
+                new RowGroupMeta(
+                        currentRowGroupRows, bucketOffsets, compressedSizes, uncompressedSizes));
+
+        prunedSchema = schema.pruneAllNullColumns(allNullByBucket);
+
+        currentRowGroupRows = 0;
+        currentBufferedSize = 0;
+    }
+
+    private int writeCompressed(byte[] raw) throws IOException {
+        switch (compressionByte) {
+            case COMPRESSION_NONE:
+                out.write(raw);
+                return raw.length;
+            case COMPRESSION_ZSTD:
+                int bound = (int) Zstd.compressBound(raw.length);
+                if (compressBuffer.length < bound) {
+                    compressBuffer = new byte[bound];
+                }
+                int compLen = (int) Zstd.compress(compressBuffer, raw, zstdLevel);
+                out.write(compressBuffer, 0, compLen);
+                return compLen;
+            default:
+                throw new UnsupportedEncodingException(
+                        "Unsupported compression: " + compressionByte);
+        }
+    }
+
     @Override
     public void close() throws IOException {
         if (closed) {
@@ -178,10 +208,16 @@ public class MosaicWriter implements FormatWriter {
         closed = true;
 
         // Flush remaining rows as the last row group
-        flushRowGroup();
+        boolean singleRowGroup = rowGroupMetas.isEmpty() && currentRowGroupRows > 0;
+        if (singleRowGroup) {
+            flushRowGroupPruned();
+        } else {
+            flushRowGroup();
+        }
 
-        // Write schema block
-        byte[] schemaRaw = schema.serialize();
+        // Write schema block (use pruned schema if available)
+        MosaicSchema schemaToWrite = prunedSchema != null ? prunedSchema : schema;
+        byte[] schemaRaw = schemaToWrite.serialize();
         long schemaBlockOffset = out.getPos();
         switch (compressionByte) {
             case COMPRESSION_NONE:

@@ -28,228 +28,499 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
+import static org.apache.paimon.format.mosaic.MosaicSpec.ENCODING_ALL_NULL;
+import static org.apache.paimon.format.mosaic.MosaicSpec.ENCODING_CONST;
+import static org.apache.paimon.format.mosaic.MosaicSpec.ENCODING_DICT;
+import static org.apache.paimon.format.mosaic.MosaicSpec.ENCODING_PLAIN;
 import static org.apache.paimon.format.mosaic.MosaicUtils.writeVarint;
 
-/** Serializes rows for a single bucket in the Mosaic format. */
+/**
+ * Columnar bucket writer for the Mosaic v2 format. Buffers values per-column and produces a
+ * column-oriented byte array with CONST/DICT/PLAIN/ALL_NULL encoding per column.
+ */
 public class MosaicBucketWriter {
 
     private final InternalRow.FieldGetter[] fieldGetters;
-    private final ColumnWriter[] columnWriters;
     private final int numColumns;
-    private final int nullBitmapBytes;
+    private final int[] fixedWidths;
+    private final boolean[] isVariableWidth;
 
-    private byte[] buf;
-    private int pos;
-    private final List<Integer> rowOffsets;
-    private final byte[] nullBitmap;
-    private final Object[] values;
+    // Per-column buffers
+    private byte[][] nullBitmaps;
+    private byte[][] valueBuffers;
+    private int[] valueBufPos;
+    private int[] nonNullCounts;
+
+    // Dict tracking for all columns (byte-level key comparison)
+    private Map<ByteKey, Integer>[] dictMaps;
+
+    private int numRows;
 
     public MosaicBucketWriter(RowType fullRowType, int[] globalColumnIndices) {
         this.numColumns = globalColumnIndices.length;
-        this.nullBitmapBytes = (numColumns + 7) / 8;
         this.fieldGetters = new InternalRow.FieldGetter[numColumns];
-        this.columnWriters = new ColumnWriter[numColumns];
+        this.fixedWidths = new int[numColumns];
+        this.isVariableWidth = new boolean[numColumns];
 
-        List<DataType> allTypes = fullRowType.getFieldTypes();
         for (int i = 0; i < numColumns; i++) {
             int globalIdx = globalColumnIndices[i];
-            DataType type = allTypes.get(globalIdx);
+            DataType type = fullRowType.getTypeAt(globalIdx);
             fieldGetters[i] = InternalRow.createFieldGetter(type, globalIdx);
-            columnWriters[i] = createColumnWriter(type);
+            fixedWidths[i] = getFixedWidth(type);
+            isVariableWidth[i] = fixedWidths[i] < 0;
         }
 
-        this.buf = new byte[4096];
-        this.pos = 0;
-        this.rowOffsets = new ArrayList<>();
-        this.nullBitmap = new byte[nullBitmapBytes];
-        this.values = new Object[numColumns];
+        initBuffers();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void initBuffers() {
+        this.nullBitmaps = new byte[numColumns][];
+        this.valueBuffers = new byte[numColumns][];
+        this.valueBufPos = new int[numColumns];
+        this.nonNullCounts = new int[numColumns];
+        this.dictMaps = new Map[numColumns];
+
+        for (int i = 0; i < numColumns; i++) {
+            nullBitmaps[i] = new byte[128];
+            valueBuffers[i] = new byte[1024];
+            dictMaps[i] = new HashMap<>();
+        }
+        this.numRows = 0;
     }
 
     public boolean isEmpty() {
-        return rowOffsets.isEmpty();
+        return numRows == 0;
     }
 
-    /** Writes a row and returns the current buffer size after writing. */
     public int writeRow(InternalRow row) {
-        rowOffsets.add(pos);
+        int bitmapIdx = numRows / 8;
 
-        for (int i = 0; i < nullBitmapBytes; i++) {
-            nullBitmap[i] = 0;
-        }
-
+        int totalSize = 0;
         for (int i = 0; i < numColumns; i++) {
+            // Ensure null bitmap capacity
+            if (bitmapIdx >= nullBitmaps[i].length) {
+                byte[] newBm = new byte[nullBitmaps[i].length * 2];
+                System.arraycopy(nullBitmaps[i], 0, newBm, 0, nullBitmaps[i].length);
+                nullBitmaps[i] = newBm;
+            }
+
             Object value = fieldGetters[i].getFieldOrNull(row);
-            values[i] = value;
             if (value == null) {
-                nullBitmap[i / 8] |= (byte) (1 << (i % 8));
+                nullBitmaps[i][bitmapIdx] |= (byte) (1 << (numRows % 8));
+            } else {
+                nonNullCounts[i]++;
+                int before = valueBufPos[i];
+                writeValue(i, value);
+                int written = valueBufPos[i] - before;
+                totalSize += written;
+
+                // Track in dict map (byte-level key from serialized value)
+                if (dictMaps[i] != null && dictMaps[i].size() <= 255) {
+                    ByteKey key = new ByteKey(valueBuffers[i], before, written);
+                    dictMaps[i].putIfAbsent(key, dictMaps[i].size());
+                }
             }
         }
-
-        ensureCapacity(nullBitmapBytes);
-        System.arraycopy(nullBitmap, 0, buf, pos, nullBitmapBytes);
-        pos += nullBitmapBytes;
-
-        for (int i = 0; i < numColumns; i++) {
-            if (values[i] != null) {
-                columnWriters[i].write(this, values[i]);
-            }
-        }
-        return pos;
+        numRows++;
+        return totalSize;
     }
 
     public byte[] finish() {
-        int numRows = rowOffsets.size();
-        int dataSize = pos;
+        return finish(false);
+    }
 
-        byte[] varintBuf = new byte[numRows * 5];
-        int vPos = 0;
-        int prevOffset = 0;
-        for (int i = 0; i < numRows; i++) {
-            int nextOffset = (i + 1 < numRows) ? rowOffsets.get(i + 1) : dataSize;
-            int rowSize = nextOffset - prevOffset;
-            prevOffset = nextOffset;
-            vPos = writeVarint(varintBuf, vPos, rowSize);
+    public byte[] finish(boolean pruneAllNull) {
+        if (numRows == 0) {
+            return new byte[0];
         }
 
-        byte[] result = new byte[vPos + dataSize];
-        System.arraycopy(varintBuf, 0, result, 0, vPos);
-        System.arraycopy(buf, 0, result, vPos, dataSize);
-        return result;
+        // 1. Determine encoding per column
+        byte[] encodings = new byte[numColumns];
+        boolean[] hasNulls = new boolean[numColumns];
+
+        for (int i = 0; i < numColumns; i++) {
+            hasNulls[i] = nonNullCounts[i] < numRows;
+            Map<ByteKey, Integer> dictMap = dictMaps[i];
+            if (nonNullCounts[i] == 0) {
+                encodings[i] = ENCODING_ALL_NULL;
+            } else if (dictMap != null && dictMap.size() == 1) {
+                encodings[i] = ENCODING_CONST;
+            } else if (dictMap != null && dictMap.size() <= 255) {
+                encodings[i] = ENCODING_DICT;
+            } else {
+                encodings[i] = ENCODING_PLAIN;
+            }
+        }
+
+        // Count output columns (skip ALL_NULL when pruning)
+        int numOutputCols = numColumns;
+        if (pruneAllNull) {
+            numOutputCols = 0;
+            for (int i = 0; i < numColumns; i++) {
+                if (encodings[i] != ENCODING_ALL_NULL) {
+                    numOutputCols++;
+                }
+            }
+        }
+
+        // 2. Compute exact output size
+        byte[] out = computeOutBuffer(numOutputCols, encodings, hasNulls);
+        int pos = 0;
+
+        // 2a. Encoding flags: 2 bits per output column
+        int encodingFlagsBytes = (numOutputCols * 2 + 7) / 8;
+        int outputIdx = 0;
+        for (int i = 0; i < numColumns; i++) {
+            if (pruneAllNull && encodings[i] == ENCODING_ALL_NULL) {
+                continue;
+            }
+            int byteIdx = (outputIdx * 2) / 8;
+            int bitIdx = (outputIdx * 2) % 8;
+            out[pos + byteIdx] |= (byte) (encodings[i] << bitIdx);
+            outputIdx++;
+        }
+        pos += encodingFlagsBytes;
+
+        // 2b. Has-nulls flags: 1 bit per output column
+        int hasNullsFlagsBytes = (numOutputCols + 7) / 8;
+        outputIdx = 0;
+        for (int i = 0; i < numColumns; i++) {
+            if (pruneAllNull && encodings[i] == ENCODING_ALL_NULL) {
+                continue;
+            }
+            if (hasNulls[i]) {
+                out[pos + outputIdx / 8] |= (byte) (1 << (outputIdx % 8));
+            }
+            outputIdx++;
+        }
+        pos += hasNullsFlagsBytes;
+
+        // 2c. Const metadata — write the single distinct value's serialized bytes
+        for (int i = 0; i < numColumns; i++) {
+            if (encodings[i] == ENCODING_CONST) {
+                ByteKey constKey = dictMaps[i].keySet().iterator().next();
+                System.arraycopy(constKey.data, 0, out, pos, constKey.data.length);
+                pos += constKey.data.length;
+            }
+        }
+
+        // 2d. Dict metadata — write entry count + each entry's serialized bytes
+        for (int i = 0; i < numColumns; i++) {
+            if (encodings[i] == ENCODING_DICT) {
+                int numEntries = dictMaps[i].size();
+                pos = writeVarint(out, pos, numEntries);
+                ByteKey[] keys = new ByteKey[numEntries];
+                for (Map.Entry<ByteKey, Integer> e : dictMaps[i].entrySet()) {
+                    keys[e.getValue()] = e.getKey();
+                }
+                for (int j = 0; j < numEntries; j++) {
+                    System.arraycopy(keys[j].data, 0, out, pos, keys[j].data.length);
+                    pos += keys[j].data.length;
+                }
+            }
+        }
+
+        // 2e. Null bitmaps (only for cols with nulls and not ALL_NULL)
+        int nullBitmapBytes = (numRows + 7) / 8;
+        for (int i = 0; i < numColumns; i++) {
+            if (hasNulls[i] && encodings[i] != ENCODING_ALL_NULL) {
+                System.arraycopy(nullBitmaps[i], 0, out, pos, nullBitmapBytes);
+                pos += nullBitmapBytes;
+            }
+        }
+
+        // 2f. Column data
+        for (int i = 0; i < numColumns; i++) {
+            if (encodings[i] == ENCODING_PLAIN) {
+                System.arraycopy(valueBuffers[i], 0, out, pos, valueBufPos[i]);
+                pos += valueBufPos[i];
+            } else if (encodings[i] == ENCODING_DICT) {
+                // 1-byte dict indices for non-null cells
+                Map<ByteKey, Integer> dict = dictMaps[i];
+                int w = fixedWidths[i];
+                int valPos = 0;
+                for (int r = 0; r < numRows; r++) {
+                    boolean isNull = (nullBitmaps[i][r / 8] & (1 << (r % 8))) != 0;
+                    if (!isNull) {
+                        int valueLen;
+                        if (w > 0) {
+                            valueLen = w;
+                        } else {
+                            int varLen = readVarint(valueBuffers[i], valPos);
+                            valueLen = varintSize(varLen) + varLen;
+                        }
+                        ByteKey key = new ByteKey(valueBuffers[i], valPos, valueLen);
+                        valPos += valueLen;
+                        out[pos++] = (byte) (int) dict.get(key);
+                    }
+                }
+            }
+            // CONST and ALL_NULL: no column data
+        }
+
+        return out;
+    }
+
+    private byte[] computeOutBuffer(int numOutputCols, byte[] encodings, boolean[] hasNulls) {
+        int nullBitmapBytesPerCol = (numRows + 7) / 8;
+        int exactSize = (numOutputCols * 2 + 7) / 8 + (numOutputCols + 7) / 8;
+        for (int i = 0; i < numColumns; i++) {
+            if (encodings[i] == ENCODING_ALL_NULL) {
+                continue;
+            }
+            if (hasNulls[i]) {
+                exactSize += nullBitmapBytesPerCol;
+            }
+            if (encodings[i] == ENCODING_CONST) {
+                ByteKey constKey = dictMaps[i].keySet().iterator().next();
+                exactSize += constKey.data.length;
+            } else if (encodings[i] == ENCODING_DICT) {
+                int numEntries = dictMaps[i].size();
+                exactSize += varintSize(numEntries);
+                for (ByteKey key : dictMaps[i].keySet()) {
+                    exactSize += key.data.length;
+                }
+                exactSize += nonNullCounts[i]; // 1-byte index per non-null
+            } else if (encodings[i] == ENCODING_PLAIN) {
+                exactSize += valueBufPos[i];
+            }
+        }
+        return new byte[exactSize];
+    }
+
+    public boolean[] getAllNullFlags() {
+        boolean[] flags = new boolean[numColumns];
+        for (int i = 0; i < numColumns; i++) {
+            flags[i] = nonNullCounts[i] == 0;
+        }
+        return flags;
     }
 
     public void reset() {
-        pos = 0;
-        rowOffsets.clear();
+        for (int i = 0; i < numColumns; i++) {
+            Arrays.fill(nullBitmaps[i], (byte) 0);
+            valueBufPos[i] = 0;
+            nonNullCounts[i] = 0;
+            if (dictMaps[i] != null) {
+                dictMaps[i].clear();
+            }
+        }
+        numRows = 0;
     }
 
-    void ensureCapacity(int additional) {
-        int required = pos + additional;
-        if (required > buf.length) {
-            int newLen = Math.max(buf.length * 2, required);
-            byte[] newBuf = new byte[newLen];
-            System.arraycopy(buf, 0, newBuf, 0, pos);
-            buf = newBuf;
+    // ======================== Value writing ========================
+
+    private void writeValue(int colIdx, Object value) {
+        int w = fixedWidths[colIdx];
+        if (w > 0) {
+            ensureValueCapacity(colIdx, w);
+            writeFixedValue(valueBuffers[colIdx], valueBufPos[colIdx], value, w);
+            valueBufPos[colIdx] += w;
+        } else {
+            writeVariableValue(colIdx, value);
         }
     }
 
-    void writeByte(int v) {
-        ensureCapacity(1);
-        buf[pos++] = (byte) v;
+    private static void writeFixedValue(byte[] buf, int pos, Object value, int width) {
+        switch (width) {
+            case 1:
+                if (value instanceof Boolean) {
+                    buf[pos] = (byte) ((Boolean) value ? 1 : 0);
+                } else {
+                    buf[pos] = (Byte) value;
+                }
+                break;
+            case 2:
+                {
+                    short v = (Short) value;
+                    buf[pos] = (byte) (v >>> 8);
+                    buf[pos + 1] = (byte) v;
+                    break;
+                }
+            case 4:
+                {
+                    int v;
+                    if (value instanceof Float) {
+                        v = Float.floatToRawIntBits((Float) value);
+                    } else {
+                        v = (Integer) value;
+                    }
+                    buf[pos] = (byte) (v >>> 24);
+                    buf[pos + 1] = (byte) (v >>> 16);
+                    buf[pos + 2] = (byte) (v >>> 8);
+                    buf[pos + 3] = (byte) v;
+                    break;
+                }
+            case 8:
+                {
+                    long v;
+                    if (value instanceof Long) {
+                        v = (Long) value;
+                    } else if (value instanceof Double) {
+                        v = Double.doubleToRawLongBits((Double) value);
+                    } else if (value instanceof Decimal) {
+                        v = ((Decimal) value).toUnscaledLong();
+                    } else if (value instanceof Timestamp) {
+                        v = ((Timestamp) value).getMillisecond();
+                    } else {
+                        throw new IllegalArgumentException("Unsupported type: " + value.getClass());
+                    }
+                    writeLong(buf, pos, v);
+                    break;
+                }
+            case 12:
+                {
+                    Timestamp ts = (Timestamp) value;
+                    long millis = ts.getMillisecond();
+                    int nanos = ts.getNanoOfMillisecond();
+                    writeLong(buf, pos, millis);
+                    buf[pos + 8] = (byte) (nanos >>> 24);
+                    buf[pos + 9] = (byte) (nanos >>> 16);
+                    buf[pos + 10] = (byte) (nanos >>> 8);
+                    buf[pos + 11] = (byte) nanos;
+                    break;
+                }
+            default:
+                break;
+        }
     }
 
-    void writeShort(int v) {
-        ensureCapacity(2);
-        buf[pos++] = (byte) (v >>> 8);
-        buf[pos++] = (byte) v;
+    private static void writeLong(byte[] buf, int pos, long v) {
+        buf[pos] = (byte) (v >>> 56);
+        buf[pos + 1] = (byte) (v >>> 48);
+        buf[pos + 2] = (byte) (v >>> 40);
+        buf[pos + 3] = (byte) (v >>> 32);
+        buf[pos + 4] = (byte) (v >>> 24);
+        buf[pos + 5] = (byte) (v >>> 16);
+        buf[pos + 6] = (byte) (v >>> 8);
+        buf[pos + 7] = (byte) v;
     }
 
-    void writeInt(int v) {
-        ensureCapacity(4);
-        buf[pos++] = (byte) (v >>> 24);
-        buf[pos++] = (byte) (v >>> 16);
-        buf[pos++] = (byte) (v >>> 8);
-        buf[pos++] = (byte) v;
+    private void writeVariableValue(int colIdx, Object value) {
+        byte[] bytes;
+        if (value instanceof BinaryString) {
+            bytes = ((BinaryString) value).toBytes();
+        } else if (value instanceof byte[]) {
+            bytes = (byte[]) value;
+        } else if (value instanceof Decimal) {
+            bytes = ((Decimal) value).toUnscaledBytes();
+        } else {
+            throw new UnsupportedOperationException("Unsupported variable-width type: " + value);
+        }
+        ensureValueCapacity(colIdx, 5 + bytes.length);
+        valueBufPos[colIdx] = writeVarint(valueBuffers[colIdx], valueBufPos[colIdx], bytes.length);
+        System.arraycopy(bytes, 0, valueBuffers[colIdx], valueBufPos[colIdx], bytes.length);
+        valueBufPos[colIdx] += bytes.length;
     }
 
-    void writeLong(long v) {
-        ensureCapacity(8);
-        buf[pos++] = (byte) (v >>> 56);
-        buf[pos++] = (byte) (v >>> 48);
-        buf[pos++] = (byte) (v >>> 40);
-        buf[pos++] = (byte) (v >>> 32);
-        buf[pos++] = (byte) (v >>> 24);
-        buf[pos++] = (byte) (v >>> 16);
-        buf[pos++] = (byte) (v >>> 8);
-        buf[pos++] = (byte) v;
+    // ======================== Buffer helpers ========================
+
+    private void ensureValueCapacity(int colIdx, int additional) {
+        int required = valueBufPos[colIdx] + additional;
+        if (required > valueBuffers[colIdx].length) {
+            int newLen = Math.max(valueBuffers[colIdx].length * 2, required);
+            byte[] newBuf = new byte[newLen];
+            System.arraycopy(valueBuffers[colIdx], 0, newBuf, 0, valueBufPos[colIdx]);
+            valueBuffers[colIdx] = newBuf;
+        }
     }
 
-    void writeBytes(byte[] src, int off, int len) {
-        ensureCapacity(len);
-        System.arraycopy(src, off, buf, pos, len);
-        pos += len;
-    }
+    // ======================== Type width ========================
 
-    void writeVarintVal(int value) {
-        ensureCapacity(5);
-        pos = writeVarint(buf, pos, value);
-    }
-
-    // ======================== Column Writers ========================
-
-    @FunctionalInterface
-    interface ColumnWriter {
-        void write(MosaicBucketWriter w, Object value);
-    }
-
-    private static ColumnWriter createColumnWriter(DataType type) {
+    static int getFixedWidth(DataType type) {
         switch (type.getTypeRoot()) {
             case BOOLEAN:
-                return (w, v) -> w.writeByte((Boolean) v ? 1 : 0);
             case TINYINT:
-                return (w, v) -> w.writeByte((Byte) v);
+                return 1;
             case SMALLINT:
-                return (w, v) -> w.writeShort((Short) v);
+                return 2;
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-                return (w, v) -> w.writeInt((Integer) v);
-            case BIGINT:
-                return (w, v) -> w.writeLong((Long) v);
             case FLOAT:
-                return (w, v) -> w.writeInt(Float.floatToRawIntBits((Float) v));
+                return 4;
+            case BIGINT:
             case DOUBLE:
-                return (w, v) -> w.writeLong(Double.doubleToRawLongBits((Double) v));
+                return 8;
             case DECIMAL:
-                DecimalType decType = (DecimalType) type;
-                if (Decimal.isCompact(decType.getPrecision())) {
-                    return (w, v) -> w.writeLong(((Decimal) v).toUnscaledLong());
-                } else {
-                    return (w, v) -> {
-                        byte[] bytes = ((Decimal) v).toUnscaledBytes();
-                        w.writeVarintVal(bytes.length);
-                        w.writeBytes(bytes, 0, bytes.length);
-                    };
+                if (Decimal.isCompact(((DecimalType) type).getPrecision())) {
+                    return 8;
                 }
+                return -1;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 if (Timestamp.isCompact(((TimestampType) type).getPrecision())) {
-                    return (w, v) -> w.writeLong(((Timestamp) v).getMillisecond());
-                } else {
-                    return (w, v) -> {
-                        Timestamp ts = (Timestamp) v;
-                        w.writeLong(ts.getMillisecond());
-                        w.writeInt(ts.getNanoOfMillisecond());
-                    };
+                    return 8;
                 }
+                return 12;
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 if (Timestamp.isCompact(((LocalZonedTimestampType) type).getPrecision())) {
-                    return (w, v) -> w.writeLong(((Timestamp) v).getMillisecond());
-                } else {
-                    return (w, v) -> {
-                        Timestamp ts = (Timestamp) v;
-                        w.writeLong(ts.getMillisecond());
-                        w.writeInt(ts.getNanoOfMillisecond());
-                    };
+                    return 8;
                 }
-            case CHAR:
-            case VARCHAR:
-                return (w, v) -> {
-                    BinaryString bs = (BinaryString) v;
-                    byte[] bytes = bs.toBytes();
-                    w.writeVarintVal(bytes.length);
-                    w.writeBytes(bytes, 0, bytes.length);
-                };
-            case BINARY:
-            case VARBINARY:
-                return (w, v) -> {
-                    byte[] bytes = (byte[]) v;
-                    w.writeVarintVal(bytes.length);
-                    w.writeBytes(bytes, 0, bytes.length);
-                };
+                return 12;
             default:
-                throw new UnsupportedOperationException("Unsupported type: " + type);
+                return -1;
+        }
+    }
+
+    // ======================== Varint helpers ========================
+
+    private static int readVarint(byte[] buf, int pos) {
+        int value = 0;
+        int shift = 0;
+        int b;
+        do {
+            b = buf[pos++] & 0xFF;
+            value |= (b & 0x7F) << shift;
+            shift += 7;
+        } while ((b & 0x80) != 0);
+        return value;
+    }
+
+    private static int varintSize(int value) {
+        int size = 1;
+        while ((value & ~0x7F) != 0) {
+            size++;
+            value >>>= 7;
+        }
+        return size;
+    }
+
+    // ======================== ByteKey ========================
+
+    /** Immutable byte array wrapper with value-based hash and equals for dict tracking. */
+    private static final class ByteKey {
+        final byte[] data;
+        private final int hash;
+
+        ByteKey(byte[] source, int offset, int length) {
+            this.data = new byte[length];
+            System.arraycopy(source, offset, this.data, 0, length);
+            int h = 1;
+            for (int i = 0; i < length; i++) {
+                h = 31 * h + this.data[i];
+            }
+            this.hash = h;
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof ByteKey)) {
+                return false;
+            }
+            return Arrays.equals(data, ((ByteKey) obj).data);
         }
     }
 }

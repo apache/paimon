@@ -144,13 +144,20 @@ public class MosaicSchema {
         writeVarint(out, columns.size());
         writeVarint(out, numBuckets);
 
+        // Front coding: each column name stored as (sharedPrefixLen, suffix)
+        byte[] prevNameBytes = new byte[0];
         for (ColumnMeta col : columns) {
             writeVarint(out, col.fieldId);
             writeVarint(out, col.bucketId);
             writeVarint(out, col.indexInBucket);
+
             byte[] nameBytes = col.name.getBytes(StandardCharsets.UTF_8);
-            writeVarint(out, nameBytes.length);
-            out.write(nameBytes);
+            int shared = commonPrefixLength(prevNameBytes, nameBytes);
+            writeVarint(out, shared);
+            writeVarint(out, nameBytes.length - shared);
+            out.write(nameBytes, shared, nameBytes.length - shared);
+            prevNameBytes = nameBytes;
+
             MosaicTypes.writeType(out, col.type);
         }
 
@@ -170,13 +177,19 @@ public class MosaicSchema {
             bucketLists.add(new ArrayList<>());
         }
 
+        byte[] prevNameBytes = new byte[0];
         for (int i = 0; i < numColumns; i++) {
             int fieldId = readVarint(in);
             int bucketId = readVarint(in);
             int indexInBucket = readVarint(in);
-            int nameLen = readVarint(in);
-            byte[] nameBytes = new byte[nameLen];
-            in.readFully(nameBytes);
+
+            int shared = readVarint(in);
+            int suffixLen = readVarint(in);
+            byte[] nameBytes = new byte[shared + suffixLen];
+            System.arraycopy(prevNameBytes, 0, nameBytes, 0, shared);
+            in.readFully(nameBytes, shared, suffixLen);
+            prevNameBytes = nameBytes;
+
             String name = new String(nameBytes, StandardCharsets.UTF_8);
             DataType type = MosaicTypes.readType(in);
             columns.add(new ColumnMeta(fieldId, name, type, bucketId, indexInBucket));
@@ -193,6 +206,65 @@ public class MosaicSchema {
         }
 
         return new MosaicSchema(numBuckets, columns, bucketToGlobal);
+    }
+
+    public MosaicSchema pruneAllNullColumns(boolean[][] allNullByBucket) {
+        Set<Integer> prunedGlobalIndices = new HashSet<>();
+        for (int b = 0; b < numBuckets; b++) {
+            if (allNullByBucket[b] == null) {
+                continue;
+            }
+            int[] globalIndices = bucketToGlobalIndices[b];
+            for (int local = 0; local < globalIndices.length; local++) {
+                if (allNullByBucket[b][local]) {
+                    prunedGlobalIndices.add(globalIndices[local]);
+                }
+            }
+        }
+
+        if (prunedGlobalIndices.isEmpty()) {
+            return this;
+        }
+
+        List<ColumnMeta> newColumns = new ArrayList<>();
+        Map<Integer, Integer> oldToNew = new HashMap<>();
+        for (int i = 0; i < columns.size(); i++) {
+            if (!prunedGlobalIndices.contains(i)) {
+                oldToNew.put(i, newColumns.size());
+                newColumns.add(columns.get(i));
+            }
+        }
+
+        int[][] newBucketToGlobal = new int[numBuckets][];
+        for (int b = 0; b < numBuckets; b++) {
+            List<Integer> kept = new ArrayList<>();
+            for (int globalIdx : bucketToGlobalIndices[b]) {
+                Integer newIdx = oldToNew.get(globalIdx);
+                if (newIdx != null) {
+                    kept.add(newIdx);
+                }
+            }
+            newBucketToGlobal[b] = new int[kept.size()];
+            for (int j = 0; j < kept.size(); j++) {
+                newBucketToGlobal[b][j] = kept.get(j);
+                ColumnMeta old = newColumns.get(kept.get(j));
+                newColumns.set(
+                        kept.get(j),
+                        new ColumnMeta(old.fieldId, old.name, old.type, old.bucketId, j));
+            }
+        }
+
+        return new MosaicSchema(numBuckets, newColumns, newBucketToGlobal);
+    }
+
+    private static int commonPrefixLength(byte[] a, byte[] b) {
+        int len = Math.min(a.length, b.length);
+        for (int i = 0; i < len; i++) {
+            if (a[i] != b[i]) {
+                return i;
+            }
+        }
+        return len;
     }
 
     /** Metadata for a single column. */

@@ -53,7 +53,6 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
     private final SeekableInputStream inputStream;
     private final RowType projectedRowType;
 
-    private MosaicSchema schema;
     private byte compression;
     private int[] sortedRequiredBuckets;
     private MosaicSpec.RowGroupMeta[] rowGroupMetas;
@@ -119,7 +118,7 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
             default:
                 throw new UnsupportedEncodingException("Unsupported compression: " + compression);
         }
-        this.schema = MosaicSchema.deserialize(schemaRaw);
+        MosaicSchema schema = MosaicSchema.deserialize(schemaRaw);
 
         // Determine which buckets we need
         Set<Integer> requiredBuckets = schema.getRequiredBuckets(projectedRowType);
@@ -204,8 +203,7 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
         int activeCount = 0;
         int[] activeBuckets = new int[ordered.length];
 
-        for (int i = 0; i < ordered.length; i++) {
-            int b = ordered[i];
+        for (int b : ordered) {
             if (meta.compressedSizes[b] == 0) {
                 continue;
             }
@@ -237,32 +235,33 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
             activeBuckets[activeCount++] = b;
         }
 
-        final int totalRows = meta.numRows;
         final int[] active = Arrays.copyOf(activeBuckets, activeCount);
+        return new IteratorResultIterator(
+                toIterator(meta.numRows, active, readers), null, filePath, 0);
+    }
+
+    private IteratorWithException<InternalRow, IOException> toIterator(
+            int totalRows, int[] active, MosaicBucketReader[] readers) {
         final int projectedFieldCount = projectedRowType.getFieldCount();
+        return new IteratorWithException<InternalRow, IOException>() {
+            int currentRow = 0;
+            final Object[] fields = new Object[projectedFieldCount];
 
-        IteratorWithException<InternalRow, IOException> iter =
-                new IteratorWithException<InternalRow, IOException>() {
-                    int currentRow = 0;
-                    final Object[] fields = new Object[projectedFieldCount];
+            @Override
+            public boolean hasNext() {
+                return currentRow < totalRows;
+            }
 
-                    @Override
-                    public boolean hasNext() {
-                        return currentRow < totalRows;
-                    }
-
-                    @Override
-                    public InternalRow next() throws IOException {
-                        Arrays.fill(fields, null);
-                        for (int i = 0; i < active.length; i++) {
-                            readers[active[i]].readRow(fields);
-                        }
-                        currentRow++;
-                        return GenericRow.of(fields);
-                    }
-                };
-
-        return new IteratorResultIterator(iter, null, filePath, 0);
+            @Override
+            public InternalRow next() {
+                Arrays.fill(fields, null);
+                for (int j : active) {
+                    readers[j].readRow(fields);
+                }
+                currentRow++;
+                return GenericRow.of(fields);
+            }
+        };
     }
 
     @Override

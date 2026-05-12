@@ -37,6 +37,12 @@ public class MosaicSpec {
 
     public static final int DEFAULT_NUM_BUCKETS = 100;
 
+    // Column encoding types (2 bits each in encoding flags)
+    public static final byte ENCODING_PLAIN = 0;
+    public static final byte ENCODING_CONST = 1;
+    public static final byte ENCODING_DICT = 2;
+    public static final byte ENCODING_ALL_NULL = 3;
+
     public static int assignBucket(String fieldName, int numBuckets) {
         return Math.floorMod(fieldName.hashCode(), numBuckets);
     }
