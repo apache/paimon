@@ -118,7 +118,7 @@ case class PaimonBatchWrite(
     logInfo(s"Aborting write to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     try {
-      val commitMessages = WriteTaskResult.merge(messages)
+      val commitMessages = WriteTaskResult.merge(messages.filter(_ != null))
       batchTableCommit.abort(commitMessages.asJava)
     } finally {
       batchTableCommit.close()

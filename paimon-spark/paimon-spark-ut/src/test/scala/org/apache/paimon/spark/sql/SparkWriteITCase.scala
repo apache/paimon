@@ -294,7 +294,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
       assertThat(dataFilePaths.size).isGreaterThan(0)
       dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isTrue)
 
-      batchWrite.abort(Array(writerCommitMessage))
+      batchWrite.abort(Array(writerCommitMessage, null))
 
       dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isFalse)
       assertThat(table.latestSnapshot()).isEmpty
@@ -325,7 +325,7 @@ class SparkWriteITCase extends PaimonSparkTestBase {
       }
       assertThat(table.latestSnapshot()).isPresent
 
-      batchWrite.abort(Array(writerCommitMessage))
+      batchWrite.abort(Array(writerCommitMessage, null))
 
       dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isTrue)
       checkAnswer(spark.sql("SELECT * FROM T"), Row(1, 10) :: Nil)
