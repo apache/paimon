@@ -18,6 +18,8 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.data.Timestamp;
+
 import javax.annotation.Nullable;
 
 import java.time.LocalDate;
@@ -89,6 +91,37 @@ public class PartitionTimeExtractor {
     }
 
     public LocalDateTime extract(List<String> partitionKeys, List<?> partitionValues) {
+        // Try to extract directly from typed partition values (DATE/TIMESTAMP)
+        if (pattern == null && partitionValues.size() == 1) {
+            Object value = partitionValues.get(0);
+            LocalDateTime directExtracted = extractFromTypedValue(value);
+            if (directExtracted != null) {
+                return directExtracted;
+            }
+        }
+
+        // Handle pattern-based extraction with typed values
+        if (pattern != null) {
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                Object value = partitionValues.get(i);
+                LocalDateTime directExtracted = extractFromTypedValue(value);
+                if (directExtracted != null) {
+                    // For typed values with pattern, replace with formatted string
+                    String formattedValue = formatTypedValue(directExtracted);
+                    if (formattedValue != null) {
+                        String tempPattern =
+                                pattern.replaceAll("\\$" + partitionKeys.get(i), formattedValue);
+                        // If pattern only contains this one variable, we can use the extracted
+                        // value
+                        if (!tempPattern.contains("$")) {
+                            return toLocalDateTime(tempPattern, this.formatter);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to string-based extraction
         String timestampString;
         if (pattern == null) {
             timestampString = partitionValues.get(0).toString();
@@ -127,5 +160,71 @@ public class PartitionTimeExtractor {
             return LocalDateTime.of(
                     LocalDate.parse(timestampString, DATE_FORMATTER), LocalTime.MIDNIGHT);
         }
+    }
+
+    /**
+     * Extract LocalDateTime from typed partition values (Integer for DATE, Timestamp for
+     * TIMESTAMP).
+     *
+     * @param value the partition value object
+     * @return LocalDateTime if the value is a supported type, null otherwise
+     */
+    @Nullable
+    private static LocalDateTime extractFromTypedValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        // Handle INTEGER type - represents days since epoch (DATE type)
+        if (value instanceof Integer) {
+            int daysSinceEpoch = (Integer) value;
+            return LocalDate.ofEpochDay(daysSinceEpoch).atStartOfDay();
+        }
+
+        // Handle Paimon Timestamp type
+        if (value instanceof Timestamp) {
+            Timestamp timestamp = (Timestamp) value;
+            return timestamp.toLocalDateTime();
+        }
+
+        // Handle java.sql.Date
+        if (value instanceof java.sql.Date) {
+            return ((java.sql.Date) value).toLocalDate().atStartOfDay();
+        }
+
+        // Handle java.sql.Timestamp
+        if (value instanceof java.sql.Timestamp) {
+            return ((java.sql.Timestamp) value).toLocalDateTime();
+        }
+
+        // Handle java.time.LocalDate
+        if (value instanceof LocalDate) {
+            return ((LocalDate) value).atStartOfDay();
+        }
+
+        // Handle java.time.LocalDateTime
+        if (value instanceof LocalDateTime) {
+            return (LocalDateTime) value;
+        }
+
+        return null;
+    }
+
+    /**
+     * Format a LocalDateTime to string for pattern replacement.
+     *
+     * @param dateTime the LocalDateTime to format
+     * @return formatted string, or null if input is null
+     */
+    @Nullable
+    private static String formatTypedValue(LocalDateTime dateTime) {
+        if (dateTime == null) {
+            return null;
+        }
+        // Use ISO format: yyyy-MM-dd HH:mm:ss or yyyy-MM-dd if time is midnight
+        if (dateTime.toLocalTime().equals(LocalTime.MIDNIGHT)) {
+            return dateTime.toLocalDate().toString();
+        }
+        return dateTime.toString().replace("T", " ");
     }
 }
