@@ -791,3 +791,11 @@ Limitations:
 3. Statistics collection is not supported for BLOB columns.
 
 For usage details, configuration options, and examples, see [Blob Type]({{< ref "append-table/blob" >}}).
+
+## MOSAIC
+
+Mosaic is a columnar-bucket hybrid format optimized for wide tables (10,000+ columns). Columns are hashed into buckets
+by name, stored row-oriented within each bucket, and independently compressed. This enables efficient projection pushdown
+at bucket granularity — reading 10 columns out of 10,000 only decompresses the buckets that contain those 10 columns.
+
+For the detailed file format specification, see [Mosaic File Format]({{< ref "concepts/spec/mosaic" >}}).
