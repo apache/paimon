@@ -157,7 +157,10 @@ class RayDatasource(Datasource):
                 if batch.num_rows == 0:
                     continue
                 has_data = True
-                yield pyarrow.Table.from_batches([batch], schema=schema)
+                table = pyarrow.Table.from_batches([batch])
+                if table.schema != schema:
+                    table = table.cast(schema)
+                yield table
 
             if not has_data:
                 yield pyarrow.Table.from_arrays(

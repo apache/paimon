@@ -345,6 +345,32 @@ class RayIntegrationTest(unittest.TestCase):
             read_paimon('default.does_not_matter', self.catalog_options,
                         override_num_blocks=0)
 
+    def test_read_paimon_pk_single_snapshot(self):
+        """read_paimon on a PK table with a single snapshot (raw-convertible
+        splits) must not raise ArrowInvalid on schema nullability mismatch.
+
+        The Paimon table schema marks PK columns as NOT NULL, but the
+        Parquet reader may produce nullable fields. The RayDatasource
+        read task must cast the batch to align the schema rather than
+        rejecting it via strict from_batches equality.
+        """
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        identifier = self._create_and_populate_table(
+            'test_read_pk_single_snap', pa_schema,
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c']},
+            primary_keys=['id'], options={'bucket': '2'},
+        )
+
+        ds = read_paimon(identifier, self.catalog_options)
+        self.assertEqual(ds.count(), 3)
+        df = ds.to_pandas().sort_values('id').reset_index(drop=True)
+        self.assertEqual(list(df['id']), [1, 2, 3])
+
 
 if __name__ == '__main__':
     unittest.main()
