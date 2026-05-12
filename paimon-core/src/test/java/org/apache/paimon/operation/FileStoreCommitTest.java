@@ -1015,9 +1015,7 @@ public class FileStoreCommitTest {
                         .collect(Collectors.toList());
 
         store.options().toConfiguration().set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        store.options()
-                .toConfiguration()
-                .set(CoreOptions.MANIFEST_SORT_REWRITE_MANIFEST_COUNT, 4);
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_SORT_REWRITE_MANIFEST_COUNT, 4);
 
         List<KeyValue> finalKvs = partitionRangeData(6, 4);
         expected.addAll(finalKvs);
