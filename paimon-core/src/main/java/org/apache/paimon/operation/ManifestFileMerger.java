@@ -177,6 +177,9 @@ public class ManifestFileMerger {
             return Optional.empty();
         }
 
+        // Sort compaction may move a rewritten group before non-rewritten manifests. Even though
+        // rewriteGroups keeps the input order inside each group, it cannot preserve ordering
+        // dependencies between a DELETE entry and an ADD entry in manifests outside the group.
         for (ManifestFileMeta file : input) {
             if (file.numDeletedFiles() > 0) {
                 return Optional.empty();
@@ -224,9 +227,8 @@ public class ManifestFileMerger {
         for (int i = 0; i < input.size(); i++) {
             ManifestFileMeta file = input.get(i);
             if (rewriteFileNames.contains(file.fileName())) {
-                if (insertPos < 0) {
-                    insertPos = i;
-                }
+                insertPos = i;
+                break;
             }
         }
 
