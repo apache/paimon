@@ -61,23 +61,27 @@ public class CollectAggregationITCase extends CatalogITCaseBase {
                 "INSERT INTO test_collect VALUES "
                         + "(1, CAST (NULL AS ARRAY<STRING>)), "
                         + "(2, ARRAY['A', 'B']), "
-                        + "(3, ARRAY['car', 'watch'])");
+                        + "(3, ARRAY['car', 'watch']), "
+                        + "(4, ARRAY['A', 'B', 'A'])");
 
         List<Row> result = queryAndSort("SELECT * FROM test_collect");
         checkOneRecord(result.get(0), 1);
         checkOneRecord(result.get(1), 2, "A", "B");
         checkOneRecord(result.get(2), 3, "car", "watch");
+        checkOneRecord(result.get(3), 4, "A", "B");
 
         sql(
                 "INSERT INTO test_collect VALUES "
                         + "(1, ARRAY['paimon', 'paimon']), "
                         + "(2, ARRAY['A', 'B', 'C']), "
-                        + "(3, CAST (NULL AS ARRAY<STRING>))");
+                        + "(3, CAST (NULL AS ARRAY<STRING>)), "
+                        + "(4, ARRAY['C', 'D', 'C'])");
 
         result = queryAndSort("SELECT * FROM test_collect");
         checkOneRecord(result.get(0), 1, "paimon");
         checkOneRecord(result.get(1), 2, "A", "B", "C");
         checkOneRecord(result.get(2), 3, "car", "watch");
+        checkOneRecord(result.get(3), 4, "A", "B", "C", "D");
     }
 
     @Test
