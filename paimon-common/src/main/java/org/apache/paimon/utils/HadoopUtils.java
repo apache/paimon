@@ -18,7 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
@@ -166,7 +166,7 @@ public class HadoopUtils {
         Path root = new Path(possibleHadoopConfPath);
 
         try {
-            FileIO fileIO = FileIO.get(root, CatalogContext.create(options, configuration));
+            FileIO fileIO = FileIO.get(root, CatalogHadoopContext.create(options, configuration));
             boolean foundHadoopConfiguration = false;
 
             if (fileIO.exists(root)) {

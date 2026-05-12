@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.{CatalogContext, CatalogUtils}
+import org.apache.paimon.catalog.{CatalogHadoopContext, CatalogUtils}
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.SparkSource._
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
@@ -114,7 +114,7 @@ class SparkSource
         .copy(options)
     } else {
       val catalogContext =
-        CatalogContext.create(Options.fromMap(options), sessionState.newHadoopConf())
+        CatalogHadoopContext.create(Options.fromMap(options), sessionState.newHadoopConf())
       copyWithSQLConf(FileStoreTableFactory.create(catalogContext), extraOptions = options)
     }
 

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -44,7 +44,7 @@ public class ResolvingFileIOTest {
     public void setUp() {
         resolvingFileIO = new ResolvingFileIO();
         Options options = new Options();
-        CatalogContext catalogContext = CatalogContext.create(options);
+        CatalogHadoopContext catalogContext = CatalogHadoopContext.create(options);
         resolvingFileIO.configure(catalogContext);
     }
 

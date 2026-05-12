@@ -80,7 +80,7 @@ public class CatalogFactoryTest {
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
         options.set("hadoop.fs.defaultFS", defaultFS);
         options.set("hadoop.dfs.replication", replication);
-        Configuration conf = CatalogContext.create(options).hadoopConf();
+        Configuration conf = CatalogHadoopContext.create(options).hadoopConf();
 
         assertThat(conf).isInstanceOf(HdfsConfiguration.class);
         assertThat(conf.get("fs.defaultFS")).isEqualTo(defaultFS);
@@ -91,8 +91,8 @@ public class CatalogFactoryTest {
     public void testContextSerializable() throws IOException, ClassNotFoundException {
         Configuration conf = new Configuration(false);
         conf.set("my_key", "my_value");
-        CatalogContext context =
-                CatalogContext.create(
+        CatalogHadoopContext context =
+                CatalogHadoopContext.create(
                         new Options(), conf, new TestFileIOLoader(), new TestFileIOLoader());
         context = InstantiationUtil.clone(context);
         assertThat(context.hadoopConf().get("my_key")).isEqualTo(conf.get("my_key"));

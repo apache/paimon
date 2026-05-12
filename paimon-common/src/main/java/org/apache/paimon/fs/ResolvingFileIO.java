@@ -62,9 +62,7 @@ public class ResolvingFileIO implements FileIO {
         Options options = new Options();
         context.options().toMap().forEach(options::set);
         options.set(RESOLVING_FILE_IO_ENABLED, false);
-        this.context =
-                CatalogContext.create(
-                        options, context.hadoopConf(), context.preferIO(), context.fallbackIO());
+        this.context = context.copy(options, context.preferIO(), context.fallbackIO());
     }
 
     @Override

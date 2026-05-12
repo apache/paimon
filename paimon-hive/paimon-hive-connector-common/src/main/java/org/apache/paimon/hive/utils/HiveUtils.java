@@ -20,6 +20,7 @@ package org.apache.paimon.hive.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.LocationKeyExtractor;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
@@ -58,7 +59,7 @@ public class HiveUtils {
 
         CatalogContext catalogContext;
         if (options.get(HADOOP_LOAD_DEFAULT_CONFIG)) {
-            catalogContext = CatalogContext.create(options, jobConf);
+            catalogContext = CatalogHadoopContext.create(options, jobConf);
         } else {
             catalogContext = CatalogContext.create(options);
         }
