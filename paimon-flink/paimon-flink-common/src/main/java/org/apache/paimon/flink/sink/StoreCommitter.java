@@ -58,7 +58,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         }
 
         try {
-            this.commitListeners = CommitListeners.create(context, table);
+            this.commitListeners = CommitListeners.create(context, table, this.commit);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

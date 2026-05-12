@@ -56,6 +56,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -144,6 +145,10 @@ public class TableCommitImpl implements InnerTableCommit {
     public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
         this.overwritePartition = overwritePartitions;
         return this;
+    }
+
+    public Optional<Map<String, String>> getOverwrite() {
+        return Optional.ofNullable(overwritePartition);
     }
 
     @Override

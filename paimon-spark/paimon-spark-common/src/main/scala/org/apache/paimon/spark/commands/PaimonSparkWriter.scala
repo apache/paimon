@@ -41,7 +41,7 @@ import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
-import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.{InternalRowPartitionComputer, SerializationUtils}
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
@@ -109,6 +109,25 @@ case class PaimonSparkWriter(
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
+    val writeEmptyPartitionEnable = coreOptions.writeEmptyPartitionEnable()
+    val dynamicPartitionOverwriteMode = coreOptions.dynamicPartitionOverwrite()
+    val staticPartition = writeBuilder.staticPartition()
+    val overwritePartition =
+      if (
+        !dynamicPartitionOverwriteMode &&
+        staticPartition != null &&
+        !staticPartition.isEmpty
+      ) {
+        val partitionType = table.schema().logicalPartitionType()
+        InternalSerializers.create(partitionType).toBinaryRow(
+          InternalRowPartitionComputer.convertSpecToInternalRow(
+            staticPartition,
+            partitionType,
+            coreOptions.partitionDefaultName())).copy()
+      } else {
+        null
+      }
+
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
       case KEY_DYNAMIC if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
@@ -173,6 +192,21 @@ case class PaimonSparkWriter(
               Iterator.apply(write.commit)
             } finally {
               write.close()
+            }
+          }
+      }
+    }
+
+    def emptyDataWrite(overwritePartition: BinaryRow, bucket: Int) = {
+      sparkSession.sparkContext.parallelize(Seq(0), 1).mapPartitions {
+        _ =>
+          {
+            val emptyWrite = newWrite()
+            try {
+              emptyWrite.write.notifyNewEmptyOutputWriter(overwritePartition, bucket)
+              Iterator.apply(emptyWrite.commit)
+            } finally {
+              emptyWrite.close()
             }
           }
       }
@@ -343,7 +377,24 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    WriteTaskResult.merge(written.collect())
+    var res = WriteTaskResult.merge(written.collect())
+    if (
+      !dynamicPartitionOverwriteMode &&
+      writeEmptyPartitionEnable &&
+      overwritePartition != null &&
+      !hasNewFiles(res)
+    ) {
+      res ++= WriteTaskResult.merge(emptyDataWrite(overwritePartition, 0).collect())
+    }
+    res
+  }
+
+  def hasNewFiles(commitMessages: Seq[CommitMessage]): Boolean = {
+    commitMessages.exists {
+      case msg: CommitMessageImpl =>
+        msg.newFilesIncrement() != null && msg.newFilesIncrement().newFiles().asScala.nonEmpty
+      case _ => false
+    }
   }
 
   /**

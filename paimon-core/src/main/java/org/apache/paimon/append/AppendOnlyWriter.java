@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
@@ -204,6 +205,14 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
         }
+    }
+
+    @Override
+    public void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
+        RollingFileWriter<InternalRow, DataFileMeta> writer = createRollingRowWriter();
+        writer.writeEmptyFile();
+        writer.close();
+        newFiles.addAll(writer.result());
     }
 
     @Override

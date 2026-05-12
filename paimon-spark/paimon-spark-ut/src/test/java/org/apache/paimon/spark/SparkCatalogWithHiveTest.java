@@ -23,6 +23,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.TestHiveMetastore;
 import org.apache.paimon.table.FileStoreTableFactory;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
@@ -153,6 +154,44 @@ public class SparkCatalogWithHiveTest {
                                                             "%s.db/%s",
                                                             "test_db", "external_table"))))
                     .doesNotThrowAnyException();
+        }
+    }
+
+    @Test
+    public void testOverwriteEmptyPartition() throws IOException {
+        try (SparkSession spark =
+                createSessionBuilder()
+                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
+                        .getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+            spark.sql("USE spark_catalog.my_db1");
+
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS `my_db1`.`append_test` ("
+                            + "`t1` BIGINT COMMENT 't1', "
+                            + "`t2` BIGINT COMMENT 't2', "
+                            + "`t3` STRING COMMENT 't3') "
+                            + "PARTITIONED BY (`dt` STRING COMMENT 'dt') "
+                            + "ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe' "
+                            + "WITH SERDEPROPERTIES ('serialization.format' = '1') "
+                            + "STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' "
+                            + "OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' "
+                            + "TBLPROPERTIES ("
+                            + "'partition.timestamp-pattern' = '$dt', "
+                            + "'partition.timestamp-formatter' = 'yyyyMMdd', "
+                            + "'metastore.partitioned-table' = 'true')");
+
+            spark.sql("set spark.paimon.write.empty.partition.enable=true");
+            spark.sql(
+                    "insert overwrite table `my_db1`.`append_test` partition (dt = '20251127') "
+                            + "select t1,t2,t3 from `my_db1`.`append_test` where dt = '20251126'");
+
+            Dataset<Row> partitions = spark.sql("SELECT * FROM `my_db1`.`append_test$partitions`");
+            assertThat(partitions.count()).isEqualTo(1);
+            long recordCount = partitions.first().getAs("record_count");
+            assertThat(recordCount).isEqualTo(0);
+
+            spark.sql("DROP TABLE IF EXISTS `my_db1`.`append_test`");
         }
     }
 

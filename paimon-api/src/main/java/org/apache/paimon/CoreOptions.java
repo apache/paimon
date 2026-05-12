@@ -1136,6 +1136,14 @@ public class CoreOptions implements Serializable {
                             "Whether only overwrite dynamic partition when overwriting a partitioned table with "
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
+    public static final ConfigOption<Boolean> WRITE_EMPTY_PARTITION_ENABLE =
+            key("write.empty.partition.enable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to write an empty data file for a static partition overwrite "
+                                    + "when the input has no records.");
+
     public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
                     .stringType()
@@ -3433,6 +3441,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dynamicPartitionOverwrite() {
         return options.get(DYNAMIC_PARTITION_OVERWRITE);
+    }
+
+    public boolean writeEmptyPartitionEnable() {
+        return options.get(WRITE_EMPTY_PARTITION_ENABLE);
     }
 
     public Duration partitionExpireTime() {
