@@ -98,9 +98,9 @@ public class RESTTestFileIO extends LocalFileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
+    public boolean renameImpl(Path src, Path dst) throws IOException {
         checkDataToken(src);
-        return super.rename(src, dst);
+        return super.renameImpl(src, dst);
     }
 
     private void checkDataToken(Path path) throws IOException {

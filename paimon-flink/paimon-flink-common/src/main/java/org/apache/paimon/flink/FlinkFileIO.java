@@ -116,7 +116,7 @@ public class FlinkFileIO implements FileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
+    public boolean renameImpl(Path src, Path dst) throws IOException {
         org.apache.flink.core.fs.Path flinkSrc = path(src);
         org.apache.flink.core.fs.Path flinkDst = path(dst);
         return getFileSystem(flinkSrc).rename(flinkSrc, flinkDst);
