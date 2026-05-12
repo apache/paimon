@@ -105,7 +105,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB.</td>
+      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in <code>blob-descriptor-field</code> or <code>blob-view-field</code> are also treated as BLOB fields.</td>
     </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
@@ -120,7 +120,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
       <td>
-        Comma-separated BLOB field names stored as serialized <code>BlobDescriptor</code> bytes inline in normal data files.
+        Comma-separated field names treated as BLOB fields and stored as serialized <code>BlobDescriptor</code> bytes inline in normal data files.
         By default, all blob fields store blob bytes in separate <code>.blob</code> files.
         If configured, one table can mix:
         some BLOB fields in <code>.blob</code> files and some as descriptor references.
@@ -132,9 +132,9 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
       <td>
-        Comma-separated BLOB field names stored as serialized <code>BlobViewStruct</code> bytes inline in normal data files.
+        Comma-separated field names treated as BLOB fields and stored as serialized <code>BlobViewStruct</code> bytes inline in normal data files.
         The field values reference BLOB values in upstream tables and are resolved at read time.
-        This option must be a subset of <code>blob-field</code> and must not overlap with <code>blob-descriptor-field</code>.
+        This option must not overlap with <code>blob-descriptor-field</code>.
       </td>
     </tr>
     <tr>
@@ -300,7 +300,7 @@ Blob view is useful when a downstream table should reference BLOB values already
 Blob view requires:
 
 - the upstream table to have row tracking enabled, so each row has a stable `_ROW_ID`
-- the downstream field to be listed in both `blob-field` and `blob-view-field`
+- the downstream field to be listed in `blob-view-field`
 - writes to provide a serialized `BlobViewStruct`; in Flink SQL, use the built-in `sys.blob_view` function
 
 The Flink SQL function signature is:
@@ -335,7 +335,6 @@ CREATE TABLE image_view_table (
 ) WITH (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
-    'blob-field' = 'image_ref',
     'blob-view-field' = 'image_ref'
 );
 

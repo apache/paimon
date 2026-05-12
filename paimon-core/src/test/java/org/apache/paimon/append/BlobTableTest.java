@@ -51,6 +51,7 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
@@ -497,49 +498,32 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
-    public void testBlobViewFieldMustBeSubsetOfBlobField() {
-        assertThatThrownBy(
-                        () -> {
-                            Schema.Builder schemaBuilder = Schema.newBuilder();
-                            schemaBuilder.column("f0", DataTypes.INT());
-                            schemaBuilder.column("f1", DataTypes.STRING());
-                            schemaBuilder.column("f2", DataTypes.BLOB());
-                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.BLOB_VIEW_FIELD.key(), "f2");
-                            catalog.createTable(identifier(), schemaBuilder.build(), true);
-                        })
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Field 'f2' in '"
-                                + CoreOptions.BLOB_VIEW_FIELD.key()
-                                + "' must also be in '"
-                                + CoreOptions.BLOB_FIELD.key()
-                                + "'.");
+    public void testBlobInlineFieldCanDeclareBlobWithoutBlobField() throws Exception {
+        assertCreateBlobInlineFieldWithoutBlobField(
+                "blob_descriptor_without_blob_field", CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        assertCreateBlobInlineFieldWithoutBlobField(
+                "blob_view_without_blob_field", CoreOptions.BLOB_VIEW_FIELD.key());
     }
 
-    @Test
-    public void testBlobDescriptorFieldMustBeSubsetOfBlobField() {
-        assertThatThrownBy(
-                        () -> {
-                            Schema.Builder schemaBuilder = Schema.newBuilder();
-                            schemaBuilder.column("f0", DataTypes.INT());
-                            schemaBuilder.column("f1", DataTypes.STRING());
-                            schemaBuilder.column("f2", DataTypes.BLOB());
-                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
-                            catalog.createTable(identifier(), schemaBuilder.build(), true);
-                        })
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Field 'f2' in '"
-                                + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
-                                + "' must also be in '"
-                                + CoreOptions.BLOB_FIELD.key()
-                                + "'.");
+    private void assertCreateBlobInlineFieldWithoutBlobField(String tableName, String optionKey)
+            throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(optionKey, "f2");
+
+        catalog.createTable(identifier(tableName), schemaBuilder.build(), true);
+
+        assertThat(
+                        catalog.getTable(identifier(tableName))
+                                .rowType()
+                                .getTypeAt(2)
+                                .is(DataTypeRoot.BLOB))
+                .isTrue();
     }
 
     @Test

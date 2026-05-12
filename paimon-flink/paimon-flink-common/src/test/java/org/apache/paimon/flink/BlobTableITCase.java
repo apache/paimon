@@ -27,6 +27,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.TestHttpWebServer;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
@@ -191,7 +192,6 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 "CREATE TABLE downstream_blob_view (id INT, label STRING, image_ref BYTES)"
                         + " WITH ('row-tracking.enabled'='true',"
                         + " 'data-evolution.enabled'='true',"
-                        + " 'blob-field'='image_ref',"
                         + " 'blob-view-field'='image_ref')");
 
         batchSql(
@@ -251,26 +251,25 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBlobInlineFieldRequiresBlobField() {
-        assertSecondaryBlobFieldRequiresBlobField(
+    public void testBlobInlineFieldCanDeclareBlobWithoutBlobField() throws Exception {
+        assertSecondaryBlobFieldCanDeclareBlobWithoutBlobField(
                 "blob_descriptor_without_blob_field", "blob-descriptor-field");
-        assertSecondaryBlobFieldRequiresBlobField(
+        assertSecondaryBlobFieldCanDeclareBlobWithoutBlobField(
                 "blob_view_without_blob_field", "blob-view-field");
     }
 
-    private void assertSecondaryBlobFieldRequiresBlobField(String tableName, String optionKey) {
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                        String.format(
-                                                "CREATE TABLE %s (id INT, picture BYTES)"
-                                                        + " WITH ('row-tracking.enabled'='true',"
-                                                        + " 'data-evolution.enabled'='true',"
-                                                        + " '%s'='picture')",
-                                                tableName, optionKey)))
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Field 'picture' in '" + optionKey + "' must also be in 'blob-field'.");
+    private void assertSecondaryBlobFieldCanDeclareBlobWithoutBlobField(
+            String tableName, String optionKey) throws Exception {
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE %s (id INT, picture BYTES)"
+                                + " WITH ('row-tracking.enabled'='true',"
+                                + " 'data-evolution.enabled'='true',"
+                                + " '%s'='picture')",
+                        tableName, optionKey));
+
+        assertThat(paimonTable(tableName).rowType().getTypeAt(1).is(DataTypeRoot.BLOB))
+                .isTrue();
     }
 
     @Test

@@ -129,6 +129,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1091,11 +1092,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
         List<String> blobFields = CoreOptions.blobField(options);
-        Set<String> blobDescriptorFields = new CoreOptions(options).blobDescriptorField();
-        List<String> blobViewFields = CoreOptions.blobViewField(options);
-        validateSecondaryBlobFields(
-                blobFields, blobDescriptorFields, CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
-        validateSecondaryBlobFields(blobFields, blobViewFields, CoreOptions.BLOB_VIEW_FIELD.key());
+        Set<String> blobTypeFields = blobTypeFields(options);
         if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
@@ -1124,30 +1121,29 @@ public class FlinkCatalog extends AbstractCatalog {
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
-                                        resolveDataType(field.getName(), field.getType(), options),
+                                        resolveDataType(
+                                                field.getName(),
+                                                field.getType(),
+                                                options,
+                                                blobTypeFields),
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();
     }
 
-    private static void validateSecondaryBlobFields(
-            List<String> blobFields, Iterable<String> secondaryBlobFields, String optionKey) {
-        for (String secondaryBlobField : secondaryBlobFields) {
-            checkArgument(
-                    blobFields.contains(secondaryBlobField),
-                    "Field '%s' in '%s' must also be in '%s'.",
-                    secondaryBlobField,
-                    optionKey,
-                    CoreOptions.BLOB_FIELD.key());
-        }
+    private static Set<String> blobTypeFields(Map<String, String> options) {
+        Set<String> blobTypeFields = new HashSet<>(CoreOptions.blobField(options));
+        blobTypeFields.addAll(new CoreOptions(options).blobDescriptorField());
+        blobTypeFields.addAll(CoreOptions.blobViewField(options));
+        return blobTypeFields;
     }
 
     private static org.apache.paimon.types.DataType resolveDataType(
             String fieldName,
             org.apache.flink.table.types.logical.LogicalType logicalType,
-            Map<String, String> options) {
-        List<String> blobFields = CoreOptions.blobField(options);
-        if (blobFields.contains(fieldName)) {
+            Map<String, String> options,
+            Set<String> blobTypeFields) {
+        if (blobTypeFields.contains(fieldName)) {
             return toBlobType(logicalType);
         }
         Set<String> vectorFields = CoreOptions.vectorField(options);

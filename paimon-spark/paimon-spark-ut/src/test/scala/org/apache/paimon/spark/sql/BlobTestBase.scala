@@ -399,7 +399,7 @@ class BlobTestBase extends PaimonSparkTestBase {
       sql(
         "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
           "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
-          "'blob-field'='picture', 'blob-descriptor-field'='picture')")
+          "'blob-descriptor-field'='picture')")
 
       // Insert with a descriptor pointing to a real file
       val blobData = new Array[Byte](256)
