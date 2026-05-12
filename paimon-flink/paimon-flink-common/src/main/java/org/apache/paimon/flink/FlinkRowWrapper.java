@@ -159,9 +159,6 @@ public class FlinkRowWrapper implements InternalRow {
     @Override
     public Blob getBlob(int pos) {
         byte[] bytes = row.getBinary(pos);
-        if (isMissingBlobDescriptor(pos, bytes)) {
-            return null;
-        }
         return Blob.fromBytes(bytes, uriReaderFactory, null);
     }
 

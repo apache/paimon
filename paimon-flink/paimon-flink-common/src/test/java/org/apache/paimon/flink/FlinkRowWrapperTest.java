@@ -44,7 +44,6 @@ public class FlinkRowWrapperTest {
         FlinkRowWrapper wrapper = wrapper(row, true);
 
         assertThat(wrapper.isNullAt(0)).isTrue();
-        assertThat(wrapper.getBlob(0)).isNull();
     }
 
     @Test
