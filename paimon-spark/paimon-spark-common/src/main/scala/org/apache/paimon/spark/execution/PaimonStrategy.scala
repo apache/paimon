@@ -22,7 +22,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
+import org.apache.paimon.spark.catalyst.plans.logical.{AlterTableArchiveCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.SparkSession
@@ -72,6 +72,12 @@ case class PaimonStrategy(spark: SparkSession)
 
     case RenameTagCommand(PaimonCatalogAndIdentifier(catalog, ident), sourceTag, targetTag) =>
       RenameTagExec(catalog, ident, sourceTag, targetTag) :: Nil
+
+    case AlterTableArchiveCommand(
+          PaimonCatalogAndIdentifier(catalog, ident),
+          partitionSpec,
+          operation) =>
+      AlterTableArchiveExec(catalog, ident, partitionSpec, operation) :: Nil
 
     case CreatePaimonView(
           ResolvedIdentifier(viewCatalog: SupportView, ident),
