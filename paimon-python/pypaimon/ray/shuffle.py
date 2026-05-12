@@ -37,6 +37,7 @@ original Ray round-robin behaviour.
 """
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import pyarrow as pa
@@ -50,9 +51,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Transient column the helper appends before the groupby and strips
-# afterwards. Sink-side schema is identical to caller-provided schema.
+# Default transient column name. A collision-safe variant is picked at
+# runtime by ``_pick_bucket_col_name`` so user tables that happen to
+# contain a column with this name still work correctly.
 BUCKET_KEY_COL = "__paimon_bucket__"
+
+
+def _pick_bucket_col_name(existing_names) -> str:
+    """Return a bucket column name guaranteed not to collide with
+    ``existing_names``. Falls back to a UUID suffix on collision."""
+    if BUCKET_KEY_COL not in existing_names:
+        return BUCKET_KEY_COL
+    while True:
+        candidate = "__paimon_bucket_{}_".format(uuid.uuid4().hex[:8])
+        if candidate not in existing_names:
+            return candidate
 
 
 def maybe_apply_repartition(
@@ -94,17 +107,19 @@ def maybe_apply_repartition(
     if shuffle:
         partition_keys = list(table.table_schema.partition_keys or [])
         extractor = table.create_row_key_extractor()
-        bucket_udf = _make_bucket_udf(extractor)
+        col_names = set(f.name for f in table.table_schema.fields)
+        bucket_col = _pick_bucket_col_name(col_names)
+        bucket_udf = _make_bucket_udf(extractor, bucket_col)
 
         ds_with_bucket = dataset.map_batches(
             bucket_udf, batch_format="pyarrow", zero_copy_batch=True,
         )
-        group_keys: List[str] = partition_keys + [BUCKET_KEY_COL]
+        group_keys: List[str] = partition_keys + [bucket_col]
         grouped = ds_with_bucket.groupby(
             group_keys, num_partitions=override_num_blocks,
         )
         regrouped = grouped.map_groups(_identity_batch, batch_format="pyarrow")
-        return regrouped.drop_columns([BUCKET_KEY_COL]), True
+        return regrouped.drop_columns([bucket_col]), True
 
     # After a soft fallback, override_num_blocks may still be None —
     # keep the contract that None means "no Ray-side repartition".
@@ -137,8 +152,8 @@ def _coerce_large_string_types(batch: pa.Table) -> pa.Table:
     return batch.cast(pa.schema(fields)) if needs_cast else batch
 
 
-def _make_bucket_udf(extractor):
-    """Build a map_batches UDF that appends BUCKET_KEY_COL.
+def _make_bucket_udf(extractor, bucket_col):
+    """Build a map_batches UDF that appends a transient bucket column.
 
     The bucket value comes from ``extract_partition_bucket_batch`` so it
     matches the writer's bucket assignment for the same row exactly.
@@ -146,12 +161,12 @@ def _make_bucket_udf(extractor):
     def _udf(batch: pa.Table) -> pa.Table:
         if batch.num_rows == 0:
             return batch.append_column(
-                BUCKET_KEY_COL, pa.array([], type=pa.int32())
+                bucket_col, pa.array([], type=pa.int32())
             )
         record_batch = batch.combine_chunks().to_batches()[0]
         _, buckets = extractor.extract_partition_bucket_batch(record_batch)
         return batch.append_column(
-            BUCKET_KEY_COL, pa.array(buckets, type=pa.int32())
+            bucket_col, pa.array(buckets, type=pa.int32())
         )
 
     return _udf

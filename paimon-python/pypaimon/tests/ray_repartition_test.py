@@ -238,6 +238,34 @@ class RayShuffleTest(unittest.TestCase):
         # bucket they touch → strictly more files.
         self.assertGreater(len(files_off), len(files_on))
 
+    def test_shuffle_with_colliding_column_name(self):
+        """A table that has a column named ``__paimon_bucket__`` must
+        still work with ``shuffle=True`` — the helper picks a
+        collision-free transient column name."""
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('__paimon_bucket__', pa.string()),
+        ])
+        table_name = 'test_shuffle_collide_col'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id'], options={'bucket': '2'},
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(10)),
+             '__paimon_bucket__': [f'v{i}' for i in range(10)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(2)
+        write_paimon(ds, identifier, self.catalog_options, shuffle=True)
+
+        result = self._read_table(identifier)
+        self.assertEqual(len(result), 10)
+        self.assertEqual(set(result.columns), {'id', '__paimon_bucket__'})
+
     # ----- soft fallback -----
 
     def test_shuffle_on_non_fixed_bucket_falls_through(self):

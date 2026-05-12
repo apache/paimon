@@ -31,7 +31,8 @@ from unittest.mock import MagicMock
 import pyarrow as pa
 
 from pypaimon.ray.shuffle import (BUCKET_KEY_COL, _coerce_large_string_types,
-                                  _make_bucket_udf, maybe_apply_repartition)
+                                  _make_bucket_udf, _pick_bucket_col_name,
+                                  maybe_apply_repartition)
 from pypaimon.table.bucket_mode import BucketMode
 
 
@@ -48,7 +49,7 @@ class BucketUdfTest(unittest.TestCase):
 
     def test_appends_int32_bucket_column(self):
         extractor = self._make_extractor([0, 1, 0])
-        udf = _make_bucket_udf(extractor)
+        udf = _make_bucket_udf(extractor, BUCKET_KEY_COL)
         batch = pa.table({"id": [10, 11, 12]})
 
         out = udf(batch)
@@ -59,7 +60,7 @@ class BucketUdfTest(unittest.TestCase):
 
     def test_empty_batch_appends_empty_column(self):
         extractor = self._make_extractor([])
-        udf = _make_bucket_udf(extractor)
+        udf = _make_bucket_udf(extractor, BUCKET_KEY_COL)
         batch = pa.table({"id": pa.array([], type=pa.int32())})
 
         out = udf(batch)
@@ -75,7 +76,7 @@ class BucketUdfTest(unittest.TestCase):
         # before calling the extractor, otherwise the extractor sees
         # half the rows.
         extractor = self._make_extractor([0, 1, 2, 3])
-        udf = _make_bucket_udf(extractor)
+        udf = _make_bucket_udf(extractor, BUCKET_KEY_COL)
         rb1 = pa.record_batch({"id": [1, 2]})
         rb2 = pa.record_batch({"id": [3, 4]})
         batch = pa.Table.from_batches([rb1, rb2])
@@ -88,6 +89,20 @@ class BucketUdfTest(unittest.TestCase):
         call = extractor.extract_partition_bucket_batch.call_args
         passed_batch = call.args[0]
         self.assertEqual(passed_batch.num_rows, 4)
+
+
+class PickBucketColNameTest(unittest.TestCase):
+    """``_pick_bucket_col_name`` avoids collision with user columns."""
+
+    def test_default_name_when_no_collision(self):
+        self.assertEqual(
+            _pick_bucket_col_name({"id", "name"}), BUCKET_KEY_COL)
+
+    def test_fallback_when_default_collides(self):
+        name = _pick_bucket_col_name({"id", BUCKET_KEY_COL})
+        self.assertNotEqual(name, BUCKET_KEY_COL)
+        self.assertTrue(name.startswith("__paimon_bucket_"))
+        self.assertNotIn(name, {"id", BUCKET_KEY_COL})
 
 
 class CoerceLargeStringTypesTest(unittest.TestCase):
