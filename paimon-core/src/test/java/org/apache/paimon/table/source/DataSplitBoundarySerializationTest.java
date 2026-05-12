@@ -120,12 +120,9 @@ public class DataSplitBoundarySerializationTest {
                 0,
                 null,
                 null,
-                null,
-                null,
                 FileSource.APPEND,
                 null,
-                null,
-                null,
+                0L,
                 null);
     }
 }

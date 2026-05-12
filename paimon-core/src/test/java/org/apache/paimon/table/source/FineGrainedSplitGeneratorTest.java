@@ -40,6 +40,7 @@ import java.util.Map;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -62,7 +63,7 @@ public class FineGrainedSplitGeneratorTest {
         parquetReader = mock(FormatMetadataReader.class);
         baseGenerator = new AppendOnlySplitGenerator(1000, 1, false);
 
-        when(pathFactory.bucketPath(any(BinaryRow.class), any(int.class)))
+        when(pathFactory.bucketPath(any(BinaryRow.class), anyInt()))
                 .thenReturn(new Path("file:/tmp/bucket"));
         when(parquetReader.supportsFinerGranularity()).thenReturn(true);
     }
@@ -264,12 +265,9 @@ public class FineGrainedSplitGeneratorTest {
                 0,
                 null,
                 null,
-                null,
-                null,
                 FileSource.APPEND,
                 null,
-                null,
-                null,
+                0L,
                 null);
     }
 }
