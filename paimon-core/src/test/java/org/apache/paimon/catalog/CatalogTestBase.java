@@ -68,6 +68,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1079,6 +1080,38 @@ public abstract class CatalogTestBase {
         // Drop table does not throw exception when table does not exist and ignoreIfNotExists is
         // true
         assertThatCode(() -> catalog.dropTable(nonExistingTable, true)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testDropTableWithExternalPaths() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "table_with_external_paths");
+        java.nio.file.Path dataExternalPath = tempFile.resolve("data-external-path");
+        java.nio.file.Path globalIndexExternalPath = tempFile.resolve("global-index-external-path");
+        Files.createDirectories(dataExternalPath.resolve("data"));
+        Files.createDirectories(globalIndexExternalPath.resolve("index"));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), dataExternalPath.toUri().toString());
+        options.put(
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                globalIndexExternalPath.toUri().toString());
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        catalog.createTable(identifier, schema, false);
+        catalog.dropTable(identifier, false);
+
+        assertThat(Files.exists(dataExternalPath)).isFalse();
+        assertThat(Files.exists(globalIndexExternalPath)).isFalse();
     }
 
     @Test

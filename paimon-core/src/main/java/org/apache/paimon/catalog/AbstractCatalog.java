@@ -62,6 +62,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -387,7 +388,15 @@ public abstract class AbstractCatalog implements Catalog {
             return Collections.emptyList();
         }
         return schemas.stream()
-                .map(schema -> schema.toSchema().options().get(DATA_FILE_EXTERNAL_PATHS.key()))
+                .flatMap(
+                        schema -> {
+                            Map<String, String> options = schema.toSchema().options();
+                            return Arrays.stream(
+                                    new String[] {
+                                        options.get(DATA_FILE_EXTERNAL_PATHS.key()),
+                                        options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
+                                    });
+                        })
                 .filter(Objects::nonNull)
                 .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
                 .map(Path::new)
