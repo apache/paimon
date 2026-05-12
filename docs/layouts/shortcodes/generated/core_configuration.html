@@ -93,6 +93,12 @@ under the License.
             <td>Comma-separated BLOB field names, selected from blob-field, to store as serialized BlobViewStruct bytes inline in data files and resolve from upstream tables at read time.</td>
         </tr>
         <tr>
+            <td><h5>blob-write-null-on-missing-file</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced file does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
             <td><h5>blob.split-by-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
