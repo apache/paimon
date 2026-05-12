@@ -22,6 +22,7 @@ import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.format.FormatMetadataReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
@@ -51,7 +52,8 @@ public class ParquetMetadataReader implements FormatMetadataReader {
             throws IOException {
         List<FileSplitBoundary> boundaries = new ArrayList<>();
 
-        try (ParquetFileReader reader = ParquetUtil.getParquetReader(fileIO, filePath, fileSize)) {
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(fileIO, filePath, fileSize, new Options())) {
             ParquetMetadata metadata = reader.getFooter();
             List<BlockMetaData> blocks = metadata.getBlocks();
 
