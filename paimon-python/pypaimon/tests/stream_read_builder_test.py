@@ -122,6 +122,55 @@ class TestAsyncStreamingTableScanFiltering:
         assert [e.bucket for e in filtered] == list(range(8))
 
 
+class TestWithScanFrom:
+    """Unit tests for StreamReadBuilder.with_scan_from()."""
+
+    def test_with_scan_from_earliest(self, builder):
+        """with_scan_from('earliest') stores value and returns self."""
+        result = builder.with_scan_from("earliest")
+        assert result is builder
+        assert builder._scan_from == "earliest"
+
+    def test_with_scan_from_latest(self, builder):
+        """with_scan_from('latest') stores value and returns self."""
+        result = builder.with_scan_from("latest")
+        assert result is builder
+        assert builder._scan_from == "latest"
+
+    def test_with_scan_from_integer(self, builder):
+        """with_scan_from(42) stores integer value and returns self."""
+        result = builder.with_scan_from(42)
+        assert result is builder
+        assert builder._scan_from == 42
+
+    def test_with_scan_from_passes_to_scan(self, mock_scan_table):
+        """with_scan_from() value is passed through to AsyncStreamingTableScan."""
+        builder = StreamReadBuilder(mock_scan_table)
+        builder.with_scan_from("earliest")
+        scan = builder.new_streaming_scan()
+        assert scan._scan_from == "earliest"
+
+    def test_with_scan_from_integer_passes_to_scan(self, mock_scan_table):
+        """with_scan_from(42) passes integer to AsyncStreamingTableScan."""
+        builder = StreamReadBuilder(mock_scan_table)
+        builder.with_scan_from(42)
+        scan = builder.new_streaming_scan()
+        assert scan._scan_from == 42
+
+    def test_with_scan_from_none_by_default(self, mock_scan_table):
+        """Without calling with_scan_from(), _scan_from is None."""
+        builder = StreamReadBuilder(mock_scan_table)
+        scan = builder.new_streaming_scan()
+        assert scan._scan_from is None
+
+    def test_method_chaining_with_scan_from(self, builder):
+        """with_scan_from() chains correctly with other builder methods."""
+        result = builder.with_scan_from("earliest").with_poll_interval_ms(500)
+        assert result is builder
+        assert builder._scan_from == "earliest"
+        assert builder._poll_interval_ms == 500
+
+
 class TestConsumerIdPassthrough:
     """Test that consumer_id passes through to AsyncStreamingTableScan."""
 
