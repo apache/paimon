@@ -25,7 +25,7 @@ from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
-from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
 
@@ -60,19 +60,22 @@ class FullTextReadImpl(FullTextRead):
         if not splits:
             return GlobalIndexResult.create_empty()
 
-        result = ScoredGlobalIndexResult.create_empty()
+        merged_scores = {}
         for split in splits:
             split_result = self._eval(
                 split.row_range_start, split.row_range_end,
                 split.full_text_index_files
             )
             if split_result is not None:
-                result = result.or_(split_result)
+                score_getter = split_result.score_getter()
+                for row_id in split_result.results():
+                    if row_id not in merged_scores:
+                        merged_scores[row_id] = score_getter(row_id)
 
-        return result.top_k(self._limit)
+        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
     def _eval(self, row_range_start, row_range_end, full_text_index_files
-              ) -> Optional[ScoredGlobalIndexResult]:
+              ) -> Optional['ScoredGlobalIndexResult']:
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
