@@ -36,16 +36,40 @@ To use partial updates / data evolution, enable both options when creating the t
 - **`row-tracking.enabled`**: `true`
 - **`data-evolution.enabled`**: `true`
 
+## Batch vs Stream
+
+Data evolution supports both batch and stream modes. The API differs as follows:
+
+|                     | Batch                                        | Stream                                         |
+|---------------------|----------------------------------------------|------------------------------------------------|
+| Builder             | `table.new_batch_write_builder()`            | `table.new_stream_write_builder()`             |
+| Write               | `BatchTableWrite`                            | `StreamTableWrite`                             |
+| Update              | `BatchTableUpdate`                           | `StreamTableUpdate`                            |
+| Commit              | `BatchTableCommit`                           | `StreamTableCommit`                            |
+| `commit_identifier` | Not required                                 | Required (monotonically increasing integer)    |
+| Lifecycle           | One-shot: each instance can commit only once | Reusable: same instance can commit many rounds |
+
+Method signatures that differ between modes:
+
+| Method                          | Batch                                          | Stream                                                            |
+|---------------------------------|------------------------------------------------|-------------------------------------------------------------------|
+| `prepare_commit()`              | `write.prepare_commit()`                       | `write.prepare_commit(commit_identifier)`                         |
+| `update_by_arrow_with_row_id()` | `update.update_by_arrow_with_row_id(table)`    | `update.update_by_arrow_with_row_id(table, commit_identifier)`    |
+| `upsert_by_arrow_with_key()`    | `update.upsert_by_arrow_with_key(table, keys)` | `update.upsert_by_arrow_with_key(table, keys, commit_identifier)` |
+| `commit()`                      | `commit.commit(messages)`                      | `commit.commit(messages, commit_identifier)`                      |
+
 ## Update Columns By Row ID
 
-You can create `TableUpdate.update_by_arrow_with_row_id` to update columns to data evolution tables.
+You can use `update_by_arrow_with_row_id` to update columns in data evolution tables.
 
-The input data should include the `_ROW_ID` column, update operation will automatically sort and match each `_ROW_ID` to
-its corresponding `first_row_id`, then groups rows with the same `first_row_id` and writes them to a separate file.
+The input data should include the `_ROW_ID` column. The update operation will automatically sort and match each `_ROW_ID`
+to its corresponding `first_row_id`, then group rows with the same `first_row_id` and write them to a separate file.
 
 **Requirements for `_ROW_ID` updates**
 
 - **Update columns only**: include `_ROW_ID` plus the columns you want to update (partial schema is OK).
+
+### Batch Mode
 
 ```python
 import pyarrow as pa
@@ -96,6 +120,58 @@ table_commit.close()
 #   'f1': [-1001, 1002]
 ```
 
+### Stream Mode
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', False)
+
+simple_pa_schema = pa.schema([
+  ('f0', pa.int8()),
+  ('f1', pa.int16()),
+])
+schema = Schema.from_pyarrow_schema(simple_pa_schema,
+                                    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+catalog.create_table('default.test_stream', schema, False)
+table = catalog.get_table('default.test_stream')
+
+# write initial data
+write_builder = table.new_batch_write_builder()
+table_write = write_builder.new_write()
+table_commit = write_builder.new_commit()
+table_write.write_arrow(pa.Table.from_pydict({
+  'f0': [-1, 2],
+  'f1': [-1001, 1002]
+}, schema=simple_pa_schema))
+table_commit.commit(table_write.prepare_commit())
+table_write.close()
+table_commit.close()
+
+# stream update: each round uses a new commit_identifier
+stream_builder = table.new_stream_write_builder()
+table_update = stream_builder.new_update().with_update_type(['f0'])
+table_commit = stream_builder.new_commit()
+
+data1 = pa.Table.from_pydict({
+  '_ROW_ID': [0],
+  'f0': [5],
+}, schema=pa.schema([('_ROW_ID', pa.int64()), ('f0', pa.int8())]))
+cmts1 = table_update.update_by_arrow_with_row_id(data1, commit_identifier=1)
+table_commit.commit(cmts1, commit_identifier=1)
+
+data2 = pa.Table.from_pydict({
+  '_ROW_ID': [1],
+  'f0': [6],
+}, schema=pa.schema([('_ROW_ID', pa.int64()), ('f0', pa.int8())]))
+cmts2 = table_update.update_by_arrow_with_row_id(data2, commit_identifier=2)
+table_commit.commit(cmts2, commit_identifier=2)
+
+table_commit.close()
+```
+
 ## Filter by _ROW_ID
 
 Requires the same [Prerequisites](#prerequisites) (row-tracking and data-evolution enabled). On such tables you can filter by `_ROW_ID` to prune files at scan time. Supported: `equal('_ROW_ID', id)`, `is_in('_ROW_ID', [id1, ...])`, `between('_ROW_ID', low, high)`.
@@ -121,6 +197,8 @@ If you want to **upsert** (update-or-insert) rows by one or more business key co
 - For **partitioned tables**, the input data must contain all partition key columns. Partition keys are
   **automatically stripped** from `upsert_keys` during matching (since each partition is processed independently),
   so you do **not** need to include them in `upsert_keys`.
+
+### Batch Mode
 
 **Example: basic upsert**
 
@@ -234,6 +312,63 @@ table_commit.close()
 - Duplicate keys in the input data are automatically deduplicated — the **last occurrence** is kept.
 - The upsert is atomic per commit — all matched updates and new appends are included in the same commit.
 
+### Stream Mode
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', False)
+
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('age', pa.int32()),
+])
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+)
+catalog.create_table('default.users_stream', schema, False)
+table = catalog.get_table('default.users_stream')
+
+# write initial data
+write_builder = table.new_batch_write_builder()
+write = write_builder.new_write()
+commit = write_builder.new_commit()
+write.write_arrow(pa.Table.from_pydict(
+    {'id': [1, 2], 'name': ['Alice', 'Bob'], 'age': [30, 25]},
+    schema=pa_schema,
+))
+commit.commit(write.prepare_commit())
+write.close()
+commit.close()
+
+# stream upsert: each round uses a new commit_identifier
+stream_builder = table.new_stream_write_builder()
+table_update = stream_builder.new_update()
+table_commit = stream_builder.new_commit()
+
+upsert_data1 = pa.Table.from_pydict(
+    {'id': [1, 3], 'name': ['Alice_v2', 'Charlie'], 'age': [31, 28]},
+    schema=pa_schema,
+)
+cmts1 = table_update.upsert_by_arrow_with_key(upsert_data1, upsert_keys=['id'], commit_identifier=1)
+table_commit.commit(cmts1, commit_identifier=1)
+
+upsert_data2 = pa.Table.from_pydict(
+    {'id': [2, 4], 'name': ['Bob_v2', 'David'], 'age': [26, 40]},
+    schema=pa_schema,
+)
+cmts2 = table_update.upsert_by_arrow_with_key(upsert_data2, upsert_keys=['id'], commit_identifier=2)
+table_commit.commit(cmts2, commit_identifier=2)
+
+table_commit.close()
+```
+
+The `with_update_type` and partitioned table patterns shown in Batch Mode also work in Stream Mode — just add `commit_identifier` to the `upsert_by_arrow_with_key` and `commit` calls.
+
 ## Update Columns By Shards
 
 If you want to **compute a derived column** (or **update an existing column based on other columns**) without providing
@@ -245,6 +380,8 @@ If you want to **compute a derived column** (or **update an existing column base
 - Commit per shard
 
 This is useful for backfilling a newly added column, or recomputing a column from other columns.
+
+### Batch Mode
 
 **Example: compute `d = c + b - a`**
 
@@ -325,6 +462,62 @@ commit_messages = upd.prepare_commit()
 commit = write_builder.new_commit()
 commit.commit(commit_messages)
 commit.close()
+```
+
+### Stream Mode
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', False)
+
+table_schema = pa.schema([
+    ('a', pa.int32()),
+    ('b', pa.int32()),
+    ('c', pa.int32()),
+    ('d', pa.int32()),
+])
+
+schema = Schema.from_pyarrow_schema(
+    table_schema,
+    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+)
+catalog.create_table('default.t_stream', schema, False)
+table = catalog.get_table('default.t_stream')
+
+# write initial data (a, b, c only)
+write_builder = table.new_batch_write_builder()
+write = write_builder.new_write().with_write_type(['a', 'b', 'c'])
+commit = write_builder.new_commit()
+write.write_arrow(pa.Table.from_pydict({'a': [1, 2], 'b': [10, 20], 'c': [100, 200]}))
+commit.commit(write.prepare_commit())
+write.close()
+commit.close()
+
+# stream shard update: each round uses a new commit_identifier
+stream_builder = table.new_stream_write_builder()
+table_update = stream_builder.new_update()
+table_update.with_read_projection(['a', 'b', 'c'])
+table_update.with_update_type(['d'])
+table_commit = stream_builder.new_commit()
+
+upd = table_update.new_shard_updator(0, 1)
+reader = upd.arrow_reader()
+
+for batch in iter(reader.read_next_batch, None):
+    a = batch.column('a').to_pylist()
+    b = batch.column('b').to_pylist()
+    c = batch.column('c').to_pylist()
+    d = [ci + bi - ai for ai, bi, ci in zip(a, b, c)]
+
+    upd.update_by_arrow_batch(
+        pa.RecordBatch.from_pydict({'d': d}, schema=pa.schema([('d', pa.int32())]))
+    )
+
+commit_messages = upd.prepare_commit()
+table_commit.commit(commit_messages, commit_identifier=1)
 ```
 
 **Notes**

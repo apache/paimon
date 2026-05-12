@@ -122,5 +122,5 @@ class StreamTableCommit(TableCommit):
     :meth:`StreamTableWrite.prepare_commit`.
     """
 
-    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
+    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         self._commit(commit_messages, commit_identifier)
