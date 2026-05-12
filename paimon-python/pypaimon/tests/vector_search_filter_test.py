@@ -541,5 +541,66 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
         self.assertIn("non-partition", str(ctx.exception))
 
 
+class VectorSearchManySplitsTest(unittest.TestCase):
+
+    def test_vector_search_with_many_splits(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_split import VectorSearchSplit
+
+        num_splits = 1200
+        embedding_field = _field(1, "embedding", "FLOAT")
+        entries = [
+            _entry(None, field_id=1, index_type="lumina-vector-ann",
+                   file_name="vec-%d.index" % i,
+                   row_range_start=i, row_range_end=i)
+            for i in range(num_splits)
+        ]
+        table = _StubTable(fields=[embedding_field], entries=entries)
+        _patch_snapshot(self, entries)
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            row_id = index_io_meta_list[0].file_name
+            row_id = int(row_id.split("-")[1].split(".")[0])
+
+            class _FakeReader:
+                def visit_vector_search(self_inner, vs):
+                    return DictBasedScoredIndexResult({row_id: float(row_id)})
+
+                def close(self_inner):
+                    pass
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *a):
+                    return False
+            return _FakeReader()
+
+        splits = [
+            VectorSearchSplit(
+                row_range_start=i, row_range_end=i,
+                vector_index_files=[entries[i].index_file])
+            for i in range(num_splits)
+        ]
+
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            reader = VectorSearchReadImpl(
+                table, limit=10, vector_column=embedding_field,
+                query_vector=[1.0], filter_=None)
+            result = reader.read(splits)
+
+        self.assertGreater(result.results().cardinality(), 0)
+        self.assertIsNotNone(result.score_getter()(0))
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+
 if __name__ == "__main__":
     unittest.main()

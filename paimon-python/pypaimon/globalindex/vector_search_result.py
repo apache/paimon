@@ -70,13 +70,14 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
         other_score_getter = other.score_getter()
         
         result_or = RoaringBitmap64.or_(this_row_ids, other_row_ids)
-        
-        def combined_score_getter(row_id: int) -> Optional[float]:
-            if row_id in this_row_ids:
-                return this_score_getter(row_id)
-            return other_score_getter(row_id)
-        
-        return SimpleScoredGlobalIndexResult(result_or, combined_score_getter)
+
+        merged_scores = {}
+        for row_id in other_row_ids:
+            merged_scores[row_id] = other_score_getter(row_id)
+        for row_id in this_row_ids:
+            merged_scores[row_id] = this_score_getter(row_id)
+
+        return SimpleScoredGlobalIndexResult(result_or, lambda row_id: merged_scores.get(row_id))
 
     def top_k(self, k: int) -> 'ScoredGlobalIndexResult':
         """Return the top-k results by score."""
