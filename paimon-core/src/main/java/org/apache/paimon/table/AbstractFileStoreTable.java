@@ -279,47 +279,32 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        SplitGenerator baseGenerator = splitGenerator();
         CoreOptions options = coreOptions();
+        SplitGenerator generator = splitGenerator();
 
-        // Wrap with FineGrainedSplitGenerator if enabled
         if (options.splitFileEnabled()) {
-            Map<String, FormatMetadataReader> metadataReaders = createMetadataReaders(options);
-            SplitGenerator wrappedGenerator =
+            generator =
                     new FineGrainedSplitGenerator(
-                            baseGenerator,
-                            true,
+                            generator,
                             options.splitFileThreshold(),
                             options.splitFileMaxSplits(),
                             fileIO(),
                             store().pathFactory(),
-                            metadataReaders);
-            return new SnapshotReaderImpl(
-                    store().newScan(),
-                    tableSchema,
-                    options,
-                    snapshotManager(),
-                    changelogManager(),
-                    wrappedGenerator,
-                    nonPartitionFilterConsumer(),
-                    store().pathFactory(),
-                    name(),
-                    store().newIndexFileHandler(),
-                    dvmetaCache);
-        } else {
-            return new SnapshotReaderImpl(
-                    store().newScan(),
-                    tableSchema,
-                    options,
-                    snapshotManager(),
-                    changelogManager(),
-                    baseGenerator,
-                    nonPartitionFilterConsumer(),
-                    store().pathFactory(),
-                    name(),
-                    store().newIndexFileHandler(),
-                    dvmetaCache);
+                            createMetadataReaders(options));
         }
+
+        return new SnapshotReaderImpl(
+                store().newScan(),
+                tableSchema,
+                options,
+                snapshotManager(),
+                changelogManager(),
+                generator,
+                nonPartitionFilterConsumer(),
+                store().pathFactory(),
+                name(),
+                store().newIndexFileHandler(),
+                dvmetaCache);
     }
 
     private Map<String, FormatMetadataReader> createMetadataReaders(CoreOptions options) {

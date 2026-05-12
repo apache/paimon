@@ -64,9 +64,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 7L;
+    private static final long serialVersionUID = 8L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 8;
+    private static final int VERSION = 9;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -80,11 +80,8 @@ public class DataSplit implements Split {
     private boolean isStreaming = false;
     private boolean rawConvertible;
 
-    /**
-     * Optional file split boundaries for finer-grained splitting. Maps file index in dataFiles to
-     * list of boundaries. This is transient (not serialized) to maintain backward compatibility.
-     */
-    @Nullable private transient Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries;
+    /** Maps file index in dataFiles to its split boundaries (null when not fine-grained split). */
+    @Nullable private Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries;
 
     public DataSplit() {}
 
@@ -451,6 +448,24 @@ public class DataSplit implements Split {
         out.writeBoolean(isStreaming);
 
         out.writeBoolean(rawConvertible);
+
+        if (fileSplitBoundaries != null && !fileSplitBoundaries.isEmpty()) {
+            out.writeBoolean(true);
+            out.writeInt(fileSplitBoundaries.size());
+            for (Map.Entry<Integer, List<FileSplitBoundary>> entry :
+                    fileSplitBoundaries.entrySet()) {
+                out.writeInt(entry.getKey());
+                List<FileSplitBoundary> boundaries = entry.getValue();
+                out.writeInt(boundaries.size());
+                for (FileSplitBoundary b : boundaries) {
+                    out.writeLong(b.offset());
+                    out.writeLong(b.length());
+                    out.writeLong(b.rowCount());
+                }
+            }
+        } else {
+            out.writeBoolean(false);
+        }
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -489,6 +504,23 @@ public class DataSplit implements Split {
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
 
+        Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries = null;
+        if (version >= 9 && in.readBoolean()) {
+            int mapSize = in.readInt();
+            fileSplitBoundaries = new HashMap<>(mapSize);
+            for (int i = 0; i < mapSize; i++) {
+                int fileIndex = in.readInt();
+                int boundaryCount = in.readInt();
+                List<FileSplitBoundary> boundaries = new ArrayList<>(boundaryCount);
+                for (int j = 0; j < boundaryCount; j++) {
+                    boundaries.add(
+                            new FileSplitBoundary(
+                                    in.readLong(), in.readLong(), in.readLong()));
+                }
+                fileSplitBoundaries.put(fileIndex, boundaries);
+            }
+        }
+
         DataSplit.Builder builder =
                 builder()
                         .withSnapshot(snapshotId)
@@ -502,6 +534,9 @@ public class DataSplit implements Split {
 
         if (dataDeletionFiles != null) {
             builder.withDataDeletionFiles(dataDeletionFiles);
+        }
+        if (fileSplitBoundaries != null) {
+            builder.withFileSplitBoundaries(fileSplitBoundaries);
         }
         return builder.build();
     }
@@ -524,7 +559,7 @@ public class DataSplit implements Split {
             DataFileMetaFirstRowIdLegacySerializer serializer =
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
-        } else if (version == 8) {
+        } else if (version == 8 || version == 9) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {

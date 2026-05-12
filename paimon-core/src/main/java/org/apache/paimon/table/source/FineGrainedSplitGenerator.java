@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.format.FormatMetadataReader;
 import org.apache.paimon.fs.FileIO;
@@ -31,48 +32,29 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * A decorator for {@link SplitGenerator} that enables finer-grained splitting by splitting large
- * files at row group (Parquet) or stripe (ORC) boundaries.
- *
- * <p>This generator wraps a base {@link SplitGenerator} and, when enabled, queries format metadata
- * readers to split large files into multiple splits. The boundaries are stored and can be used
- * later when converting to {@link org.apache.paimon.table.source.RawFile} objects.
- *
- * @since 0.9.0
- */
+/** Decorator for {@link SplitGenerator} that splits large files at row group or stripe boundaries. */
 public class FineGrainedSplitGenerator implements SplitGenerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(FineGrainedSplitGenerator.class);
 
     private final SplitGenerator baseGenerator;
-    private final boolean enabled;
     private final long splitFileThreshold;
     private final int maxSplitsPerFile;
     private final FileIO fileIO;
     private final FileStorePathFactory pathFactory;
     private final Map<String, FormatMetadataReader> metadataReaders;
 
-    /**
-     * Map from file name to list of split boundaries. This is populated when fine-grained splitting
-     * is performed and can be retrieved later.
-     */
-    private final Map<String, List<FileSplitBoundary>> fileBoundaries = new HashMap<>();
-
     public FineGrainedSplitGenerator(
             SplitGenerator baseGenerator,
-            boolean enabled,
             long splitFileThreshold,
             int maxSplitsPerFile,
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             Map<String, FormatMetadataReader> metadataReaders) {
         this.baseGenerator = baseGenerator;
-        this.enabled = enabled;
         this.splitFileThreshold = splitFileThreshold;
         this.maxSplitsPerFile = maxSplitsPerFile;
         this.fileIO = fileIO;
@@ -80,81 +62,67 @@ public class FineGrainedSplitGenerator implements SplitGenerator {
         this.metadataReaders = metadataReaders;
     }
 
-    /**
-     * Get the split boundaries for a file. Returns empty list if the file was not split or if
-     * boundaries are not available.
-     */
-    public List<FileSplitBoundary> getFileBoundaries(String fileName) {
-        return fileBoundaries.getOrDefault(fileName, new ArrayList<>());
-    }
-
     @Override
     public boolean alwaysRawConvertible() {
         return baseGenerator.alwaysRawConvertible();
     }
 
+    /** Delegates to base generator — fine-grained splitting is batch-only. */
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
+        return baseGenerator.splitForBatch(files);
+    }
+
+    /**
+     * Fine-grained batch split with partition and bucket context for path construction.
+     * Called by {@link org.apache.paimon.table.source.snapshot.SnapshotReaderImpl}.
+     */
+    public List<SplitGroup> splitForBatch(
+            List<DataFileMeta> files, BinaryRow partition, int bucket) {
         List<SplitGroup> baseGroups = baseGenerator.splitForBatch(files);
 
-        if (!enabled || metadataReaders.isEmpty()) {
+        if (metadataReaders.isEmpty()) {
             return baseGroups;
         }
 
+        Path bucketDir = pathFactory.bucketPath(partition, bucket);
         List<SplitGroup> result = new ArrayList<>();
 
         for (SplitGroup group : baseGroups) {
             List<DataFileMeta> groupFiles = group.files;
-            List<DataFileMeta> filesToSplit = new ArrayList<>();
             List<DataFileMeta> filesToKeep = new ArrayList<>();
 
-            // Separate files that should be split from those that should be kept as-is
             for (DataFileMeta file : groupFiles) {
-                if (shouldSplitFile(file)) {
-                    filesToSplit.add(file);
-                } else {
+                if (!shouldSplitFile(file)) {
                     filesToKeep.add(file);
+                    continue;
                 }
-            }
 
-            // Add files that don't need splitting as-is
-            if (!filesToKeep.isEmpty()) {
-                result.add(
-                        group.rawConvertible
-                                ? SplitGroup.rawConvertibleGroup(filesToKeep)
-                                : SplitGroup.nonRawConvertibleGroup(filesToKeep));
-            }
+                List<FileSplitBoundary> boundaries = getSplitBoundaries(file, bucketDir);
 
-            // Split large files into multiple groups
-            for (DataFileMeta file : filesToSplit) {
-                List<FileSplitBoundary> boundaries = getSplitBoundaries(file);
-                if (boundaries.isEmpty() || boundaries.size() == 1) {
-                    // Could not split or only one boundary, keep as single file
+                if (boundaries.size() <= 1) {
+                    filesToKeep.add(file);
+                    continue;
+                }
+
+                // Flush any non-split files accumulated so far as one group
+                if (!filesToKeep.isEmpty()) {
+                    result.add(groupOf(group.rawConvertible, filesToKeep, null));
+                    filesToKeep = new ArrayList<>();
+                }
+
+                int numSplits = Math.min(boundaries.size(), maxSplitsPerFile);
+                for (int i = 0; i < numSplits; i++) {
                     result.add(
-                            group.rawConvertible
-                                    ? SplitGroup.rawConvertibleGroup(
-                                            Collections.singletonList(file))
-                                    : SplitGroup.nonRawConvertibleGroup(
-                                            Collections.singletonList(file)));
-                } else {
-                    // Create one SplitGroup per boundary
-                    // Limit the number of splits per file
-                    int numSplits = Math.min(boundaries.size(), maxSplitsPerFile);
-                    List<FileSplitBoundary> boundariesToUse = boundaries.subList(0, numSplits);
-                    // Store boundaries for later use in DataSplit.convertToRawFiles()
-                    fileBoundaries.put(file.fileName(), boundariesToUse);
-                    // Create multiple SplitGroups - each will become a separate DataSplit
-                    // Note: All SplitGroups contain the same file, but boundaries are stored
-                    // and will be used when converting to RawFile
-                    for (int i = 0; i < numSplits; i++) {
-                        result.add(
-                                group.rawConvertible
-                                        ? SplitGroup.rawConvertibleGroup(
-                                                Collections.singletonList(file))
-                                        : SplitGroup.nonRawConvertibleGroup(
-                                                Collections.singletonList(file)));
-                    }
+                            groupOf(
+                                    group.rawConvertible,
+                                    Collections.singletonList(file),
+                                    boundaries.get(i)));
                 }
+            }
+
+            if (!filesToKeep.isEmpty()) {
+                result.add(groupOf(group.rawConvertible, filesToKeep, null));
             }
         }
 
@@ -163,7 +131,6 @@ public class FineGrainedSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
-        // For streaming, don't split files - use base generator as-is
         return baseGenerator.splitForStreaming(files);
     }
 
@@ -172,51 +139,34 @@ public class FineGrainedSplitGenerator implements SplitGenerator {
                 && metadataReaders.containsKey(file.fileFormat().toLowerCase());
     }
 
-    private List<FileSplitBoundary> getSplitBoundaries(DataFileMeta file) {
+    private List<FileSplitBoundary> getSplitBoundaries(DataFileMeta file, Path bucketDir) {
         String format = file.fileFormat().toLowerCase();
         FormatMetadataReader reader = metadataReaders.get(format);
 
         if (reader == null || !reader.supportsFinerGranularity()) {
-            return new ArrayList<>();
+            return Collections.emptyList();
         }
 
+        Path filePath = new Path(bucketDir, file.fileName());
         try {
-            // Construct path from external path if available
-            // If external path is not available, we cannot construct the full path here
-            // as we don't have partition/bucket info. In this case, return empty list
-            // and the file will be treated as a single split (fallback behavior).
-            Path filePath = file.externalPath().map(Path::new).orElse(null);
-
-            if (filePath == null) {
-                // Cannot construct full path without partition/bucket info
-                // Fall back to file-level splitting
-                LOG.debug(
-                        "Cannot construct full path for file {} (no external path), "
-                                + "skipping fine-grained splitting",
-                        file.fileName());
-                return new ArrayList<>();
-            }
-
-            List<FileSplitBoundary> boundaries =
-                    reader.getSplitBoundaries(fileIO, filePath, file.fileSize());
-
-            if (LOG.isDebugEnabled() && !boundaries.isEmpty()) {
-                LOG.debug(
-                        "Extracted {} boundaries for file {} (format: {})",
-                        boundaries.size(),
-                        file.fileName(),
-                        format);
-            }
-
-            return boundaries;
+            return reader.getSplitBoundaries(fileIO, filePath, file.fileSize());
         } catch (IOException e) {
             LOG.warn(
-                    "Failed to extract split boundaries for file {} (format: {}), "
-                            + "will treat as single split",
+                    "Failed to read split boundaries for {} ({}), treating as single split",
                     file.fileName(),
                     format,
                     e);
-            return new ArrayList<>();
+            return Collections.emptyList();
         }
+    }
+
+    private static SplitGroup groupOf(
+            boolean rawConvertible, List<DataFileMeta> files, FileSplitBoundary boundary) {
+        if (rawConvertible) {
+            return boundary != null
+                    ? SplitGroup.rawConvertibleGroup(files, boundary)
+                    : SplitGroup.rawConvertibleGroup(files);
+        }
+        return SplitGroup.nonRawConvertibleGroup(files);
     }
 }

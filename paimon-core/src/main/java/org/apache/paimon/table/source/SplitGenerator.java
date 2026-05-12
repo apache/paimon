@@ -18,7 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.io.DataFileMeta;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -36,18 +39,28 @@ public interface SplitGenerator {
 
         public final List<DataFileMeta> files;
         public final boolean rawConvertible;
+        @Nullable public final FileSplitBoundary boundary;
 
-        private SplitGroup(List<DataFileMeta> files, boolean rawConvertible) {
+        private SplitGroup(
+                List<DataFileMeta> files,
+                boolean rawConvertible,
+                @Nullable FileSplitBoundary boundary) {
             this.files = files;
             this.rawConvertible = rawConvertible;
+            this.boundary = boundary;
         }
 
         public static SplitGroup rawConvertibleGroup(List<DataFileMeta> files) {
-            return new SplitGroup(files, true);
+            return new SplitGroup(files, true, null);
+        }
+
+        public static SplitGroup rawConvertibleGroup(
+                List<DataFileMeta> files, FileSplitBoundary boundary) {
+            return new SplitGroup(files, true, boundary);
         }
 
         public static SplitGroup nonRawConvertibleGroup(List<DataFileMeta> files) {
-            return new SplitGroup(files, false);
+            return new SplitGroup(files, false, null);
         }
     }
 }

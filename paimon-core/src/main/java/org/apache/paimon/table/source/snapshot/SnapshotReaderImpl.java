@@ -427,64 +427,26 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 List<SplitGenerator.SplitGroup> splitGroups =
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
-                                : splitGenerator.splitForBatch(bucketFiles);
+                                : splitGenerator instanceof FineGrainedSplitGenerator
+                                        ? ((FineGrainedSplitGenerator) splitGenerator)
+                                                .splitForBatch(bucketFiles, partition, bucket)
+                                        : splitGenerator.splitForBatch(bucketFiles);
 
-                // Track boundaries from FineGrainedSplitGenerator if available
-                FineGrainedSplitGenerator fineGrainedGenerator = null;
-                if (splitGenerator instanceof FineGrainedSplitGenerator) {
-                    fineGrainedGenerator = (FineGrainedSplitGenerator) splitGenerator;
-                }
-
-                // Calculate bucketPath once per bucket to avoid repeated computation
                 String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
-
-                // Track which SplitGroup index we're on for each file (for fine-grained splits)
-                Map<String, Integer> fileSplitGroupIndex = new HashMap<>();
 
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
-
-                    // Check if this is a fine-grained split (single file with boundaries)
-                    if (fineGrainedGenerator != null
-                            && dataFiles.size() == 1
-                            && splitGroup.rawConvertible) {
-                        DataFileMeta file = dataFiles.get(0);
-                        List<FileSplitBoundary> boundaries =
-                                fineGrainedGenerator.getFileBoundaries(file.fileName());
-
-                        if (!boundaries.isEmpty()) {
-                            int boundaryIndex =
-                                    fileSplitGroupIndex.getOrDefault(file.fileName(), 0);
-
-                            if (boundaryIndex < boundaries.size()) {
-                                Map<Integer, List<FileSplitBoundary>> splitBoundaries =
-                                        new HashMap<>();
-                                splitBoundaries.put(
-                                        0,
-                                        Collections.singletonList(boundaries.get(boundaryIndex)));
-
-                                builder.withDataFiles(dataFiles)
-                                        .rawConvertible(splitGroup.rawConvertible)
-                                        .withBucketPath(bucketPath)
-                                        .withFileSplitBoundaries(splitBoundaries);
-
-                                if (deletionVectors && deletionFilesMap != null) {
-                                    builder.withDataDeletionFiles(
-                                            getDeletionFiles(
-                                                    dataFiles,
-                                                    deletionFilesMap.getOrDefault(
-                                                            Pair.of(partition, bucket),
-                                                            Collections.emptyMap())));
-                                }
-                                splits.add(builder.build());
-                                fileSplitGroupIndex.put(file.fileName(), boundaryIndex + 1);
-                            }
-                            continue;
-                        }
-                    }
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
+
+                    if (splitGroup.boundary != null) {
+                        Map<Integer, List<FileSplitBoundary>> splitBoundaries = new HashMap<>();
+                        splitBoundaries.put(
+                                0, Collections.singletonList(splitGroup.boundary));
+                        builder.withFileSplitBoundaries(splitBoundaries);
+                    }
+
                     if (deletionVectors && deletionFilesMap != null) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(
