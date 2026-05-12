@@ -72,6 +72,7 @@ public class TagAutoCreation {
             TagDeletion tagDeletion,
             TagTimeExtractor timeExtractor,
             TagPeriodHandler periodHandler,
+            Boolean withoutDelay,
             Duration delay,
             @Nullable Integer numRetainedMax,
             @Nullable Duration defaultTimeRetained,
@@ -84,7 +85,7 @@ public class TagAutoCreation {
         this.tagDeletion = tagDeletion;
         this.timeExtractor = timeExtractor;
         this.periodHandler = periodHandler;
-        this.delay = delay;
+        this.delay = withoutDelay ? Duration.ZERO : delay;
         this.numRetainedMax = numRetainedMax;
         this.defaultTimeRetained = defaultTimeRetained;
         this.callbacks = callbacks;
@@ -233,6 +234,7 @@ public class TagAutoCreation {
                 tagDeletion,
                 extractor,
                 TagPeriodHandler.create(options),
+                options.tagAutoCreateWithoutDelay(),
                 options.tagCreationDelay(),
                 options.tagNumRetainedMax(),
                 options.tagDefaultTimeRetained(),
