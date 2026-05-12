@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.table.source.RawFile;
 
 import org.junit.jupiter.api.Test;
 
@@ -63,15 +64,16 @@ public class DataSplitBoundarySerializationTest {
 
         DataSplit roundTripped = serializeDeserialize(original);
 
-        assertThat(roundTripped.fileSplitBoundaries()).isNotNull();
-        List<FileSplitBoundary> deserialized = roundTripped.fileSplitBoundaries().get(0);
-        assertThat(deserialized).hasSize(2);
-        assertThat(deserialized.get(0).offset()).isEqualTo(0);
-        assertThat(deserialized.get(0).length()).isEqualTo(512);
-        assertThat(deserialized.get(0).rowCount()).isEqualTo(1000);
-        assertThat(deserialized.get(1).offset()).isEqualTo(512);
-        assertThat(deserialized.get(1).length()).isEqualTo(256);
-        assertThat(deserialized.get(1).rowCount()).isEqualTo(500);
+        // convertToRawFiles() exercises the boundary data - if boundaries were lost
+        // in serialization, each RawFile would have offset=0 and length=fileSize instead
+        List<RawFile> rawFiles = roundTripped.convertToRawFiles().get();
+        assertThat(rawFiles).hasSize(2);
+        assertThat(rawFiles.get(0).offset()).isEqualTo(0);
+        assertThat(rawFiles.get(0).length()).isEqualTo(512);
+        assertThat(rawFiles.get(0).rowCount()).isEqualTo(1000);
+        assertThat(rawFiles.get(1).offset()).isEqualTo(512);
+        assertThat(rawFiles.get(1).length()).isEqualTo(256);
+        assertThat(rawFiles.get(1).rowCount()).isEqualTo(500);
     }
 
     @Test
@@ -90,7 +92,11 @@ public class DataSplitBoundarySerializationTest {
 
         DataSplit roundTripped = serializeDeserialize(original);
 
-        assertThat(roundTripped.fileSplitBoundaries()).isNull();
+        // Without boundaries, convertToRawFiles still works - each file maps to one RawFile
+        // covering the full file (offset=0, length=fileSize)
+        List<RawFile> rawFiles = roundTripped.convertToRawFiles().get();
+        assertThat(rawFiles).hasSize(1);
+        assertThat(rawFiles.get(0).offset()).isEqualTo(0);
     }
 
     private static DataSplit serializeDeserialize(DataSplit split) throws Exception {
