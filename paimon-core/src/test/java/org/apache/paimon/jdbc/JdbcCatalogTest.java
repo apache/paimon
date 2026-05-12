@@ -18,14 +18,17 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -618,5 +621,207 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         tableName))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to insert table");
+    }
+
+    private Schema schemaWithCustomPath(String customPath) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), customPath);
+        return new Schema(
+                Lists.newArrayList(
+                        new DataField(0, "pk", DataTypes.INT()),
+                        new DataField(1, "col1", DataTypes.STRING())),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
+    @Test
+    public void testCreateTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_location/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "custom_table");
+
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Verify schema exists at custom location
+        Path customPath = new Path(customDir);
+        SchemaManager sm = new SchemaManager(fileIO, customPath);
+        assertThat(sm.listAllIds()).isNotEmpty();
+
+        // Verify getTableLocation returns the custom path
+        assertThat(jdbcCatalog.getTableLocation(identifier)).isEqualTo(customPath);
+
+        // Verify path is stored in JDBC table properties
+        Map<String, String> storedProps =
+                fetchTableProperties(jdbcCatalog, "test_db", "custom_table");
+        assertThat(storedProps).containsEntry(CoreOptions.PATH.key(), customPath.toString());
+
+        // Verify table is loadable
+        assertDoesNotThrow(() -> jdbcCatalog.getTable(identifier));
+    }
+
+    @Test
+    public void testCreateTableWithCustomPathSyncDisabled() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(false);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_nosync/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "nosync_table");
+
+        // Custom path requires syncTableProperties=true
+        assertThatThrownBy(() -> jdbcCatalog.createTable(identifier, schema, false))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testDropTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_drop/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "drop_custom");
+
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Verify data exists at custom location
+        Path customPath = new Path(customDir);
+        assertThat(fileIO.exists(customPath)).isTrue();
+
+        // Drop the table
+        jdbcCatalog.dropTable(identifier, false);
+
+        // Verify JDBC metadata is cleaned up
+        assertThatThrownBy(() -> jdbcCatalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        Map<String, String> storedProps =
+                fetchTableProperties(jdbcCatalog, "test_db", "drop_custom");
+        assertThat(storedProps).isEmpty();
+
+        // Verify data is NOT deleted (external table keeps its data)
+        assertThat(fileIO.exists(customPath)).isTrue();
+    }
+
+    @Test
+    public void testDropTableWithDefaultPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "drop_default");
+        jdbcCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        Path tablePath = jdbcCatalog.getTableLocation(identifier);
+        assertThat(fileIO.exists(tablePath)).isTrue();
+
+        jdbcCatalog.dropTable(identifier, false);
+
+        // Data SHOULD be deleted for default-path tables
+        assertThat(fileIO.exists(tablePath)).isFalse();
+    }
+
+    @Test
+    public void testRenameTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_rename/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier fromTable = Identifier.create("test_db", "rename_from");
+
+        jdbcCatalog.createTable(fromTable, schema, false);
+
+        Identifier toTable = Identifier.create("test_db", "rename_to");
+        jdbcCatalog.renameTable(fromTable, toTable, false);
+
+        // Verify old table is gone
+        assertThatThrownBy(() -> jdbcCatalog.getTable(fromTable))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // Verify new table is accessible and still points to the custom path
+        assertThat(jdbcCatalog.getTableLocation(toTable)).isEqualTo(new Path(customDir));
+
+        // Verify the path property was moved
+        Map<String, String> storedProps = fetchTableProperties(jdbcCatalog, "test_db", "rename_to");
+        assertThat(storedProps)
+                .containsEntry(CoreOptions.PATH.key(), new Path(customDir).toString());
+
+        // Verify old name has no properties
+        Map<String, String> oldProps = fetchTableProperties(jdbcCatalog, "test_db", "rename_from");
+        assertThat(oldProps).isEmpty();
+    }
+
+    @Test
+    public void testAlterTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_alter/my_table";
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), customDir);
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Lists.newArrayList("pk"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "alter_custom");
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Alter: add a new option
+        jdbcCatalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.setOption("file.format", "orc")),
+                false);
+
+        // Verify path is preserved after alter
+        Map<String, String> storedProps =
+                fetchTableProperties(jdbcCatalog, "test_db", "alter_custom");
+        assertThat(storedProps)
+                .containsEntry(CoreOptions.PATH.key(), new Path(customDir).toString());
+        assertThat(storedProps).containsEntry("file.format", "orc");
+        assertThat(storedProps).containsEntry("bucket", "4");
+
+        // Verify getTableLocation still returns custom path
+        assertThat(jdbcCatalog.getTableLocation(identifier)).isEqualTo(new Path(customDir));
+    }
+
+    @Test
+    public void testLoadTableSchemaWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_load/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "load_custom");
+
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Verify schema loads from custom location
+        Table table = jdbcCatalog.getTable(identifier);
+        assertThat(table).isNotNull();
+        assertThat(table.name()).isEqualTo("load_custom");
+    }
+
+    @Test
+    public void testGetTableLocationFallback() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        jdbcCatalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "default_table");
+        jdbcCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        // Verify getTableLocation returns default when no stored path
+        Path expected = new Path(new Path(warehouse, "test_db.db"), "default_table");
+        assertThat(jdbcCatalog.getTableLocation(identifier)).isEqualTo(expected);
     }
 }
