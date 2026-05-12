@@ -175,6 +175,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
+    public void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
+        getWriterWrapper(partition, bucket).writer.notifyNewEmptyOutputWriter(partition, bucket);
+        LOG.info("Notify new empty output writer for partition {}, bucket {}", partition, bucket);
+    }
+
+    @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         getWriterWrapper(partition, bucket).writer.compact(fullCompaction);
     }

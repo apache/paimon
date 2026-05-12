@@ -25,6 +25,7 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
@@ -196,6 +197,20 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public long memoryOccupancy() {
         return writeBuffer.memoryOccupancy();
+    }
+
+    @Override
+    public void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
+        RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        dataWriter.writeEmptyFile();
+        dataWriter.close();
+        List<DataFileMeta> dataMetas = dataWriter.result();
+        if (dataMetas == null || dataMetas.size() != 1 || dataMetas.get(0) == null) {
+            throw new IllegalStateException(
+                    "Data writer should generate one and only one file, but got " + dataMetas);
+        }
+        newFiles.add(dataMetas.get(0));
     }
 
     @Override

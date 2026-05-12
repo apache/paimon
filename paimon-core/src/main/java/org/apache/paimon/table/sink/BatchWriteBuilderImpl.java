@@ -77,6 +77,11 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
+    public @Nullable Map<String, String> staticPartition() {
+        return staticPartition;
+    }
+
+    @Override
     public BatchTableWrite newWrite() {
         return table.newWrite(commitUser).withIgnorePreviousFiles(staticPartition != null);
     }

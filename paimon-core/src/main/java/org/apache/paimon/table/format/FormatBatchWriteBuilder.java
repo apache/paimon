@@ -98,6 +98,11 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
         return this;
     }
 
+    @Override
+    public @Nullable Map<String, String> staticPartition() {
+        return staticPartition;
+    }
+
     protected static void validateStaticPartition(
             Map<String, String> staticPartition, List<String> partitionKeys) {
         if (staticPartition != null && !staticPartition.isEmpty()) {
