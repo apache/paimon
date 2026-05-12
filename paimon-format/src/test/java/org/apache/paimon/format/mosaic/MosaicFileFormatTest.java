@@ -34,6 +34,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -383,6 +384,64 @@ public class MosaicFileFormatTest {
         assertThat(result).hasSize(10);
         for (int i = 0; i < 10; i++) {
             assertThat(result.get(i).getInt(0)).isEqualTo(i);
+        }
+    }
+
+    @Test
+    public void testMultiRowGroupStringStability() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("name", DataTypes.STRING())
+                        .build();
+
+        // Use tiny writeBatchMemory to force multiple row groups
+        MosaicFileFormat format =
+                new MosaicFileFormat(
+                        new FormatContext(
+                                new Options(), 1024, 1024, MemorySize.ofBytes(1), 3, null));
+
+        List<InternalRow> data = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            data.add(GenericRow.of(i, BinaryString.fromString("string_value_" + i)));
+        }
+
+        Path path = new Path(tempDir.toString(), "multi_rg_string.mosaic");
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+        PositionOutputStream out = fileIO.newOutputStream(path, false);
+        FormatWriter writer = writerFactory.create(out, "zstd");
+        for (InternalRow row : data) {
+            writer.addElement(row);
+        }
+        writer.close();
+        out.close();
+
+        // Project only the string column
+        RowType projectedType = RowType.builder().field("name", DataTypes.STRING()).build();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(rowType, projectedType, null);
+        FileRecordReader<InternalRow> reader =
+                (FileRecordReader<InternalRow>)
+                        readerFactory.createReader(
+                                new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        // Read batches one by one; retain string values from earlier batches
+        List<BinaryString> allStrings = new ArrayList<>();
+        RecordReader.RecordIterator<InternalRow> batch;
+        while ((batch = reader.readBatch()) != null) {
+            InternalRow row;
+            while ((row = batch.next()) != null) {
+                allStrings.add(row.getString(0));
+            }
+            batch.releaseBatch();
+        }
+        reader.close();
+
+        // Verify all retained strings are still correct
+        assertThat(allStrings).hasSize(100);
+        for (int i = 0; i < 100; i++) {
+            assertThat(allStrings.get(i).toString()).isEqualTo("string_value_" + i);
         }
     }
 

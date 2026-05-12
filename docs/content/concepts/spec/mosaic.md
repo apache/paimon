@@ -132,12 +132,10 @@ repeated numColumns times:
     <tr><td>15</td><td>TIME</td><td>varint precision</td></tr>
     <tr><td>16</td><td>TIMESTAMP</td><td>varint precision</td></tr>
     <tr><td>17</td><td>TIMESTAMP_LTZ</td><td>varint precision</td></tr>
-    <tr><td>18</td><td>VARIANT</td><td>(none)</td></tr>
-    <tr><td>19</td><td>BLOB</td><td>(none)</td></tr>
     </tbody>
 </table>
 
-Complex types (ARRAY, MAP, ROW, etc.) are not supported.
+Complex types (ARRAY, MAP, ROW, etc.), VARIANT, and BLOB are not supported.
 
 ## Bucket Data
 

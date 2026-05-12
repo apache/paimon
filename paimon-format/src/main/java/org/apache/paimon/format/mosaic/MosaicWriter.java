@@ -53,6 +53,7 @@ public class MosaicWriter implements FormatWriter {
     private byte[] compressBuffer;
     private int currentRowGroupRows;
     private long currentBufferedSize;
+    private double compressionRatio;
     private boolean closed;
 
     public MosaicWriter(
@@ -81,6 +82,7 @@ public class MosaicWriter implements FormatWriter {
         this.compressBuffer = new byte[0];
         this.currentRowGroupRows = 0;
         this.currentBufferedSize = 0;
+        this.compressionRatio = this.compressionByte == COMPRESSION_NONE ? 1.0 : 0.3;
         this.closed = false;
     }
 
@@ -102,8 +104,7 @@ public class MosaicWriter implements FormatWriter {
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        // always check, because the cost of check is low
-        long estimatedSize = out.getPos() + (long) (currentBufferedSize * 0.3);
+        long estimatedSize = out.getPos() + (long) (currentBufferedSize * compressionRatio);
         return estimatedSize >= targetSize;
     }
 
@@ -154,6 +155,17 @@ public class MosaicWriter implements FormatWriter {
         rowGroupMetas.add(
                 new RowGroupMeta(
                         currentRowGroupRows, bucketOffsets, compressedSizes, uncompressedSizes));
+
+        long totalCompressed = 0;
+        long totalUncompressed = 0;
+        for (int b = 0; b < numBuckets; b++) {
+            totalCompressed += compressedSizes[b];
+            totalUncompressed += uncompressedSizes[b];
+        }
+        if (totalUncompressed > 0) {
+            compressionRatio = (double) totalCompressed / totalUncompressed;
+        }
+
         currentRowGroupRows = 0;
         currentBufferedSize = 0;
     }

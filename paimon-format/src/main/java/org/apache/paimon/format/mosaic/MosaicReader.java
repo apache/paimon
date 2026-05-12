@@ -60,7 +60,6 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
     private MosaicBucketReader[] bucketReaders;
     private int currentRowGroup;
     private byte[] compressedBuf;
-    private byte[] decompressBuf;
 
     public MosaicReader(FileIO fileIO, Path filePath, long fileSize, RowType projectedRowType)
             throws IOException {
@@ -171,7 +170,6 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
             }
         }
         this.compressedBuf = new byte[0];
-        this.decompressBuf = new byte[0];
     }
 
     @Nullable
@@ -213,30 +211,22 @@ public class MosaicReader implements FileRecordReader<InternalRow> {
             }
 
             int compSize = meta.compressedSizes[b];
-            if (compressedBuf.length < compSize) {
-                compressedBuf = new byte[compSize];
-            }
             inputStream.seek(meta.bucketOffsets[b]);
-            readFully(compressedBuf, compSize);
 
             byte[] bucketData;
             switch (compression) {
                 case COMPRESSION_NONE:
-                    bucketData = Arrays.copyOf(compressedBuf, compSize);
+                    bucketData = new byte[compSize];
+                    readFully(bucketData);
                     break;
                 case COMPRESSION_ZSTD:
+                    if (compressedBuf.length < compSize) {
+                        compressedBuf = new byte[compSize];
+                    }
+                    readFully(compressedBuf, compSize);
                     int uncompSize = meta.uncompressedSizes[b];
-                    if (decompressBuf.length < uncompSize) {
-                        decompressBuf = new byte[uncompSize];
-                    }
-                    Zstd.decompressByteArray(
-                            decompressBuf, 0, uncompSize, compressedBuf, 0, compSize);
-                    // BucketReader holds a reference to data, so copy for all but the last bucket
-                    if (i < ordered.length - 1) {
-                        bucketData = Arrays.copyOf(decompressBuf, uncompSize);
-                    } else {
-                        bucketData = decompressBuf;
-                    }
+                    bucketData = new byte[uncompSize];
+                    Zstd.decompressByteArray(bucketData, 0, uncompSize, compressedBuf, 0, compSize);
                     break;
                 default:
                     throw new UnsupportedEncodingException(
