@@ -602,5 +602,62 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         mock.patch.stopall()
 
 
+class FullTextSearchManySplitsTest(unittest.TestCase):
+
+    def test_full_text_search_with_many_splits(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_search_split import (
+            FullTextSearchSplit,
+        )
+
+        num_splits = 1200
+        text_field = _field(1, "content", "STRING")
+        entries = [
+            _entry(None, field_id=1, index_type="tantivy-fulltext",
+                   file_name="ft-%d.index" % i,
+                   row_range_start=i, row_range_end=i)
+            for i in range(num_splits)
+        ]
+        table = _StubTable(fields=[text_field], entries=entries)
+        _patch_snapshot(self, entries)
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list):
+            row_id = index_io_meta_list[0].file_name
+            row_id = int(row_id.split("-")[1].split(".")[0])
+
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    return DictBasedScoredIndexResult({row_id: float(row_id)})
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        splits = [
+            FullTextSearchSplit(
+                row_range_start=i, row_range_end=i,
+                full_text_index_files=[entries[i].index_file])
+            for i in range(num_splits)
+        ]
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            reader = FullTextReadImpl(
+                table, limit=10, text_column=text_field,
+                query_text="test")
+            result = reader.read(splits)
+
+        self.assertGreater(result.results().cardinality(), 0)
+        self.assertIsNotNone(result.score_getter()(0))
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -75,7 +75,7 @@ class FullTextReadImpl(FullTextRead):
         return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
     def _eval(self, row_range_start, row_range_end, full_text_index_files
-              ) -> Optional['ScoredGlobalIndexResult']:
+              ) -> Optional[GlobalIndexResult]:
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
