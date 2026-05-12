@@ -895,6 +895,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
+        List<ManifestFileMeta> createdManifestsForAbort = new ArrayList<>();
         long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
@@ -915,14 +916,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             // try to merge old manifest files to create base manifest list
             mergeAfterManifests =
-                    ManifestFileMerger.merge(
+                    mergeManifests(
                             mergeBeforeManifests,
-                            manifestFile,
-                            options.manifestTargetSize().getBytes(),
                             options.manifestMergeMinCount(),
                             options.manifestFullCompactionThresholdSize().getBytes(),
-                            partitionType,
-                            options.scanManifestParallelism());
+                            createdManifestsForAbort);
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -997,7 +995,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             commitCleaner.cleanUpReuseTmpManifests(
                     deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
             commitCleaner.cleanUpNoReuseTmpManifests(
-                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+                    baseManifestList, mergeBeforeManifests, createdManifestsForAbort);
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when preparing snapshot #%d by user %s "
@@ -1117,16 +1115,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 manifestList.readDataManifests(latestSnapshot);
         List<ManifestFileMeta> mergeAfterManifests;
 
-        // the fist trial
-        mergeAfterManifests =
-                ManifestFileMerger.merge(
-                        mergeBeforeManifests,
-                        manifestFile,
-                        options.manifestTargetSize().getBytes(),
-                        1,
-                        1,
-                        partitionType,
-                        options.scanManifestParallelism());
+        // the first trial
+        mergeAfterManifests = mergeManifests(mergeBeforeManifests, 1, 1);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
@@ -1161,6 +1151,87 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
+    }
+
+    private List<ManifestFileMeta> mergeManifests(
+            List<ManifestFileMeta> input,
+            int suggestedMinMetaCount,
+            long manifestFullCompactionSize) {
+        List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
+        try {
+            return mergeManifests(
+                    input, suggestedMinMetaCount, manifestFullCompactionSize, newFilesForAbort);
+        } catch (Throwable e) {
+            for (ManifestFileMeta manifest : newFilesForAbort) {
+                manifestFile.delete(manifest.fileName());
+            }
+            if (e instanceof Error) {
+                throw (Error) e;
+            }
+            throw new RuntimeException(e);
+        }
+    }
+
+    private List<ManifestFileMeta> mergeManifests(
+            List<ManifestFileMeta> input,
+            int suggestedMinMetaCount,
+            long manifestFullCompactionSize,
+            List<ManifestFileMeta> newFilesForAbort)
+            throws Exception {
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        options.manifestTargetSize().getBytes(),
+                        suggestedMinMetaCount,
+                        manifestFullCompactionSize,
+                        partitionType,
+                        options.scanManifestParallelism());
+        addCreatedManifestFiles(input, merged, newFilesForAbort);
+        if (options.manifestSortEnabled()) {
+            Optional<List<ManifestFileMeta>> sorted =
+                    ManifestFileMerger.trySortCompaction(
+                            merged,
+                            newFilesForAbort,
+                            manifestFile,
+                            partitionType,
+                            options.manifestSortRewriteManifestCount(),
+                            options.scanManifestParallelism());
+            if (sorted.isPresent()) {
+                merged = sorted.get();
+                cleanUnusedCreatedManifestFiles(merged, newFilesForAbort);
+            }
+        }
+        return merged;
+    }
+
+    private static void addCreatedManifestFiles(
+            List<ManifestFileMeta> input,
+            List<ManifestFileMeta> output,
+            List<ManifestFileMeta> newFilesForAbort) {
+        Set<String> inputFileNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        Set<String> knownNewFileNames =
+                newFilesForAbort.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toSet());
+        for (ManifestFileMeta manifest : output) {
+            if (!inputFileNames.contains(manifest.fileName())
+                    && knownNewFileNames.add(manifest.fileName())) {
+                newFilesForAbort.add(manifest);
+            }
+        }
+    }
+
+    private void cleanUnusedCreatedManifestFiles(
+            List<ManifestFileMeta> output, List<ManifestFileMeta> createdManifestFiles) {
+        Set<String> outputFileNames =
+                output.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        for (ManifestFileMeta manifest : createdManifestFiles) {
+            if (!outputFileNames.contains(manifest.fileName())) {
+                manifestFile.delete(manifest.fileName());
+            }
+        }
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {

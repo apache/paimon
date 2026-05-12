@@ -469,6 +469,21 @@ public class CoreOptions implements Serializable {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLED =
+            key("manifest-sort.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to rewrite part of manifest files by partition range during commit.");
+
+    public static final ConfigOption<Integer> MANIFEST_SORT_REWRITE_MANIFEST_COUNT =
+            key("manifest-sort.rewrite-manifest-count")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The maximum number of manifest files picked from sorted runs for "
+                                    + "manifest sort compaction.");
+
     public static final ConfigOption<String> UPSERT_KEY =
             key("upsert-key")
                     .stringType()
@@ -2809,6 +2824,14 @@ public class CoreOptions implements Serializable {
 
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
+    }
+
+    public boolean manifestSortEnabled() {
+        return options.get(MANIFEST_SORT_ENABLED);
+    }
+
+    public int manifestSortRewriteManifestCount() {
+        return options.get(MANIFEST_SORT_REWRITE_MANIFEST_COUNT);
     }
 
     public MergeEngine mergeEngine() {

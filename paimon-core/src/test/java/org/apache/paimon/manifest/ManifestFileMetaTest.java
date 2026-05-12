@@ -75,6 +75,18 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         manifestFile = createManifestFile(tempDir.toString());
     }
 
+    private ManifestFileMeta makeRangeManifest(String fileNamePrefix, int minPartition) {
+        return makeManifest(
+                makeEntry(true, fileNamePrefix + "-" + minPartition, minPartition),
+                makeEntry(true, fileNamePrefix + "-" + (minPartition + 1), minPartition + 1));
+    }
+
+    private Set<String> entryFileNames(ManifestFileMeta manifest) {
+        return manifestFile.read(manifest.fileName(), manifest.fileSize()).stream()
+                .map(entry -> entry.file().fileName())
+                .collect(Collectors.toSet());
+    }
+
     @Disabled // TODO wrong test to rely on self-defined file size
     @ParameterizedTest
     @ValueSource(ints = {2, 3, 4})
@@ -229,6 +241,169 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 ManifestFileMerger.merge(
                         input, manifestFile, 500, 3, 200, getPartitionType(), null);
         assertEquivalentEntries(input, merged);
+    }
+
+    @Test
+    public void testSortCompactionPicksRunsByRecursiveSize() throws Exception {
+        ManifestFileMeta run0Partition0 = makeRangeManifest("run0", 0);
+        ManifestFileMeta run1Partition0 = makeRangeManifest("run1", 0);
+        ManifestFileMeta run2Partition0 = makeRangeManifest("run2", 0);
+        ManifestFileMeta run0Partition3 = makeRangeManifest("run0", 3);
+        ManifestFileMeta run1Partition3 = makeRangeManifest("run1", 3);
+        ManifestFileMeta run2Partition3 = makeRangeManifest("run2", 3);
+        ManifestFileMeta run0Partition6 = makeRangeManifest("run0", 6);
+        ManifestFileMeta run1Partition6 = makeRangeManifest("run1", 6);
+        ManifestFileMeta run2Partition6 = makeRangeManifest("run2", 6);
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        run0Partition0,
+                        run1Partition0,
+                        run2Partition0,
+                        run0Partition3,
+                        run1Partition3,
+                        run2Partition3,
+                        run0Partition6,
+                        run1Partition6,
+                        run2Partition6);
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> sorted =
+                ManifestFileMerger.trySortCompaction(
+                        input, newMetas, manifestFile, getPartitionType(), 9, null);
+
+        assertThat(sorted).isPresent();
+        List<ManifestFileMeta> result = sorted.get();
+        assertEquivalentEntries(input, result);
+        assertThat(result).hasSize(3);
+        assertThat(result).doesNotContainAnyElementsOf(input);
+        assertThat(newMetas).hasSize(3);
+        assertThat(newMetas.stream().map(this::entryFileNames).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        new HashSet<>(
+                                Arrays.asList(
+                                        "run0-0", "run0-1", "run1-0", "run1-1", "run2-0",
+                                        "run2-1")),
+                        new HashSet<>(
+                                Arrays.asList(
+                                        "run0-3", "run0-4", "run1-3", "run1-4", "run2-3",
+                                        "run2-4")),
+                        new HashSet<>(
+                                Arrays.asList(
+                                        "run0-6", "run0-7", "run1-6", "run1-7", "run2-6",
+                                        "run2-7")));
+    }
+
+    @Test
+    public void testSortCompactionRegistersEveryRewrittenManifestForAbort() throws Exception {
+        ManifestFileMeta run0Partition0 = makeRangeManifest("run0", 0);
+        ManifestFileMeta run1Partition0 = makeRangeManifest("run1", 0);
+        ManifestFileMeta run2Partition0 = makeRangeManifest("run2", 0);
+        ManifestFileMeta run0Partition3 = makeRangeManifest("run0", 3);
+        ManifestFileMeta run1Partition3 = makeRangeManifest("run1", 3);
+        ManifestFileMeta run2Partition3 = makeRangeManifest("run2", 3);
+        ManifestFileMeta run0Partition6 = makeRangeManifest("run0", 6);
+        ManifestFileMeta run1Partition6 = makeRangeManifest("run1", 6);
+        ManifestFileMeta run2Partition6 = makeRangeManifest("run2", 6);
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        run0Partition0,
+                        run1Partition0,
+                        run2Partition0,
+                        run0Partition3,
+                        run1Partition3,
+                        run2Partition3,
+                        run0Partition6,
+                        run1Partition6,
+                        run2Partition6);
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> sorted =
+                ManifestFileMerger.trySortCompaction(
+                        input, newMetas, manifestFile, getPartitionType(), 6, null);
+
+        assertThat(sorted).isPresent();
+        assertEquivalentEntries(input, sorted.get());
+        assertThat(sorted.get()).hasSize(6);
+        assertThat(newMetas).hasSize(3);
+        assertThat(newMetas).allMatch(meta -> sorted.get().contains(meta));
+        assertThat(newMetas.stream().map(this::entryFileNames).collect(Collectors.toList()))
+                .allMatch(names -> names.size() == 4);
+    }
+
+    @Test
+    public void testSortCompactionCanRewriteSingleFileRuns() throws Exception {
+        List<ManifestFileMeta> input =
+                Arrays.asList(makeRangeManifest("run0", 0), makeRangeManifest("run1", 0));
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+
+        Optional<List<ManifestFileMeta>> sorted =
+                ManifestFileMerger.trySortCompaction(
+                        input, newMetas, manifestFile, getPartitionType(), 2, null);
+
+        assertThat(sorted).isPresent();
+        assertEquivalentEntries(input, sorted.get());
+        assertThat(sorted.get()).hasSize(1);
+        assertThat(newMetas).hasSize(1);
+        assertThat(entryFileNames(newMetas.get(0)))
+                .containsExactlyInAnyOrder("run0-0", "run0-1", "run1-0", "run1-1");
+    }
+
+    @Test
+    public void testSortCompactionSkipsWhenOnlyOneRunFitsRewriteCount() throws Exception {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeRangeManifest("target-0", 0),
+                        makeRangeManifest("target-3", 3),
+                        makeRangeManifest("source-3", 3),
+                        makeRangeManifest("target-6", 6),
+                        makeRangeManifest("source-6", 6));
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+
+        Optional<List<ManifestFileMeta>> sorted =
+                ManifestFileMerger.trySortCompaction(
+                        input, newMetas, manifestFile, getPartitionType(), 2, null);
+
+        assertThat(sorted).isEmpty();
+        assertThat(newMetas).isEmpty();
+    }
+
+    @Test
+    public void testSortCompactionSkipsSinglePartitionManifests() throws Exception {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeEntry(true, "target-0", 0)),
+                        makeManifest(makeEntry(true, "target-2", 2)),
+                        makeManifest(makeEntry(true, "target-4", 4)),
+                        makeManifest(makeEntry(true, "source-4", 4)),
+                        makeManifest(makeEntry(true, "target-6", 6)),
+                        makeManifest(makeEntry(true, "source-6", 6)),
+                        makeManifest(makeEntry(true, "target-8", 8)),
+                        makeManifest(makeEntry(true, "source-8", 8)));
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+
+        Optional<List<ManifestFileMeta>> sorted =
+                ManifestFileMerger.trySortCompaction(
+                        input, newMetas, manifestFile, getPartitionType(), 3, null);
+
+        assertThat(sorted).isEmpty();
+        assertThat(newMetas).isEmpty();
+    }
+
+    @Test
+    public void testSortCompactionSkipsDeleteManifests() throws Exception {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeEntry(true, "target-0", 0)),
+                        makeManifest(makeEntry(false, "target-0", 0)),
+                        makeManifest(makeEntry(true, "target-2", 2)));
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+
+        Optional<List<ManifestFileMeta>> sorted =
+                ManifestFileMerger.trySortCompaction(
+                        input, newMetas, manifestFile, getPartitionType(), 1, null);
+
+        assertThat(sorted).isEmpty();
+        assertThat(newMetas).isEmpty();
     }
 
     @Test
