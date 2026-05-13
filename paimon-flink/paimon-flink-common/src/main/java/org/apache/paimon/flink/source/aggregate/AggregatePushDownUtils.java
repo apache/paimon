@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.aggregate;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -26,6 +27,8 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.table.expressions.AggregateExpression;
@@ -41,7 +44,12 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
-/** Utilities for aggregate push down. */
+/**
+ * Utilities for aggregate push down.
+ *
+ * <p>This class references Spark's implementation: {@code
+ * org.apache.paimon.spark.aggregate.AggregatePushDownUtils} and related classes.
+ */
 public class AggregatePushDownUtils {
 
     public static Optional<PushedAggregateResult> tryPushdownAggregation(
@@ -50,17 +58,20 @@ public class AggregatePushDownUtils {
             @Nullable PartitionPredicate partitionPredicate,
             @Nullable int[][] projectFields,
             List<int[]> groupingSets,
-            List<AggregateExpression> aggregateExpressions) {
+            List<AggregateExpression> aggregateExpressions,
+            org.apache.flink.table.types.DataType producedDataType) {
         if (groupingSets.size() != 1) {
             return Optional.empty();
         }
 
+        // reject nested projection
         int[] fieldIndexMapping = createFieldIndexMapping(table, projectFields);
         if (fieldIndexMapping == null) {
             return Optional.empty();
         }
 
-        // translate grouping fields index to original field index
+        // groupingSet contains the index within the projected fields,
+        // so we have to translate grouping fields index to original field index
         int[] originalGrouping = translateFieldIndexes(groupingSets.get(0), fieldIndexMapping);
         if (originalGrouping == null) {
             return Optional.empty();
@@ -86,8 +97,39 @@ public class AggregatePushDownUtils {
         for (DataSplit dataSplit : dataSplits) {
             aggregator.update(dataSplit);
         }
-        return Optional.of(
-                new PushedAggregateResult(aggregator.result(), aggregator.resultRowType()));
+
+        // we should check the result row type equals to producedDataType
+        RowType producedRowType = toPaimonRowType(producedDataType);
+        if (producedRowType == null || !isCompatible(aggregator.resultRowType(), producedRowType)) {
+            return Optional.empty();
+        }
+        return Optional.of(new PushedAggregateResult(aggregator.result(), producedRowType));
+    }
+
+    @Nullable
+    private static RowType toPaimonRowType(org.apache.flink.table.types.DataType producedDataType) {
+        if (!(producedDataType.getLogicalType()
+                instanceof org.apache.flink.table.types.logical.RowType)) {
+            return null;
+        }
+        return LogicalTypeConversion.toDataType(
+                (org.apache.flink.table.types.logical.RowType) producedDataType.getLogicalType());
+    }
+
+    private static boolean isCompatible(RowType actualRowType, RowType producedRowType) {
+        if (actualRowType.getFieldCount() != producedRowType.getFieldCount()) {
+            return false;
+        }
+
+        for (int i = 0; i < actualRowType.getFieldCount(); i++) {
+            DataType actualType = actualRowType.getTypeAt(i);
+            DataType producedType = producedRowType.getTypeAt(i);
+            if (!actualType.equalsIgnoreNullable(producedType)
+                    || (actualType.isNullable() && !producedType.isNullable())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Nullable
@@ -109,7 +151,6 @@ public class AggregatePushDownUtils {
 
         ReadBuilder readBuilder =
                 table.newReadBuilder()
-                        .withProjection(new int[0])
                         .withFilter(predicate)
                         .withPartitionFilter(partitionPredicate);
         if (minMaxColumns.isEmpty()) {

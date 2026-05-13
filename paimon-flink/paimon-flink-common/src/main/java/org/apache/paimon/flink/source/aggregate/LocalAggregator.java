@@ -27,6 +27,7 @@ import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
@@ -41,7 +42,7 @@ class LocalAggregator {
 
     private final int[] grouping;
     private final List<Aggregate> aggregates;
-    private final List<org.apache.paimon.types.DataType> groupFieldTypes;
+    private final List<DataType> groupFieldTypes;
     private final List<String> groupFieldNames;
     private final ProjectedRow projectedPartition;
     private final InternalRowSerializer groupSerializer;
@@ -53,6 +54,7 @@ class LocalAggregator {
     private final InternalRowSerializer resultSerializer;
 
     LocalAggregator(FileStoreTable table, int[] grouping, List<Aggregate> aggregates) {
+        // grouping has been converted to indices of the original table type
         this.grouping = grouping;
         this.aggregates = aggregates;
         this.groupFieldTypes = new ArrayList<>(grouping.length);
@@ -71,9 +73,7 @@ class LocalAggregator {
         }
 
         this.projectedPartition = ProjectedRow.from(partitionProjection);
-        this.groupSerializer =
-                new InternalRowSerializer(
-                        groupFieldTypes.toArray(new org.apache.paimon.types.DataType[0]));
+        this.groupSerializer = new InternalRowSerializer(groupFieldTypes.toArray(new DataType[0]));
         this.groupEvaluatorMap = new LinkedHashMap<>();
         this.simpleStatsEvolutions =
                 new SimpleStatsEvolutions(
@@ -145,6 +145,12 @@ class LocalAggregator {
         return evaluators;
     }
 
+    /**
+     * According to {@code SupportsAggregatePushDown}, the produced data type will be strictly
+     * organized by grouping keys and aggregate results with the same order as input.
+     *
+     * @return the result row
+     */
     private InternalRow createResultRow(BinaryRow groupKey, List<AggFuncEvaluator> evaluators) {
         GenericRow row = new GenericRow(grouping.length + evaluators.size());
         for (int i = 0; i < grouping.length; i++) {
@@ -175,6 +181,7 @@ class LocalAggregator {
         return new RowType(fields);
     }
 
+    /** Aggregate information. */
     static class Aggregate {
 
         private final Kind kind;
@@ -209,8 +216,16 @@ class LocalAggregator {
             return fieldName;
         }
 
-        private org.apache.paimon.types.DataType resultType() {
-            return kind == Kind.COUNT ? DataTypes.BIGINT().notNull() : dataField.type();
+        private DataType resultType() {
+            switch (kind) {
+                case COUNT:
+                    return DataTypes.BIGINT().notNull();
+                case MIN:
+                case MAX:
+                    return dataField.type();
+                default:
+                    throw new UnsupportedOperationException("Unsupported aggregate " + kind);
+            }
         }
 
         private String resultName() {
@@ -218,12 +233,14 @@ class LocalAggregator {
         }
     }
 
+    /** Aggregate Kind. */
     private enum Kind {
         COUNT,
         MIN,
         MAX
     }
 
+    /** Evaluator to calculate agg results from file statistics. */
     private interface AggFuncEvaluator {
 
         void update(DataSplit dataSplit);
@@ -231,6 +248,7 @@ class LocalAggregator {
         Object result();
     }
 
+    /** Evaluator for count star. */
     private static class CountStarEvaluator implements AggFuncEvaluator {
 
         private long result;
@@ -246,23 +264,27 @@ class LocalAggregator {
         }
     }
 
-    private abstract class MinMaxEvaluator implements AggFuncEvaluator {
+    /** Evaluator for MIN. */
+    private class MinEvaluator implements AggFuncEvaluator {
 
         private final Aggregate aggregate;
         private Object result;
 
-        private MinMaxEvaluator(Aggregate aggregate) {
+        private MinEvaluator(Aggregate aggregate) {
             this.aggregate = aggregate;
         }
 
         @Override
         public void update(DataSplit dataSplit) {
-            Object other = value(dataSplit);
+            Object other =
+                    dataSplit.minValue(
+                            aggregate.fieldIndex, aggregate.dataField, simpleStatsEvolutions);
             if (other == null) {
                 return;
             }
 
-            if (result == null || shouldReplace(result, other)) {
+            if (result == null
+                    || CompareUtils.compareLiteral(aggregate.dataField.type(), result, other) > 0) {
                 result = other;
             }
         }
@@ -271,33 +293,36 @@ class LocalAggregator {
         public Object result() {
             return result;
         }
-
-        private Object value(DataSplit dataSplit) {
-            if (aggregate.kind == Kind.MIN) {
-                return dataSplit.minValue(
-                        aggregate.fieldIndex, aggregate.dataField, simpleStatsEvolutions);
-            }
-            return dataSplit.maxValue(
-                    aggregate.fieldIndex, aggregate.dataField, simpleStatsEvolutions);
-        }
-
-        private boolean shouldReplace(Object current, Object other) {
-            int compared = CompareUtils.compareLiteral(aggregate.dataField.type(), current, other);
-            return aggregate.kind == Kind.MIN ? compared > 0 : compared < 0;
-        }
     }
 
-    private class MinEvaluator extends MinMaxEvaluator {
+    /** Evaluator for MAX. */
+    private class MaxEvaluator implements AggFuncEvaluator {
 
-        private MinEvaluator(Aggregate aggregate) {
-            super(aggregate);
-        }
-    }
-
-    private class MaxEvaluator extends MinMaxEvaluator {
+        private final Aggregate aggregate;
+        private Object result;
 
         private MaxEvaluator(Aggregate aggregate) {
-            super(aggregate);
+            this.aggregate = aggregate;
+        }
+
+        @Override
+        public void update(DataSplit dataSplit) {
+            Object other =
+                    dataSplit.maxValue(
+                            aggregate.fieldIndex, aggregate.dataField, simpleStatsEvolutions);
+            if (other == null) {
+                return;
+            }
+
+            if (result == null
+                    || CompareUtils.compareLiteral(aggregate.dataField.type(), result, other) < 0) {
+                result = other;
+            }
+        }
+
+        @Override
+        public Object result() {
+            return result;
         }
     }
 }

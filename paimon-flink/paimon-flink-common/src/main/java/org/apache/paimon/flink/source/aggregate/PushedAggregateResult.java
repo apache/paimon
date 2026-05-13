@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.aggregate;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
 import java.util.List;
@@ -29,9 +30,9 @@ public class PushedAggregateResult implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final List<InternalRow> rows;
-    private final org.apache.paimon.types.RowType paimonRowType;
+    private final RowType paimonRowType;
 
-    PushedAggregateResult(List<InternalRow> rows, org.apache.paimon.types.RowType paimonRowType) {
+    PushedAggregateResult(List<InternalRow> rows, RowType paimonRowType) {
         this.rows = rows;
         this.paimonRowType = paimonRowType;
     }
@@ -40,7 +41,7 @@ public class PushedAggregateResult implements Serializable {
         return rows;
     }
 
-    public org.apache.paimon.types.RowType paimonRowType() {
+    public RowType paimonRowType() {
         return paimonRowType;
     }
 }

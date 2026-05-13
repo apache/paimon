@@ -24,6 +24,7 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -46,12 +47,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
 
 /** A bounded source that returns a precomputed list of rows. */
-class StaticRowDataSource
+public class StaticRowDataSource
         implements Source<
                         RowData,
                         StaticRowDataSource.StaticRowsSplit,
@@ -61,10 +61,10 @@ class StaticRowDataSource
     private static final long serialVersionUID = 1L;
 
     private final List<InternalRow> rows;
-    private final org.apache.paimon.types.RowType paimonRowType;
+    private final RowType paimonRowType;
 
-    StaticRowDataSource(List<InternalRow> rows, org.apache.paimon.types.RowType paimonRowType) {
-        this.rows = rows;
+    public StaticRowDataSource(List<InternalRow> rows, RowType paimonRowType) {
+        this.rows = new ArrayList<>(rows);
         this.paimonRowType = paimonRowType;
     }
 
@@ -86,10 +86,7 @@ class StaticRowDataSource
     @Override
     public SplitEnumerator<StaticRowsSplit, Collection<StaticRowsSplit>> createEnumerator(
             SplitEnumeratorContext<StaticRowsSplit> enumContext) {
-        List<StaticRowsSplit> splits =
-                rows.isEmpty()
-                        ? Collections.emptyList()
-                        : Collections.singletonList(new StaticRowsSplit("1", rows, 0));
+        List<StaticRowsSplit> splits = splitRows(rows, enumContext.currentParallelism());
         return new IteratorSourceEnumerator<>(enumContext, splits);
     }
 
@@ -111,17 +108,29 @@ class StaticRowDataSource
         return new CheckpointSerializer(paimonRowType);
     }
 
-    static class StaticRowsSplit implements IteratorSourceSplit<RowData, StaticRowsIterator> {
+    private List<StaticRowsSplit> splitRows(List<InternalRow> rows, int numSplits) {
+        StaticRowsIterator[] iterators = new StaticRowsIterator(rows, 0).split(numSplits);
+        List<StaticRowsSplit> splits = new ArrayList<>(iterators.length);
 
-        private static final long serialVersionUID = 1L;
+        int splitId = 1;
+        for (StaticRowsIterator iterator : iterators) {
+            if (iterator.hasNext()) {
+                splits.add(new StaticRowsSplit(String.valueOf(splitId++), iterator.rows, 0));
+            }
+        }
+        return splits;
+    }
 
+    /** A SourceSplit with pre-computed static rows. */
+    public static class StaticRowsSplit
+            implements IteratorSourceSplit<RowData, StaticRowsIterator> {
         private final String splitId;
         private final List<InternalRow> rows;
         private final int nextIndex;
 
-        StaticRowsSplit(String splitId, List<InternalRow> rows, int nextIndex) {
+        public StaticRowsSplit(String splitId, List<InternalRow> rows, int nextIndex) {
             this.splitId = splitId;
-            this.rows = rows;
+            this.rows = new ArrayList<>(rows);
             this.nextIndex = nextIndex;
         }
 
@@ -142,7 +151,8 @@ class StaticRowDataSource
         }
     }
 
-    static class StaticRowsIterator extends SplittableIterator<RowData> {
+    /** Iterator for static rows. */
+    private static class StaticRowsIterator extends SplittableIterator<RowData> {
 
         private static final long serialVersionUID = 1L;
 
@@ -181,7 +191,20 @@ class StaticRowDataSource
             if (numPartitions < 1) {
                 throw new IllegalArgumentException("The number of partitions must be at least 1.");
             }
-            return new StaticRowsIterator[] {new StaticRowsIterator(rows, nextIndex)};
+
+            int remaining = rows.size() - nextIndex;
+            StaticRowsIterator[] iterators = new StaticRowsIterator[numPartitions];
+
+            int start = nextIndex;
+            int baseSize = remaining / numPartitions;
+            int numWithExtra = remaining % numPartitions;
+            for (int i = 0; i < numPartitions; i++) {
+                int splitSize = baseSize + (i < numWithExtra ? 1 : 0);
+                int end = start + splitSize;
+                iterators[i] = new StaticRowsIterator(new ArrayList<>(rows.subList(start, end)), 0);
+                start = end;
+            }
+            return iterators;
         }
 
         @Override
@@ -190,13 +213,14 @@ class StaticRowDataSource
         }
     }
 
+    /** Serializer for StaticRowsSplit. */
     private static class SplitSerializer implements SimpleVersionedSerializer<StaticRowsSplit> {
 
         private static final int CURRENT_VERSION = 1;
 
         private final InternalRowSerializer rowSerializer;
 
-        private SplitSerializer(org.apache.paimon.types.RowType rowType) {
+        private SplitSerializer(RowType rowType) {
             this.rowSerializer = new InternalRowSerializer(rowType);
         }
 
@@ -236,6 +260,7 @@ class StaticRowDataSource
         }
     }
 
+    /** Serializer for multiple splits. */
     private static class CheckpointSerializer
             implements SimpleVersionedSerializer<Collection<StaticRowsSplit>> {
 
@@ -243,7 +268,7 @@ class StaticRowDataSource
 
         private final SplitSerializer splitSerializer;
 
-        private CheckpointSerializer(org.apache.paimon.types.RowType rowType) {
+        private CheckpointSerializer(RowType rowType) {
             this.splitSerializer = new SplitSerializer(rowType);
         }
 

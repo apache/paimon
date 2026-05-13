@@ -345,7 +345,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         partitionPredicate,
                         projectFields,
                         groupingSets,
-                        aggregateExpressions);
+                        aggregateExpressions,
+                        producedDataType);
         result.ifPresent(r -> this.pushedAggregateResult = r);
         return result.isPresent();
     }
