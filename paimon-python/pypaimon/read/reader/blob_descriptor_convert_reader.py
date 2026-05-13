@@ -47,30 +47,29 @@ class BlobDescriptorConvertReader(RecordBatchReader):
         for field_name in self._descriptor_fields:
             if field_name not in result.schema.names:
                 continue
-            values = result.column(field_name).to_pylist()
+            values = [self._normalize_blob_cell(value) for value in result.column(field_name).to_pylist()]
             converted_values = []
             for value in values:
                 if value is None:
                     converted_values.append(None)
                     continue
-                if hasattr(value, 'as_py'):
-                    value = value.as_py()
-                if isinstance(value, str):
-                    value = value.encode('utf-8')
-                if isinstance(value, bytearray):
-                    value = bytes(value)
                 if not isinstance(value, bytes):
                     converted_values.append(value)
                     continue
+                if not BlobDescriptor.is_blob_descriptor(value):
+                    converted_values.append(value)
+                    continue
+                descriptor = BlobDescriptor.deserialize(value)
+                if descriptor.serialize() != value:
+                    converted_values.append(value)
+                    continue
                 try:
-                    descriptor = BlobDescriptor.deserialize(value)
-                    if descriptor.serialize() != value:
-                        converted_values.append(value)
-                        continue
                     uri_reader = self._table.file_io.uri_reader_factory.create(descriptor.uri)
                     converted_values.append(Blob.from_descriptor(uri_reader, descriptor).to_data())
-                except Exception:
-                    converted_values.append(value)
+                except Exception as e:
+                    raise RuntimeError(
+                        "Failed to read blob bytes from descriptor URI while converting blob value."
+                    ) from e
 
             column_idx = result.schema.names.index(field_name)
             result = result.set_column(
@@ -81,31 +80,30 @@ class BlobDescriptorConvertReader(RecordBatchReader):
         for field_name in self._view_fields:
             if field_name not in result.schema.names:
                 continue
-            values = result.column(field_name).to_pylist()
+            values = [self._normalize_blob_cell(value) for value in result.column(field_name).to_pylist()]
+            view_structs = [
+                BlobViewStruct.deserialize(value)
+                for value in values
+                if isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value)
+            ]
+            if view_structs:
+                if self._blob_view_lookup is None:
+                    self._blob_view_lookup = BlobViewLookup(self._table)
+                self._blob_view_lookup.preload(view_structs)
+
             converted_values = []
             for value in values:
                 if value is None:
                     converted_values.append(None)
                     continue
-                if hasattr(value, 'as_py'):
-                    value = value.as_py()
-                if isinstance(value, str):
-                    value = value.encode('utf-8')
-                if isinstance(value, bytearray):
-                    value = bytes(value)
                 if not isinstance(value, bytes):
                     converted_values.append(value)
                     continue
-                try:
-                    if not BlobViewStruct.is_blob_view_struct(value):
-                        converted_values.append(value)
-                        continue
-                    if self._blob_view_lookup is None:
-                        self._blob_view_lookup = BlobViewLookup(self._table)
-                    view_struct = BlobViewStruct.deserialize(value)
-                    converted_values.append(self._blob_view_lookup.resolve_data(view_struct))
-                except Exception:
+                if not BlobViewStruct.is_blob_view_struct(value):
                     converted_values.append(value)
+                    continue
+                view_struct = BlobViewStruct.deserialize(value)
+                converted_values.append(self._blob_view_lookup.resolve_data(view_struct))
 
             column_idx = result.schema.names.index(field_name)
             result = result.set_column(
@@ -114,6 +112,18 @@ class BlobDescriptorConvertReader(RecordBatchReader):
                 pyarrow.array(converted_values, type=pyarrow.large_binary()),
             )
         return result
+
+    @staticmethod
+    def _normalize_blob_cell(value):
+        if value is None:
+            return None
+        if hasattr(value, 'as_py'):
+            value = value.as_py()
+        if isinstance(value, str):
+            value = value.encode('utf-8')
+        if isinstance(value, bytearray):
+            value = bytes(value)
+        return value
 
     def close(self):
         self._inner.close()
