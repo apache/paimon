@@ -190,7 +190,9 @@ public class ParquetVectorUpdaterFactory {
             return c -> {
                 if (c.getPrimitiveType().getPrimitiveTypeName()
                         == PrimitiveType.PrimitiveTypeName.INT64) {
-                    return new LongTimestampUpdater(timestampType.getPrecision());
+                    return new LongTimestampUpdater(
+                            timestampType.getPrecision(),
+                            timestampUnit(c, timestampType.getPrecision()));
                 } else if (c.getPrimitiveType().getPrimitiveTypeName()
                         == PrimitiveType.PrimitiveTypeName.INT96) {
                     return new TimestampUpdater(timestampType.getPrecision());
@@ -206,10 +208,30 @@ public class ParquetVectorUpdaterFactory {
             return c -> {
                 if (c.getPrimitiveType().getPrimitiveTypeName()
                         == PrimitiveType.PrimitiveTypeName.INT64) {
-                    return new LongUpdater();
+                    return new LongTimestampUpdater(
+                            localZonedTimestampType.getPrecision(),
+                            timestampUnit(c, localZonedTimestampType.getPrecision()));
                 }
                 return new TimestampUpdater(localZonedTimestampType.getPrecision());
             };
+        }
+
+        private static LogicalTypeAnnotation.TimeUnit timestampUnit(
+                ColumnDescriptor descriptor, int precision) {
+            LogicalTypeAnnotation typeAnnotation =
+                    descriptor.getPrimitiveType().getLogicalTypeAnnotation();
+            if (typeAnnotation instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+                return ((LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) typeAnnotation)
+                        .getUnit();
+            }
+
+            if (precision <= 3) {
+                return LogicalTypeAnnotation.TimeUnit.MILLIS;
+            } else if (precision <= 6) {
+                return LogicalTypeAnnotation.TimeUnit.MICROS;
+            } else {
+                return LogicalTypeAnnotation.TimeUnit.MILLIS;
+            }
         }
 
         @Override
@@ -436,8 +458,11 @@ public class ParquetVectorUpdaterFactory {
 
     private static class LongTimestampUpdater extends AbstractTimestampUpdater {
 
-        public LongTimestampUpdater(int precision) {
+        private final LogicalTypeAnnotation.TimeUnit timeUnit;
+
+        public LongTimestampUpdater(int precision, LogicalTypeAnnotation.TimeUnit timeUnit) {
             super(precision);
+            this.timeUnit = timeUnit;
         }
 
         @Override
@@ -465,9 +490,67 @@ public class ParquetVectorUpdaterFactory {
         private void putTimestamp(WritableColumnVector vector, int offset, long timestamp) {
             if (vector instanceof WritableTimestampVector) {
                 ((WritableTimestampVector) vector)
-                        .setTimestamp(offset, Timestamp.fromEpochMillis(timestamp));
+                        .setTimestamp(offset, timestampFromInt64(timestamp, timeUnit));
             } else {
-                ((WritableLongVector) vector).setLong(offset, timestamp);
+                ((WritableLongVector) vector).setLong(offset, longTimestamp(timestamp));
+            }
+        }
+
+        private long longTimestamp(long timestamp) {
+            if (precision <= 3) {
+                return millisFromInt64(timestamp, timeUnit);
+            } else if (precision <= 6) {
+                return microsFromInt64(timestamp, timeUnit);
+            } else {
+                throw new UnsupportedOperationException(
+                        "Unsupported timestamp precision: " + precision);
+            }
+        }
+
+        private static Timestamp timestampFromInt64(
+                long timestamp, LogicalTypeAnnotation.TimeUnit timeUnit) {
+            switch (timeUnit) {
+                case MILLIS:
+                    return Timestamp.fromEpochMillis(timestamp);
+                case MICROS:
+                    return Timestamp.fromMicros(timestamp);
+                case NANOS:
+                    return Timestamp.fromEpochMillis(
+                            Math.floorDiv(timestamp, 1_000_000L),
+                            (int) Math.floorMod(timestamp, 1_000_000L));
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported timestamp unit: " + timeUnit);
+            }
+        }
+
+        private static long millisFromInt64(
+                long timestamp, LogicalTypeAnnotation.TimeUnit timeUnit) {
+            switch (timeUnit) {
+                case MILLIS:
+                    return timestamp;
+                case MICROS:
+                    return Math.floorDiv(timestamp, 1_000L);
+                case NANOS:
+                    return Math.floorDiv(timestamp, 1_000_000L);
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported timestamp unit: " + timeUnit);
+            }
+        }
+
+        private static long microsFromInt64(
+                long timestamp, LogicalTypeAnnotation.TimeUnit timeUnit) {
+            switch (timeUnit) {
+                case MILLIS:
+                    return Math.multiplyExact(timestamp, 1_000L);
+                case MICROS:
+                    return timestamp;
+                case NANOS:
+                    return Math.floorDiv(timestamp, 1_000L);
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported timestamp unit: " + timeUnit);
             }
         }
     }
