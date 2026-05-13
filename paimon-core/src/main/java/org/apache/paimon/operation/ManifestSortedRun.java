@@ -18,12 +18,9 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.utils.Preconditions;
 
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -50,14 +47,6 @@ public class ManifestSortedRun {
         this.totalSize = size;
     }
 
-    public static ManifestSortedRun empty() {
-        return new ManifestSortedRun(Collections.emptyList());
-    }
-
-    public static ManifestSortedRun fromSingle(ManifestFileMeta file) {
-        return new ManifestSortedRun(Collections.singletonList(file));
-    }
-
     /**
      * Build a {@code ManifestSortedRun} from an already-sorted list. The caller MUST guarantee that
      * {@code sortedFiles} is sorted ascending on the configured sort field's min value, and that
@@ -71,14 +60,6 @@ public class ManifestSortedRun {
         return files;
     }
 
-    public boolean isEmpty() {
-        return files.isEmpty();
-    }
-
-    public boolean nonEmpty() {
-        return !isEmpty();
-    }
-
     public long totalSize() {
         return totalSize;
     }
@@ -89,21 +70,6 @@ public class ManifestSortedRun {
 
     public void setLevel(int level) {
         this.level = level;
-    }
-
-    /**
-     * Validate that this run is monotonically non-overlapping on the sort field at {@code
-     * sortFieldIndex}. Used in tests and as an assertion in development.
-     */
-    public void validate(int sortFieldIndex, Comparator<BinaryRow> partitionComparator) {
-        for (int i = 1; i < files.size(); i++) {
-            BinaryRow prevMax = files.get(i - 1).partitionStats().maxValues();
-            BinaryRow currMin = files.get(i).partitionStats().minValues();
-            Preconditions.checkState(
-                    partitionComparator.compare(prevMax, currMin) <= 0,
-                    "ManifestSortedRun is not sorted on field %s; prev.max > curr.min",
-                    sortFieldIndex);
-        }
     }
 
     @Override

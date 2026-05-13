@@ -26,7 +26,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
@@ -341,16 +340,12 @@ public class ManifestFileMerger {
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         long manifestFullCompactionSize = options.manifestFullCompactionThresholdSize().getBytes();
         Integer manifestReadParallelism = options.scanManifestParallelism();
-        Options tableOptions = options.toConfiguration();
-
+        String sortPartitionField = options.manifestSortPartitionField();
         // Step 1: Resolve sort field.
-        String sortField = resolveSortField(tableOptions.toMap(), partitionType);
+        String sortField = resolveSortField(sortPartitionField, partitionType);
         if (sortField == null) {
-            LOG.warn(
-                    "Cannot resolve sort field for manifest sort rewrite. "
-                            + "Skipping sort. Configure 'manifest-sort.partition-field'"
-                            + " for multi-partition tables.");
-            return Optional.of(input);
+            throw new IllegalArgumentException(
+                    "Cannot resolve sort field for manifest sort rewrite. ");
         }
         int sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
         DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
@@ -487,87 +482,6 @@ public class ManifestFileMerger {
     }
 
     // ==================== Sort Rewrite Helpers ====================
-
-    /**
-     * Compares the value at field {@code k} of two {@link BinaryRow}s according to {@code type}.
-     */
-    static int compareField(BinaryRow a, BinaryRow b, int k, DataType type) {
-        switch (type.getTypeRoot()) {
-            case INTEGER:
-            case DATE:
-                return Integer.compare(a.getInt(k), b.getInt(k));
-            case BIGINT:
-                return Long.compare(a.getLong(k), b.getLong(k));
-            case SMALLINT:
-                return Short.compare(a.getShort(k), b.getShort(k));
-            case TINYINT:
-                return Byte.compare(a.getByte(k), b.getByte(k));
-            case FLOAT:
-                return Float.compare(a.getFloat(k), b.getFloat(k));
-            case DOUBLE:
-                return Double.compare(a.getDouble(k), b.getDouble(k));
-            case BOOLEAN:
-                return Boolean.compare(a.getBoolean(k), b.getBoolean(k));
-            case VARCHAR:
-            case CHAR:
-                return a.getString(k).compareTo(b.getString(k));
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return a.getTimestamp(k, type.defaultSize())
-                        .compareTo(b.getTimestamp(k, type.defaultSize()));
-            case DECIMAL:
-                DecimalType dt = (DecimalType) type;
-                return a.getDecimal(k, dt.getPrecision(), dt.getScale())
-                        .compareTo(b.getDecimal(k, dt.getPrecision(), dt.getScale()));
-            default:
-                String errorMsg =
-                        String.format(
-                                "Unsupported partition field type '%s' for manifest sort rewrite. "
-                                        + "Supported types: TINYINT, SMALLINT, INTEGER, BIGINT, "
-                                        + "FLOAT, DOUBLE, BOOLEAN, CHAR, VARCHAR, DATE, TIMESTAMP, "
-                                        + "DECIMAL.",
-                                type.getTypeRoot());
-                LOG.error(errorMsg);
-                throw new UnsupportedOperationException(errorMsg);
-        }
-    }
-
-    /**
-     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, fileName)}.
-     * {@code fileName} is used as the tie-breaker so that all entries sharing the same sort-field
-     * value AND the same data file are emitted contiguously.
-     */
-    static int compareSortKey(
-            ManifestEntry a, ManifestEntry b, int sortFieldIndex, DataType sortFieldType) {
-        int c = compareField(a.partition(), b.partition(), sortFieldIndex, sortFieldType);
-        if (c != 0) {
-            return c;
-        }
-        return a.file().fileName().compareTo(b.file().fileName());
-    }
-
-    /**
-     * Resolve the partition field to sort manifests by.
-     *
-     * <p>Resolution rules:
-     *
-     * <ol>
-     *   <li>If {@code manifest-sort.partition-field} is configured, return that value.
-     *   <li>Otherwise, if the table has exactly one partition field, return that field name.
-     *   <li>Otherwise return {@code null}.
-     * </ol>
-     */
-    @Nullable
-    static String resolveSortField(Map<String, String> tableOptions, RowType partitionType) {
-        String configured = tableOptions.get("manifest-sort.partition-field");
-        if (configured != null && !configured.isEmpty()) {
-            return configured;
-        }
-        if (partitionType.getFieldCount() == 1) {
-            return partitionType.getFieldNames().get(0);
-        }
-        return null;
-    }
 
     /**
      * Build level-sorted runs from a list of manifest files. Sorts files by min partition value,
@@ -816,7 +730,85 @@ public class ManifestFileMerger {
 
         return result;
     }
+    /**
+     * Compares the value at field {@code k} of two {@link BinaryRow}s according to {@code type}.
+     */
+    static int compareField(BinaryRow a, BinaryRow b, int k, DataType type) {
+        switch (type.getTypeRoot()) {
+            case INTEGER:
+            case DATE:
+                return Integer.compare(a.getInt(k), b.getInt(k));
+            case BIGINT:
+                return Long.compare(a.getLong(k), b.getLong(k));
+            case SMALLINT:
+                return Short.compare(a.getShort(k), b.getShort(k));
+            case TINYINT:
+                return Byte.compare(a.getByte(k), b.getByte(k));
+            case FLOAT:
+                return Float.compare(a.getFloat(k), b.getFloat(k));
+            case DOUBLE:
+                return Double.compare(a.getDouble(k), b.getDouble(k));
+            case BOOLEAN:
+                return Boolean.compare(a.getBoolean(k), b.getBoolean(k));
+            case VARCHAR:
+            case CHAR:
+                return a.getString(k).compareTo(b.getString(k));
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return a.getTimestamp(k, type.defaultSize())
+                        .compareTo(b.getTimestamp(k, type.defaultSize()));
+            case DECIMAL:
+                DecimalType dt = (DecimalType) type;
+                return a.getDecimal(k, dt.getPrecision(), dt.getScale())
+                        .compareTo(b.getDecimal(k, dt.getPrecision(), dt.getScale()));
+            default:
+                String errorMsg =
+                        String.format(
+                                "Unsupported partition field type '%s' for manifest sort rewrite. "
+                                        + "Supported types: TINYINT, SMALLINT, INTEGER, BIGINT, "
+                                        + "FLOAT, DOUBLE, BOOLEAN, CHAR, VARCHAR, DATE, TIMESTAMP, "
+                                        + "DECIMAL.",
+                                type.getTypeRoot());
+                LOG.error(errorMsg);
+                throw new UnsupportedOperationException(errorMsg);
+        }
+    }
 
+    /**
+     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, fileName)}.
+     * {@code fileName} is used as the tie-breaker so that all entries sharing the same sort-field
+     * value AND the same data file are emitted contiguously.
+     */
+    static int compareSortKey(
+            ManifestEntry a, ManifestEntry b, int sortFieldIndex, DataType sortFieldType) {
+        int c = compareField(a.partition(), b.partition(), sortFieldIndex, sortFieldType);
+        if (c != 0) {
+            return c;
+        }
+        return a.file().fileName().compareTo(b.file().fileName());
+    }
+
+    /**
+     * Resolve the partition field to sort manifests by.
+     *
+     * <p>Resolution rules:
+     *
+     * <ol>
+     *   <li>If {@code manifest-sort.partition-field} is configured, return that value.
+     *   <li>Otherwise, if the table has exactly one partition field, return that field name.
+     *   <li>Otherwise return {@code null}.
+     * </ol>
+     */
+    @Nullable
+    static String resolveSortField(String sortPartitionField, RowType partitionType) {
+        if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
+            return sortPartitionField;
+        }
+        if (partitionType.getFieldCount() == 1) {
+            return partitionType.getFieldNames().get(0);
+        }
+        return null;
+    }
     /**
      * Read a single manifest file for sort rewrite. If the meta contains delete entries, only ADD
      * entries not in {@code deletedIdentifiers} are returned. Otherwise, check if any ADD entry is
@@ -846,24 +838,6 @@ public class ManifestFileMerger {
                 }
             }
             return new FullCompactionReadResult(meta, requireChange, entries);
-        }
-    }
-
-    /** Parse a long option from table options with a default value. */
-    private static long parseLongOption(Options options, String key, long defaultValue) {
-        String value = options.get(key);
-        if (value == null || value.isEmpty()) {
-            return defaultValue;
-        }
-        try {
-            return Long.parseLong(value.trim());
-        } catch (NumberFormatException e) {
-            LOG.warn(
-                    "Invalid long value '{}' for option '{}', using default {}.",
-                    value,
-                    key,
-                    defaultValue);
-            return defaultValue;
         }
     }
 
