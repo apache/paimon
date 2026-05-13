@@ -39,10 +39,17 @@ import static org.apache.paimon.format.mosaic.MosaicSpec.ENCODING_PLAIN;
 import static org.apache.paimon.format.mosaic.MosaicUtils.writeVarint;
 
 /**
- * Columnar bucket writer for the Mosaic v2 format. Buffers values per-column and produces a
+ * Columnar bucket writer for the Mosaic format. Buffers values per-column and produces a
  * column-oriented byte array with CONST/DICT/PLAIN/ALL_NULL encoding per column.
+ *
+ * <p>Dictionary tracking uses zero-allocation long keys for fixed-width types (≤8 bytes) and
+ * byte-array keys for variable-width types. Tracking is abandoned early when cardinality exceeds
+ * 255 or a single value exceeds {@link #MAX_DICT_VALUE_BYTES}. DICT encoding is chosen only when it
+ * produces fewer bytes than PLAIN (cost-based selection).
  */
 public class MosaicBucketWriter {
+
+    private static final int MAX_DICT_VALUE_BYTES = 256;
 
     private final InternalRow.FieldGetter[] fieldGetters;
     private final int numColumns;
@@ -55,8 +62,10 @@ public class MosaicBucketWriter {
     private int[] valueBufPos;
     private int[] nonNullCounts;
 
-    // Dict tracking for all columns (byte-level key comparison)
-    private Map<ByteKey, Integer>[] dictMaps;
+    // Fixed-width ≤8 bytes: zero-allocation long-based dict tracking
+    private Map<Long, Integer>[] longDictMaps;
+    // Variable-width and width>8: byte-array-based dict tracking
+    private Map<ByteKey, Integer>[] byteDictMaps;
 
     private int numRows;
 
@@ -83,14 +92,23 @@ public class MosaicBucketWriter {
         this.valueBuffers = new byte[numColumns][];
         this.valueBufPos = new int[numColumns];
         this.nonNullCounts = new int[numColumns];
-        this.dictMaps = new Map[numColumns];
+        this.longDictMaps = new Map[numColumns];
+        this.byteDictMaps = new Map[numColumns];
 
         for (int i = 0; i < numColumns; i++) {
             nullBitmaps[i] = new byte[128];
             valueBuffers[i] = new byte[1024];
-            dictMaps[i] = new HashMap<>();
+            if (usesLongDict(i)) {
+                longDictMaps[i] = new HashMap<>();
+            } else {
+                byteDictMaps[i] = new HashMap<>();
+            }
         }
         this.numRows = 0;
+    }
+
+    private boolean usesLongDict(int colIdx) {
+        return fixedWidths[colIdx] > 0 && fixedWidths[colIdx] <= 8;
     }
 
     public boolean isEmpty() {
@@ -119,14 +137,30 @@ public class MosaicBucketWriter {
                 int written = valueBufPos[i] - before;
                 totalSize += written;
 
-                // Track in dict map (byte-level key from serialized value)
-                if (dictMaps[i] != null && dictMaps[i].size() <= 255) {
-                    ByteKey key = new ByteKey(valueBuffers[i], before, written);
-                    dictMaps[i].putIfAbsent(key, dictMaps[i].size());
+                // Track in long dict (fixed-width ≤8, zero allocation)
+                if (longDictMaps[i] != null) {
+                    long key = extractFixedKey(valueBuffers[i], before, fixedWidths[i]);
+                    longDictMaps[i].putIfAbsent(key, longDictMaps[i].size());
+                    if (longDictMaps[i].size() > 255) {
+                        longDictMaps[i] = null;
+                    }
+                } else if (byteDictMaps[i] != null) {
+                    // Abandon if value too large for dict to be worthwhile
+                    if (written > MAX_DICT_VALUE_BYTES) {
+                        byteDictMaps[i] = null;
+                    } else {
+                        ByteKey key = new ByteKey(valueBuffers[i], before, written);
+                        byteDictMaps[i].putIfAbsent(key, byteDictMaps[i].size());
+                        if (byteDictMaps[i].size() > 255) {
+                            byteDictMaps[i] = null;
+                        }
+                    }
                 }
             }
         }
         numRows++;
+        // Include null bitmap overhead (~1 bit per column per row)
+        totalSize += (numColumns + 7) / 8;
         return totalSize;
     }
 
@@ -139,21 +173,24 @@ public class MosaicBucketWriter {
             return new byte[0];
         }
 
-        // 1. Determine encoding per column
+        // 1. Determine encoding per column (cost-based DICT selection)
         byte[] encodings = new byte[numColumns];
         boolean[] hasNulls = new boolean[numColumns];
 
         for (int i = 0; i < numColumns; i++) {
-            hasNulls[i] = nonNullCounts[i] < numRows;
-            Map<ByteKey, Integer> dictMap = dictMaps[i];
+            int dictSize = getDictSize(i);
             if (nonNullCounts[i] == 0) {
                 encodings[i] = ENCODING_ALL_NULL;
-            } else if (dictMap != null && dictMap.size() == 1) {
+                hasNulls[i] = false;
+            } else if (dictSize == 1) {
                 encodings[i] = ENCODING_CONST;
-            } else if (dictMap != null && dictMap.size() <= 255) {
+                hasNulls[i] = nonNullCounts[i] < numRows;
+            } else if (dictSize >= 2 && dictSize <= 255 && dictEncodedSize(i) < valueBufPos[i]) {
                 encodings[i] = ENCODING_DICT;
+                hasNulls[i] = nonNullCounts[i] < numRows;
             } else {
                 encodings[i] = ENCODING_PLAIN;
+                hasNulls[i] = nonNullCounts[i] < numRows;
             }
         }
 
@@ -200,27 +237,45 @@ public class MosaicBucketWriter {
         }
         pos += hasNullsFlagsBytes;
 
-        // 2c. Const metadata — write the single distinct value's serialized bytes
+        // 2c. Const metadata
         for (int i = 0; i < numColumns; i++) {
             if (encodings[i] == ENCODING_CONST) {
-                ByteKey constKey = dictMaps[i].keySet().iterator().next();
-                System.arraycopy(constKey.data, 0, out, pos, constKey.data.length);
-                pos += constKey.data.length;
+                if (longDictMaps[i] != null) {
+                    long key = longDictMaps[i].keySet().iterator().next();
+                    pos = writeFixedKey(out, pos, key, fixedWidths[i]);
+                } else {
+                    ByteKey constKey = byteDictMaps[i].keySet().iterator().next();
+                    System.arraycopy(constKey.data, 0, out, pos, constKey.data.length);
+                    pos += constKey.data.length;
+                }
             }
         }
 
-        // 2d. Dict metadata — write entry count + each entry's serialized bytes
+        // 2d. Dict metadata
         for (int i = 0; i < numColumns; i++) {
             if (encodings[i] == ENCODING_DICT) {
-                int numEntries = dictMaps[i].size();
-                pos = writeVarint(out, pos, numEntries);
-                ByteKey[] keys = new ByteKey[numEntries];
-                for (Map.Entry<ByteKey, Integer> e : dictMaps[i].entrySet()) {
-                    keys[e.getValue()] = e.getKey();
-                }
-                for (int j = 0; j < numEntries; j++) {
-                    System.arraycopy(keys[j].data, 0, out, pos, keys[j].data.length);
-                    pos += keys[j].data.length;
+                if (longDictMaps[i] != null) {
+                    int numEntries = longDictMaps[i].size();
+                    pos = writeVarint(out, pos, numEntries);
+                    int w = fixedWidths[i];
+                    long[] keys = new long[numEntries];
+                    for (Map.Entry<Long, Integer> e : longDictMaps[i].entrySet()) {
+                        keys[e.getValue()] = e.getKey();
+                    }
+                    for (int j = 0; j < numEntries; j++) {
+                        pos = writeFixedKey(out, pos, keys[j], w);
+                    }
+                } else {
+                    int numEntries = byteDictMaps[i].size();
+                    pos = writeVarint(out, pos, numEntries);
+                    ByteKey[] keys = new ByteKey[numEntries];
+                    for (Map.Entry<ByteKey, Integer> e : byteDictMaps[i].entrySet()) {
+                        keys[e.getValue()] = e.getKey();
+                    }
+                    for (int j = 0; j < numEntries; j++) {
+                        System.arraycopy(keys[j].data, 0, out, pos, keys[j].data.length);
+                        pos += keys[j].data.length;
+                    }
                 }
             }
         }
@@ -240,23 +295,27 @@ public class MosaicBucketWriter {
                 System.arraycopy(valueBuffers[i], 0, out, pos, valueBufPos[i]);
                 pos += valueBufPos[i];
             } else if (encodings[i] == ENCODING_DICT) {
-                // 1-byte dict indices for non-null cells
-                Map<ByteKey, Integer> dict = dictMaps[i];
                 int w = fixedWidths[i];
                 int valPos = 0;
                 for (int r = 0; r < numRows; r++) {
                     boolean isNull = (nullBitmaps[i][r / 8] & (1 << (r % 8))) != 0;
                     if (!isNull) {
-                        int valueLen;
-                        if (w > 0) {
-                            valueLen = w;
+                        if (longDictMaps[i] != null) {
+                            long key = extractFixedKey(valueBuffers[i], valPos, w);
+                            valPos += w;
+                            out[pos++] = (byte) (int) longDictMaps[i].get(key);
                         } else {
-                            int varLen = readVarint(valueBuffers[i], valPos);
-                            valueLen = varintSize(varLen) + varLen;
+                            int valueLen;
+                            if (w > 0) {
+                                valueLen = w;
+                            } else {
+                                int varLen = readVarint(valueBuffers[i], valPos);
+                                valueLen = varintSize(varLen) + varLen;
+                            }
+                            ByteKey key = new ByteKey(valueBuffers[i], valPos, valueLen);
+                            valPos += valueLen;
+                            out[pos++] = (byte) (int) byteDictMaps[i].get(key);
                         }
-                        ByteKey key = new ByteKey(valueBuffers[i], valPos, valueLen);
-                        valPos += valueLen;
-                        out[pos++] = (byte) (int) dict.get(key);
                     }
                 }
             }
@@ -277,20 +336,59 @@ public class MosaicBucketWriter {
                 exactSize += nullBitmapBytesPerCol;
             }
             if (encodings[i] == ENCODING_CONST) {
-                ByteKey constKey = dictMaps[i].keySet().iterator().next();
-                exactSize += constKey.data.length;
-            } else if (encodings[i] == ENCODING_DICT) {
-                int numEntries = dictMaps[i].size();
-                exactSize += varintSize(numEntries);
-                for (ByteKey key : dictMaps[i].keySet()) {
-                    exactSize += key.data.length;
+                if (longDictMaps[i] != null) {
+                    exactSize += fixedWidths[i];
+                } else {
+                    ByteKey constKey = byteDictMaps[i].keySet().iterator().next();
+                    exactSize += constKey.data.length;
                 }
-                exactSize += nonNullCounts[i]; // 1-byte index per non-null
+            } else if (encodings[i] == ENCODING_DICT) {
+                if (longDictMaps[i] != null) {
+                    int numEntries = longDictMaps[i].size();
+                    exactSize +=
+                            varintSize(numEntries) + numEntries * fixedWidths[i] + nonNullCounts[i];
+                } else {
+                    int numEntries = byteDictMaps[i].size();
+                    exactSize += varintSize(numEntries);
+                    for (ByteKey key : byteDictMaps[i].keySet()) {
+                        exactSize += key.data.length;
+                    }
+                    exactSize += nonNullCounts[i];
+                }
             } else if (encodings[i] == ENCODING_PLAIN) {
                 exactSize += valueBufPos[i];
             }
         }
         return new byte[exactSize];
+    }
+
+    private int getDictSize(int colIdx) {
+        if (longDictMaps[colIdx] != null) {
+            return longDictMaps[colIdx].size();
+        }
+        if (byteDictMaps[colIdx] != null) {
+            return byteDictMaps[colIdx].size();
+        }
+        return -1;
+    }
+
+    /** Compare dict encoded size vs plain size (pre-compression). */
+    private int dictEncodedSize(int colIdx) {
+        int numEntries;
+        int entryBytes;
+        if (longDictMaps[colIdx] != null) {
+            numEntries = longDictMaps[colIdx].size();
+            entryBytes = numEntries * fixedWidths[colIdx];
+        } else if (byteDictMaps[colIdx] != null) {
+            numEntries = byteDictMaps[colIdx].size();
+            entryBytes = 0;
+            for (ByteKey key : byteDictMaps[colIdx].keySet()) {
+                entryBytes += key.data.length;
+            }
+        } else {
+            return Integer.MAX_VALUE;
+        }
+        return varintSize(numEntries) + entryBytes + nonNullCounts[colIdx];
     }
 
     public boolean[] getAllNullFlags() {
@@ -306,8 +404,18 @@ public class MosaicBucketWriter {
             Arrays.fill(nullBitmaps[i], (byte) 0);
             valueBufPos[i] = 0;
             nonNullCounts[i] = 0;
-            if (dictMaps[i] != null) {
-                dictMaps[i].clear();
+            if (usesLongDict(i)) {
+                if (longDictMaps[i] != null) {
+                    longDictMaps[i].clear();
+                } else {
+                    longDictMaps[i] = new HashMap<>();
+                }
+            } else {
+                if (byteDictMaps[i] != null) {
+                    byteDictMaps[i].clear();
+                } else {
+                    byteDictMaps[i] = new HashMap<>();
+                }
             }
         }
         numRows = 0;
@@ -418,6 +526,64 @@ public class MosaicBucketWriter {
         valueBufPos[colIdx] += bytes.length;
     }
 
+    // ======================== Fixed-width key helpers ========================
+
+    private static long extractFixedKey(byte[] buf, int pos, int width) {
+        switch (width) {
+            case 1:
+                return buf[pos] & 0xFFL;
+            case 2:
+                return ((buf[pos] & 0xFFL) << 8) | (buf[pos + 1] & 0xFFL);
+            case 4:
+                return ((buf[pos] & 0xFFL) << 24)
+                        | ((buf[pos + 1] & 0xFFL) << 16)
+                        | ((buf[pos + 2] & 0xFFL) << 8)
+                        | (buf[pos + 3] & 0xFFL);
+            case 8:
+                return ((buf[pos] & 0xFFL) << 56)
+                        | ((buf[pos + 1] & 0xFFL) << 48)
+                        | ((buf[pos + 2] & 0xFFL) << 40)
+                        | ((buf[pos + 3] & 0xFFL) << 32)
+                        | ((buf[pos + 4] & 0xFFL) << 24)
+                        | ((buf[pos + 5] & 0xFFL) << 16)
+                        | ((buf[pos + 6] & 0xFFL) << 8)
+                        | (buf[pos + 7] & 0xFFL);
+            default:
+                return 0;
+        }
+    }
+
+    private static int writeFixedKey(byte[] buf, int pos, long key, int width) {
+        switch (width) {
+            case 1:
+                buf[pos++] = (byte) key;
+                break;
+            case 2:
+                buf[pos++] = (byte) (key >>> 8);
+                buf[pos++] = (byte) key;
+                break;
+            case 4:
+                buf[pos++] = (byte) (key >>> 24);
+                buf[pos++] = (byte) (key >>> 16);
+                buf[pos++] = (byte) (key >>> 8);
+                buf[pos++] = (byte) key;
+                break;
+            case 8:
+                buf[pos++] = (byte) (key >>> 56);
+                buf[pos++] = (byte) (key >>> 48);
+                buf[pos++] = (byte) (key >>> 40);
+                buf[pos++] = (byte) (key >>> 32);
+                buf[pos++] = (byte) (key >>> 24);
+                buf[pos++] = (byte) (key >>> 16);
+                buf[pos++] = (byte) (key >>> 8);
+                buf[pos++] = (byte) key;
+                break;
+            default:
+                break;
+        }
+        return pos;
+    }
+
     // ======================== Buffer helpers ========================
 
     private void ensureValueCapacity(int colIdx, int additional) {
@@ -493,7 +659,7 @@ public class MosaicBucketWriter {
     // ======================== ByteKey ========================
 
     /** Immutable byte array wrapper with value-based hash and equals for dict tracking. */
-    private static final class ByteKey {
+    static final class ByteKey {
         final byte[] data;
         private final int hash;
 

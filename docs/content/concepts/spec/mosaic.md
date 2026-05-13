@@ -189,22 +189,28 @@ of four encodings (PLAIN, CONST, DICT, or ALL_NULL), chosen automatically based 
 | 2     | DICT     | 2-255 distinct values; each non-null cell stores a 1-byte dictionary index |
 | 3     | ALL_NULL | Every cell in this column is null; no data or null bitmap stored |
 
-**Has-Nulls Flags**: 1 bit per column. If set, a null bitmap exists for that column.
+**Has-Nulls Flags**: 1 bit per column. If set, a null bitmap exists for that column. ALL_NULL columns always have
+this flag cleared (no bitmap is stored for them).
 
 **Null Bitmap**: `ceil(numRows / 8)` bytes per column. Bit `i` = 1 means row `i` is null. Only present for columns
-where has-nulls flag is set and encoding is not ALL_NULL.
+where has-nulls flag is set.
 
 ### Column Encoding Selection
 
-The encoding for each column is chosen automatically during writing:
+The encoding for each column is chosen automatically during writing based on value distribution and cost:
 
 - **ALL_NULL**: 0 non-null values
 - **CONST**: exactly 1 distinct non-null value (any number of nulls allowed)
-- **DICT**: 2-255 distinct non-null values — values stored as a dictionary with 1-byte indices
-- **PLAIN**: 256+ distinct values, or dict tracking was abandoned
+- **DICT**: 2-255 distinct non-null values, **and** the dictionary-encoded size is smaller than plain — the writer
+  compares `varint(numEntries) + sum(entryBytes) + nonNullCount` against the raw value buffer size
+- **PLAIN**: 256+ distinct values, dict tracking was abandoned, or dict encoding would be larger than plain
 
 Dictionary encoding works for all data types including variable-width types (VARCHAR, VARBINARY, DECIMAL). The writer
-tracks distinct values using their serialized byte representation.
+uses zero-allocation long keys for fixed-width types (≤8 bytes) and byte-array keys for variable-width types. Dictionary
+tracking is abandoned early when cardinality exceeds 255 or a single serialized value exceeds 256 bytes.
+
+Dictionary indices are limited to 1 byte (max 255 entries). This is a deliberate simplicity trade-off for the first
+version — columns with 256+ distinct values fall back to PLAIN encoding.
 
 ## Value Serialization
 
