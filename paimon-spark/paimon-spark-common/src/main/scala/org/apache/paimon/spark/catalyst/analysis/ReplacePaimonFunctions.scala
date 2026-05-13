@@ -48,10 +48,7 @@ object ReplacePaimonFunctions {
       Literal(null, BinaryType)
     } else {
       val catalogAndIdentifier = SparkUtils
-        .catalogAndIdentifier(
-          spark,
-          tableName,
-          spark.sessionState.catalogManager.currentCatalog)
+        .catalogAndIdentifier(spark, tableName, spark.sessionState.catalogManager.currentCatalog)
       if (!catalogAndIdentifier.catalog().isInstanceOf[SparkBaseCatalog]) {
         throw new UnsupportedOperationException(
           s"${catalogAndIdentifier.catalog()} is not a Paimon catalog")
