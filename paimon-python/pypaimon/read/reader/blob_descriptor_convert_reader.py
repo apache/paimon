@@ -30,6 +30,8 @@ class BlobDescriptorConvertReader(RecordBatchReader):
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self.file_io = inner.file_io
         self.blob_field_indices = inner.blob_field_indices
+        self._view_fields = CoreOptions.blob_view_fields(table.options)
+        self._blob_view_lookup = None
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         import pyarrow
@@ -39,7 +41,8 @@ class BlobDescriptorConvertReader(RecordBatchReader):
         return self._convert_batch(batch, pyarrow)
 
     def _convert_batch(self, batch, pyarrow):
-        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
 
         result = batch
         for field_name in self._descriptor_fields:
@@ -67,6 +70,41 @@ class BlobDescriptorConvertReader(RecordBatchReader):
                         continue
                     uri_reader = self._table.file_io.uri_reader_factory.create(descriptor.uri)
                     converted_values.append(Blob.from_descriptor(uri_reader, descriptor).to_data())
+                except Exception:
+                    converted_values.append(value)
+
+            column_idx = result.schema.names.index(field_name)
+            result = result.set_column(
+                column_idx,
+                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
+                pyarrow.array(converted_values, type=pyarrow.large_binary()),
+            )
+        for field_name in self._view_fields:
+            if field_name not in result.schema.names:
+                continue
+            values = result.column(field_name).to_pylist()
+            converted_values = []
+            for value in values:
+                if value is None:
+                    converted_values.append(None)
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if isinstance(value, bytearray):
+                    value = bytes(value)
+                if not isinstance(value, bytes):
+                    converted_values.append(value)
+                    continue
+                try:
+                    if not BlobViewStruct.is_blob_view_struct(value):
+                        converted_values.append(value)
+                        continue
+                    if self._blob_view_lookup is None:
+                        self._blob_view_lookup = BlobViewLookup(self._table)
+                    view_struct = BlobViewStruct.deserialize(value)
+                    converted_values.append(self._blob_view_lookup.resolve_data(view_struct))
                 except Exception:
                     converted_values.append(value)
 

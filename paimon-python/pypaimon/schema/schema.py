@@ -77,6 +77,26 @@ class Schema:
                     "Table with BLOB type column must have other normal columns."
                 )
 
+            blob_field_names = {
+                field.name for field in fields if 'blob' in str(field.type).lower()
+            }
+            core_options = CoreOptions.from_dict(options)
+            descriptor_fields = core_options.blob_descriptor_fields()
+            view_fields = core_options.blob_view_fields()
+            unknown_inline_fields = descriptor_fields.union(view_fields).difference(blob_field_names)
+            if unknown_inline_fields:
+                raise ValueError(
+                    "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
+                    "in schema. Unknown fields: {}".format(sorted(unknown_inline_fields))
+                )
+
+            overlapping_inline_fields = descriptor_fields.intersection(view_fields)
+            if overlapping_inline_fields:
+                raise ValueError(
+                    "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
+                    "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
+                )
+
             required_options = {
                 CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
                 CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
