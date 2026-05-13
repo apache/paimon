@@ -207,6 +207,7 @@ class DataFileBatchReader(RecordBatchReader):
         for field_name in view_fields:
             field_idx = record_batch.schema.get_field_index(field_name)
             values = record_batch.column(field_idx).to_pylist()
+            self._preload_blob_views(values)
 
             if self.blob_as_descriptor:
                 converted = [self._blob_view_cell_to_descriptor(v) for v in values]
@@ -256,6 +257,15 @@ class DataFileBatchReader(RecordBatchReader):
         if not BlobViewStruct.is_blob_view_struct(value):
             return None
         return BlobViewStruct.deserialize(value)
+
+    def _preload_blob_views(self, values):
+        view_structs = []
+        for value in values:
+            view_struct = self._deserialize_blob_view_or_none(value)
+            if view_struct is not None:
+                view_structs.append(view_struct)
+        if view_structs:
+            self._blob_view_lookup_or_create().preload(view_structs)
 
     def _blob_view_lookup_or_create(self):
         if self.table is None:

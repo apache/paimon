@@ -17,7 +17,7 @@
 ################################################################################
 
 import os
-from typing import Dict, Tuple
+from typing import Dict, Iterable, Tuple
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
@@ -35,16 +35,26 @@ class BlobViewLookup:
         self._table_cache = {}
         self._field_descriptor_cache: Dict[Tuple[str, int], Dict[int, BlobDescriptor]] = {}
 
-    def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
-        key = (view_struct.identifier.get_full_name(), view_struct.field_id)
-        if key not in self._field_descriptor_cache:
-            self._field_descriptor_cache[key] = self._load_field_descriptors(
-                view_struct.identifier,
-                view_struct.field_id,
-            )
+    def preload(self, view_structs: Iterable[BlobViewStruct]) -> None:
+        requests = {}
+        for view_struct in view_structs:
+            key = (view_struct.identifier.get_full_name(), view_struct.field_id)
+            if key not in requests:
+                requests[key] = (view_struct.identifier, set())
+            requests[key][1].add(int(view_struct.row_id))
 
+        for key, (identifier, row_ids) in requests.items():
+            descriptors = self._field_descriptor_cache.setdefault(key, {})
+            missing_row_ids = sorted(row_id for row_id in row_ids if row_id not in descriptors)
+            if not missing_row_ids:
+                continue
+            descriptors.update(self._load_field_descriptors(identifier, key[1], missing_row_ids))
+
+    def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
+        self.preload([view_struct])
+        key = (view_struct.identifier.get_full_name(), view_struct.field_id)
         descriptors = self._field_descriptor_cache[key]
-        descriptor = descriptors.get(view_struct.row_id)
+        descriptor = descriptors.get(int(view_struct.row_id))
         if descriptor is None:
             raise ValueError(
                 "Cannot resolve BlobViewStruct {} because row id {} was not found "
@@ -61,13 +71,29 @@ class BlobViewLookup:
     def _load_field_descriptors(
             self,
             identifier: Identifier,
-            field_id: int) -> Dict[int, BlobDescriptor]:
+            field_id: int,
+            row_ids: Iterable[int]) -> Dict[int, BlobDescriptor]:
+        row_ids = list(row_ids)
+        if not row_ids:
+            return {}
+
         upstream_table = self._load_table(identifier)
         field = self._field_by_id(upstream_table, field_id)
         descriptor_table = upstream_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
         read_builder = descriptor_table.new_read_builder().with_projection(
             [field.name, SpecialFields.ROW_ID.name]
         )
+        if SpecialFields.ROW_ID.name not in [data_field.name for data_field in read_builder.read_type()]:
+            raise ValueError(
+                "Cannot resolve blob view for table {} because row tracking is not readable."
+                .format(identifier.get_full_name())
+            )
+        predicate_builder = read_builder.new_predicate_builder()
+        if len(row_ids) == 1:
+            predicate = predicate_builder.equal(SpecialFields.ROW_ID.name, row_ids[0])
+        else:
+            predicate = predicate_builder.is_in(SpecialFields.ROW_ID.name, row_ids)
+        read_builder.with_filter(predicate)
         result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
 
         if SpecialFields.ROW_ID.name not in result.schema.names:
