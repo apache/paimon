@@ -83,6 +83,8 @@ class DataBlobWriter(DataWriter):
         # Determine blob columns from table schema
         self.blob_column_names = self._get_blob_columns_from_schema()
         self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
+        self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
+        self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
 
         unknown_descriptor_fields = self.blob_descriptor_fields.difference(
             set(self.blob_column_names)
@@ -93,9 +95,23 @@ class DataBlobWriter(DataWriter):
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
             )
 
+        unknown_view_fields = self.blob_view_fields.difference(set(self.blob_column_names))
+        if unknown_view_fields:
+            raise ValueError(
+                "Fields in 'blob-view-field' must be blob fields in schema. "
+                f"Unknown fields: {sorted(unknown_view_fields)}"
+            )
+
+        overlapping_inline_fields = self.blob_descriptor_fields.intersection(self.blob_view_fields)
+        if overlapping_inline_fields:
+            raise ValueError(
+                "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
+                f"Overlapping fields: {sorted(overlapping_inline_fields)}"
+            )
+
         # Blob fields that should still be written to `.blob` files.
         self.blob_file_column_names = [
-            col for col in self.blob_column_names if col not in self.blob_descriptor_fields
+            col for col in self.blob_column_names if col not in self.blob_inline_fields
         ]
 
         all_column_names = self.table.field_names
@@ -129,10 +145,11 @@ class DataBlobWriter(DataWriter):
 
         logger.info(
             "Initialized DataBlobWriter with blob columns: %s, blob file columns: %s, descriptor "
-            "stored columns: %s",
+            "stored columns: %s, view stored columns: %s",
             self.blob_column_names,
             self.blob_file_column_names,
             sorted(self.blob_descriptor_fields),
+            sorted(self.blob_view_fields),
         )
 
     def _get_blob_columns_from_schema(self) -> List[str]:
@@ -157,7 +174,7 @@ class DataBlobWriter(DataWriter):
         try:
             # Split data into normal and blob parts
             normal_data, blob_data_map = self._split_data(data)
-            self._validate_descriptor_stored_fields_input(data)
+            self._validate_inline_stored_fields_input(data)
 
             # Process and accumulate normal data
             processed_normal = self._process_normal_data(normal_data)
@@ -218,11 +235,11 @@ class DataBlobWriter(DataWriter):
         }
         return normal_data, blob_data_map
 
-    def _validate_descriptor_stored_fields_input(self, data: pa.RecordBatch):
-        if not self.blob_descriptor_fields:
+    def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
+        if not self.blob_inline_fields:
             return
 
-        from pypaimon.table.row.blob import BlobDescriptor
+        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 
         for field_name in self.blob_descriptor_fields:
             if field_name not in data.schema.names:
@@ -249,6 +266,33 @@ class DataBlobWriter(DataWriter):
                     raise ValueError(
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
+                    ) from e
+
+        for field_name in self.blob_view_fields:
+            if field_name not in data.schema.names:
+                continue
+            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
+            for value in values:
+                if value is None:
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if not isinstance(value, (bytes, bytearray)):
+                    raise ValueError(
+                        "blob-view-field requires blob field value to be a serialized "
+                        "BlobViewStruct."
+                    )
+                try:
+                    view_bytes = bytes(value)
+                    view_struct = BlobViewStruct.deserialize(view_bytes)
+                    if view_struct.serialize() != view_bytes:
+                        raise ValueError("BlobViewStruct payload contains trailing bytes.")
+                except Exception as e:
+                    raise ValueError(
+                        "blob-view-field requires blob field value to be a serialized "
+                        "BlobViewStruct."
                     ) from e
 
     @staticmethod

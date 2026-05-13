@@ -258,6 +258,7 @@ class SplitRead(ABC):
 
         blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
         blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
+        blob_view_fields = CoreOptions.blob_view_fields(self.table.options)
 
         index_mapping = self.create_index_mapping()
         partition_info = self._create_partition_info()
@@ -279,7 +280,9 @@ class SplitRead(ABC):
                 system_fields,
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
-                file_io=self.table.file_io)
+                blob_view_fields=blob_view_fields,
+                file_io=self.table.file_io,
+                table=self.table)
         else:
             reader = DataFileBatchReader(
                 format_reader,
@@ -293,7 +296,9 @@ class SplitRead(ABC):
                 system_fields,
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
-                file_io=self.table.file_io)
+                blob_view_fields=blob_view_fields,
+                file_io=self.table.file_io,
+                table=self.table)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
         if row_ranges is not None and row_indices is None:
@@ -693,7 +698,8 @@ class DataEvolutionSplitRead(SplitRead):
             reader = merge_reader
 
         if (not CoreOptions.blob_as_descriptor(self.table.options)
-                and CoreOptions.blob_descriptor_fields(self.table.options)):
+                and (CoreOptions.blob_descriptor_fields(self.table.options)
+                     or CoreOptions.blob_view_fields(self.table.options))):
             reader = BlobDescriptorConvertReader(reader, self.table)
 
         return reader
