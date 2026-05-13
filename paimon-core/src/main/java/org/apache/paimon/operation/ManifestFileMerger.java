@@ -75,7 +75,6 @@ public class ManifestFileMerger {
         int suggestedMinMetaCount = options.manifestMergeMinCount();
         long manifestFullCompactionSize = options.manifestFullCompactionThresholdSize().getBytes();
         Integer manifestReadParallelism = options.scanManifestParallelism();
-        Options tableOptions = options.toConfiguration();
 
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
@@ -84,8 +83,7 @@ public class ManifestFileMerger {
             Optional<List<ManifestFileMeta>> merged;
 
             // If manifest-sort.enable is enabled and there are partition fields, use trySortRewrite
-            if (tableOptions.getBoolean("manifest-sort.enable", false)
-                    && partitionType.getFieldCount() > 0) {
+            if (options.manifestSortEnable() && partitionType.getFieldCount() > 0) {
                 merged =
                         trySortRewrite(
                                 input, newFilesForAbort, manifestFile, partitionType, options);
@@ -417,7 +415,8 @@ public class ManifestFileMerger {
                             sortFieldIndex,
                             sortFieldType,
                             suggestedMetaSize,
-                            deleteEntries);
+                            deleteEntries,
+                            manifestReadParallelism);
             newFilesForAbort.addAll(fullCompactionRewritten);
         }
 
@@ -428,8 +427,8 @@ public class ManifestFileMerger {
                         : buildLevelSortedRuns(lsmFiles, sortFieldIndex, sortFieldType);
 
         // Step 6: Pick runs to compact.
-        int sizeAmpThreshold = tableOptions.getInteger("manifest-sort.size-amp-threshold", 2);
-        int sizeRatioThreshold = tableOptions.getInteger("manifest-sort.size-ratio-threshold", 10);
+        int sizeAmpThreshold = options.maxSizeAmplificationPercent();
+        int sizeRatioThreshold = options.sortedRunSizeRatio();
         ManifestPickStrategy pickStrategy =
                 new ManifestPickStrategy(sizeAmpThreshold, sizeRatioThreshold);
         List<ManifestSortedRun> pickedRuns = pickStrategy.pick(levelRuns);
@@ -455,15 +454,15 @@ public class ManifestFileMerger {
 
         List<List<ManifestFileMeta>> sections =
                 splitIntoSections(pickedFiles, sortFieldIndex, sortFieldType);
-        long maxRewriteSize =
-                parseLongOption(tableOptions, "manifest-sort.max-rewrite-size", Long.MAX_VALUE);
+        long maxRewriteSize = options.manifestSortMaxRewriteSize();
         long processedSize = 0;
 
+        long openFileCost = options.manifestSortOpenFileCost();
         List<ManifestFileMeta> sortNewFiles = new ArrayList<>();
         for (List<ManifestFileMeta> section : sections) {
             long sectionSize = 0;
             for (ManifestFileMeta m : section) {
-                sectionSize += m.fileSize();
+                sectionSize += m.fileSize() + openFileCost;
             }
             if (processedSize + sectionSize > maxRewriteSize) {
                 result.addAll(section);
@@ -473,7 +472,12 @@ public class ManifestFileMerger {
 
             List<ManifestFileMeta> merged =
                     sortAndRewriteSection(
-                            section, manifestFile, sortFieldIndex, sortFieldType, null);
+                            section,
+                            manifestFile,
+                            sortFieldIndex,
+                            sortFieldType,
+                            null,
+                            manifestReadParallelism);
             sortNewFiles.addAll(merged);
             result.addAll(merged);
         }
@@ -696,7 +700,8 @@ public class ManifestFileMerger {
             int sortFieldIndex,
             DataType sortFieldType,
             long suggestedMetaSize,
-            @Nullable Set<FileEntry.Identifier> deletedIdentifiers)
+            @Nullable Set<FileEntry.Identifier> deletedIdentifiers,
+            @Nullable Integer manifestReadParallelism)
             throws Exception {
 
         // Sort by min partition value
@@ -746,7 +751,8 @@ public class ManifestFileMerger {
                                 manifestFile,
                                 sortFieldIndex,
                                 sortFieldType,
-                                deletedIdentifiers);
+                                deletedIdentifiers,
+                                manifestReadParallelism);
                 result.addAll(rewritten);
                 batch.clear();
                 batchSize = 0;
@@ -759,38 +765,88 @@ public class ManifestFileMerger {
     /**
      * Read all entries from a section's manifest files, sort them in memory by the specified
      * partition field, filter out DELETE entries and cancelled ADD entries, then write surviving
-     * entries to the rolling writer.
+     * entries to the rolling writer. Manifest files without delete entries and without cancelled
+     * ADD entries are kept as-is.
+     *
+     * <p>Reading is parallelized via {@code sequentialBatchedExecute} following the same pattern as
+     * {@link #tryFullCompaction}.
      */
     private static List<ManifestFileMeta> sortAndRewriteSection(
             List<ManifestFileMeta> section,
             ManifestFile manifestFile,
             int sortFieldIndex,
             DataType sortFieldType,
-            @Nullable Set<FileEntry.Identifier> deletedIdentifiers)
+            @Nullable Set<FileEntry.Identifier> deletedIdentifiers,
+            @Nullable Integer manifestReadParallelism)
             throws Exception {
-
-        List<ManifestEntry> allEntries = new ArrayList<>();
-        for (ManifestFileMeta meta : section) {
-            allEntries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
-        }
-
-        allEntries.sort((a, b) -> compareSortKey(a, b, sortFieldIndex, sortFieldType));
 
         Set<FileEntry.Identifier> safeDeletedIds =
                 deletedIdentifiers != null ? deletedIdentifiers : new HashSet<>();
 
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                manifestFile.createRollingWriter();
-        try {
-            for (ManifestEntry entry : allEntries) {
-                if (entry.kind() == FileKind.ADD && !safeDeletedIds.contains(entry.identifier())) {
+        // Parallel read: each meta is read independently
+        Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
+                meta -> singletonList(readForSortRewrite(meta, manifestFile, safeDeletedIds));
+
+        List<ManifestFileMeta> result = new ArrayList<>();
+        List<ManifestEntry> entriesToRewrite = new ArrayList<>();
+
+        for (FullCompactionReadResult readResult :
+                sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
+            if (readResult.requireChange) {
+                entriesToRewrite.addAll(readResult.entries);
+            } else {
+                result.add(readResult.file);
+            }
+        }
+
+        if (!entriesToRewrite.isEmpty()) {
+            entriesToRewrite.sort((a, b) -> compareSortKey(a, b, sortFieldIndex, sortFieldType));
+
+            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
+                    manifestFile.createRollingWriter();
+            try {
+                for (ManifestEntry entry : entriesToRewrite) {
                     writer.write(entry);
                 }
+            } finally {
+                writer.close();
             }
-        } finally {
-            writer.close();
+            result.addAll(writer.result());
         }
-        return writer.result();
+
+        return result;
+    }
+
+    /**
+     * Read a single manifest file for sort rewrite. If the meta contains delete entries, only ADD
+     * entries not in {@code deletedIdentifiers} are returned. Otherwise, check if any ADD entry is
+     * cancelled; if not, the file is kept as-is ({@code requireChange = false}).
+     */
+    private static FullCompactionReadResult readForSortRewrite(
+            ManifestFileMeta meta,
+            ManifestFile manifestFile,
+            Set<FileEntry.Identifier> deletedIdentifiers) {
+        if (meta.numDeletedFiles() > 0) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
+                if (entry.kind() == FileKind.ADD
+                        && !deletedIdentifiers.contains(entry.identifier())) {
+                    entries.add(entry);
+                }
+            }
+            return new FullCompactionReadResult(meta, true, entries);
+        } else {
+            boolean requireChange = false;
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
+                if (deletedIdentifiers.contains(entry.identifier())) {
+                    requireChange = true;
+                } else {
+                    entries.add(entry);
+                }
+            }
+            return new FullCompactionReadResult(meta, requireChange, entries);
+        }
     }
 
     /** Parse a long option from table options with a default value. */
