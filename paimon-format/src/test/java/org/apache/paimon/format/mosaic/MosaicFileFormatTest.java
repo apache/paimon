@@ -45,6 +45,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1130,9 +1131,103 @@ public class MosaicFileFormatTest {
         return result;
     }
 
+    @Test
+    public void testLongConstantString() throws IOException {
+        // 1KB constant string — CONST should work regardless of value length
+        String longStr = repeatChar('x', 1024);
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("long_const", DataTypes.STRING())
+                        .build();
+
+        List<InternalRow> data = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            data.add(GenericRow.of(i, BinaryString.fromString(longStr)));
+        }
+
+        Path path = new Path(tempDir.toString(), "long_const.mosaic");
+        write(rowType, data, path);
+
+        // Verify CONST is smaller than PLAIN (200 * 1KB = 200KB plain, CONST = 1KB)
+        long fileSize = tempDir.toFile().toPath().resolve("long_const.mosaic").toFile().length();
+
+        List<InternalRow> result = read(rowType, rowType, path);
+        assertThat(result).hasSize(200);
+        for (int i = 0; i < 200; i++) {
+            assertThat(result.get(i).getInt(0)).isEqualTo(i);
+            assertThat(result.get(i).getString(1).toString()).isEqualTo(longStr);
+        }
+    }
+
+    @Test
+    public void testLongConstantStringWithNulls() throws IOException {
+        String longStr = repeatChar('y', 2048);
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("long_const_nullable", DataTypes.STRING().nullable())
+                        .build();
+
+        List<InternalRow> data = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            data.add(GenericRow.of(i, i % 3 == 0 ? null : BinaryString.fromString(longStr)));
+        }
+
+        Path path = new Path(tempDir.toString(), "long_const_null.mosaic");
+        write(rowType, data, path);
+        List<InternalRow> result = read(rowType, rowType, path);
+
+        assertThat(result).hasSize(100);
+        for (int i = 0; i < 100; i++) {
+            assertThat(result.get(i).getInt(0)).isEqualTo(i);
+            if (i % 3 == 0) {
+                assertThat(result.get(i).isNullAt(1)).isTrue();
+            } else {
+                assertThat(result.get(i).getString(1).toString()).isEqualTo(longStr);
+            }
+        }
+    }
+
+    @Test
+    public void testRepeatedLongStringsDict() throws IOException {
+        // 5 distinct 500-byte strings — should use DICT encoding
+        String[] values = new String[5];
+        for (int i = 0; i < 5; i++) {
+            values[i] = repeatChar((char) ('A' + i), 500);
+        }
+
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("long_dict", DataTypes.STRING())
+                        .build();
+
+        List<InternalRow> data = new ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            data.add(GenericRow.of(i, BinaryString.fromString(values[i % 5])));
+        }
+
+        Path path = new Path(tempDir.toString(), "long_dict.mosaic");
+        write(rowType, data, path);
+        List<InternalRow> result = read(rowType, rowType, path);
+
+        assertThat(result).hasSize(500);
+        for (int i = 0; i < 500; i++) {
+            assertThat(result.get(i).getInt(0)).isEqualTo(i);
+            assertThat(result.get(i).getString(1).toString()).isEqualTo(values[i % 5]);
+        }
+    }
+
     private MosaicFileFormat createFormat() {
         return new MosaicFileFormat(
                 new FormatContext(new Options(), 1024, 1024, MemorySize.ofMebiBytes(128), 3, null));
+    }
+
+    private static String repeatChar(char c, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, c);
+        return new String(chars);
     }
 
     private RowType buildWideRowType(int columnCount) {

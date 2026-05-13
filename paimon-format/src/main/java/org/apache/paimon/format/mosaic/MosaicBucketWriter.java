@@ -42,14 +42,15 @@ import static org.apache.paimon.format.mosaic.MosaicUtils.writeVarint;
  * Columnar bucket writer for the Mosaic format. Buffers values per-column and produces a
  * column-oriented byte array with CONST/DICT/PLAIN/ALL_NULL encoding per column.
  *
- * <p>Dictionary tracking uses zero-allocation long keys for fixed-width types (≤8 bytes) and
- * byte-array keys for variable-width types. Tracking is abandoned early when cardinality exceeds
- * 255 or a single value exceeds {@link #MAX_DICT_VALUE_BYTES}. DICT encoding is chosen only when it
- * produces fewer bytes than PLAIN (cost-based selection).
+ * <p>CONST detection uses a lightweight byte-comparison tracker that works for all types and value
+ * sizes, independent of dictionary tracking. Dictionary tracking uses primitive long keys for
+ * fixed-width types (≤8 bytes) and byte-array keys for variable-width types. Variable-width dict
+ * tracking is bounded by a cumulative byte budget ({@link #MAX_DICT_TOTAL_BYTES}). DICT encoding is
+ * chosen only when it produces fewer bytes than PLAIN (cost-based selection).
  */
 public class MosaicBucketWriter {
 
-    private static final int MAX_DICT_VALUE_BYTES = 256;
+    private static final int MAX_DICT_TOTAL_BYTES = 16384;
 
     private final InternalRow.FieldGetter[] fieldGetters;
     private final int numColumns;
@@ -62,10 +63,15 @@ public class MosaicBucketWriter {
     private int[] valueBufPos;
     private int[] nonNullCounts;
 
-    // Fixed-width ≤8 bytes: zero-allocation long-based dict tracking
+    // CONST tracking: byte comparison against first non-null value (works for any size)
+    private boolean[] constTracking;
+    private int[] firstValueLen;
+
+    // Fixed-width ≤8 bytes: primitive long-based dict tracking
     private Map<Long, Integer>[] longDictMaps;
-    // Variable-width and width>8: byte-array-based dict tracking
+    // Variable-width and width>8: byte-array-based dict tracking with cumulative budget
     private Map<ByteKey, Integer>[] byteDictMaps;
+    private int[] dictTotalBytes;
 
     private int numRows;
 
@@ -92,12 +98,16 @@ public class MosaicBucketWriter {
         this.valueBuffers = new byte[numColumns][];
         this.valueBufPos = new int[numColumns];
         this.nonNullCounts = new int[numColumns];
+        this.constTracking = new boolean[numColumns];
+        this.firstValueLen = new int[numColumns];
         this.longDictMaps = new Map[numColumns];
         this.byteDictMaps = new Map[numColumns];
+        this.dictTotalBytes = new int[numColumns];
 
         for (int i = 0; i < numColumns; i++) {
             nullBitmaps[i] = new byte[128];
             valueBuffers[i] = new byte[1024];
+            constTracking[i] = true;
             if (usesLongDict(i)) {
                 longDictMaps[i] = new HashMap<>();
             } else {
@@ -137,7 +147,17 @@ public class MosaicBucketWriter {
                 int written = valueBufPos[i] - before;
                 totalSize += written;
 
-                // Track in long dict (fixed-width ≤8, zero allocation)
+                // CONST tracking: compare against first non-null value
+                if (constTracking[i]) {
+                    if (nonNullCounts[i] == 1) {
+                        firstValueLen[i] = written;
+                    } else if (written != firstValueLen[i]
+                            || !regionEquals(valueBuffers[i], 0, before, written)) {
+                        constTracking[i] = false;
+                    }
+                }
+
+                // Dict tracking (separate from CONST)
                 if (longDictMaps[i] != null) {
                     long key = extractFixedKey(valueBuffers[i], before, fixedWidths[i]);
                     longDictMaps[i].putIfAbsent(key, longDictMaps[i].size());
@@ -145,15 +165,14 @@ public class MosaicBucketWriter {
                         longDictMaps[i] = null;
                     }
                 } else if (byteDictMaps[i] != null) {
-                    // Abandon if value too large for dict to be worthwhile
-                    if (written > MAX_DICT_VALUE_BYTES) {
+                    ByteKey key = new ByteKey(valueBuffers[i], before, written);
+                    int sizeBefore = byteDictMaps[i].size();
+                    byteDictMaps[i].putIfAbsent(key, sizeBefore);
+                    if (byteDictMaps[i].size() > sizeBefore) {
+                        dictTotalBytes[i] += written;
+                    }
+                    if (byteDictMaps[i].size() > 255 || dictTotalBytes[i] > MAX_DICT_TOTAL_BYTES) {
                         byteDictMaps[i] = null;
-                    } else {
-                        ByteKey key = new ByteKey(valueBuffers[i], before, written);
-                        byteDictMaps[i].putIfAbsent(key, byteDictMaps[i].size());
-                        if (byteDictMaps[i].size() > 255) {
-                            byteDictMaps[i] = null;
-                        }
                     }
                 }
             }
@@ -173,23 +192,24 @@ public class MosaicBucketWriter {
             return new byte[0];
         }
 
-        // 1. Determine encoding per column (cost-based DICT selection)
+        // 1. Determine encoding per column
         byte[] encodings = new byte[numColumns];
         boolean[] hasNulls = new boolean[numColumns];
 
         for (int i = 0; i < numColumns; i++) {
-            int dictSize = getDictSize(i);
             if (nonNullCounts[i] == 0) {
                 encodings[i] = ENCODING_ALL_NULL;
                 hasNulls[i] = false;
-            } else if (dictSize == 1) {
+            } else if (constTracking[i]) {
                 encodings[i] = ENCODING_CONST;
                 hasNulls[i] = nonNullCounts[i] < numRows;
-            } else if (dictSize >= 2 && dictSize <= 255 && dictEncodedSize(i) < valueBufPos[i]) {
-                encodings[i] = ENCODING_DICT;
-                hasNulls[i] = nonNullCounts[i] < numRows;
             } else {
-                encodings[i] = ENCODING_PLAIN;
+                int dictSize = getDictSize(i);
+                if (dictSize >= 2 && dictSize <= 255 && dictEncodedSize(i) < valueBufPos[i]) {
+                    encodings[i] = ENCODING_DICT;
+                } else {
+                    encodings[i] = ENCODING_PLAIN;
+                }
                 hasNulls[i] = nonNullCounts[i] < numRows;
             }
         }
@@ -237,17 +257,11 @@ public class MosaicBucketWriter {
         }
         pos += hasNullsFlagsBytes;
 
-        // 2c. Const metadata
+        // 2c. Const metadata — first non-null value from value buffer
         for (int i = 0; i < numColumns; i++) {
             if (encodings[i] == ENCODING_CONST) {
-                if (longDictMaps[i] != null) {
-                    long key = longDictMaps[i].keySet().iterator().next();
-                    pos = writeFixedKey(out, pos, key, fixedWidths[i]);
-                } else {
-                    ByteKey constKey = byteDictMaps[i].keySet().iterator().next();
-                    System.arraycopy(constKey.data, 0, out, pos, constKey.data.length);
-                    pos += constKey.data.length;
-                }
+                System.arraycopy(valueBuffers[i], 0, out, pos, firstValueLen[i]);
+                pos += firstValueLen[i];
             }
         }
 
@@ -336,12 +350,7 @@ public class MosaicBucketWriter {
                 exactSize += nullBitmapBytesPerCol;
             }
             if (encodings[i] == ENCODING_CONST) {
-                if (longDictMaps[i] != null) {
-                    exactSize += fixedWidths[i];
-                } else {
-                    ByteKey constKey = byteDictMaps[i].keySet().iterator().next();
-                    exactSize += constKey.data.length;
-                }
+                exactSize += firstValueLen[i];
             } else if (encodings[i] == ENCODING_DICT) {
                 if (longDictMaps[i] != null) {
                     int numEntries = longDictMaps[i].size();
@@ -404,6 +413,9 @@ public class MosaicBucketWriter {
             Arrays.fill(nullBitmaps[i], (byte) 0);
             valueBufPos[i] = 0;
             nonNullCounts[i] = 0;
+            constTracking[i] = true;
+            firstValueLen[i] = 0;
+            dictTotalBytes[i] = 0;
             if (usesLongDict(i)) {
                 if (longDictMaps[i] != null) {
                     longDictMaps[i].clear();
@@ -594,6 +606,15 @@ public class MosaicBucketWriter {
             System.arraycopy(valueBuffers[colIdx], 0, newBuf, 0, valueBufPos[colIdx]);
             valueBuffers[colIdx] = newBuf;
         }
+    }
+
+    private static boolean regionEquals(byte[] buf, int off1, int off2, int len) {
+        for (int i = 0; i < len; i++) {
+            if (buf[off1 + i] != buf[off2 + i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ======================== Type width ========================

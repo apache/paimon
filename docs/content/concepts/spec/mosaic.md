@@ -205,9 +205,13 @@ The encoding for each column is chosen automatically during writing based on val
   compares `varint(numEntries) + sum(entryBytes) + nonNullCount` against the raw value buffer size
 - **PLAIN**: 256+ distinct values, dict tracking was abandoned, or dict encoding would be larger than plain
 
+CONST detection is independent of dictionary tracking — it uses a lightweight byte comparison against the first non-null
+value, so it works for all types and value sizes (including long strings).
+
 Dictionary encoding works for all data types including variable-width types (VARCHAR, VARBINARY, DECIMAL). The writer
-uses zero-allocation long keys for fixed-width types (≤8 bytes) and byte-array keys for variable-width types. Dictionary
-tracking is abandoned early when cardinality exceeds 255 or a single serialized value exceeds 256 bytes.
+uses primitive long keys for fixed-width types (≤8 bytes) and byte-array keys for variable-width types. Variable-width
+dictionary tracking is bounded by a cumulative byte budget and abandoned when cardinality exceeds 255 or total dictionary
+entry bytes exceed the budget.
 
 Dictionary indices are limited to 1 byte (max 255 entries). This is a deliberate simplicity trade-off for the first
 version — columns with 256+ distinct values fall back to PLAIN encoding.
