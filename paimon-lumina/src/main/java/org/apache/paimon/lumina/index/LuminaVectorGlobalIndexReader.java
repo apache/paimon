@@ -36,6 +36,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.aliyun.lumina.LuminaFileInput;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -95,6 +96,134 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                             vectorSearch.fieldName(), vectorSearch.limit()),
                     e);
         }
+    }
+
+    @Override
+    public List<Optional<ScoredGlobalIndexResult>> visitBatchVectorSearch(
+            VectorSearch vectorSearch) {
+        try {
+            ensureLoaded();
+            return searchBatch(vectorSearch);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to batch search Lumina vector index with fieldName=%s, limit=%d, vectorCount=%d",
+                            vectorSearch.fieldName(),
+                            vectorSearch.limit(),
+                            vectorSearch.vectorCount()),
+                    e);
+        }
+    }
+
+    private List<Optional<ScoredGlobalIndexResult>> searchBatch(VectorSearch vectorSearch)
+            throws IOException {
+        int n = vectorSearch.vectorCount();
+        if (n == 1) {
+            // Fast path: single vector, reuse existing search logic.
+            List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
+            results.add(Optional.ofNullable(search(vectorSearch)));
+            return results;
+        }
+
+        float[][] vectors = vectorSearch.vectors();
+        int dim = indexMeta.dim();
+        for (float[] v : vectors) {
+            validateSearchVector(v);
+        }
+
+        int limit = vectorSearch.limit();
+        LuminaVectorMetric indexMetric = indexMeta.metric();
+        int effectiveK = (int) Math.min(limit, index.size());
+        if (effectiveK <= 0) {
+            List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                results.add(Optional.empty());
+            }
+            return results;
+        }
+
+        // Flatten n vectors into a single float[n * dim] array.
+        float[] queryVectors = new float[n * dim];
+        for (int i = 0; i < n; i++) {
+            System.arraycopy(vectors[i], 0, queryVectors, i * dim, dim);
+        }
+
+        RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
+        float[] distances;
+        long[] labels;
+
+        if (includeRowIds != null) {
+            long cardinality = includeRowIds.getLongCardinality();
+            if (cardinality > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        "includeRowIds cardinality ("
+                                + cardinality
+                                + ") exceeds Integer.MAX_VALUE");
+            }
+            long[] scopedIds = new long[(int) cardinality];
+            Iterator<Long> iter = includeRowIds.iterator();
+            for (int i = 0; i < scopedIds.length; i++) {
+                scopedIds[i] = iter.next();
+            }
+            if (scopedIds.length == 0) {
+                List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+                for (int i = 0; i < n; i++) {
+                    results.add(Optional.empty());
+                }
+                return results;
+            }
+            effectiveK = Math.min(effectiveK, scopedIds.length);
+            distances = new float[n * effectiveK];
+            labels = new long[n * effectiveK];
+            Map<String, String> searchOptions = options.toLuminaOptions();
+            searchOptions.putAll(indexMeta.options());
+            searchOptions.put("search.thread_safe_filter", "true");
+            ensureSearchListSize(searchOptions, effectiveK);
+            index.searchWithFilter(
+                    queryVectors, n, effectiveK, distances, labels, scopedIds, searchOptions);
+        } else {
+            distances = new float[n * effectiveK];
+            labels = new long[n * effectiveK];
+            Map<String, String> searchOptions = options.toLuminaOptions();
+            searchOptions.putAll(indexMeta.options());
+            ensureSearchListSize(searchOptions, effectiveK);
+            index.search(queryVectors, n, effectiveK, distances, labels, searchOptions);
+        }
+
+        // Split results: query i's results are at [i*effectiveK, (i+1)*effectiveK).
+        List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            PriorityQueue<ScoredRow> topK =
+                    new PriorityQueue<>(
+                            effectiveK + 1, Comparator.comparingDouble(s -> s.score));
+            int offset = i * effectiveK;
+            for (int j = 0; j < effectiveK; j++) {
+                long rowId = labels[offset + j];
+                if (rowId < 0) {
+                    continue;
+                }
+                float score = convertDistanceToScore(distances[offset + j], indexMetric);
+                if (topK.size() < effectiveK) {
+                    topK.offer(new ScoredRow(rowId, score));
+                } else if (score > topK.peek().score) {
+                    topK.poll();
+                    topK.offer(new ScoredRow(rowId, score));
+                }
+            }
+
+            if (topK.isEmpty()) {
+                results.add(Optional.empty());
+            } else {
+                RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+                HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
+                for (ScoredRow row : topK) {
+                    bitmap.add(row.rowId);
+                    id2scores.put(row.rowId, row.score);
+                }
+                results.add(Optional.of(new LuminaScoredGlobalIndexResult(bitmap, id2scores)));
+            }
+        }
+        return results;
     }
 
     private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {

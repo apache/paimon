@@ -39,6 +39,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     private int limit;
     private DataField vectorColumn;
     private float[] vector;
+    private float[][] vectors;
 
     public VectorSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
@@ -81,12 +82,23 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     @Override
+    public VectorSearchBuilder withVectors(float[][] vectors) {
+        this.vectors = vectors;
+        return this;
+    }
+
+    @Override
     public VectorScan newVectorScan() {
         return new VectorScanImpl(table, partitionFilter, filter, vectorColumn);
     }
 
     @Override
     public VectorRead newVectorRead() {
-        return new VectorReadImpl(table, filter, limit, vectorColumn, vector);
+        return new VectorReadImpl(
+                table,
+                filter,
+                limit,
+                vectorColumn,
+                vectors != null ? vectors : (vector != null ? new float[][] {vector} : null));
     }
 }

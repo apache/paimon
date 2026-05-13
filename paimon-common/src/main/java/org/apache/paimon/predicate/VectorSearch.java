@@ -26,6 +26,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.List;
 import java.util.Optional;
 
 /** VectorSearch to perform vector similarity search. * */
@@ -33,15 +34,22 @@ public class VectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final float[] vector;
+    private final float[][] vectors;
     private final String fieldName;
     private final int limit;
 
     @Nullable private RoaringNavigableMap64 includeRowIds;
 
     public VectorSearch(float[] vector, int limit, String fieldName) {
+        this(new float[][] {vector}, limit, fieldName);
         if (vector == null) {
             throw new IllegalArgumentException("Search cannot be null");
+        }
+    }
+
+    public VectorSearch(float[][] vectors, int limit, String fieldName) {
+        if (vectors == null || vectors.length == 0) {
+            throw new IllegalArgumentException("Search vectors cannot be null or empty");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
@@ -49,13 +57,33 @@ public class VectorSearch implements Serializable {
         if (fieldName == null || fieldName.isEmpty()) {
             throw new IllegalArgumentException("Field name cannot be null or empty");
         }
-        this.vector = vector;
+        this.vectors = vectors;
         this.limit = limit;
         this.fieldName = fieldName;
     }
 
+    /** Returns the first (or only) query vector. */
     public float[] vector() {
-        return vector;
+        return vectors[0];
+    }
+
+    /** Returns all query vectors. */
+    public float[][] vectors() {
+        return vectors;
+    }
+
+    /** Returns the number of query vectors. */
+    public int vectorCount() {
+        return vectors.length;
+    }
+
+    /** Returns a single-vector VectorSearch for the i-th query vector. */
+    public VectorSearch forIndex(int i) {
+        VectorSearch single = new VectorSearch(vectors[i], limit, fieldName);
+        if (includeRowIds != null) {
+            single.withIncludeRowIds(includeRowIds);
+        }
+        return single;
     }
 
     public int limit() {
@@ -84,7 +112,7 @@ public class VectorSearch implements Serializable {
             for (long rowId : and64) {
                 roaringNavigableMap64Offset.add(rowId - from);
             }
-            VectorSearch target = new VectorSearch(vector, limit, fieldName);
+            VectorSearch target = new VectorSearch(vectors, limit, fieldName);
             target.withIncludeRowIds(roaringNavigableMap64Offset);
             return target;
         }
@@ -95,8 +123,13 @@ public class VectorSearch implements Serializable {
         return visitor.visitVectorSearch(this);
     }
 
+    public List<Optional<ScoredGlobalIndexResult>> visitBatch(GlobalIndexReader visitor) {
+        return visitor.visitBatchVectorSearch(this);
+    }
+
     @Override
     public String toString() {
-        return String.format("FieldName(%s), Limit(%s)", fieldName, limit);
+        return String.format(
+                "FieldName(%s), Limit(%s), VectorCount(%s)", fieldName, limit, vectors.length);
     }
 }

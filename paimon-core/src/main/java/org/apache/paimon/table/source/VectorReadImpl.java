@@ -59,19 +59,19 @@ public class VectorReadImpl implements VectorRead {
     private final Predicate filter;
     private final int limit;
     private final DataField vectorColumn;
-    private final float[] vector;
+    private final float[][] vectors;
 
     public VectorReadImpl(
             FileStoreTable table,
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[] vector) {
+            float[][] vectors) {
         this.table = table;
         this.filter = filter;
         this.limit = limit;
         this.vectorColumn = vectorColumn;
-        this.vector = vector;
+        this.vectors = vectors;
     }
 
     @Override
@@ -113,6 +113,64 @@ public class VectorReadImpl implements VectorRead {
         return result.topK(limit);
     }
 
+    @Override
+    public List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+        int n = vectors.length;
+        if (splits.isEmpty()) {
+            List<GlobalIndexResult> empty = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                empty.add(GlobalIndexResult.createEmpty());
+            }
+            return empty;
+        }
+
+        RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
+        Integer threadNum = table.coreOptions().globalIndexThreadNum();
+
+        String indexType = splits.get(0).vectorIndexFiles().get(0).indexType();
+        GlobalIndexer globalIndexer =
+                GlobalIndexerFactoryUtils.load(indexType)
+                        .create(vectorColumn, table.coreOptions().toConfiguration());
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+
+        // Collect batch results from all splits.
+        // Each split returns List<Optional<ScoredGlobalIndexResult>> of size n.
+        Iterator<List<Optional<ScoredGlobalIndexResult>>> batchIterator =
+                randomlyExecuteSequentialReturn(
+                        split ->
+                                singletonList(
+                                        evalBatch(
+                                                globalIndexer,
+                                                indexPathFactory,
+                                                split.rowRangeStart(),
+                                                split.rowRangeEnd(),
+                                                split.vectorIndexFiles(),
+                                                preFilter)),
+                        splits,
+                        threadNum);
+
+        // Merge: for each query i, or() across all splits, then topK.
+        ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            merged[i] = ScoredGlobalIndexResult.createEmpty();
+        }
+
+        while (batchIterator.hasNext()) {
+            List<Optional<ScoredGlobalIndexResult>> splitResults = batchIterator.next();
+            for (int i = 0; i < n; i++) {
+                if (splitResults.get(i).isPresent()) {
+                    merged[i] = merged[i].or(splitResults.get(i).get());
+                }
+            }
+        }
+
+        List<GlobalIndexResult> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(merged[i].topK(limit));
+        }
+        return results;
+    }
+
     private Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
@@ -139,6 +197,47 @@ public class VectorReadImpl implements VectorRead {
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
             @Nullable RoaringNavigableMap64 includeRowIds) {
+        List<GlobalIndexIOMeta> indexIOMetaList = buildIOMetaList(indexPathFactory, vectorIndexFiles);
+        @SuppressWarnings("resource")
+        FileIO fileIO = table.fileIO();
+        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
+            VectorSearch vectorSearch =
+                    new VectorSearch(vectors[0], limit, vectorColumn.name())
+                            .withIncludeRowIds(includeRowIds);
+            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                    .visitVectorSearch(vectorSearch);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private List<Optional<ScoredGlobalIndexResult>> evalBatch(
+            GlobalIndexer globalIndexer,
+            IndexPathFactory indexPathFactory,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> vectorIndexFiles,
+            @Nullable RoaringNavigableMap64 includeRowIds) {
+        List<GlobalIndexIOMeta> indexIOMetaList = buildIOMetaList(indexPathFactory, vectorIndexFiles);
+        @SuppressWarnings("resource")
+        FileIO fileIO = table.fileIO();
+        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
+            VectorSearch vectorSearch =
+                    new VectorSearch(vectors, limit, vectorColumn.name())
+                            .withIncludeRowIds(includeRowIds);
+            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                    .visitBatchVectorSearch(vectorSearch);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private List<GlobalIndexIOMeta> buildIOMetaList(
+            IndexPathFactory indexPathFactory, List<IndexFileMeta> vectorIndexFiles) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : vectorIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -148,18 +247,6 @@ public class VectorReadImpl implements VectorRead {
                             indexFile.fileSize(),
                             meta.indexMeta()));
         }
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
-            VectorSearch vectorSearch =
-                    new VectorSearch(vector, limit, vectorColumn.name())
-                            .withIncludeRowIds(includeRowIds);
-            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                    .visitVectorSearch(vectorSearch);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return indexIOMetaList;
     }
 }

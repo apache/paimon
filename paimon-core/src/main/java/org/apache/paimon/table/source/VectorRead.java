@@ -30,4 +30,10 @@ public interface VectorRead {
     }
 
     GlobalIndexResult read(List<VectorSearchSplit> splits);
+
+    default List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
+        return readBatch(plan.splits());
+    }
+
+    List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits);
 }
