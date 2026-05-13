@@ -138,7 +138,7 @@ public class RewriteFileIndexProcedureITCase extends CatalogITCaseBase {
         Assertions.assertThat(count.get()).isEqualTo(6);
 
         tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
-        sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='order_id,v')");
+        sql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='k,v')");
         if (isNamedArgument) {
             sql("CALL sys.rewrite_file_index(`table` => 'default.T', partitions => 'dt=20221208')");
         } else {
