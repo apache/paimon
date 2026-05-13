@@ -19,10 +19,7 @@
 package org.apache.paimon.operation;
 
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Pick strategy for manifest LSM Tree compaction.
@@ -75,21 +72,19 @@ public class ManifestPickStrategy {
      * * sizeAmpThreshold, pick all runs for full compaction.
      */
     private List<ManifestSortedRun> pickForSizeAmp(List<ManifestSortedRun> levelRuns) {
-        int maxLevel = -1;
-        ManifestSortedRun highestRun = null;
-        long lowerLevelTotalSize = 0;
-
-        for (ManifestSortedRun run : levelRuns) {
-            if (run.level() > maxLevel) {
-                maxLevel = run.level();
-                highestRun = run;
-            }
-        }
-
-        if (highestRun == null || maxLevel <= 0) {
+        if (levelRuns.isEmpty()) {
             return null;
         }
 
+        // The last run has the highest level (set by buildLevelSortedRuns)
+        ManifestSortedRun highestRun = levelRuns.get(levelRuns.size() - 1);
+        int maxLevel = highestRun.level();
+
+        if (maxLevel <= 0) {
+            return null;
+        }
+
+        long lowerLevelTotalSize = 0;
         for (ManifestSortedRun run : levelRuns) {
             if (run.level() < maxLevel) {
                 lowerLevelTotalSize += run.totalSize();
@@ -112,27 +107,24 @@ public class ManifestPickStrategy {
      * </ul>
      */
     private List<ManifestSortedRun> pickForSizeRatioAndForce(List<ManifestSortedRun> levelRuns) {
-        // Sort by level ascending for low-to-high traversal
-        List<ManifestSortedRun> sorted = new ArrayList<>(levelRuns);
-        sorted.sort(Comparator.comparingInt(ManifestSortedRun::level));
-
-        Set<ManifestSortedRun> pickedSet = new HashSet<>();
+        // levelRuns is already sorted by level ascending (set by buildLevelSortedRuns)
+        List<ManifestSortedRun> picked = new ArrayList<>();
         long pickedSize = 0;
 
         // From low to high: forced pick level0/level1, then SizeRatio for the rest.
-        for (ManifestSortedRun run : sorted) {
+        for (ManifestSortedRun run : levelRuns) {
             if (run.level() <= 1) {
-                pickedSet.add(run);
+                picked.add(run);
                 pickedSize += run.totalSize();
             } else {
                 long nextRunSize = run.totalSize();
                 if (pickedSize > 0 && pickedSize * sizeRatioThreshold >= nextRunSize) {
-                    pickedSet.add(run);
+                    picked.add(run);
                     pickedSize += nextRunSize;
                 }
             }
         }
 
-        return new ArrayList<>(pickedSet);
+        return picked;
     }
 }
