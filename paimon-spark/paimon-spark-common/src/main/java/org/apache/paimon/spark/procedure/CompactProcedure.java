@@ -620,7 +620,9 @@ public class CompactProcedure extends BaseProcedure {
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
-        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
+        SnapshotReader.Plan readPlan = snapshotReader.read();
+        Long readSnapshotId = readPlan.snapshotId();
+        Map<BinaryRow, DataSplit[]> packedSplits = packForSort(readPlan.dataSplits());
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
         Dataset<Row> datasetForWrite =
                 packedSplits.values().stream()
@@ -637,8 +639,8 @@ public class CompactProcedure extends BaseProcedure {
                         .orElse(null);
         if (datasetForWrite != null) {
             PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
-            // Use dynamic partition overwrite
             writer.writeBuilder().withOverwrite();
+            writer.withOverwriteBaseSnapshot(readSnapshotId);
             writer.commit(writer.write(datasetForWrite));
         }
     }

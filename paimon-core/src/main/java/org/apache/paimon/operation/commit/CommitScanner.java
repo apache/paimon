@@ -58,14 +58,25 @@ public class CommitScanner {
             Snapshot from, Snapshot to, List<BinaryRow> changedPartitions) {
         List<SimpleFileEntry> entries = new ArrayList<>();
         for (long i = from.id() + 1; i <= to.id(); i++) {
-            List<SimpleFileEntry> delta =
-                    scan.withSnapshot(i)
-                            .withKind(ScanMode.DELTA)
-                            .withPartitionFilter(changedPartitions)
-                            .readSimpleEntries();
-            entries.addAll(delta);
+            entries.addAll(readIncrementalChanges(i, changedPartitions));
         }
         return entries;
+    }
+
+    public List<SimpleFileEntry> readIncrementalChanges(
+            long snapshotId, List<BinaryRow> changedPartitions) {
+        return scan.withSnapshot(snapshotId)
+                .withKind(ScanMode.DELTA)
+                .withPartitionFilter(changedPartitions)
+                .readSimpleEntries();
+    }
+
+    public List<SimpleFileEntry> readIncrementalChanges(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        return scan.withSnapshot(snapshot)
+                .withKind(ScanMode.DELTA)
+                .withPartitionFilter(changedPartitions)
+                .readSimpleEntries();
     }
 
     public List<ManifestEntry> readIncrementalEntries(
