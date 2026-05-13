@@ -18,6 +18,10 @@
 
 package org.apache.paimon.spark.function;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BlobViewStruct;
+
+import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
@@ -25,12 +29,12 @@ import org.apache.spark.unsafe.types.UTF8String;
 
 import java.io.Serializable;
 
-/** Spark scalar function resolved by Spark analysis before execution. */
-public class BlobViewSparkFunction implements ScalarFunction<byte[]>, Serializable {
+/** Spark scalar function that constructs a serialized {@link BlobViewStruct} by field id. */
+public class BlobViewFieldIdSparkFunction implements ScalarFunction<byte[]>, Serializable {
 
     @Override
     public DataType[] inputTypes() {
-        return new DataType[] {DataTypes.StringType, DataTypes.StringType, DataTypes.LongType};
+        return new DataType[] {DataTypes.StringType, DataTypes.IntegerType, DataTypes.LongType};
     }
 
     @Override
@@ -38,21 +42,28 @@ public class BlobViewSparkFunction implements ScalarFunction<byte[]>, Serializab
         return DataTypes.BinaryType;
     }
 
-    public byte[] invoke(UTF8String tableName, UTF8String fieldName, long rowId) {
-        if (tableName == null || fieldName == null) {
+    public byte[] invoke(UTF8String identifier, int fieldId, long rowId) {
+        if (identifier == null) {
             return null;
         }
-        throw new UnsupportedOperationException(
-                "Function 'blob_view' requires literal tableName and fieldName.");
+        return blobViewStruct(identifier, fieldId, rowId);
+    }
+
+    @Override
+    public byte[] produceResult(InternalRow input) {
+        if (input.isNullAt(0) || input.isNullAt(1) || input.isNullAt(2)) {
+            return null;
+        }
+        return blobViewStruct(input.getUTF8String(0), input.getInt(1), input.getLong(2));
+    }
+
+    private byte[] blobViewStruct(UTF8String identifier, int fieldId, long rowId) {
+        return new BlobViewStruct(Identifier.fromString(identifier.toString()), fieldId, rowId)
+                .serialize();
     }
 
     @Override
     public String name() {
         return "blob_view";
-    }
-
-    @Override
-    public String canonicalName() {
-        return "paimon.blob_view(string, string, bigint)";
     }
 }

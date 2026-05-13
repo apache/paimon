@@ -20,7 +20,6 @@ package org.apache.paimon.spark.function;
 
 import org.apache.spark.sql.connector.catalog.functions.BoundFunction;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
-import org.apache.spark.sql.types.IntegerType;
 import org.apache.spark.sql.types.LongType;
 import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.StructType;
@@ -33,16 +32,16 @@ public class BlobViewUnbound implements UnboundFunction {
         if (inputType.fields().length != 3) {
             throw new UnsupportedOperationException(
                     "Function 'blob_view' requires 3 arguments "
-                            + "(identifier STRING, fieldId INT, rowId BIGINT), but found "
+                            + "(tableName STRING, fieldName STRING, rowId BIGINT), but found "
                             + inputType.fields().length);
         }
         if (!(inputType.fields()[0].dataType() instanceof StringType)) {
             throw new UnsupportedOperationException(
                     "The first argument of 'blob_view' must be STRING type.");
         }
-        if (!(inputType.fields()[1].dataType() instanceof IntegerType)) {
+        if (!(inputType.fields()[1].dataType() instanceof StringType)) {
             throw new UnsupportedOperationException(
-                    "The second argument of 'blob_view' must be INT type.");
+                    "The second argument of 'blob_view' must be STRING type.");
         }
         if (!(inputType.fields()[2].dataType() instanceof LongType)) {
             throw new UnsupportedOperationException(
@@ -53,7 +52,7 @@ public class BlobViewUnbound implements UnboundFunction {
 
     @Override
     public String description() {
-        return "Construct a serialized BlobViewStruct from identifier, fieldId and rowId";
+        return "Construct a serialized BlobViewStruct from tableName, fieldName and rowId";
     }
 
     @Override

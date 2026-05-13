@@ -200,6 +200,43 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test write blob view with built-in function") {
+    withTable("upstream_blob_view", "downstream_blob_view") {
+      sql(
+        "CREATE TABLE upstream_blob_view (id INT, name STRING, picture BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql(
+        "INSERT INTO upstream_blob_view VALUES " +
+          "(1, 'row1', X'48656C6C6F'), " +
+          "(2, 'row2', X'5945')")
+
+      val upstreamFullName = s"$dbName0.upstream_blob_view"
+
+      sql(
+        "CREATE TABLE downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+
+      sql(
+        s"INSERT INTO downstream_blob_view " +
+          s"SELECT id, name, sys.blob_view('$upstreamFullName', 'picture', _ROW_ID) " +
+          s"FROM `upstream_blob_view$$row_tracking`")
+
+      checkAnswer(
+        sql("SELECT * FROM downstream_blob_view ORDER BY id"),
+        Seq(
+          Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
+          Row(2, "row2", Array[Byte](89, 69)))
+      )
+    }
+  }
+
   test("Blob: test write blob descriptor from external storage") {
     val catalogName = "isolated_paimon"
     val databaseName = "external_blob_db"

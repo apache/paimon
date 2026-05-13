@@ -99,6 +99,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
 
     // optimization rules
+    extensions.injectOptimizerRule(spark => ReplacePaimonFunctions(spark))
     extensions.injectOptimizerRule(_ => OptimizeMetadataOnlyDeleteFromPaimonTable)
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
 
