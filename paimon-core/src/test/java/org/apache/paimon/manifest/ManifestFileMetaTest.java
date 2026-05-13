@@ -872,4 +872,402 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             }
         }
     }
+
+    // ==================== Manifest Sort Tests ====================
+
+    /**
+     * Test manifest sort with overlapping partition ranges. Each manifest contains entries spanning
+     * multiple partitions, creating overlapping intervals that require sort rewrite to resolve.
+     *
+     * <p>Input manifests (deliberately unordered and overlapping):
+     *
+     * <pre>
+     *   manifest-A: partitions [5, 9]  (entries in partition 5,6,7,8,9)
+     *   manifest-B: partitions [0, 4]  (entries in partition 0,1,2,3,4)
+     *   manifest-C: partitions [3, 7]  (entries in partition 3,4,5,6,7) -- overlaps A and B
+     *   manifest-D: partitions [8, 12] (entries in partition 8,9,10,11,12) -- overlaps A
+     *   manifest-E: partitions [1, 3]  (entries in partition 1,2,3) -- overlaps B and C
+     *   manifest-F: partitions [10, 14](entries in partition 10,11,12,13,14) -- overlaps D
+     * </pre>
+     *
+     * <p>After sort rewrite, all surviving ADD entries should be sorted by partition field.
+     */
+    @Test
+    public void testManifestSortWithOverlappingPartitions() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // manifest-A: partitions [5, 9]
+        List<ManifestEntry> entriesA = new ArrayList<>();
+        for (int p = 5; p <= 9; p++) {
+            entriesA.add(makeEntry(true, String.format("A-p%d", p), p));
+        }
+        input.add(makeManifest(entriesA.toArray(new ManifestEntry[0])));
+
+        // manifest-B: partitions [0, 4]
+        List<ManifestEntry> entriesB = new ArrayList<>();
+        for (int p = 0; p <= 4; p++) {
+            entriesB.add(makeEntry(true, String.format("B-p%d", p), p));
+        }
+        input.add(makeManifest(entriesB.toArray(new ManifestEntry[0])));
+
+        // manifest-C: partitions [3, 7] -- overlaps with A and B
+        List<ManifestEntry> entriesC = new ArrayList<>();
+        for (int p = 3; p <= 7; p++) {
+            entriesC.add(makeEntry(true, String.format("C-p%d", p), p));
+        }
+        input.add(makeManifest(entriesC.toArray(new ManifestEntry[0])));
+
+        // manifest-D: partitions [8, 12] -- overlaps with A
+        List<ManifestEntry> entriesD = new ArrayList<>();
+        for (int p = 8; p <= 12; p++) {
+            entriesD.add(makeEntry(true, String.format("D-p%d", p), p));
+        }
+        input.add(makeManifest(entriesD.toArray(new ManifestEntry[0])));
+
+        // manifest-E: partitions [1, 3] -- overlaps with B and C
+        List<ManifestEntry> entriesE = new ArrayList<>();
+        for (int p = 1; p <= 3; p++) {
+            entriesE.add(makeEntry(true, String.format("E-p%d", p), p));
+        }
+        input.add(makeManifest(entriesE.toArray(new ManifestEntry[0])));
+
+        // manifest-F: partitions [10, 14] -- overlaps with D
+        List<ManifestEntry> entriesF = new ArrayList<>();
+        for (int p = 10; p <= 14; p++) {
+            entriesF.add(makeEntry(true, String.format("F-p%d", p), p));
+        }
+        input.add(makeManifest(entriesF.toArray(new ManifestEntry[0])));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "200B");
+        testOptions.set("manifest-sort.enable", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Verify entries are equivalent (no data loss)
+        assertEquivalentEntries(input, merged);
+
+        // Verify all entries within each output manifest are sorted by partition
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within a manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+
+        // Verify manifest files themselves are ordered by minValues
+        for (int i = 1; i < merged.size(); i++) {
+            int prevMin = merged.get(i - 1).partitionStats().minValues().getInt(0);
+            int currMin = merged.get(i).partitionStats().minValues().getInt(0);
+            assertThat(currMin).isGreaterThanOrEqualTo(prevMin);
+        }
+    }
+
+    /**
+     * Test manifest sort with more manifests having overlapping partition ranges. Creates a larger
+     * number of manifests in shuffled order to stress-test the sort rewrite logic.
+     *
+     * <p>Input manifests (shuffled, all ADD-only):
+     *
+     * <pre>
+     *   manifest-1: partitions [6, 10]
+     *   manifest-2: partitions [0, 3]
+     *   manifest-3: partitions [4, 8]  -- overlaps 1 and 2
+     *   manifest-4: partitions [9, 14] -- overlaps 1
+     *   manifest-5: partitions [2, 5]  -- overlaps 2 and 3
+     *   manifest-6: partitions [11, 15]-- overlaps 4
+     * </pre>
+     */
+    @Test
+    public void testManifestSortWithShuffledOverlappingPartitions() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // manifest-1: partitions [6, 10]
+        List<ManifestEntry> entries1 = new ArrayList<>();
+        for (int p = 6; p <= 10; p++) {
+            entries1.add(makeEntry(true, String.format("m1-p%d", p), p));
+        }
+        input.add(makeManifest(entries1.toArray(new ManifestEntry[0])));
+
+        // manifest-2: partitions [0, 3]
+        List<ManifestEntry> entries2 = new ArrayList<>();
+        for (int p = 0; p <= 3; p++) {
+            entries2.add(makeEntry(true, String.format("m2-p%d", p), p));
+        }
+        input.add(makeManifest(entries2.toArray(new ManifestEntry[0])));
+
+        // manifest-3: partitions [4, 8] -- overlaps manifest-1 and manifest-2
+        List<ManifestEntry> entries3 = new ArrayList<>();
+        for (int p = 4; p <= 8; p++) {
+            entries3.add(makeEntry(true, String.format("m3-p%d", p), p));
+        }
+        input.add(makeManifest(entries3.toArray(new ManifestEntry[0])));
+
+        // manifest-4: partitions [9, 14] -- overlaps manifest-1
+        List<ManifestEntry> entries4 = new ArrayList<>();
+        for (int p = 9; p <= 14; p++) {
+            entries4.add(makeEntry(true, String.format("m4-p%d", p), p));
+        }
+        input.add(makeManifest(entries4.toArray(new ManifestEntry[0])));
+
+        // manifest-5: partitions [2, 5] -- overlaps manifest-2 and manifest-3
+        List<ManifestEntry> entries5 = new ArrayList<>();
+        for (int p = 2; p <= 5; p++) {
+            entries5.add(makeEntry(true, String.format("m5-p%d", p), p));
+        }
+        input.add(makeManifest(entries5.toArray(new ManifestEntry[0])));
+
+        // manifest-6: partitions [11, 15] -- overlaps manifest-4
+        List<ManifestEntry> entries6 = new ArrayList<>();
+        for (int p = 11; p <= 15; p++) {
+            entries6.add(makeEntry(true, String.format("m6-p%d", p), p));
+        }
+        input.add(makeManifest(entries6.toArray(new ManifestEntry[0])));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "100B");
+        testOptions.set("manifest-sort.enable", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Verify no data loss
+        assertEquivalentEntries(input, merged);
+
+        // Verify entries within each output manifest are sorted by partition
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within a manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+
+        // Verify output manifests are ordered by minValues
+        for (int i = 1; i < merged.size(); i++) {
+            int prevMin = merged.get(i - 1).partitionStats().minValues().getInt(0);
+            int currMin = merged.get(i).partitionStats().minValues().getInt(0);
+            assertThat(currMin).isGreaterThanOrEqualTo(prevMin);
+        }
+    }
+
+    /**
+     * Test manifest sort with heavily overlapping manifests that form multiple sorted runs. This
+     * exercises buildLevelSortedRuns and the LSM level assignment logic.
+     *
+     * <p>Creates manifests whose partition ranges overlap in various ways:
+     *
+     * <pre>
+     *   run1 (non-overlapping): [0,2], [3,5], [6,8]
+     *   run2 (overlapping with run1): [1,4], [5,7]
+     *   run3 (overlapping with both): [0,9]
+     * </pre>
+     */
+    @Test
+    public void testManifestSortWithMultipleOverlappingRuns() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // Run1: non-overlapping within itself [0,2], [3,5], [6,8]
+        input.add(
+                makeManifest(
+                        makeEntry(true, "r1a-p0", 0),
+                        makeEntry(true, "r1a-p1", 1),
+                        makeEntry(true, "r1a-p2", 2)));
+        input.add(
+                makeManifest(
+                        makeEntry(true, "r1b-p3", 3),
+                        makeEntry(true, "r1b-p4", 4),
+                        makeEntry(true, "r1b-p5", 5)));
+        input.add(
+                makeManifest(
+                        makeEntry(true, "r1c-p6", 6),
+                        makeEntry(true, "r1c-p7", 7),
+                        makeEntry(true, "r1c-p8", 8)));
+
+        // Run2: overlaps with run1 [1,4], [5,7]
+        input.add(
+                makeManifest(
+                        makeEntry(true, "r2a-p1", 1),
+                        makeEntry(true, "r2a-p2", 2),
+                        makeEntry(true, "r2a-p3", 3),
+                        makeEntry(true, "r2a-p4", 4)));
+        input.add(
+                makeManifest(
+                        makeEntry(true, "r2b-p5", 5),
+                        makeEntry(true, "r2b-p6", 6),
+                        makeEntry(true, "r2b-p7", 7)));
+
+        // Run3: a large manifest overlapping everything [0,9]
+        List<ManifestEntry> run3Entries = new ArrayList<>();
+        for (int p = 0; p <= 9; p++) {
+            run3Entries.add(makeEntry(true, String.format("r3-p%d", p), p));
+        }
+        input.add(makeManifest(run3Entries.toArray(new ManifestEntry[0])));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest.target-file-size", "500B");
+        testOptions.set("manifest.merge-min-count", "3");
+        testOptions.set("manifest.full-compaction-threshold-size", "100B");
+        testOptions.set("manifest-sort.enable", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Verify no data loss
+        assertEquivalentEntries(input, merged);
+
+        // Verify entries within each output manifest are sorted by partition
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as(
+                                "Entries within manifest should be sorted, but found %d after %d",
+                                currPartition, prevPartition)
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+
+        // Verify output manifests are ordered by minValues
+        for (int i = 1; i < merged.size(); i++) {
+            int prevMin = merged.get(i - 1).partitionStats().minValues().getInt(0);
+            int currMin = merged.get(i).partitionStats().minValues().getInt(0);
+            assertThat(currMin).isGreaterThanOrEqualTo(prevMin);
+        }
+    }
+
+    /**
+     * Test that sort rewrite correctly eliminates DELETE entries and their corresponding ADD
+     * entries. The key condition is that totalDeltaFileSize must reach manifestFullCompactionSize
+     * to trigger the full compaction path inside trySortRewrite, which reads deleteEntries and
+     * passes them to sortAndRewriteSection for elimination.
+     *
+     * <p>Design:
+     *
+     * <pre>
+     *   - Base manifests with overlapping partitions (all ADD, large enough to be "mustChange"
+     *     since fileSize < suggestedMetaSize):
+     *     manifest-A: partitions [0, 4] with entries A-p0..A-p4
+     *     manifest-B: partitions [2, 6] with entries B-p2..B-p6 (overlaps A)
+     *     manifest-C: partitions [5, 9] with entries C-p5..C-p9 (overlaps B)
+     *   - Delta manifests with DELETE entries (cancel some ADD entries):
+     *     manifest-D: DELETE A-p2, DELETE B-p4, ADD new-p2, ADD new-p4
+     *     manifest-E: DELETE C-p7, ADD new-p7
+     *   - After sort rewrite: A-p2, B-p4, C-p7 should be eliminated,
+     *     replaced by new-p2, new-p4, new-p7. Output should only contain ADD entries,
+     *     sorted by partition.
+     * </pre>
+     */
+    @Test
+    public void testManifestSortEliminatesDeleteEntries() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // manifest-A: partitions [0, 4]
+        List<ManifestEntry> entriesA = new ArrayList<>();
+        for (int p = 0; p <= 4; p++) {
+            entriesA.add(makeEntry(true, String.format("A-p%d", p), p));
+        }
+        input.add(makeManifest(entriesA.toArray(new ManifestEntry[0])));
+
+        // manifest-B: partitions [2, 6] -- overlaps A
+        List<ManifestEntry> entriesB = new ArrayList<>();
+        for (int p = 2; p <= 6; p++) {
+            entriesB.add(makeEntry(true, String.format("B-p%d", p), p));
+        }
+        input.add(makeManifest(entriesB.toArray(new ManifestEntry[0])));
+
+        // manifest-C: partitions [5, 9] -- overlaps B
+        List<ManifestEntry> entriesC = new ArrayList<>();
+        for (int p = 5; p <= 9; p++) {
+            entriesC.add(makeEntry(true, String.format("C-p%d", p), p));
+        }
+        input.add(makeManifest(entriesC.toArray(new ManifestEntry[0])));
+
+        // manifest-D: DELETE A-p2, DELETE B-p4, ADD new-p2, ADD new-p4
+        input.add(
+                makeManifest(
+                        makeEntry(false, "A-p2", 2),
+                        makeEntry(false, "B-p4", 4),
+                        makeEntry(true, "new-p2", 2),
+                        makeEntry(true, "new-p4", 4)));
+
+        // manifest-E: DELETE C-p7, ADD new-p7
+        input.add(makeManifest(makeEntry(false, "C-p7", 7), makeEntry(true, "new-p7", 7)));
+
+        Options testOptions = new Options();
+        // Set target file size very large so all input manifests are considered "small"
+        // (fileSize < suggestedMetaSize), which makes them all satisfy mustChange condition
+        testOptions.set("manifest.target-file-size", "16MB");
+        testOptions.set("manifest.merge-min-count", "3");
+        // Set full-compaction threshold very small to ensure it triggers
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("manifest-sort.enable", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Collect all output entries
+        List<ManifestEntry> allOutputEntries = new ArrayList<>();
+        for (ManifestFileMeta meta : merged) {
+            allOutputEntries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+
+        // Verify: no DELETE entries in output (all DELETE pairs eliminated)
+        long deleteCount =
+                allOutputEntries.stream().filter(e -> e.kind() == FileKind.DELETE).count();
+        assertThat(deleteCount).as("Sort rewrite should eliminate all DELETE entries").isEqualTo(0);
+
+        // Verify: the deleted ADD entries (A-p2, B-p4, C-p7) are NOT in output
+        Set<String> outputFileNames =
+                allOutputEntries.stream().map(e -> e.file().fileName()).collect(Collectors.toSet());
+        assertThat(outputFileNames).doesNotContain("A-p2", "B-p4", "C-p7");
+
+        // Verify: the replacement entries (new-p2, new-p4, new-p7) ARE in output
+        assertThat(outputFileNames).contains("new-p2", "new-p4", "new-p7");
+
+        // Verify: all surviving entries match what FileEntry.mergeEntries would produce
+        assertEquivalentEntries(input, merged);
+
+        // Verify entries within each output manifest are sorted by partition
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+    }
 }

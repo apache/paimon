@@ -441,9 +441,10 @@ public class ManifestFileMerger {
                 reusedFiles.addAll(run.files());
             }
         }
-
+        List<ManifestFileMeta> result = new ArrayList<>(reusedFiles);
         if (pickedRuns.isEmpty()) {
-            return Optional.of(new ArrayList<>(input));
+            result.addAll(fullCompactionRewritten);
+            return Optional.of(new ArrayList<>(result));
         }
 
         // Step 7: Split picked files into sections, sort and rewrite each.
@@ -458,7 +459,7 @@ public class ManifestFileMerger {
                 parseLongOption(tableOptions, "manifest-sort.max-rewrite-size", Long.MAX_VALUE);
         long processedSize = 0;
 
-        List<ManifestFileMeta> result = new ArrayList<>(reusedFiles);
+
         List<ManifestFileMeta> sortNewFiles = new ArrayList<>();
         for (List<ManifestFileMeta> section : sections) {
             long sectionSize = 0;
@@ -473,7 +474,7 @@ public class ManifestFileMerger {
 
             List<ManifestFileMeta> merged =
                     sortAndRewriteSection(
-                            section, manifestFile, sortFieldIndex, sortFieldType, deleteEntries);
+                            section, manifestFile, sortFieldIndex, sortFieldType, null);
             sortNewFiles.addAll(merged);
             result.addAll(merged);
         }
