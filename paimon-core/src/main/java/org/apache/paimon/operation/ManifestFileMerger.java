@@ -459,7 +459,6 @@ public class ManifestFileMerger {
                 parseLongOption(tableOptions, "manifest-sort.max-rewrite-size", Long.MAX_VALUE);
         long processedSize = 0;
 
-
         List<ManifestFileMeta> sortNewFiles = new ArrayList<>();
         for (List<ManifestFileMeta> section : sections) {
             long sectionSize = 0;
