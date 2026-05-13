@@ -191,6 +191,185 @@ public class SchemaMergingUtilsTest {
     }
 
     @Test
+    public void testDiffNestedSchemaChangesInArrayAndMap() {
+        DataField arrayField =
+                new DataField(
+                        0,
+                        "items",
+                        new ArrayType(
+                                new RowType(
+                                        Lists.newArrayList(
+                                                new DataField(1, "f1", new IntType()),
+                                                new DataField(
+                                                        2,
+                                                        "f2",
+                                                        new VarCharType(
+                                                                VarCharType.MAX_LENGTH))))));
+        DataField mapField =
+                new DataField(
+                        3,
+                        "attributes",
+                        new MapType(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new RowType(
+                                        Lists.newArrayList(
+                                                new DataField(4, "v1", new IntType())))));
+        TableSchema oldSchema =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(arrayField, mapField),
+                        4,
+                        Lists.newArrayList(),
+                        Lists.newArrayList(),
+                        new HashMap<>(),
+                        "");
+
+        DataField evolvedArrayField =
+                new DataField(
+                        0,
+                        "items",
+                        new ArrayType(
+                                new RowType(
+                                        Lists.newArrayList(
+                                                new DataField(1, "f1", new IntType()),
+                                                new DataField(
+                                                        2,
+                                                        "f2",
+                                                        new VarCharType(VarCharType.MAX_LENGTH)),
+                                                new DataField(
+                                                        5,
+                                                        "f3",
+                                                        new VarCharType(
+                                                                VarCharType.MAX_LENGTH))))));
+        DataField evolvedMapField =
+                new DataField(
+                        3,
+                        "attributes",
+                        new MapType(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new RowType(
+                                        Lists.newArrayList(
+                                                new DataField(4, "v1", new IntType()),
+                                                new DataField(6, "v2", new BigIntType())))));
+        TableSchema newSchema =
+                new TableSchema(
+                        1,
+                        Lists.newArrayList(evolvedArrayField, evolvedMapField),
+                        6,
+                        Lists.newArrayList(),
+                        Lists.newArrayList(),
+                        new HashMap<>(),
+                        "");
+
+        List<SchemaChange> changes = SchemaMergingUtils.diffSchemaChanges(oldSchema, newSchema);
+
+        assertThat(changes).hasSize(2);
+        SchemaChange.AddColumn addArrayNestedField = (SchemaChange.AddColumn) changes.get(0);
+        assertThat(addArrayNestedField.fieldNames())
+                .containsExactly("items", SchemaMergingUtils.ARRAY_ELEMENT_FIELD_NAME, "f3");
+        assertThat(addArrayNestedField.dataType())
+                .isEqualTo(new VarCharType(VarCharType.MAX_LENGTH));
+        SchemaChange.AddColumn addMapValueNestedField = (SchemaChange.AddColumn) changes.get(1);
+        assertThat(addMapValueNestedField.fieldNames())
+                .containsExactly("attributes", SchemaMergingUtils.MAP_VALUE_FIELD_NAME, "v2");
+        assertThat(addMapValueNestedField.dataType()).isEqualTo(new BigIntType());
+    }
+
+    @Test
+    public void testDiffNestedSchemaChangesDoesNotTreatMapKeyAsValueChange() {
+        DataField mapField =
+                new DataField(
+                        0,
+                        "attributes",
+                        new MapType(
+                                new RowType(
+                                        Lists.newArrayList(new DataField(1, "k1", new IntType()))),
+                                new RowType(
+                                        Lists.newArrayList(
+                                                new DataField(2, "v1", new IntType())))));
+        TableSchema oldSchema =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(mapField),
+                        2,
+                        Lists.newArrayList(),
+                        Lists.newArrayList(),
+                        new HashMap<>(),
+                        "");
+
+        DataType evolvedMapType =
+                new MapType(
+                        new RowType(
+                                Lists.newArrayList(
+                                        new DataField(1, "k1", new IntType()),
+                                        new DataField(3, "k2", new BigIntType()))),
+                        new RowType(
+                                Lists.newArrayList(
+                                        new DataField(2, "v1", new IntType()),
+                                        new DataField(4, "v2", new BigIntType()))));
+        TableSchema newSchema =
+                new TableSchema(
+                        1,
+                        Lists.newArrayList(new DataField(0, "attributes", evolvedMapType)),
+                        4,
+                        Lists.newArrayList(),
+                        Lists.newArrayList(),
+                        new HashMap<>(),
+                        "");
+
+        List<SchemaChange> changes = SchemaMergingUtils.diffSchemaChanges(oldSchema, newSchema);
+
+        assertThat(changes).hasSize(1);
+        SchemaChange.UpdateColumnType updateMapType =
+                (SchemaChange.UpdateColumnType) changes.get(0);
+        assertThat(updateMapType.fieldNames()).containsExactly("attributes");
+        assertThat(updateMapType.newDataType()).isEqualTo(evolvedMapType);
+    }
+
+    @Test
+    public void testDiffNestedSchemaChangesFallsBackToTypeUpdateWhenNestedFieldRemoved() {
+        DataType itemsType =
+                new ArrayType(
+                        new RowType(
+                                Lists.newArrayList(
+                                        new DataField(1, "f1", new IntType()),
+                                        new DataField(
+                                                2,
+                                                "f2",
+                                                new VarCharType(VarCharType.MAX_LENGTH)))));
+        TableSchema oldSchema =
+                new TableSchema(
+                        0,
+                        Lists.newArrayList(new DataField(0, "items", itemsType)),
+                        2,
+                        Lists.newArrayList(),
+                        Lists.newArrayList(),
+                        new HashMap<>(),
+                        "");
+
+        DataType evolvedItemsType =
+                new ArrayType(
+                        new RowType(Lists.newArrayList(new DataField(1, "f1", new IntType()))));
+        TableSchema newSchema =
+                new TableSchema(
+                        1,
+                        Lists.newArrayList(new DataField(0, "items", evolvedItemsType)),
+                        2,
+                        Lists.newArrayList(),
+                        Lists.newArrayList(),
+                        new HashMap<>(),
+                        "");
+
+        List<SchemaChange> changes = SchemaMergingUtils.diffSchemaChanges(oldSchema, newSchema);
+
+        assertThat(changes).hasSize(1);
+        SchemaChange.UpdateColumnType updateItemsType =
+                (SchemaChange.UpdateColumnType) changes.get(0);
+        assertThat(updateItemsType.fieldNames()).containsExactly("items");
+        assertThat(updateItemsType.newDataType()).isEqualTo(evolvedItemsType);
+    }
+
+    @Test
     public void testMergeArrayTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 

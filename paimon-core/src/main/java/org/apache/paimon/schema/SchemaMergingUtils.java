@@ -39,6 +39,9 @@ import java.util.stream.Collectors;
 /** The util class for merging the schemas. */
 public class SchemaMergingUtils {
 
+    public static final String ARRAY_ELEMENT_FIELD_NAME = "element";
+    public static final String MAP_VALUE_FIELD_NAME = "value";
+
     public static TableSchema mergeSchemas(
             TableSchema currentTableSchema, RowType targetType, boolean allowExplicitCast) {
         RowType currentType = currentTableSchema.logicalRowType();
@@ -266,19 +269,68 @@ public class SchemaMergingUtils {
                 changes.add(
                         SchemaChange.addColumn(
                                 fieldNames, newField.type(), newField.description(), null));
-            } else if (!oldField.type().equals(newField.type())) {
-                // type changed — check if it's a nested struct change
-                if (oldField.type() instanceof RowType && newField.type() instanceof RowType) {
-                    diffFields(
-                            ((RowType) oldField.type()).getFields(),
-                            ((RowType) newField.type()).getFields(),
-                            fieldNames,
-                            changes);
-                } else {
-                    changes.add(SchemaChange.updateColumnType(fieldNames, newField.type(), true));
-                }
+            } else if (!oldField.type().equals(newField.type())
+                    && !diffNestedTypeChanges(
+                            oldField.type(), newField.type(), fieldNames, changes)) {
+                changes.add(SchemaChange.updateColumnType(fieldNames, newField.type(), true));
             }
         }
+    }
+
+    /**
+     * Returns true only when the type difference has been fully represented by nested schema
+     * changes. Returns false to let the caller fall back to {@link SchemaChange.UpdateColumnType}.
+     */
+    private static boolean diffNestedTypeChanges(
+            DataType oldType, DataType newType, String[] fieldNames, List<SchemaChange> changes) {
+        List<SchemaChange> stagedChanges = new ArrayList<>();
+        boolean handled = diffNestedTypeChangesInner(oldType, newType, fieldNames, stagedChanges);
+        if (handled) {
+            changes.addAll(stagedChanges);
+        }
+        return handled;
+    }
+
+    private static boolean diffNestedTypeChangesInner(
+            DataType oldType, DataType newType, String[] fieldNames, List<SchemaChange> changes) {
+        if (oldType instanceof RowType && newType instanceof RowType) {
+            List<DataField> oldFields = ((RowType) oldType).getFields();
+            List<DataField> newFields = ((RowType) newType).getFields();
+            if (hasRemovedFields(oldFields, newFields)) {
+                return false;
+            }
+            diffFields(oldFields, newFields, fieldNames, changes);
+            return true;
+        } else if (oldType instanceof ArrayType && newType instanceof ArrayType) {
+            return diffNestedTypeChanges(
+                    ((ArrayType) oldType).getElementType(),
+                    ((ArrayType) newType).getElementType(),
+                    appendFieldName(fieldNames, ARRAY_ELEMENT_FIELD_NAME),
+                    changes);
+        } else if (oldType instanceof MapType && newType instanceof MapType) {
+            MapType oldMapType = (MapType) oldType;
+            MapType newMapType = (MapType) newType;
+            if (!oldMapType.getKeyType().equals(newMapType.getKeyType())) {
+                return false;
+            }
+            return diffNestedTypeChanges(
+                    oldMapType.getValueType(),
+                    newMapType.getValueType(),
+                    appendFieldName(fieldNames, MAP_VALUE_FIELD_NAME),
+                    changes);
+        }
+        return false;
+    }
+
+    private static boolean hasRemovedFields(List<DataField> oldFields, List<DataField> newFields) {
+        Map<String, DataField> newFieldMap =
+                newFields.stream().collect(Collectors.toMap(DataField::name, Function.identity()));
+        for (DataField oldField : oldFields) {
+            if (!newFieldMap.containsKey(oldField.name())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String[] appendFieldName(String[] parentNames, String fieldName) {

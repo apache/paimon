@@ -1199,6 +1199,185 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test("Paimon MergeInto: merge-schema with star and new nested array struct field") {
+    withTable("source", "target") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        createTable(
+          "source",
+          """
+            |id STRING,
+            |items ARRAY<STRUCT<
+            |  text: STRING,
+            |  lang: STRING,
+            |  `0`: STRUCT<extra_url: STRING>,
+            |  url: STRING>>,
+            |payload STRING
+            |""".stripMargin,
+          Seq("id")
+        )
+        spark.sql("""
+                    |INSERT INTO source VALUES
+                    |  ('1', array(named_struct(
+                    |    'text', 'updated-text',
+                    |    'lang', 'en',
+                    |    '0', named_struct('extra_url', 'https://example.com/extra'),
+                    |    'url', 'https://example.com/item')), 'updated'),
+                    |  ('2', array(named_struct(
+                    |    'text', 'inserted-text',
+                    |    'lang', 'en',
+                    |    '0', named_struct('extra_url', 'https://example.com/extra'),
+                    |    'url', 'https://example.com/item')), 'inserted')
+                    |""".stripMargin)
+
+        createTable(
+          "target",
+          """
+            |id STRING,
+            |payload STRING,
+            |items ARRAY<STRUCT<lang: STRING, text: STRING, url: STRING>>
+            |""".stripMargin,
+          Seq("id")
+        )
+
+        spark.sql("""
+                    |INSERT INTO target VALUES (
+                    |  '1',
+                    |  'old',
+                    |  array(named_struct('lang', 'old-lang', 'text', 'old-text', 'url', 'old-url'))
+                    |)
+                    |""".stripMargin)
+
+        spark.sql("""
+                    |MERGE INTO target
+                    |USING source
+                    |ON target.id = source.id
+                    |WHEN MATCHED THEN UPDATE SET *
+                    |WHEN NOT MATCHED THEN INSERT *
+                    |""".stripMargin)
+
+        checkAnswer(
+          spark.sql("""
+                      |SELECT
+                      |  id,
+                      |  payload,
+                      |  items[0].lang,
+                      |  items[0].text,
+                      |  items[0].url,
+                      |  items[0].`0`.extra_url
+                      |FROM target
+                      |ORDER BY id
+                      |""".stripMargin),
+          Seq(
+            Row(
+              "1",
+              "updated",
+              "en",
+              "updated-text",
+              "https://example.com/item",
+              "https://example.com/extra"),
+            Row(
+              "2",
+              "inserted",
+              "en",
+              "inserted-text",
+              "https://example.com/item",
+              "https://example.com/extra")
+          )
+        )
+      }
+    }
+  }
+
+  test("Paimon MergeInto: merge-schema with star and new nested map value struct field") {
+    withTable("source", "target") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        createTable(
+          "source",
+          """
+            |id STRING,
+            |attributes MAP<STRING, STRUCT<
+            |  text: STRING,
+            |  lang: STRING,
+            |  `0`: STRUCT<extra_url: STRING>,
+            |  url: STRING>>,
+            |payload STRING
+            |""".stripMargin,
+          Seq("id")
+        )
+        spark.sql("""
+                    |INSERT INTO source VALUES
+                    |  ('1', map('main', named_struct(
+                    |    'text', 'updated-text',
+                    |    'lang', 'en',
+                    |    '0', named_struct('extra_url', 'https://example.com/extra'),
+                    |    'url', 'https://example.com/item')), 'updated'),
+                    |  ('2', map('main', named_struct(
+                    |    'text', 'inserted-text',
+                    |    'lang', 'en',
+                    |    '0', named_struct('extra_url', 'https://example.com/extra'),
+                    |    'url', 'https://example.com/item')), 'inserted')
+                    |""".stripMargin)
+
+        createTable(
+          "target",
+          """
+            |id STRING,
+            |payload STRING,
+            |attributes MAP<STRING, STRUCT<lang: STRING, text: STRING, url: STRING>>
+            |""".stripMargin,
+          Seq("id")
+        )
+
+        spark.sql(
+          """
+            |INSERT INTO target VALUES (
+            |  '1',
+            |  'old',
+            |  map('main', named_struct('lang', 'old-lang', 'text', 'old-text', 'url', 'old-url'))
+            |)
+            |""".stripMargin)
+
+        spark.sql("""
+                    |MERGE INTO target
+                    |USING source
+                    |ON target.id = source.id
+                    |WHEN MATCHED THEN UPDATE SET *
+                    |WHEN NOT MATCHED THEN INSERT *
+                    |""".stripMargin)
+
+        checkAnswer(
+          spark.sql("""
+                      |SELECT
+                      |  id,
+                      |  payload,
+                      |  attributes['main'].lang,
+                      |  attributes['main'].text,
+                      |  attributes['main'].url,
+                      |  attributes['main'].`0`.extra_url
+                      |FROM target
+                      |ORDER BY id
+                      |""".stripMargin),
+          Seq(
+            Row(
+              "1",
+              "updated",
+              "en",
+              "updated-text",
+              "https://example.com/item",
+              "https://example.com/extra"),
+            Row(
+              "2",
+              "inserted",
+              "en",
+              "inserted-text",
+              "https://example.com/item",
+              "https://example.com/extra")
+          )
+        )
+      }
+    }
+  }
+
   test("Paimon MergeInto: struct field reorder when target has fields absent from source") {
     withTable("source", "target") {
       // Target struct has 3 sub-fields; source struct only has 2 of them in a different order.
