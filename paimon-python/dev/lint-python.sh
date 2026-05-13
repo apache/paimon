@@ -107,7 +107,7 @@ function collect_checks() {
 function get_all_supported_checks() {
     _OLD_IFS=$IFS
     IFS=$'\n'
-    SUPPORT_CHECKS=("flake8_check" "pytest_torch_check" "pytest_check" "mixed_check") # control the calling sequence
+    SUPPORT_CHECKS=("license_check" "flake8_check" "pytest_torch_check" "pytest_check" "mixed_check") # control the calling sequence
     for fun in $(declare -F); do
         if [[ `regexp_match "$fun" "_check$"` = true ]]; then
             check_name="${fun:11}"
@@ -134,6 +134,22 @@ function check_stage() {
 # This part defines all check functions such as tox_check and flake8_check
 # We make a rule that all check functions are suffixed with _ check. e.g. tox_check, flake8_check
 #########################
+# License header check
+function license_check() {
+    print_function "STAGE" "license header checks"
+
+    set -o pipefail
+    (python "$CURRENT_DIR/dev/check_license_header.py") 2>&1 | tee -a $LOG_FILE
+
+    LICENSE_STATUS=$?
+    if [ $LICENSE_STATUS -ne 0 ]; then
+        print_function "STAGE" "license header checks... [FAILED]"
+        exit 1
+    else
+        print_function "STAGE" "license header checks... [SUCCESS]"
+    fi
+}
+
 # Flake8 check
 function flake8_check() {
     local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox -o -path ./.venv \) -prune -o -type f -name "*.py" -print )"
