@@ -768,6 +768,95 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCountStarGroupByPartition() {
+        sql("CREATE TABLE count_group_part (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
+        sql("INSERT INTO count_group_part VALUES (1, 'a', '1'), (1, 'a', '1'), (2, 'b', '2')");
+        String sql = "SELECT dt, COUNT(*) FROM count_group_part GROUP BY dt ORDER BY dt";
+
+        assertThat(sql(sql)).containsExactly(Row.of("1", 2L), Row.of("2", 1L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarGroupByPartitionSubset() {
+        sql(
+                "CREATE TABLE count_group_part_subset ("
+                        + "f0 INT, region STRING, dt STRING) PARTITIONED BY (region, dt)");
+        sql(
+                "INSERT INTO count_group_part_subset VALUES "
+                        + "(1, 'cn', '1'), (2, 'cn', '1'), (3, 'cn', '2'), (4, 'us', '1')");
+        String sql =
+                "SELECT region, COUNT(*) FROM count_group_part_subset "
+                        + "GROUP BY region ORDER BY region";
+
+        assertThat(sql(sql)).containsExactly(Row.of("cn", 3L), Row.of("us", 1L));
+        validateCount1PushDown(sql);
+    }
+
+    @Test
+    public void testCountStarGroupByNonPartition() {
+        sql("CREATE TABLE count_group_non_part (f0 INT, f1 STRING, dt STRING) PARTITIONED BY (dt)");
+        sql(
+                "INSERT INTO count_group_non_part VALUES "
+                        + "(1, 'a', '1'), (1, 'b', '1'), (2, 'c', '2')");
+        String sql = "SELECT f0, COUNT(*) FROM count_group_non_part GROUP BY f0 ORDER BY f0";
+
+        assertThat(sql(sql)).containsExactly(Row.of(1, 2L), Row.of(2, 1L));
+        validateCount1NotPushDown(sql);
+    }
+
+    @Test
+    public void testMinMaxAppend() {
+        sql("CREATE TABLE min_max_append (f0 INT, f1 STRING)");
+        sql("INSERT INTO min_max_append VALUES (1, 'a'), (7, 'b'), (3, 'c')");
+
+        String sql = "SELECT MIN(f0), MAX(f0), COUNT(*) FROM min_max_append";
+        assertThat(sql(sql)).containsOnly(Row.of(1, 7, 3L));
+        validateAggregatePushDown(sql, "MinAggFunction", "MaxAggFunction", "Count1AggFunction");
+    }
+
+    @Test
+    public void testMinMaxEmptyAppend() {
+        sql("CREATE TABLE min_max_empty_append (f0 INT)");
+
+        String sql = "SELECT MIN(f0), MAX(f0), COUNT(*) FROM min_max_empty_append";
+        assertThat(sql(sql)).containsOnly(Row.of(null, null, 0L));
+    }
+
+    @Test
+    public void testMinMaxGroupByPartition() {
+        sql("CREATE TABLE min_max_group_part (f0 INT, dt STRING) PARTITIONED BY (dt)");
+        sql("INSERT INTO min_max_group_part VALUES " + "(3, '1'), (1, '1'), (8, '2'), (5, '2')");
+
+        String sql =
+                "SELECT dt, MIN(f0), MAX(f0), COUNT(*) FROM min_max_group_part "
+                        + "GROUP BY dt ORDER BY dt";
+        assertThat(sql(sql)).containsExactly(Row.of("1", 1, 3, 2L), Row.of("2", 5, 8, 2L));
+        validateAggregatePushDown(sql, "MinAggFunction", "MaxAggFunction", "Count1AggFunction");
+    }
+
+    @Test
+    public void testMinMaxStringNotPushDown() {
+        sql("CREATE TABLE min_max_string (f0 INT, f1 STRING)");
+        sql("INSERT INTO min_max_string VALUES (1, 'a'), (2, 'b')");
+
+        String sql = "SELECT MIN(f1) FROM min_max_string";
+        assertThat(sql(sql)).containsOnly(Row.of("a"));
+        validateAggregateNotPushDown(sql, "MinAggFunction");
+    }
+
+    @Test
+    public void testMinMaxPKNotPushDown() {
+        sql("CREATE TABLE min_max_pk (f0 INT PRIMARY KEY NOT ENFORCED, f1 INT)");
+        sql("INSERT INTO min_max_pk VALUES (1, 3), (2, 5)");
+        sql("INSERT INTO min_max_pk VALUES (1, 1)");
+
+        String sql = "SELECT MIN(f1), MAX(f1) FROM min_max_pk";
+        assertThat(sql(sql)).containsOnly(Row.of(1, 5));
+        validateAggregateNotPushDown(sql, "MinAggFunction", "MaxAggFunction");
+    }
+
+    @Test
     public void testCountStarAppendWithDv() {
         sql(
                 String.format(
@@ -811,19 +900,31 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     private void validateCount1PushDown(String sql) {
+        validateAggregatePushDown(sql, "Count1AggFunction");
+    }
+
+    private void validateAggregatePushDown(String sql, String... functionNames) {
         Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
         while (!transformation.getInputs().isEmpty()) {
             transformation = transformation.getInputs().get(0);
         }
-        assertThat(transformation.getDescription()).contains("Count1AggFunction");
+        for (String functionName : functionNames) {
+            assertThat(transformation.getDescription()).contains(functionName);
+        }
     }
 
     private void validateCount1NotPushDown(String sql) {
+        validateAggregateNotPushDown(sql, "Count1AggFunction");
+    }
+
+    private void validateAggregateNotPushDown(String sql, String... functionNames) {
         Transformation<?> transformation = AbstractTestBase.translate(tEnv, sql);
         while (!transformation.getInputs().isEmpty()) {
             transformation = transformation.getInputs().get(0);
         }
-        assertThat(transformation.getDescription()).doesNotContain("Count1AggFunction");
+        for (String functionName : functionNames) {
+            assertThat(transformation.getDescription()).doesNotContain(functionName);
+        }
     }
 
     @Test
