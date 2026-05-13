@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
@@ -273,6 +274,8 @@ public class SchemaValidation {
                 "Some of the columns specified as vector-field are unknown.");
 
         validateMergeFunctionFactory(schema);
+
+        validateFileIndex(schema);
 
         validateRowTracking(schema, options);
 
@@ -530,6 +533,50 @@ public class SchemaValidation {
         }
 
         createMergeFunctionFactory(schema);
+    }
+
+    private static void validateFileIndex(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+        FileIndexOptions fileIndexOptions = options.indexColumnsOptions();
+        if (fileIndexOptions.isEmpty()) {
+            return;
+        }
+
+        Map<String, DataField> fieldMap = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            fieldMap.put(field.name(), field);
+        }
+
+        for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
+                fileIndexOptions.entrySet()) {
+            FileIndexOptions.Column column = entry.getKey();
+            String columnName = column.getColumnName();
+            checkArgument(
+                    fieldMap.containsKey(columnName),
+                    "Column '%s' specified in 'file-index.<index-type>.columns' "
+                            + "does not exist in table schema. Existing columns: %s.",
+                    columnName,
+                    schema.fieldNames());
+
+            DataField field = fieldMap.get(columnName);
+            if (column.isNestedColumn()) {
+                checkArgument(
+                        field.type().getTypeRoot() == DataTypeRoot.MAP,
+                        "Column '%s' is configured as nested column in "
+                                + "'file-index.<index-type>.columns' but is not a map type. "
+                                + "Only map type supports nested column.",
+                        columnName);
+                DataType keyType = ((MapType) field.type()).getKeyType();
+                DataTypeRoot keyRoot = keyType.getTypeRoot();
+                checkArgument(
+                        keyRoot == DataTypeRoot.CHAR || keyRoot == DataTypeRoot.VARCHAR,
+                        "Column '%s' is configured as nested column in "
+                                + "'file-index.<index-type>.columns', but its map key type is %s. "
+                                + "Only CHAR/VARCHAR/STRING is supported.",
+                        columnName,
+                        keyType);
+            }
+        }
     }
 
     private static void validateForDeletionVectors(CoreOptions options) {

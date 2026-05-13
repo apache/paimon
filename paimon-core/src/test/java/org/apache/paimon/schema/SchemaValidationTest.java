@@ -369,4 +369,79 @@ class SchemaValidationTest {
                                                 "")))
                 .hasMessageContaining("primary-key");
     }
+
+    @Test
+    public void testFileIndexColumns() {
+        List<String> keys =
+                Arrays.asList(
+                        "file-index.bloom-filter.columns",
+                        "file-index.bitmap.columns",
+                        "file-index.bsi.columns",
+                        "file-index.range-bitmap.columns");
+
+        for (String key : keys) {
+            // valid: all referenced columns exist
+            Map<String, String> okOptions = new HashMap<>();
+            okOptions.put(key, "f0,f3");
+            assertThatCode(() -> validateTableSchemaExec(okOptions))
+                    .as("valid key=%s", key)
+                    .doesNotThrowAnyException();
+
+            // invalid: references a non-existent column
+            Map<String, String> badOptions = new HashMap<>();
+            badOptions.put(key, "f0,not_exist");
+            assertThatThrownBy(() -> validateTableSchemaExec(badOptions))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Column 'not_exist' specified in 'file-index.<index-type>.columns' does not exist in table schema.");
+        }
+    }
+
+    @Test
+    public void testFileIndexNestedColumn() {
+        List<String> keys =
+                Arrays.asList(
+                        "file-index.bloom-filter.columns",
+                        "file-index.bitmap.columns",
+                        "file-index.bsi.columns",
+                        "file-index.range-bitmap.columns");
+
+        for (String key : keys) {
+            // valid: nested syntax on a map column with string key
+            Map<String, String> okOptions = new HashMap<>();
+            okOptions.put(key, "m[k]");
+            assertThatCode(() -> validateTableSchemaWithMapField(okOptions))
+                    .doesNotThrowAnyException();
+
+            // invalid: nested syntax on a non-map column
+            Map<String, String> nonMapOptions = new HashMap<>();
+            nonMapOptions.put(key, "f3[k]");
+            assertThatThrownBy(() -> validateTableSchemaWithMapField(nonMapOptions))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Column 'f3' is configured as nested column in 'file-index.<index-type>.columns' but is not a map type.");
+
+            // invalid: nested syntax on a map column with non-string key
+            Map<String, String> nonStringKeyOptions = new HashMap<>();
+            nonStringKeyOptions.put(key, "mi[k]");
+            assertThatThrownBy(() -> validateTableSchemaWithMapField(nonStringKeyOptions))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Column 'mi' is configured as nested column in 'file-index.<index-type>.columns', but its map key type is INT. Only CHAR/VARCHAR/STRING is supported.");
+        }
+    }
+
+    private void validateTableSchemaWithMapField(Map<String, String> options) {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()),
+                        new DataField(4, "m", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        new DataField(5, "mi", DataTypes.MAP(DataTypes.INT(), DataTypes.INT())));
+        options.put(BUCKET.key(), String.valueOf(-1));
+        validateTableSchema(
+                new TableSchema(1, fields, 10, emptyList(), singletonList("f1"), options, ""));
+    }
 }
