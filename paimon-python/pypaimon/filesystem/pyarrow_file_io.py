@@ -654,7 +654,6 @@ class PyArrowFileIO(FileIO):
         try:
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
-            column = data.column(0)
             field = data.schema[0]
             if pyarrow.types.is_large_binary(field.type):
                 fields = [DataField(0, field.name, AtomicType("BLOB"))]
