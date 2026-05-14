@@ -69,7 +69,8 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=0,
-                options=options
+                options=options,
+                write_cols=self.write_cols,
             )
         elif self.table.is_primary_key_table:
             return KeyValueDataWriter(

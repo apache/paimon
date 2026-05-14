@@ -242,6 +242,133 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
         self.assertEqual(result.num_rows, 3)
 
+    def test_data_blob_writer_partial_write_with_write_type(self):
+        """Partial write (normal + blob subset) via with_write_type: split must match batch columns."""
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_partial_write_type', schema, False)
+        table = self.catalog.get_table('test_db.blob_partial_write_type')
+
+        partial_schema = pa.schema([('id', pa.int32()), ('blob_data', pa.large_binary())])
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2],
+            'blob_data': [b'a', b'b'],
+        }, schema=partial_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write().with_write_type(['id', 'blob_data'])
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        self.assertGreater(len(commit_messages), 0)
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        parquet_files = [f for f in all_files if f.file_name.endswith('.parquet')]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertEqual(len(parquet_files), 1)
+        self.assertGreaterEqual(len(blob_files), 1)
+        self.assertEqual(parquet_files[0].write_cols, ['id'])
+        self.assertEqual(parquet_files[0].row_count, 2)
+        for bf in blob_files:
+            self.assertEqual(bf.write_cols, ['blob_data'])
+            self.assertEqual(bf.row_count, 2)
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        out = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(out.num_rows, 2)
+        self.assertEqual(out.column('id').to_pylist(), [1, 2])
+        self.assertEqual(out.column('blob_data').to_pylist(), [b'a', b'b'])
+        self.assertEqual(out.column('name').to_pylist(), [None, None])
+
+    def test_data_blob_writer_partial_write_normal_only_with_write_type(self):
+        """Partial write without blob columns in write_cols must not touch blob split paths."""
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_partial_normal_only', schema, False)
+        table = self.catalog.get_table('test_db.blob_partial_normal_only')
+
+        partial_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        test_data = pa.Table.from_pydict({'id': [7], 'name': ['n']}, schema=partial_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write().with_write_type(['id', 'name'])
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        self.assertFalse(any(f.file_name.endswith('.blob') for f in all_files))
+        parquet_files = [f for f in all_files if f.file_name.endswith('.parquet')]
+        self.assertEqual(len(parquet_files), 1)
+        self.assertEqual(parquet_files[0].write_cols, ['id', 'name'])
+        self.assertEqual(parquet_files[0].row_count, 1)
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        out = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(out.column('id').to_pylist(), [7])
+        self.assertEqual(out.column('name').to_pylist(), ['n'])
+        self.assertEqual(out.column('blob_data').to_pylist(), [None])
+
+    def test_data_blob_writer_partial_write_single_blob_of_two_with_write_type(self):
+        """with_write_type lists only one blob column: only that column gets .blob files."""
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob1', pa.large_binary()),
+            ('blob2', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_partial_one_of_two', schema, False)
+        table = self.catalog.get_table('test_db.blob_partial_one_of_two')
+
+        partial_schema = pa.schema([('id', pa.int32()), ('blob1', pa.large_binary())])
+        test_data = pa.Table.from_pydict({
+            'id': [1],
+            'blob1': [b'only_b1'],
+        }, schema=partial_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write().with_write_type(['id', 'blob1'])
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertEqual(len(blob_files), 1)
+        self.assertEqual(blob_files[0].write_cols, ['blob1'])
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
     def test_data_blob_writer_write_operations(self):
         """Test DataBlobWriter write operations with real data."""
         from pypaimon import Schema
