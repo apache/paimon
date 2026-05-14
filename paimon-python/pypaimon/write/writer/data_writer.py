@@ -344,7 +344,9 @@ class DataWriter(ABC):
             }
         
         column_type = column_array.type
-        supports_minmax = not (pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type))
+        supports_minmax = not (
+            pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type)
+        )
         
         if not supports_minmax:
             return {
