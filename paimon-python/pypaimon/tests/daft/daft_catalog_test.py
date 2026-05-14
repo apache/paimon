@@ -247,7 +247,7 @@ def test_table_append(paimon_catalog):
 def test_table_overwrite(paimon_catalog):
     daft_catalog, _, _ = paimon_catalog
     table = daft_catalog.get_table("test_db.test_table")
-    replacement = daft.from_pydict({"id": [100, 200], "name": ["p", "q"], "dt": ["2024-05-01", "2024-05-02"]})
+    replacement = daft.from_pydict({"id": [100, 200], "name": ["p", "q"], "dt": ["2024-01-01", "2024-01-02"]})
     table.overwrite(replacement)
     result = sorted(table.read().to_pydict()["id"])
     assert result == [100, 200]
