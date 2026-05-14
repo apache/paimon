@@ -157,6 +157,9 @@ setup(
         'torch': [
             'torch',
         ],
+        'daft': [
+            'getdaft>=0.7.6; python_version>="3.10"',
+        ],
         'oss': [
             'ossfs>=2021.8; python_version<"3.8"',
             'ossfs>=2023; python_version>="3.8"'
