@@ -1094,6 +1094,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long totalRecordCount,
             Pair<String, Long> baseManifestList,
             Pair<String, Long> deltaManifestList) {
+        return replaceManifestList(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                latest.indexManifest(),
+                latest.nextRowId());
+    }
+
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1104,7 +1120,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         deltaManifestList.getRight(),
                         null,
                         null,
-                        latest.indexManifest(),
+                        indexManifest,
                         commitUser,
                         Long.MAX_VALUE,
                         CommitKind.OVERWRITE,
@@ -1116,7 +1132,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.statistics(),
                         // if empty properties, just set to null
                         latest.properties(),
-                        latest.nextRowId());
+                        nextRowId);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
