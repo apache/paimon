@@ -220,6 +220,16 @@ class CoreOptions:
         )
     )
 
+    BLOB_VIEW_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-view-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names that should be stored as serialized BlobViewStruct bytes "
+            "inline in normal data files and resolved from upstream tables at read time."
+        )
+    )
+
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("target-file-size")
         .memory_type()
@@ -539,6 +549,20 @@ class CoreOptions:
 
     def blob_descriptor_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_inline_fields(self, default=None):
+        fields = set()
+        fields.update(self.blob_descriptor_fields(default))
+        fields.update(self.blob_view_fields(default))
+        return fields
+
+    @staticmethod
+    def _parse_field_set(value):
         if value is None:
             return set()
         if isinstance(value, str):

@@ -31,7 +31,7 @@ from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor
+from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobView, BlobViewStruct
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -133,6 +133,26 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(descriptor.uri, uri)
         self.assertEqual(descriptor.offset, 0)
         self.assertEqual(descriptor.length, -1)
+
+    def test_blob_view_struct_roundtrip(self):
+        """Test BlobViewStruct serialization compatibility."""
+        view_struct = BlobViewStruct("test_db.source_table", 7, 42)
+        serialized = view_struct.serialize()
+
+        self.assertTrue(BlobViewStruct.is_blob_view_struct(serialized))
+        self.assertFalse(BlobDescriptor.is_blob_descriptor(serialized))
+
+        restored = BlobViewStruct.deserialize(serialized)
+        self.assertEqual(restored, view_struct)
+        self.assertEqual(restored.identifier.get_full_name(), "test_db.source_table")
+        self.assertEqual(restored.field_id, 7)
+        self.assertEqual(restored.row_id, 42)
+
+        blob = Blob.from_bytes(serialized)
+        self.assertIsInstance(blob, BlobView)
+        self.assertEqual(Blob.serialize_blob(blob), serialized)
+        with self.assertRaises(RuntimeError):
+            blob.to_data()
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
