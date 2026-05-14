@@ -145,6 +145,40 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
     }
 
     @Test
+    void testBTreeIndexWithSingleRangeAndParallelWriters() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_SINGLE_RANGE_PARALLEL (id INT, name STRING) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        String values =
+                IntStream.range(0, 2_000)
+                        .mapToObj(i -> String.format("(%s, %s)", i, "'name_" + i + "'"))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_SINGLE_RANGE_PARALLEL VALUES " + values);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_SINGLE_RANGE_PARALLEL', "
+                        + "index_column => 'id', index_type => 'btree', "
+                        + "options => 'btree-index.records-per-range=100;"
+                        + "btree-index.build.max-parallelism=4')");
+
+        FileStoreTable table = paimonTable("T_SINGLE_RANGE_PARALLEL");
+        List<IndexFileMeta> btreeEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(f -> "btree".equals(f.indexType()))
+                        .collect(Collectors.toList());
+
+        long totalRowCount = btreeEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
+        assertThat(btreeEntries).hasSizeGreaterThan(1);
+        assertThat(totalRowCount).isEqualTo(2_000L);
+
+        assertThat(sql("SELECT * FROM T_SINGLE_RANGE_PARALLEL WHERE id = 1500"))
+                .containsOnly(Row.of(1500, "name_1500"));
+    }
+
+    @Test
     void testBTreeIndexWithManyPartitions() throws Catalog.TableNotExistException {
         int numPartitions = 50;
         sql(
