@@ -40,7 +40,8 @@ class BlobFormatWriter:
 
         blob_value = row.values[0]
         if blob_value is None:
-            raise ValueError("BlobFormatWriter only supports non-null blob")
+            self.lengths.append(-1)
+            return
 
         if not isinstance(blob_value, Blob):
             raise ValueError("Field must be Blob/BlobData instance")

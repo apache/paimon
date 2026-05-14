@@ -421,9 +421,6 @@ class LocalFileIO(FileIO):
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
             
             column = data.column(0)
-            if column.null_count > 0:
-                raise RuntimeError("Blob format does not support null values")
-            
             field = data.schema[0]
             if pyarrow.types.is_large_binary(field.type):
                 fields = [DataField(0, field.name, AtomicType("BLOB"))]
@@ -444,6 +441,10 @@ class LocalFileIO(FileIO):
                 writer = BlobFormatWriter(output_stream)
                 for i in range(num_rows):
                     col_data = records_dict[field_name][i]
+                    if col_data is None:
+                        row = GenericRow([None], fields, RowKind.INSERT)
+                        writer.add_element(row)
+                        continue
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
                         if hasattr(col_data, 'as_py'):
                             col_data = col_data.as_py()

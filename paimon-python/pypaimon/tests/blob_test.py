@@ -745,17 +745,14 @@ class BlobEndToEndTest(unittest.TestCase):
             file_io.write_blob(multi_column_url, multi_column_table)
         self.assertIn("single column", str(context.exception))
 
-        # Test that FileIO.write_blob rejects null values
+        # Test that FileIO.write_blob supports null values
         null_schema = pa.schema([pa.field("blob_with_nulls", pa.large_binary())])
         null_table = pa.table([[b"data", None]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "null_data.blob"
         null_file_url = _to_url(null_file)
-
-        # Should throw RuntimeError for null values
-        with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(null_file_url, null_table)
-        self.assertIn("null values", str(context.exception))
+        file_io.write_blob(null_file_url, null_table)
+        self.assertTrue(file_io.exists(null_file_url))
 
         # ========== Test FormatBlobReader with complex type schema ==========
         # Create a valid blob file first
@@ -1027,17 +1024,14 @@ class BlobEndToEndTest(unittest.TestCase):
             "Field must be Blob/BlobData instance" in str(context.exception)
         )
 
-        # Test that blob format rejects tables with null values
+        # Test that blob format supports tables with null values
         null_schema = pa.schema([pa.field("blob_with_null", pa.large_binary())])
         null_table = pa.table([[b"data", None, b"more_data"]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "with_nulls.blob"
         null_file_url = _to_url(null_file)
-
-        # Should reject null values
-        with self.assertRaises(RuntimeError) as context:
-            file_io.write_blob(null_file_url, null_table)
-        self.assertIn("null values", str(context.exception))
+        file_io.write_blob(null_file_url, null_table)
+        self.assertTrue(file_io.exists(null_file_url))
 
     def test_blob_write_with_raw_bytes_starting_with_v1_prefix(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -1157,6 +1151,54 @@ class BlobEndToEndTest(unittest.TestCase):
         # With blob_as_descriptor=False, we should get the actual blob content
         self.assertEqual(read_content_bytes, test_content)
         reader_content.close()
+
+    def test_null_blob_write(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        output = io.BytesIO()
+        writer = BlobFormatWriter(output)
+
+        row_with_null = GenericRow(
+            [None],
+            [DataField(0, "blob_field", AtomicType("BLOB"))],
+            RowKind.INSERT
+        )
+        writer.add_element(row_with_null)
+        self.assertEqual(writer.lengths, [-1])
+        self.assertEqual(writer.position, 0)
+
+    def test_null_blob_read(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "null_blob.blob")
+
+        output = open(blob_file_path, 'wb')
+        writer = BlobFormatWriter(output)
+        fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
+        writer.add_element(GenericRow([BlobData(b"hello")], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([BlobData(b"world")], fields, RowKind.INSERT))
+        writer.close()
+
+        blob_field_name = "blob_field"
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=[blob_field_name],
+            full_fields=read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False
+        )
+
+        batch = reader.read_arrow_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.num_rows, 3)
+        self.assertEqual(batch.column(0)[0].as_py(), b"hello")
+        self.assertIsNone(batch.column(0)[1].as_py())
+        self.assertEqual(batch.column(0)[2].as_py(), b"world")
+        reader.close()
 
 
 class OffsetInputStreamTest(unittest.TestCase):
