@@ -27,7 +27,7 @@ under the License.
 
 # Daft
 
-[Daft](https://www.getdaft.io/) is a distributed DataFrame engine for Python.
+[Daft](https://www.daft.io/) is a distributed DataFrame engine for Python.
 
 This requires `daft` to be installed:
 
