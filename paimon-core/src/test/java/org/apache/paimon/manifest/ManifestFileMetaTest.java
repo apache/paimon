@@ -939,7 +939,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(entriesF.toArray(new ManifestEntry[0])));
 
         Options testOptions = new Options();
-        testOptions.set("manifest-sort.enable", "true");
+        testOptions.set("manifest-sort.enabled", "true");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
@@ -1025,7 +1025,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(run3Entries.toArray(new ManifestEntry[0])));
 
         Options testOptions = new Options();
-        testOptions.set("manifest-sort.enable", "true");
+        testOptions.set("manifest-sort.enabled", "true");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
@@ -1123,7 +1123,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         testOptions.set("manifest.target-file-size", "16MB");
         // Set full-compaction threshold very small to ensure it triggers
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
-        testOptions.set("manifest-sort.enable", "true");
+        testOptions.set("manifest-sort.enabled", "true");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(

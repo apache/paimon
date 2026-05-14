@@ -244,6 +244,9 @@ public class ManifestFileSorter {
                 defaultCompactionManifests.addAll(candidates);
                 lsmFiles.removeAll(candidates);
             }
+            deleteEntries =
+                    FileEntry.readDeletedEntries(
+                            manifestFile, defaultCompactionManifests, manifestReadParallelism);
         }
 
         return new ClassifyResult(defaultCompactionManifests, lsmFiles, deleteEntries);
@@ -579,11 +582,18 @@ public class ManifestFileSorter {
 
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                     manifestFile.createRollingWriter();
+            Exception exception = null;
             try {
                 for (ManifestEntry entry : entriesToRewrite) {
                     writer.write(entry);
                 }
+            } catch (Exception e) {
+                exception = e;
             } finally {
+                if (exception != null) {
+                    writer.abort();
+                    throw exception;
+                }
                 writer.close();
             }
             result.addAll(writer.result());
@@ -673,35 +683,31 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Read a single manifest file for sort rewrite. If the meta contains delete entries, only ADD
-     * entries not in {@code deletedIdentifiers} are returned. Otherwise, check if any ADD entry is
-     * cancelled; if not, the file is kept as-is ({@code requireChange = false}).
+     * Read a single manifest file for sort rewrite.
+     *
+     * <p>When {@code deletedIdentifiers} is non-empty (full compaction path), only surviving ADD
+     * entries (not cancelled by deletedIdentifiers) are kept, and DELETE entries are dropped
+     * because the full compaction has already resolved them.
+     *
+     * <p>When {@code deletedIdentifiers} is empty (non-full-compaction path), all entries (both ADD
+     * and DELETE) are preserved to avoid losing unresolved DELETE entries.
      */
     private static FullCompactionReadResult readForSortRewrite(
             ManifestFileMeta meta,
             ManifestFile manifestFile,
             Set<FileEntry.Identifier> deletedIdentifiers) {
-        if (meta.numDeletedFiles() > 0) {
-            List<ManifestEntry> entries = new ArrayList<>();
+        List<ManifestEntry> entries = new ArrayList<>();
+        if (deletedIdentifiers.isEmpty()) {
+            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        } else {
             for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
                 if (entry.kind() == FileKind.ADD
                         && !deletedIdentifiers.contains(entry.identifier())) {
                     entries.add(entry);
                 }
             }
-            return new FullCompactionReadResult(meta, true, entries);
-        } else {
-            boolean requireChange = false;
-            List<ManifestEntry> entries = new ArrayList<>();
-            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
-                if (deletedIdentifiers.contains(entry.identifier())) {
-                    requireChange = true;
-                } else {
-                    entries.add(entry);
-                }
-            }
-            return new FullCompactionReadResult(meta, requireChange, entries);
         }
+        return new FullCompactionReadResult(meta, true, entries);
     }
 
     /** A section of manifest files with pre-computed metadata. */

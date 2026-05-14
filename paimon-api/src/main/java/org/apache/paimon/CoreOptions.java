@@ -469,17 +469,13 @@ public class CoreOptions implements Serializable {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
-    public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLE =
-            key("manifest-sort.enable")
+    public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLED =
+            key("manifest-sort.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Whether to invoke manifest sort rewrite right after manifest merge"
-                                    + " during commit. The sort rewrite implementation is provided"
-                                    + " by an external module (e.g. morax) and discovered via"
-                                    + " ServiceLoader. When no implementation is registered on the"
-                                    + " classpath, this flag has no effect (manifest sort is"
-                                    + " silently skipped).");
+                                    + " during commit.).");
 
     public static final ConfigOption<String> MANIFEST_SORT_PARTITION_FIELD =
             key("manifest-sort.partition-field")
@@ -491,7 +487,7 @@ public class CoreOptions implements Serializable {
                                     + " caller (an external sort rewrite implementation). For"
                                     + " single-partition tables, optional (defaults to the only"
                                     + " partition field). For multi-partition tables, REQUIRED"
-                                    + " when 'manifest-sort.enable' is true.");
+                                    + " when 'manifest-sort.enabled' is true.");
 
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
@@ -2608,8 +2604,8 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
     }
 
-    public boolean manifestSortEnable() {
-        return options.get(MANIFEST_SORT_ENABLE);
+    public boolean manifestSortEnabled() {
+        return options.get(MANIFEST_SORT_ENABLED);
     }
 
     @Nullable
