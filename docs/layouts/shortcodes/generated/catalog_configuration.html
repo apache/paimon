@@ -99,6 +99,12 @@ under the License.
             <td>Whether to allow static cache in file io implementation. If not allowed, this means that there may be a large number of FileIO instances generated, enabling caching can lead to resource leakage.</td>
         </tr>
         <tr>
+            <td><h5>file-io.atomic-rename.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable atomic rename for file overwrite operations. When enabled, Paimon attempts atomic rename via temp file, supported on HDFS (DistributedFileSystem, ViewFileSystem). Falls back to direct overwrite on object stores like S3/OSS. Set to false to skip atomic rename and avoid reflection/temp file overhead.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
