@@ -167,6 +167,15 @@ public interface Catalog extends AutoCloseable {
     Table getTableById(String tableId) throws TableIdNotExistException;
 
     /**
+     * Return a {@link TableMetadata} identified by the given {@link Identifier}.
+     *
+     * @param identifier Path of the table
+     * @return The requested table metadata
+     * @throws TableNotExistException if the target does not exist
+     */
+    TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException;
+
+    /**
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * <p>NOTE: System tables will not be listed.
