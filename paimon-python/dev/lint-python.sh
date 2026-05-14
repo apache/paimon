@@ -138,7 +138,7 @@ function check_stage() {
 function flake8_check() {
     local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv"
     if python -c "import sys; sys.exit(0 if sys.version_info < (3, 7) else 1)" 2>/dev/null; then
-        PRUNE_PATHS="$PRUNE_PATHS -o -path ./pypaimon/daft"
+        PRUNE_PATHS="$PRUNE_PATHS -o -path ./pypaimon/daft -o -path ./pypaimon/tests/daft"
     fi
     PRUNE_PATHS="$PRUNE_PATHS \)"
     local PYTHON_SOURCE="$(eval "find . $PRUNE_PATHS -prune -o -type f -name '*.py' -print")"
