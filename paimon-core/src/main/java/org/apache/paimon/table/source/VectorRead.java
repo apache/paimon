@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Vector read to read index files. */
@@ -35,5 +36,9 @@ public interface VectorRead {
         return readBatch(plan.splits());
     }
 
-    List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits);
+    default List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+        List<GlobalIndexResult> results = new ArrayList<>(1);
+        results.add(read(splits));
+        return results;
+    }
 }

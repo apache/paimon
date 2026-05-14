@@ -48,6 +48,11 @@ public class VectorSearch implements Serializable {
         if (vectors == null || vectors.length == 0) {
             throw new IllegalArgumentException("Search vectors cannot be null or empty");
         }
+        for (float[] v : vectors) {
+            if (v == null) {
+                throw new IllegalArgumentException("Search vector element cannot be null");
+            }
+        }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
@@ -59,22 +64,18 @@ public class VectorSearch implements Serializable {
         this.fieldName = fieldName;
     }
 
-    /** Returns the first (or only) query vector. */
     public float[] vector() {
         return vectors[0];
     }
 
-    /** Returns all query vectors. */
     public float[][] vectors() {
         return vectors;
     }
 
-    /** Returns the number of query vectors. */
     public int vectorCount() {
         return vectors.length;
     }
 
-    /** Returns a single-vector VectorSearch for the i-th query vector. */
     public VectorSearch forIndex(int i) {
         VectorSearch single = new VectorSearch(vectors[i], limit, fieldName);
         if (includeRowIds != null) {

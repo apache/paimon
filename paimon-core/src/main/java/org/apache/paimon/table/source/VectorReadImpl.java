@@ -76,41 +76,7 @@ public class VectorReadImpl implements VectorRead {
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
-        if (splits.isEmpty()) {
-            return GlobalIndexResult.createEmpty();
-        }
-
-        RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
-        Integer threadNum = table.coreOptions().globalIndexThreadNum();
-
-        String indexType = splits.get(0).vectorIndexFiles().get(0).indexType();
-        GlobalIndexer globalIndexer =
-                GlobalIndexerFactoryUtils.load(indexType)
-                        .create(vectorColumn, table.coreOptions().toConfiguration());
-        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-        Iterator<Optional<ScoredGlobalIndexResult>> resultIterators =
-                randomlyExecuteSequentialReturn(
-                        split ->
-                                singletonList(
-                                        eval(
-                                                globalIndexer,
-                                                indexPathFactory,
-                                                split.rowRangeStart(),
-                                                split.rowRangeEnd(),
-                                                split.vectorIndexFiles(),
-                                                preFilter)),
-                        splits,
-                        threadNum);
-
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
-        while (resultIterators.hasNext()) {
-            Optional<ScoredGlobalIndexResult> next = resultIterators.next();
-            if (next.isPresent()) {
-                result = result.or(next.get());
-            }
-        }
-
-        return result.topK(limit);
+        return readBatch(splits).get(0);
     }
 
     @Override
@@ -185,30 +151,6 @@ public class VectorReadImpl implements VectorRead {
         }
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
             return scanner.scan(filter).map(GlobalIndexResult::results);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private Optional<ScoredGlobalIndexResult> eval(
-            GlobalIndexer globalIndexer,
-            IndexPathFactory indexPathFactory,
-            long rowRangeStart,
-            long rowRangeEnd,
-            List<IndexFileMeta> vectorIndexFiles,
-            @Nullable RoaringNavigableMap64 includeRowIds) {
-        List<GlobalIndexIOMeta> indexIOMetaList =
-                buildIOMetaList(indexPathFactory, vectorIndexFiles);
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
-            VectorSearch vectorSearch =
-                    new VectorSearch(vectors[0], limit, vectorColumn.name())
-                            .withIncludeRowIds(includeRowIds);
-            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                    .visitVectorSearch(vectorSearch);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
