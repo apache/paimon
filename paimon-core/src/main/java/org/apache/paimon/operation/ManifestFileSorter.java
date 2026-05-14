@@ -41,7 +41,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -73,7 +72,6 @@ public class ManifestFileSorter {
         long manifestFullCompactionSize = options.manifestFullCompactionThresholdSize().getBytes();
         Integer manifestReadParallelism = options.scanManifestParallelism();
         String sortPartitionField = options.manifestSortPartitionField();
-        int mergeMinCount = options.manifestMergeMinCount();
         // Step 1: Resolve sort field.
         String sortField = resolveSortField(sortPartitionField, partitionType);
         if (sortField == null) {
@@ -89,7 +87,6 @@ public class ManifestFileSorter {
                         input,
                         suggestedMetaSize,
                         manifestFullCompactionSize,
-                        mergeMinCount,
                         manifestFile,
                         partitionType,
                         manifestReadParallelism);
@@ -187,7 +184,6 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> input,
             long suggestedMetaSize,
             long manifestFullCompactionSize,
-            int mergeMinCount,
             ManifestFile manifestFile,
             RowType partitionType,
             @Nullable Integer manifestReadParallelism) {
@@ -238,30 +234,6 @@ public class ManifestFileSorter {
                     iterator.remove();
                     defaultCompactionManifests.add(file);
                 }
-            }
-        } else {
-            // Minor-style pick: merge adjacent small manifests when no full compact triggered.
-            Set<ManifestFileMeta> toRemove = new HashSet<>();
-            List<ManifestFileMeta> candidates = new ArrayList<>();
-            long candidateSize = 0;
-            for (ManifestFileMeta file : input) {
-                candidateSize += file.fileSize();
-                candidates.add(file);
-                if (candidateSize >= suggestedMetaSize) {
-                    if (candidates.size() > 1) {
-                        defaultCompactionManifests.addAll(candidates);
-                        toRemove.addAll(candidates);
-                    }
-                    candidates.clear();
-                    candidateSize = 0;
-                }
-            }
-            if (candidates.size() >= mergeMinCount) {
-                defaultCompactionManifests.addAll(candidates);
-                toRemove.addAll(candidates);
-            }
-            if (!toRemove.isEmpty()) {
-                lsmFiles.removeIf(toRemove::contains);
             }
         }
 
@@ -593,17 +565,6 @@ public class ManifestFileSorter {
         List<ManifestFileMeta> result = new ArrayList<>();
         if (!entriesToRewrite.isEmpty()) {
             entriesToRewrite.sort((a, b) -> compareSortKey(a, b, sortFieldIndex, sortFieldType));
-
-            // When non-full-compact (deletedIdentifiers is null, meaning delete entries
-            // were not read), entries may contain both ADD and DELETE. Merge them following
-            // FileEntry.mergeEntries logic to cancel paired ADD/DELETE and keep unresolved
-            // DELETE entries whose ADD is in a previous manifest file.
-            if (deletedIdentifiers == null) {
-                LinkedHashMap<FileEntry.Identifier, ManifestEntry> mergedMap =
-                        new LinkedHashMap<>();
-                FileEntry.mergeEntries(entriesToRewrite, mergedMap);
-                entriesToRewrite = new ArrayList<>(mergedMap.values());
-            }
 
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                     manifestFile.createRollingWriter();
