@@ -21,8 +21,12 @@ package org.apache.paimon.data.columnar.heap;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link HeapBytesVector#putByteArray}, focusing on reserveBytes() overflow safety. */
+/**
+ * Tests for {@link HeapBytesVector#putByteArray}, focusing on reserveBytes() overflow safety and
+ * the capacity-growth calculation in {@link HeapBytesVector#calculateNewBytesCapacity}.
+ */
 class HeapBytesVectorReserveBytesTest {
 
     @Test
@@ -70,6 +74,66 @@ class HeapBytesVectorReserveBytesTest {
 
         assertThat(vector.buffer.length).isGreaterThanOrEqualTo(largeSize);
         assertThat(vector.getBytes(0).len).isEqualTo(largeSize);
+    }
+
+    // ---- Tests for calculateNewBytesCapacity (no large allocation needed) ----
+
+    @Test
+    void testCalculateNewBytesCapacityDoublesSmallValues() {
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(100)).isEqualTo(200);
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(1)).isEqualTo(2);
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(1024 * 1024))
+                .isEqualTo(2 * 1024 * 1024);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAtHalfMaxReturnsDoubled() {
+        int halfMax = HeapBytesVector.MAX_ARRAY_SIZE >> 1;
+        // Exactly at the boundary: should still double
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(halfMax)).isEqualTo(halfMax << 1);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAboveHalfMaxReturnsExact() {
+        int halfMax = HeapBytesVector.MAX_ARRAY_SIZE >> 1;
+        int justAboveHalf = halfMax + 1;
+        // Above the doubling threshold: should return exact required capacity, not MAX_ARRAY_SIZE
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(justAboveHalf))
+                .isEqualTo(justAboveHalf);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAtMaxArraySizeReturnsExact() {
+        // Exactly at MAX_ARRAY_SIZE: should return exact value
+        assertThat(HeapBytesVector.calculateNewBytesCapacity(HeapBytesVector.MAX_ARRAY_SIZE))
+                .isEqualTo(HeapBytesVector.MAX_ARRAY_SIZE);
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityAboveMaxArraySizeThrows() {
+        long aboveMax = (long) HeapBytesVector.MAX_ARRAY_SIZE + 1;
+        assertThatThrownBy(() -> HeapBytesVector.calculateNewBytesCapacity(aboveMax))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds the maximum array size");
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityLongOverflowThrows() {
+        // Simulate what would happen if int arithmetic overflowed:
+        // e.g. bytesAppended=Integer.MAX_VALUE, length=1 => long sum > MAX_ARRAY_SIZE
+        long overflowedCapacity = (long) Integer.MAX_VALUE + 1;
+        assertThatThrownBy(() -> HeapBytesVector.calculateNewBytesCapacity(overflowedCapacity))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds the maximum array size");
+    }
+
+    @Test
+    void testCalculateNewBytesCapacityNegativeLongThrows() {
+        // A very large long value that would represent an int overflow scenario
+        long hugeCapacity = 3_000_000_000L;
+        assertThatThrownBy(() -> HeapBytesVector.calculateNewBytesCapacity(hugeCapacity))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds the maximum array size");
     }
 
     @Test
