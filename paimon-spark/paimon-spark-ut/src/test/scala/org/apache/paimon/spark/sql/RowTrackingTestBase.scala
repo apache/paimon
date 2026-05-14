@@ -953,4 +953,15 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("query row_tracking system table should not throw duplicate _ROW_ID error") {
+    withTable("T") {
+      sql(
+        "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+      checkAnswer(
+        sql("SELECT a, b FROM `T$row_tracking` ORDER BY a"),
+        Seq(Row(1, "a"), Row(2, "b"))
+      )
+    }
+  }
 }
