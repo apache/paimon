@@ -18,6 +18,8 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.utils.Preconditions;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,8 +34,6 @@ import java.util.List;
  *   <li><b>SizeRatio</b>: from low to high, pick adjacent runs whose amplification factor is less
  *       than {@code sizeRatioThreshold}.
  *   <li><b>Forced pick</b>: level0 and level1 runs are always picked.
- *   <li><b>Delete pick</b>: additionally pick runs containing manifest files with {@code
- *       numDeletedFiles > 0}.
  * </ol>
  */
 public class ManifestPickStrategy {
@@ -42,6 +42,8 @@ public class ManifestPickStrategy {
     private final int sizeRatioThreshold;
 
     public ManifestPickStrategy(int sizeAmpThreshold, int sizeRatioThreshold) {
+        Preconditions.checkArgument(sizeAmpThreshold > 0, "sizeAmpThreshold must be positive");
+        Preconditions.checkArgument(sizeRatioThreshold > 0, "sizeRatioThreshold must be positive");
         this.sizeAmpThreshold = sizeAmpThreshold;
         this.sizeRatioThreshold = sizeRatioThreshold;
     }
@@ -91,7 +93,7 @@ public class ManifestPickStrategy {
             }
         }
 
-        if (lowerLevelTotalSize > highestRun.totalSize() * sizeAmpThreshold) {
+        if (lowerLevelTotalSize / sizeAmpThreshold > highestRun.totalSize()) {
             return new ArrayList<>(levelRuns);
         }
         return null;
