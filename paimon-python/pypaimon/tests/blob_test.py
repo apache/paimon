@@ -1200,6 +1200,41 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(batch.column(0)[2].as_py(), b"world")
         reader.close()
 
+    def test_null_blob_read_as_descriptor(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "null_desc.blob")
+
+        output = open(blob_file_path, 'wb')
+        writer = BlobFormatWriter(output)
+        fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
+        writer.add_element(GenericRow([BlobData(b"hello")], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([BlobData(b"world")], fields, RowKind.INSERT))
+        writer.close()
+
+        blob_field_name = "blob_field"
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=[blob_field_name],
+            full_fields=read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=True
+        )
+
+        batch = reader.read_arrow_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.num_rows, 3)
+        desc0 = BlobDescriptor.deserialize(batch.column(0)[0].as_py())
+        self.assertEqual(desc0.uri, blob_file_path)
+        self.assertIsNone(batch.column(0)[1].as_py())
+        desc2 = BlobDescriptor.deserialize(batch.column(0)[2].as_py())
+        self.assertEqual(desc2.uri, blob_file_path)
+        reader.close()
+
 
 class OffsetInputStreamTest(unittest.TestCase):
 
