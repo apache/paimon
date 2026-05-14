@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -42,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -111,8 +111,18 @@ public class ManifestFileSorter {
         List<ManifestSortedRun> pickedRuns = pickStrategy.pick(levelRuns);
 
         if (pickedRuns.isEmpty() && defaultCompactionManifests.isEmpty()) {
+            LOG.debug(
+                    "Manifest sort rewrite skipped: no runs picked and no defaultCompaction files.");
             return Optional.of(input);
         }
+
+        LOG.info(
+                "Manifest sort rewrite: input={} files, lsm={} runs, picked={} runs, "
+                        + "defaultCompaction={} files.",
+                input.size(),
+                levelRuns.size(),
+                pickedRuns.size(),
+                defaultCompactionManifests.size());
 
         Set<ManifestSortedRun> pickedSet = new HashSet<>(pickedRuns);
         List<ManifestFileMeta> reusedFiles = new ArrayList<>();
@@ -155,6 +165,11 @@ public class ManifestFileSorter {
         result.addAll(rewritten);
 
         newFilesForAbort.addAll(sortNewFiles);
+        LOG.info(
+                "Manifest sort rewrite completed: sections={}, newFiles={}, resultFiles={}.",
+                sections.size(),
+                sortNewFiles.size(),
+                result.size());
         return Optional.of(result);
     }
 
@@ -226,6 +241,7 @@ public class ManifestFileSorter {
             }
         } else {
             // Minor-style pick: merge adjacent small manifests when no full compact triggered.
+            Set<ManifestFileMeta> toRemove = new HashSet<>();
             List<ManifestFileMeta> candidates = new ArrayList<>();
             long candidateSize = 0;
             for (ManifestFileMeta file : input) {
@@ -234,7 +250,7 @@ public class ManifestFileSorter {
                 if (candidateSize >= suggestedMetaSize) {
                     if (candidates.size() > 1) {
                         defaultCompactionManifests.addAll(candidates);
-                        lsmFiles.removeAll(candidates);
+                        toRemove.addAll(candidates);
                     }
                     candidates.clear();
                     candidateSize = 0;
@@ -242,11 +258,11 @@ public class ManifestFileSorter {
             }
             if (candidates.size() >= mergeMinCount) {
                 defaultCompactionManifests.addAll(candidates);
-                lsmFiles.removeAll(candidates);
+                toRemove.addAll(candidates);
             }
-            deleteEntries =
-                    FileEntry.readDeletedEntries(
-                            manifestFile, defaultCompactionManifests, manifestReadParallelism);
+            if (!toRemove.isEmpty()) {
+                lsmFiles.removeIf(toRemove::contains);
+            }
         }
 
         return new ClassifyResult(defaultCompactionManifests, lsmFiles, deleteEntries);
@@ -435,7 +451,8 @@ public class ManifestFileSorter {
         int n = runs.size();
         for (int i = 0; i < n; i++) {
             if (i >= n - 4) {
-                runs.get(i).setLevel(n - i);
+                // top-4 largest runs get level 4-1
+                runs.get(i).setLevel(i - (n - 4) + 1);
             } else {
                 runs.get(i).setLevel(0);
             }
@@ -580,6 +597,17 @@ public class ManifestFileSorter {
         if (!entriesToRewrite.isEmpty()) {
             entriesToRewrite.sort((a, b) -> compareSortKey(a, b, sortFieldIndex, sortFieldType));
 
+            // When non-full-compact (deletedIdentifiers is null, meaning delete entries
+            // were not read), entries may contain both ADD and DELETE. Merge them following
+            // FileEntry.mergeEntries logic to cancel paired ADD/DELETE and keep unresolved
+            // DELETE entries whose ADD is in a previous manifest file.
+            if (deletedIdentifiers == null) {
+                LinkedHashMap<FileEntry.Identifier, ManifestEntry> mergedMap =
+                        new LinkedHashMap<>();
+                FileEntry.mergeEntries(entriesToRewrite, mergedMap);
+                entriesToRewrite = new ArrayList<>(mergedMap.values());
+            }
+
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                     manifestFile.createRollingWriter();
             Exception exception = null;
@@ -657,6 +685,11 @@ public class ManifestFileSorter {
         if (c != 0) {
             return c;
         }
+        // ADD before DELETE, so that mergeEntries can correctly cancel pairs
+        int kindCmp = a.kind().compareTo(b.kind());
+        if (kindCmp != 0) {
+            return kindCmp;
+        }
         return a.file().fileName().compareTo(b.file().fileName());
     }
 
@@ -667,19 +700,14 @@ public class ManifestFileSorter {
      *
      * <ol>
      *   <li>If {@code manifest-sort.partition-field} is configured, return that value.
-     *   <li>Otherwise, if the table has exactly one partition field, return that field name.
-     *   <li>Otherwise return {@code null}.
+     *   <li>Otherwise, default to the first partition field.
      * </ol>
      */
-    @Nullable
     static String resolveSortField(String sortPartitionField, RowType partitionType) {
         if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
             return sortPartitionField;
         }
-        if (partitionType.getFieldCount() == 1) {
-            return partitionType.getFieldNames().get(0);
-        }
-        return null;
+        return partitionType.getFieldNames().get(0);
     }
 
     /**
@@ -701,8 +729,7 @@ public class ManifestFileSorter {
             entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
         } else {
             for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
-                if (entry.kind() == FileKind.ADD
-                        && !deletedIdentifiers.contains(entry.identifier())) {
+                if (!deletedIdentifiers.contains(entry.identifier())) {
                     entries.add(entry);
                 }
             }
