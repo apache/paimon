@@ -78,7 +78,7 @@ public class ManifestFileSorter {
         String sortField = resolveSortField(sortPartitionField, partitionType);
         if (sortField == null) {
             throw new IllegalArgumentException(
-                    "Cannot resolve sort field for manifest sort rewrite. ");
+                    "Cannot resolve sort field for manifest sort rewrite.");
         }
         int sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
         DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
