@@ -25,9 +25,9 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -38,6 +38,7 @@ public class FileSystemWriteRestore implements WriteRestore {
     private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
+    private final PartitionBucketMapping partitionBucketMapping;
 
     public FileSystemWriteRestore(
             CoreOptions options,
@@ -52,6 +53,7 @@ public class FileSystemWriteRestore implements WriteRestore {
                 this.scan.dropStats();
             }
         }
+        this.partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, options.bucket());
     }
 
     @Override
@@ -75,10 +77,15 @@ public class FileSystemWriteRestore implements WriteRestore {
             return RestoreFiles.empty();
         }
 
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
         List<ManifestEntry> entries =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
+
+        // Resolve the totalBuckets from the partition-level mapping rather than
+        // using the bucket entries, because a partition may have been rescaled to a
+        // different totalBuckets. If we used the bucket entries for an empty bucket,
+        // we would incorrectly return the table default totalBuckets for that partition.
+        Integer totalBuckets = partitionBucketMapping.resolveNumBuckets(partition);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {
