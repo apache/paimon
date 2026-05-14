@@ -21,6 +21,7 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -37,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -136,39 +138,180 @@ public class CommitScanner {
             @Nullable Snapshot latestSnapshot,
             @Nullable PartitionPredicate partitionFilter) {
         List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
-        List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
         if (latestSnapshot != null) {
-            scan.withSnapshot(latestSnapshot)
-                    .withPartitionFilter(partitionFilter)
-                    .withKind(ScanMode.ALL);
-            if (numBucket != BucketMode.POSTPONE_BUCKET) {
-                // bucket = -2 can only be overwritten in postpone bucket tables
-                scan.withBucketFilter(bucket -> bucket >= 0);
+            appendDeleteEntries(
+                    changesWithOverwrite,
+                    readOverwriteBaseEntries(numBucket, latestSnapshot, partitionFilter).values());
+        }
+        changesWithOverwrite.addAll(changes);
+        return new CommitChanges(
+                changesWithOverwrite,
+                emptyList(),
+                readOverwriteIndexChanges(indexFiles, latestSnapshot, partitionFilter));
+    }
+
+    public CommitChangesProvider overwriteChangesProvider(
+            int numBucket,
+            List<ManifestEntry> changes,
+            List<IndexManifestEntry> indexFiles,
+            @Nullable PartitionPredicate partitionFilter) {
+        return new OverwriteChangesProvider(numBucket, changes, indexFiles, partitionFilter);
+    }
+
+    private Map<FileEntry.Identifier, ManifestEntry> readOverwriteBaseEntries(
+            int numBucket, Snapshot latestSnapshot, @Nullable PartitionPredicate partitionFilter) {
+        Map<FileEntry.Identifier, ManifestEntry> currentEntries = new LinkedHashMap<>();
+        for (ManifestEntry entry :
+                readOverwriteEntries(numBucket, latestSnapshot, ScanMode.ALL, partitionFilter)) {
+            currentEntries.put(entry.identifier(), entry);
+        }
+        return currentEntries;
+    }
+
+    private List<ManifestEntry> readOverwriteEntries(
+            int numBucket,
+            Snapshot snapshot,
+            ScanMode scanMode,
+            @Nullable PartitionPredicate partitionFilter) {
+        FileStoreScan freshScan = freshScan();
+        freshScan.withSnapshot(snapshot).withPartitionFilter(partitionFilter).withKind(scanMode);
+        if (numBucket != BucketMode.POSTPONE_BUCKET) {
+            // bucket = -2 can only be overwritten in postpone bucket tables
+            freshScan.withBucketFilter(bucket -> bucket >= 0);
+        }
+        return freshScan.plan().files();
+    }
+
+    private List<IndexManifestEntry> readOverwriteIndexChanges(
+            List<IndexManifestEntry> indexFiles,
+            @Nullable Snapshot latestSnapshot,
+            @Nullable PartitionPredicate partitionFilter) {
+        List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
+        if (latestSnapshot != null && latestSnapshot.indexManifest() != null) {
+            List<IndexManifestEntry> entries =
+                    indexManifestFile.read(latestSnapshot.indexManifest());
+            for (IndexManifestEntry entry : entries) {
+                if (partitionFilter == null || partitionFilter.test(entry.partition())) {
+                    indexChangesWithOverwrite.add(entry.toDeleteEntry());
+                }
             }
-            List<ManifestEntry> currentEntries = scan.plan().files();
-            for (ManifestEntry entry : currentEntries) {
-                changesWithOverwrite.add(
-                        ManifestEntry.create(
-                                FileKind.DELETE,
-                                entry.partition(),
-                                entry.bucket(),
-                                entry.totalBuckets(),
-                                entry.file()));
+        }
+        indexChangesWithOverwrite.addAll(indexFiles);
+        return indexChangesWithOverwrite;
+    }
+
+    private FileStoreScan freshScan() {
+        FileStoreScan freshScan = scanSupplier.get();
+        if (dropStats) {
+            freshScan.dropStats();
+        }
+        return freshScan;
+    }
+
+    private void appendDeleteEntries(
+            List<ManifestEntry> changesWithOverwrite, Iterable<ManifestEntry> currentEntries) {
+        for (ManifestEntry entry : currentEntries) {
+            changesWithOverwrite.add(
+                    ManifestEntry.create(
+                            FileKind.DELETE,
+                            entry.partition(),
+                            entry.bucket(),
+                            entry.totalBuckets(),
+                            entry.file()));
+        }
+    }
+
+    private class OverwriteChangesProvider implements CommitChangesProvider {
+
+        private final int numBucket;
+        private final List<ManifestEntry> changes;
+        private final List<IndexManifestEntry> indexFiles;
+        @Nullable private final PartitionPredicate partitionFilter;
+
+        @Nullable private Snapshot cachedSnapshot;
+        @Nullable private Map<FileEntry.Identifier, ManifestEntry> currentEntries;
+
+        private OverwriteChangesProvider(
+                int numBucket,
+                List<ManifestEntry> changes,
+                List<IndexManifestEntry> indexFiles,
+                @Nullable PartitionPredicate partitionFilter) {
+            this.numBucket = numBucket;
+            this.changes = changes;
+            this.indexFiles = indexFiles;
+            this.partitionFilter = partitionFilter;
+        }
+
+        @Override
+        public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
+            if (latestSnapshot == null) {
+                return new CommitChanges(
+                        new ArrayList<>(changes), emptyList(), new ArrayList<>(indexFiles));
             }
 
-            // collect index files
-            if (latestSnapshot.indexManifest() != null) {
-                List<IndexManifestEntry> entries =
-                        indexManifestFile.read(latestSnapshot.indexManifest());
-                for (IndexManifestEntry entry : entries) {
-                    if (partitionFilter == null || partitionFilter.test(entry.partition())) {
-                        indexChangesWithOverwrite.add(entry.toDeleteEntry());
+            updateCurrentEntries(latestSnapshot);
+
+            List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
+            appendDeleteEntries(changesWithOverwrite, currentEntries.values());
+            changesWithOverwrite.addAll(changes);
+            return new CommitChanges(
+                    changesWithOverwrite,
+                    emptyList(),
+                    readOverwriteIndexChanges(indexFiles, latestSnapshot, partitionFilter));
+        }
+
+        private void updateCurrentEntries(Snapshot latestSnapshot) {
+            if (cachedSnapshot == null || latestSnapshot.id() < cachedSnapshot.id()) {
+                currentEntries =
+                        readOverwriteBaseEntries(numBucket, latestSnapshot, partitionFilter);
+            } else if (latestSnapshot.id() > cachedSnapshot.id()) {
+                try {
+                    updateCurrentEntriesFromDelta(latestSnapshot);
+                } catch (RuntimeException e) {
+                    currentEntries =
+                            readOverwriteBaseEntries(numBucket, latestSnapshot, partitionFilter);
+                }
+            }
+            cachedSnapshot = latestSnapshot;
+        }
+
+        private void updateCurrentEntriesFromDelta(Snapshot latestSnapshot) {
+            for (long snapshotId = cachedSnapshot.id() + 1;
+                    snapshotId <= latestSnapshot.id();
+                    snapshotId++) {
+                for (ManifestEntry entry :
+                        readOverwriteEntries(
+                                numBucket, snapshotId, ScanMode.DELTA, partitionFilter)) {
+                    FileEntry.Identifier identifier = entry.identifier();
+                    switch (entry.kind()) {
+                        case ADD:
+                            currentEntries.put(identifier, entry);
+                            break;
+                        case DELETE:
+                            currentEntries.remove(identifier);
+                            break;
+                        default:
+                            throw new UnsupportedOperationException(
+                                    "Unsupported file kind: " + entry.kind());
                     }
                 }
             }
         }
-        changesWithOverwrite.addAll(changes);
-        indexChangesWithOverwrite.addAll(indexFiles);
-        return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
+
+        private List<ManifestEntry> readOverwriteEntries(
+                int numBucket,
+                long snapshotId,
+                ScanMode scanMode,
+                @Nullable PartitionPredicate partitionFilter) {
+            FileStoreScan freshScan = freshScan();
+            freshScan
+                    .withSnapshot(snapshotId)
+                    .withPartitionFilter(partitionFilter)
+                    .withKind(scanMode);
+            if (numBucket != BucketMode.POSTPONE_BUCKET) {
+                freshScan.withBucketFilter(bucket -> bucket >= 0);
+            }
+            return freshScan.plan().files();
+        }
     }
 }

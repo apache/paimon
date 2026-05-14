@@ -82,6 +82,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -946,6 +947,67 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testOverwriteRetryUpdatesCurrentFilesWithDelta() throws Exception {
+        TestFileStore store = createStore(false);
+        List<KeyValue> base =
+                Arrays.asList(
+                        gen.nextPartitionedData(RowKind.INSERT, "20211110", 8),
+                        gen.nextPartitionedData(RowKind.INSERT, "20211110", 9),
+                        gen.nextPartitionedData(RowKind.INSERT, "20211111", 8));
+        store.commitData(base, gen::getPartition, kv -> 0);
+
+        KeyValue overwriteRecord = gen.nextPartitionedData(RowKind.INSERT, "20211110", 8);
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(overwriteRecord),
+                gen::getPartition,
+                kv -> 0,
+                true,
+                17L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        KeyValue concurrentRecord = gen.nextPartitionedData(RowKind.INSERT, "20211110", 9);
+        AtomicInteger retries = new AtomicInteger();
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "overwrite-retry",
+                        new CommitFailOnceSnapshotCommit(
+                                new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                                retries,
+                                () -> {
+                                    try {
+                                        store.commitData(
+                                                Collections.singletonList(concurrentRecord),
+                                                gen::getPartition,
+                                                kv -> 0);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }))) {
+            commit.overwritePartition(
+                    Collections.singletonMap("dt", "20211110"),
+                    checkNotNull(committableRef.get()),
+                    Collections.emptyMap());
+        }
+
+        assertThat(retries.get()).isEqualTo(2);
+
+        List<KeyValue> expected = new ArrayList<>();
+        expected.add(overwriteRecord);
+        expected.add(base.get(2));
+        gen.sort(expected);
+        Map<BinaryRow, BinaryRow> expectedMap = store.toKvMap(expected);
+
+        List<KeyValue> actual =
+                store.readKvsFromSnapshot(checkNotNull(store.snapshotManager().latestSnapshotId()));
+        gen.sort(actual);
+        assertThat(store.toKvMap(actual)).isEqualTo(expectedMap);
+    }
+
+    @Test
     public void testManifestCompactFull() throws Exception {
         // Disable full compaction by options.
         TestFileStore store =
@@ -1140,6 +1202,38 @@ public class FileStoreCommitTest {
                 return false;
             }
             return committed;
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
+    }
+
+    private static class CommitFailOnceSnapshotCommit implements SnapshotCommit {
+
+        private final SnapshotCommit delegate;
+        private final AtomicInteger attempts;
+        private final Runnable beforeFirstFailure;
+
+        private CommitFailOnceSnapshotCommit(
+                SnapshotCommit delegate, AtomicInteger attempts, Runnable beforeFirstFailure) {
+            this.delegate = delegate;
+            this.attempts = attempts;
+            this.beforeFirstFailure = beforeFirstFailure;
+        }
+
+        @Override
+        public boolean commit(
+                Snapshot snapshot,
+                String branch,
+                List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                throws Exception {
+            if (attempts.getAndIncrement() == 0) {
+                beforeFirstFailure.run();
+                return false;
+            }
+            return delegate.commit(snapshot, branch, statistics);
         }
 
         @Override
