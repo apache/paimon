@@ -971,7 +971,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
-
     /**
      * Test manifest sort with heavily overlapping manifests that form multiple sorted runs. This
      * exercises buildLevelSortedRuns and the LSM level assignment logic.
