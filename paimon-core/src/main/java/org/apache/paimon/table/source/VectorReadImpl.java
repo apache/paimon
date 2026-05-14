@@ -76,6 +76,10 @@ public class VectorReadImpl implements VectorRead {
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
+        if (vectors.length > 1) {
+            throw new IllegalStateException(
+                    "read() supports single vector only; use readBatch() for multiple vectors");
+        }
         return readBatch(splits).get(0);
     }
 

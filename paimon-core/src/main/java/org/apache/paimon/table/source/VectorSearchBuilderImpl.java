@@ -26,6 +26,7 @@ import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorSearchBuilder}. */
 public class VectorSearchBuilderImpl implements VectorSearchBuilder {
@@ -93,6 +94,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorRead newVectorRead() {
+        checkNotNull(vectors, "vectors must be set via withVector() or withVectors()");
         return new VectorReadImpl(
                 table,
                 filter,
