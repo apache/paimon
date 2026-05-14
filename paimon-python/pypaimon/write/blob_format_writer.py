@@ -17,7 +17,7 @@
 
 import struct
 import zlib
-from typing import BinaryIO, List, Optional
+from typing import BinaryIO, List
 
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
