@@ -939,9 +939,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(entriesF.toArray(new ManifestEntry[0])));
 
         Options testOptions = new Options();
-        testOptions.set("manifest.target-file-size", "500B");
-        testOptions.set("manifest.merge-min-count", "3");
-        testOptions.set("manifest.full-compaction-threshold-size", "200B");
         testOptions.set("manifest-sort.enable", "true");
 
         List<ManifestFileMeta> merged =
@@ -1036,9 +1033,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(entries6.toArray(new ManifestEntry[0])));
 
         Options testOptions = new Options();
-        testOptions.set("manifest.target-file-size", "500B");
-        testOptions.set("manifest.merge-min-count", "3");
-        testOptions.set("manifest.full-compaction-threshold-size", "100B");
         testOptions.set("manifest-sort.enable", "true");
 
         List<ManifestFileMeta> merged =
@@ -1125,9 +1119,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         input.add(makeManifest(run3Entries.toArray(new ManifestEntry[0])));
 
         Options testOptions = new Options();
-        testOptions.set("manifest.target-file-size", "500B");
-        testOptions.set("manifest.merge-min-count", "3");
-        testOptions.set("manifest.full-compaction-threshold-size", "100B");
         testOptions.set("manifest-sort.enable", "true");
 
         List<ManifestFileMeta> merged =
@@ -1224,7 +1215,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // Set target file size very large so all input manifests are considered "small"
         // (fileSize < suggestedMetaSize), which makes them all satisfy mustChange condition
         testOptions.set("manifest.target-file-size", "16MB");
-        testOptions.set("manifest.merge-min-count", "3");
         // Set full-compaction threshold very small to ensure it triggers
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("manifest-sort.enable", "true");

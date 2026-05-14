@@ -22,13 +22,10 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
@@ -38,7 +35,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -79,25 +75,24 @@ public class ManifestFileMerger {
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
-            Optional<List<ManifestFileMeta>> merged;
-
             // If manifest-sort.enable is enabled and there are partition fields, use trySortRewrite
             if (options.manifestSortEnable() && partitionType.getFieldCount() > 0) {
-                merged =
-                        trySortRewrite(
+                Optional<List<ManifestFileMeta>> sorted =
+                        ManifestFileSorter.trySortRewrite(
                                 input, newFilesForAbort, manifestFile, partitionType, options);
-            } else {
-                // Otherwise try full compaction first, then minor compaction if needed
-                merged =
-                        tryFullCompaction(
-                                input,
-                                newFilesForAbort,
-                                manifestFile,
-                                suggestedMetaSize,
-                                manifestFullCompactionSize,
-                                partitionType,
-                                manifestReadParallelism);
+                return sorted.orElse(input);
             }
+
+            // Otherwise try full compaction first, then minor compaction if needed
+            Optional<List<ManifestFileMeta>> merged =
+                    tryFullCompaction(
+                            input,
+                            newFilesForAbort,
+                            manifestFile,
+                            suggestedMetaSize,
+                            manifestFullCompactionSize,
+                            partitionType,
+                            manifestReadParallelism);
 
             return merged.orElseGet(
                     () ->
@@ -314,7 +309,7 @@ public class ManifestFileMerger {
         return new FullCompactionReadResult(file, requireChange, entries);
     }
 
-    private static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {
+    static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {
         Set<BinaryRow> partitions = new HashSet<>();
         for (FileEntry.Identifier identifier : deleteEntries) {
             partitions.add(identifier.partition);
@@ -322,532 +317,13 @@ public class ManifestFileMerger {
         return partitions;
     }
 
-    // ==================== Manifest Sort Rewrite ====================
+    static class FullCompactionReadResult {
 
-    /**
-     * Try to sort-rewrite the merged manifest list by a configured partition field. If the sort
-     * field cannot be resolved or the delta file size is below the full compaction threshold, the
-     * input is returned as-is.
-     */
-    private static Optional<List<ManifestFileMeta>> trySortRewrite(
-            List<ManifestFileMeta> input,
-            List<ManifestFileMeta> newFilesForAbort,
-            ManifestFile manifestFile,
-            RowType partitionType,
-            CoreOptions options)
-            throws Exception {
-        // Extract configuration from options
-        long suggestedMetaSize = options.manifestTargetSize().getBytes();
-        long manifestFullCompactionSize = options.manifestFullCompactionThresholdSize().getBytes();
-        Integer manifestReadParallelism = options.scanManifestParallelism();
-        String sortPartitionField = options.manifestSortPartitionField();
-        // Step 1: Resolve sort field.
-        String sortField = resolveSortField(sortPartitionField, partitionType);
-        if (sortField == null) {
-            throw new IllegalArgumentException(
-                    "Cannot resolve sort field for manifest sort rewrite. ");
-        }
-        int sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
-        DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
+        final ManifestFileMeta file;
+        final boolean requireChange;
+        final List<ManifestEntry> entries;
 
-        // Step 2: Check full compact trigger.
-        Filter<ManifestFileMeta> mustChange =
-                file -> file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize;
-
-        long totalDeltaFileSize = 0;
-        for (ManifestFileMeta file : input) {
-            if (mustChange.test(file)) {
-                totalDeltaFileSize += file.fileSize();
-            }
-        }
-
-        List<ManifestFileMeta> fullCompactionManifests = new ArrayList<>();
-        List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        Set<FileEntry.Identifier> deleteEntries = null;
-        if (totalDeltaFileSize >= manifestFullCompactionSize) {
-            // Step 3: Read delete entries and build partition predicate.
-            deleteEntries =
-                    FileEntry.readDeletedEntries(manifestFile, input, manifestReadParallelism);
-
-            PartitionPredicate predicate;
-            if (deleteEntries.isEmpty()) {
-                predicate = PartitionPredicate.ALWAYS_FALSE;
-            } else {
-                if (partitionType.getFieldCount() > 0) {
-                    Set<BinaryRow> deletePartitions = computeDeletePartitions(deleteEntries);
-                    predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
-                } else {
-                    predicate = PartitionPredicate.ALWAYS_TRUE;
-                }
-            }
-
-            // Step 4: Classify input into level0 runs and LSM files.
-            Iterator<ManifestFileMeta> iterator = lsmFiles.iterator();
-            while (iterator.hasNext()) {
-                ManifestFileMeta file = iterator.next();
-                if (mustChange.test(file)) {
-                    iterator.remove();
-                    fullCompactionManifests.add(file);
-                } else if (predicate != null
-                        && predicate.test(
-                                file.numAddedFiles() + file.numDeletedFiles(),
-                                file.partitionStats().minValues(),
-                                file.partitionStats().maxValues(),
-                                file.partitionStats().nullCounts())) {
-                    iterator.remove();
-                    fullCompactionManifests.add(file);
-                }
-            }
-        }
-
-        // Process full compaction manifests separately: sort, deduplicate, and rewrite
-        List<ManifestFileMeta> fullCompactionRewritten = new ArrayList<>();
-        if (!fullCompactionManifests.isEmpty()) {
-            fullCompactionRewritten =
-                    sortAndRewriteFullCompaction(
-                            fullCompactionManifests,
-                            manifestFile,
-                            sortFieldIndex,
-                            sortFieldType,
-                            suggestedMetaSize,
-                            deleteEntries,
-                            manifestReadParallelism);
-            newFilesForAbort.addAll(fullCompactionRewritten);
-        }
-
-        // Step 5: Build LSM Tree and assign levels (only for lsmFiles).
-        List<ManifestSortedRun> levelRuns =
-                lsmFiles.isEmpty()
-                        ? new ArrayList<>()
-                        : buildLevelSortedRuns(lsmFiles, sortFieldIndex, sortFieldType);
-
-        // Step 6: Pick runs to compact.
-        int sizeAmpThreshold = options.maxSizeAmplificationPercent();
-        int sizeRatioThreshold = options.sortedRunSizeRatio();
-        ManifestPickStrategy pickStrategy =
-                new ManifestPickStrategy(sizeAmpThreshold, sizeRatioThreshold);
-        List<ManifestSortedRun> pickedRuns = pickStrategy.pick(levelRuns);
-
-        Set<ManifestSortedRun> pickedSet = new HashSet<>(pickedRuns);
-        List<ManifestFileMeta> reusedFiles = new ArrayList<>();
-        for (ManifestSortedRun run : levelRuns) {
-            if (!pickedSet.contains(run)) {
-                reusedFiles.addAll(run.files());
-            }
-        }
-        List<ManifestFileMeta> result = new ArrayList<>(reusedFiles);
-        if (pickedRuns.isEmpty()) {
-            result.addAll(fullCompactionRewritten);
-            return Optional.of(new ArrayList<>(result));
-        }
-
-        // Step 7: Split picked files into sections, sort and rewrite each.
-        List<ManifestFileMeta> pickedFiles = new ArrayList<>();
-        for (ManifestSortedRun run : pickedRuns) {
-            pickedFiles.addAll(run.files());
-        }
-
-        List<List<ManifestFileMeta>> sections =
-                splitIntoSections(pickedFiles, sortFieldIndex, sortFieldType);
-        long maxRewriteSize = options.manifestSortMaxRewriteSize();
-        long processedSize = 0;
-
-        long openFileCost = options.manifestSortOpenFileCost();
-        List<ManifestFileMeta> sortNewFiles = new ArrayList<>();
-        for (List<ManifestFileMeta> section : sections) {
-            long sectionSize = 0;
-            for (ManifestFileMeta m : section) {
-                sectionSize += m.fileSize() + openFileCost;
-            }
-            if (processedSize + sectionSize > maxRewriteSize) {
-                result.addAll(section);
-                continue;
-            }
-            processedSize += sectionSize;
-
-            List<ManifestFileMeta> merged =
-                    sortAndRewriteSection(
-                            section,
-                            manifestFile,
-                            sortFieldIndex,
-                            sortFieldType,
-                            null,
-                            manifestReadParallelism);
-            sortNewFiles.addAll(merged);
-            result.addAll(merged);
-        }
-        newFilesForAbort.addAll(sortNewFiles);
-        result.addAll(fullCompactionRewritten);
-        return Optional.of(result);
-    }
-
-    // ==================== Sort Rewrite Helpers ====================
-
-    /**
-     * Build level-sorted runs from a list of manifest files. Sorts files by min partition value,
-     * greedy-scans to build non-overlapping SortedRuns, then assigns levels by totalSize (Top-4
-     * largest to level 1~4, rest to level 0).
-     */
-    static List<ManifestSortedRun> buildLevelSortedRuns(
-            List<ManifestFileMeta> input, int sortFieldIndex, DataType sortFieldType) {
-        input.sort(
-                (a, b) -> {
-                    int cmp =
-                            compareField(
-                                    a.partitionStats().minValues(),
-                                    b.partitionStats().minValues(),
-                                    sortFieldIndex,
-                                    sortFieldType);
-                    if (cmp != 0) {
-                        return cmp;
-                    }
-                    return compareField(
-                            a.partitionStats().maxValues(),
-                            b.partitionStats().maxValues(),
-                            sortFieldIndex,
-                            sortFieldType);
-                });
-
-        List<List<ManifestFileMeta>> runFilesList = new ArrayList<>();
-        List<ManifestFileMeta> currentRun = new ArrayList<>();
-        currentRun.add(input.get(0));
-        for (int i = 1; i < input.size(); i++) {
-            ManifestFileMeta file = input.get(i);
-            ManifestFileMeta last = currentRun.get(currentRun.size() - 1);
-            if (compareField(
-                            file.partitionStats().minValues(),
-                            last.partitionStats().maxValues(),
-                            sortFieldIndex,
-                            sortFieldType)
-                    > 0) {
-                currentRun.add(file);
-            } else {
-                runFilesList.add(currentRun);
-                currentRun = new ArrayList<>();
-                currentRun.add(file);
-            }
-        }
-        runFilesList.add(currentRun);
-
-        List<ManifestSortedRun> runs = new ArrayList<>(runFilesList.size());
-        for (List<ManifestFileMeta> rf : runFilesList) {
-            runs.add(ManifestSortedRun.fromSorted(rf));
-        }
-
-        runs.sort(Comparator.comparingLong(ManifestSortedRun::totalSize));
-        int n = runs.size();
-        for (int i = 0; i < n; i++) {
-            if (i >= n - 4) {
-                runs.get(i).setLevel(n - i);
-            } else {
-                runs.get(i).setLevel(0);
-            }
-        }
-        return runs;
-    }
-
-    /**
-     * Split picked files into sections. Files with overlapping sort-key intervals go into the same
-     * section.
-     */
-    static List<List<ManifestFileMeta>> splitIntoSections(
-            List<ManifestFileMeta> pickedFiles, int sortFieldIndex, DataType sortFieldType) {
-        pickedFiles.sort(
-                (a, b) -> {
-                    int cmp =
-                            compareField(
-                                    a.partitionStats().minValues(),
-                                    b.partitionStats().minValues(),
-                                    sortFieldIndex,
-                                    sortFieldType);
-                    if (cmp != 0) {
-                        return cmp;
-                    }
-                    return compareField(
-                            a.partitionStats().maxValues(),
-                            b.partitionStats().maxValues(),
-                            sortFieldIndex,
-                            sortFieldType);
-                });
-
-        List<List<ManifestFileMeta>> sections = new ArrayList<>();
-        List<ManifestFileMeta> currentSection = new ArrayList<>();
-        currentSection.add(pickedFiles.get(0));
-        BinaryRow sectionMaxBound = pickedFiles.get(0).partitionStats().maxValues();
-        for (int i = 1; i < pickedFiles.size(); i++) {
-            ManifestFileMeta file = pickedFiles.get(i);
-            if (compareField(
-                            file.partitionStats().minValues(),
-                            sectionMaxBound,
-                            sortFieldIndex,
-                            sortFieldType)
-                    > 0) {
-                sections.add(currentSection);
-                currentSection = new ArrayList<>();
-                currentSection.add(file);
-                sectionMaxBound = file.partitionStats().maxValues();
-            } else {
-                currentSection.add(file);
-                if (compareField(
-                                file.partitionStats().maxValues(),
-                                sectionMaxBound,
-                                sortFieldIndex,
-                                sortFieldType)
-                        > 0) {
-                    sectionMaxBound = file.partitionStats().maxValues();
-                }
-            }
-        }
-        sections.add(currentSection);
-        return sections;
-    }
-
-    /**
-     * Sort and rewrite full compaction manifests. Files are sorted by min partition value, then
-     * processed in batches. A batch stops when total size reaches threshold or when current max
-     * doesn't overlap with next min. Each batch is sorted, deduplicated (DELETE entries removed),
-     * and written to new manifest files.
-     */
-    private static List<ManifestFileMeta> sortAndRewriteFullCompaction(
-            List<ManifestFileMeta> fullCompactionManifests,
-            ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
-            long suggestedMetaSize,
-            @Nullable Set<FileEntry.Identifier> deletedIdentifiers,
-            @Nullable Integer manifestReadParallelism)
-            throws Exception {
-
-        // Sort by min partition value
-        fullCompactionManifests.sort(
-                (a, b) ->
-                        compareField(
-                                a.partitionStats().minValues(),
-                                b.partitionStats().minValues(),
-                                sortFieldIndex,
-                                sortFieldType));
-
-        List<ManifestFileMeta> result = new ArrayList<>();
-        List<ManifestFileMeta> batch = new ArrayList<>();
-        long batchSize = 0;
-
-        for (int i = 0; i < fullCompactionManifests.size(); i++) {
-            ManifestFileMeta current = fullCompactionManifests.get(i);
-            boolean shouldFlush = false;
-
-            // Check if batch size reaches threshold
-            if (batchSize + current.fileSize() >= suggestedMetaSize && !batch.isEmpty()) {
-                shouldFlush = true;
-            }
-
-            // Check if current max overlaps with next min
-            if (i < fullCompactionManifests.size() - 1 && !batch.isEmpty()) {
-                ManifestFileMeta next = fullCompactionManifests.get(i + 1);
-                int cmp =
-                        compareField(
-                                current.partitionStats().maxValues(),
-                                next.partitionStats().minValues(),
-                                sortFieldIndex,
-                                sortFieldType);
-                if (cmp < 0) {
-                    shouldFlush = true;
-                }
-            }
-
-            batch.add(current);
-            batchSize += current.fileSize();
-
-            if (shouldFlush || i == fullCompactionManifests.size() - 1) {
-                // Process batch: sort entries, remove DELETE, write out
-                List<ManifestFileMeta> rewritten =
-                        sortAndRewriteSection(
-                                batch,
-                                manifestFile,
-                                sortFieldIndex,
-                                sortFieldType,
-                                deletedIdentifiers,
-                                manifestReadParallelism);
-                result.addAll(rewritten);
-                batch.clear();
-                batchSize = 0;
-            }
-        }
-
-        return result;
-    }
-
-    /**
-     * Read all entries from a section's manifest files, sort them in memory by the specified
-     * partition field, filter out DELETE entries and cancelled ADD entries, then write surviving
-     * entries to the rolling writer. Manifest files without delete entries and without cancelled
-     * ADD entries are kept as-is.
-     *
-     * <p>Reading is parallelized via {@code sequentialBatchedExecute} following the same pattern as
-     * {@link #tryFullCompaction}.
-     */
-    private static List<ManifestFileMeta> sortAndRewriteSection(
-            List<ManifestFileMeta> section,
-            ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
-            @Nullable Set<FileEntry.Identifier> deletedIdentifiers,
-            @Nullable Integer manifestReadParallelism)
-            throws Exception {
-
-        Set<FileEntry.Identifier> safeDeletedIds =
-                deletedIdentifiers != null ? deletedIdentifiers : new HashSet<>();
-
-        // Parallel read: each meta is read independently
-        Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
-                meta -> singletonList(readForSortRewrite(meta, manifestFile, safeDeletedIds));
-
-        List<ManifestFileMeta> result = new ArrayList<>();
-        List<ManifestEntry> entriesToRewrite = new ArrayList<>();
-
-        for (FullCompactionReadResult readResult :
-                sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
-            if (readResult.requireChange) {
-                entriesToRewrite.addAll(readResult.entries);
-            } else {
-                result.add(readResult.file);
-            }
-        }
-
-        if (!entriesToRewrite.isEmpty()) {
-            entriesToRewrite.sort((a, b) -> compareSortKey(a, b, sortFieldIndex, sortFieldType));
-
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                    manifestFile.createRollingWriter();
-            try {
-                for (ManifestEntry entry : entriesToRewrite) {
-                    writer.write(entry);
-                }
-            } finally {
-                writer.close();
-            }
-            result.addAll(writer.result());
-        }
-
-        return result;
-    }
-    /**
-     * Compares the value at field {@code k} of two {@link BinaryRow}s according to {@code type}.
-     */
-    static int compareField(BinaryRow a, BinaryRow b, int k, DataType type) {
-        switch (type.getTypeRoot()) {
-            case INTEGER:
-            case DATE:
-                return Integer.compare(a.getInt(k), b.getInt(k));
-            case BIGINT:
-                return Long.compare(a.getLong(k), b.getLong(k));
-            case SMALLINT:
-                return Short.compare(a.getShort(k), b.getShort(k));
-            case TINYINT:
-                return Byte.compare(a.getByte(k), b.getByte(k));
-            case FLOAT:
-                return Float.compare(a.getFloat(k), b.getFloat(k));
-            case DOUBLE:
-                return Double.compare(a.getDouble(k), b.getDouble(k));
-            case BOOLEAN:
-                return Boolean.compare(a.getBoolean(k), b.getBoolean(k));
-            case VARCHAR:
-            case CHAR:
-                return a.getString(k).compareTo(b.getString(k));
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return a.getTimestamp(k, type.defaultSize())
-                        .compareTo(b.getTimestamp(k, type.defaultSize()));
-            case DECIMAL:
-                DecimalType dt = (DecimalType) type;
-                return a.getDecimal(k, dt.getPrecision(), dt.getScale())
-                        .compareTo(b.getDecimal(k, dt.getPrecision(), dt.getScale()));
-            default:
-                String errorMsg =
-                        String.format(
-                                "Unsupported partition field type '%s' for manifest sort rewrite. "
-                                        + "Supported types: TINYINT, SMALLINT, INTEGER, BIGINT, "
-                                        + "FLOAT, DOUBLE, BOOLEAN, CHAR, VARCHAR, DATE, TIMESTAMP, "
-                                        + "DECIMAL.",
-                                type.getTypeRoot());
-                LOG.error(errorMsg);
-                throw new UnsupportedOperationException(errorMsg);
-        }
-    }
-
-    /**
-     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, fileName)}.
-     * {@code fileName} is used as the tie-breaker so that all entries sharing the same sort-field
-     * value AND the same data file are emitted contiguously.
-     */
-    static int compareSortKey(
-            ManifestEntry a, ManifestEntry b, int sortFieldIndex, DataType sortFieldType) {
-        int c = compareField(a.partition(), b.partition(), sortFieldIndex, sortFieldType);
-        if (c != 0) {
-            return c;
-        }
-        return a.file().fileName().compareTo(b.file().fileName());
-    }
-
-    /**
-     * Resolve the partition field to sort manifests by.
-     *
-     * <p>Resolution rules:
-     *
-     * <ol>
-     *   <li>If {@code manifest-sort.partition-field} is configured, return that value.
-     *   <li>Otherwise, if the table has exactly one partition field, return that field name.
-     *   <li>Otherwise return {@code null}.
-     * </ol>
-     */
-    @Nullable
-    static String resolveSortField(String sortPartitionField, RowType partitionType) {
-        if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
-            return sortPartitionField;
-        }
-        if (partitionType.getFieldCount() == 1) {
-            return partitionType.getFieldNames().get(0);
-        }
-        return null;
-    }
-    /**
-     * Read a single manifest file for sort rewrite. If the meta contains delete entries, only ADD
-     * entries not in {@code deletedIdentifiers} are returned. Otherwise, check if any ADD entry is
-     * cancelled; if not, the file is kept as-is ({@code requireChange = false}).
-     */
-    private static FullCompactionReadResult readForSortRewrite(
-            ManifestFileMeta meta,
-            ManifestFile manifestFile,
-            Set<FileEntry.Identifier> deletedIdentifiers) {
-        if (meta.numDeletedFiles() > 0) {
-            List<ManifestEntry> entries = new ArrayList<>();
-            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
-                if (entry.kind() == FileKind.ADD
-                        && !deletedIdentifiers.contains(entry.identifier())) {
-                    entries.add(entry);
-                }
-            }
-            return new FullCompactionReadResult(meta, true, entries);
-        } else {
-            boolean requireChange = false;
-            List<ManifestEntry> entries = new ArrayList<>();
-            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
-                if (deletedIdentifiers.contains(entry.identifier())) {
-                    requireChange = true;
-                } else {
-                    entries.add(entry);
-                }
-            }
-            return new FullCompactionReadResult(meta, requireChange, entries);
-        }
-    }
-
-    private static class FullCompactionReadResult {
-
-        private final ManifestFileMeta file;
-        private final boolean requireChange;
-        private final List<ManifestEntry> entries;
-
-        private FullCompactionReadResult(
+        FullCompactionReadResult(
                 ManifestFileMeta file, boolean requireChange, List<ManifestEntry> entries) {
             this.file = file;
             this.requireChange = requireChange;
