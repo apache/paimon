@@ -449,10 +449,10 @@ public class ManifestFileSorter {
 
         runs.sort(Comparator.comparingLong(ManifestSortedRun::totalSize));
         int n = runs.size();
+        int maxLevel = 4;
         for (int i = 0; i < n; i++) {
-            if (i >= n - 4) {
-                // top-4 largest runs get level 4-1
-                runs.get(i).setLevel(i - (n - 4) + 1);
+            if (i >= n - maxLevel) {
+                runs.get(i).setLevel(i - (n - maxLevel) + 1);
             } else {
                 runs.get(i).setLevel(0);
             }
@@ -580,12 +580,9 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
 
-        Set<FileEntry.Identifier> safeDeletedIds =
-                deletedIdentifiers != null ? deletedIdentifiers : new HashSet<>();
-
         // Parallel read: each meta is read independently
         Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
-                meta -> singletonList(readForSortRewrite(meta, manifestFile, safeDeletedIds));
+                meta -> singletonList(readForSortRewrite(meta, manifestFile, deletedIdentifiers));
 
         List<ManifestEntry> entriesToRewrite = new ArrayList<>();
         for (FullCompactionReadResult readResult :
@@ -725,7 +722,7 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             Set<FileEntry.Identifier> deletedIdentifiers) {
         List<ManifestEntry> entries = new ArrayList<>();
-        if (deletedIdentifiers.isEmpty()) {
+        if (deletedIdentifiers == null || deletedIdentifiers.isEmpty()) {
             entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
         } else {
             for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {

@@ -486,10 +486,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Partition field name to sort manifest entries by. Validated by"
                                     + " schema validation; resolved to a 0-based index by the"
-                                    + " caller (an external sort rewrite implementation). For"
-                                    + " single-partition tables, optional (defaults to the only"
-                                    + " partition field). For multi-partition tables, REQUIRED"
-                                    + " when 'manifest-sort.enabled' is true.");
+                                    + " caller (an external sort rewrite implementation). If"
+                                    + " not configured, defaults to the first partition field.");
 
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
