@@ -233,6 +233,9 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     }
 
     private Object deserialize(byte[] valueBytes) {
+        if (valueBytes == null) {
+            return null; // defensive: V0 data may have null for empty string
+        }
         return keySerializer.deserialize(MemorySlice.wrap(valueBytes));
     }
 

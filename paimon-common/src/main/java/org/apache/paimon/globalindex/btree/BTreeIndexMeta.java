@@ -108,7 +108,7 @@ public class BTreeIndexMeta {
         // V0 format ends with hasNulls (0 or 1), V1 format ends with VERSION (>= 2).
         byte lastByte = data[data.length - 1];
 
-        if (lastByte >= VERSION) {
+        if (lastByte == VERSION) {
             // V1 format: -1 means null, 0 means empty byte array, version byte at the end
             MemorySliceInput sliceInput = MemorySlice.wrap(data).toInput();
             int firstKeyLength = sliceInput.readInt();
