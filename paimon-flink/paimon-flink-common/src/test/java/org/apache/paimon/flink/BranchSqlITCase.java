@@ -866,6 +866,23 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                         collectResult(
                                 "SELECT branch_name FROM `T$branches` WHERE branch_name = 'non_existent'"))
                 .isEmpty();
+
+        // not equals
+        assertThat(collectResult("SELECT branch_name FROM `T$branches` WHERE branch_name <> 'b2'"))
+                .containsExactlyInAnyOrder("+I[b1]", "+I[b3]");
+
+        // like
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name FROM `T$branches` WHERE branch_name LIKE 'b%'"))
+                .containsExactlyInAnyOrder("+I[b1]", "+I[b2]", "+I[b3]");
+
+        // or that is not equivalent to an in list
+        assertThat(
+                        collectResult(
+                                "SELECT branch_name FROM `T$branches` "
+                                        + "WHERE branch_name = 'b1' OR branch_name <> 'b2'"))
+                .containsExactlyInAnyOrder("+I[b1]", "+I[b3]");
     }
 
     @Test
