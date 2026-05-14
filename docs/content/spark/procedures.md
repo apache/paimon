@@ -477,6 +477,23 @@ This section introduce all available spark procedures about paimon.
       </td>
    </tr>
    <tr>
+      <td>export_parquet</td>
+      <td>
+         Export projected Paimon table rows to an external Parquet directory without building a Spark SQL wide projection. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>columns: comma-separated projected columns, or '*' for all columns. Cannot be empty.</li>
+            <li>output_path: output directory path, such as an object storage path. Cannot be empty.</li>
+            <li>where: row predicate. Left empty for all rows. Only simple AND predicates are supported.</li>
+            <li>parallelism: export task parallelism. Left empty for Spark default parallelism.</li>
+            <li>compression: Parquet compression codec. Left empty for zstd.</li>
+            <li>overwrite: whether to overwrite the output directory. Left empty for false.</li>
+      </td>
+      <td>
+         CALL sys.export_parquet(table => "default.T", columns => "id,name", output_path => "s3://bucket/export/t", where => "dt = '2025-08-17' and id >= 10", parallelism => 100, compression => "zstd", overwrite => true)<br/>
+         CALL sys.export_parquet(table => "default.T", columns => "*", output_path => "s3://bucket/export/t", overwrite => true)<br/>
+      </td>
+   </tr>
+   <tr>
       <td>copy</td>
       <td>
          copy table files. Arguments:
