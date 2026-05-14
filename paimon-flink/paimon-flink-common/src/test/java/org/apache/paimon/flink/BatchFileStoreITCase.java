@@ -905,6 +905,20 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMinExpressionNotPushDown() {
+        sql("CREATE TABLE min_expression (f0 INT, f1 STRING)");
+        sql("INSERT INTO min_expression VALUES (-3, 'a'), (4, 'b'), (1, 'c')");
+
+        String arithmeticSql = "SELECT MIN(f0 * 2) FROM min_expression";
+        assertThat(sql(arithmeticSql)).containsOnly(Row.of(-6));
+        validateAggregateNotPushDown(arithmeticSql, "MinAggFunction");
+
+        String functionSql = "SELECT MIN(ABS(f0)) FROM min_expression";
+        assertThat(sql(functionSql)).containsOnly(Row.of(1));
+        validateAggregateNotPushDown(functionSql, "MinAggFunction");
+    }
+
+    @Test
     public void testMinMaxStringNotPushDown() {
         sql("CREATE TABLE min_max_string (f0 INT, f1 STRING)");
         sql("INSERT INTO min_max_string VALUES (1, 'a'), (2, 'b')");
