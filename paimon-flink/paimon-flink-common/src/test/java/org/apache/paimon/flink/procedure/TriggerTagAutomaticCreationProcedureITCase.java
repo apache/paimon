@@ -29,15 +29,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TriggerTagAutomaticCreationProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testTriggerTagAutomaticCreation() {
+    public void testAutoTagWithData() {
+        testTriggerTagAutomaticCreation(true);
+    }
+
+    @Test
+    public void testAutoTagWithoutData() {
+        testTriggerTagAutomaticCreation(false);
+    }
+
+    public void testTriggerTagAutomaticCreation(boolean haveData) {
         sql(
                 "CREATE TABLE T (id INT, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
                         + " WITH ('bucket'='1')");
 
-        sql("INSERT INTO T VALUES (1, 'a')");
-        assertThat(sql("select * from `T`")).containsExactly(Row.of(1, "a"));
-
+        if (haveData) {
+            sql("INSERT INTO T VALUES (1, 'a')");
+            assertThat(sql("select * from `T`")).containsExactly(Row.of(1, "a"));
+        }
         assertThat(sql("select tag_name from `T$tags`").stream().map(Row::toString))
                 .isNullOrEmpty();
 
@@ -45,10 +55,11 @@ public class TriggerTagAutomaticCreationProcedureITCase extends CatalogITCaseBas
                 "alter table T set ("
                         + "'tag.automatic-creation'='process-time',"
                         + "'tag.creation-period'='daily',"
-                        + "'tag.creation-delay'='10 m',"
+                        + "'tag.creation-delay'='0 m',"
                         + "'tag.num-retained-max'='90')");
 
-        sql("CALL sys.trigger_tag_automatic_creation(`table` => 'default.T')");
+        sql("CALL sys.trigger_tag_automatic_creation(`table` => 'default.T', force => true)");
+
         assertThat(sql("select tag_name from `T$tags`").stream().map(Row::toString))
                 .isNotNull()
                 .isNotEmpty();
