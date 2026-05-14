@@ -99,8 +99,6 @@ public class VectorReadImpl implements VectorRead {
                         .create(vectorColumn, table.coreOptions().toConfiguration());
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
-        // Collect batch results from all splits.
-        // Each split returns List<Optional<ScoredGlobalIndexResult>> of size n.
         Iterator<List<Optional<ScoredGlobalIndexResult>>> batchIterator =
                 randomlyExecuteSequentialReturn(
                         split ->
@@ -115,7 +113,6 @@ public class VectorReadImpl implements VectorRead {
                         splits,
                         threadNum);
 
-        // Merge: for each query i, or() across all splits, then topK.
         ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
         for (int i = 0; i < n; i++) {
             merged[i] = ScoredGlobalIndexResult.createEmpty();

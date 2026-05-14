@@ -119,7 +119,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             throws IOException {
         int n = vectorSearch.vectorCount();
         if (n == 1) {
-            // Fast path: single vector, reuse existing search logic.
             List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
             results.add(Optional.ofNullable(search(vectorSearch)));
             return results;
@@ -142,7 +141,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             return results;
         }
 
-        // Flatten n vectors into a single float[n * dim] array.
         float[] queryVectors = new float[n * dim];
         for (int i = 0; i < n; i++) {
             System.arraycopy(vectors[i], 0, queryVectors, i * dim, dim);
@@ -190,7 +188,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             index.search(queryVectors, n, effectiveK, distances, labels, searchOptions);
         }
 
-        // Split results: query i's results are at [i*effectiveK, (i+1)*effectiveK).
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             PriorityQueue<ScoredRow> topK =
