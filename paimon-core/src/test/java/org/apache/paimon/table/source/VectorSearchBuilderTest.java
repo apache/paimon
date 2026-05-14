@@ -544,7 +544,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         ReadBuilder rb0 = table.newReadBuilder();
         List<Integer> ids0 = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                rb0.newRead().createReader(rb0.newScan().withGlobalIndexResult(results.get(0)).plan())) {
+                rb0.newRead()
+                        .createReader(rb0.newScan().withGlobalIndexResult(results.get(0)).plan())) {
             reader.forEachRemaining(row -> ids0.add(row.getInt(0)));
         }
         assertThat(ids0).contains(0);
@@ -554,7 +555,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         ReadBuilder rb1 = table.newReadBuilder();
         List<Integer> ids1 = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                rb1.newRead().createReader(rb1.newScan().withGlobalIndexResult(results.get(1)).plan())) {
+                rb1.newRead()
+                        .createReader(rb1.newScan().withGlobalIndexResult(results.get(1)).plan())) {
             reader.forEachRemaining(row -> ids1.add(row.getInt(0)));
         }
         assertThat(ids1).contains(4);

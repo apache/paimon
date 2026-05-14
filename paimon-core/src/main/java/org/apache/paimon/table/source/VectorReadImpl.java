@@ -197,7 +197,8 @@ public class VectorReadImpl implements VectorRead {
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
             @Nullable RoaringNavigableMap64 includeRowIds) {
-        List<GlobalIndexIOMeta> indexIOMetaList = buildIOMetaList(indexPathFactory, vectorIndexFiles);
+        List<GlobalIndexIOMeta> indexIOMetaList =
+                buildIOMetaList(indexPathFactory, vectorIndexFiles);
         @SuppressWarnings("resource")
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
@@ -220,7 +221,8 @@ public class VectorReadImpl implements VectorRead {
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
             @Nullable RoaringNavigableMap64 includeRowIds) {
-        List<GlobalIndexIOMeta> indexIOMetaList = buildIOMetaList(indexPathFactory, vectorIndexFiles);
+        List<GlobalIndexIOMeta> indexIOMetaList =
+                buildIOMetaList(indexPathFactory, vectorIndexFiles);
         @SuppressWarnings("resource")
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
