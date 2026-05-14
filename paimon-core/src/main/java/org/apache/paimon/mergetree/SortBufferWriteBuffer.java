@@ -120,6 +120,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             throw new IllegalArgumentException(
                     "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
         }
+        validatePageSizeForFixedLengthPart(fieldTypes.size(), memoryPool.pageSize());
         InternalRowSerializer serializer =
                 InternalSerializers.create(KeyValue.schema(keyType, valueType));
         BinaryInMemorySortBuffer inMemorySortBuffer =
@@ -137,6 +138,20 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                                 compression,
                                 maxDiskSize)
                         : inMemorySortBuffer;
+    }
+
+    private static void validatePageSizeForFixedLengthPart(int fieldCount, int pageSize) {
+        int fixedLengthPartSize = BinaryRow.calculateFixPartSizeInBytes(fieldCount);
+        if (fixedLengthPartSize > pageSize) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "BinaryRow fixed-length part size %s for %s fields exceeds current page-size %s. "
+                                    + "Please increase the 'page-size' table option to at least %s bytes.",
+                            new MemorySize(fixedLengthPartSize).toHumanReadableString(),
+                            fieldCount,
+                            new MemorySize(pageSize).toHumanReadableString(),
+                            fixedLengthPartSize));
+        }
     }
 
     @Override
