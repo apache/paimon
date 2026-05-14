@@ -512,6 +512,83 @@ class SchemaValidationTest {
     }
 
     @Test
+    void testManifestSortEnableOnNonPartitionTable() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Cannot enable 'manifest-sort.enabled' for non-partition table.");
+    }
+
+    @Test
+    void testManifestSortPartitionFieldNotInPartitionKeys() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f1");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("is not a partition field");
+    }
+
+    @Test
+    void testManifestSortValidConfig() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f0");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                emptyList(),
+                                                options,
+                                                "")));
+    }
+
+    @Test
     public void testMergeOnReadCoexistsWithVisibilityCallback() {
         Map<String, String> options = new HashMap<>();
         options.put("deletion-vectors.enabled", "true");

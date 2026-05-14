@@ -319,6 +319,8 @@ public class SchemaValidation {
         validateChangelogReadSequenceNumber(schema, options);
 
         validatePkClusteringOverride(options);
+
+        validateManifestSort(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -1030,6 +1032,25 @@ public class SchemaValidation {
                                 + changelogProducer
                                 + " in 'pk-clustering-override' mode.");
             }
+        }
+    }
+
+    private static void validateManifestSort(TableSchema schema, CoreOptions options) {
+        if (options.manifestSortEnabled()) {
+            checkArgument(
+                    !schema.partitionKeys().isEmpty(),
+                    "Cannot enable '%s' for non-partition table.",
+                    CoreOptions.MANIFEST_SORT_ENABLED.key());
+        }
+
+        String sortPartitionField = options.manifestSortPartitionField();
+        if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
+            checkArgument(
+                    schema.partitionKeys().contains(sortPartitionField),
+                    "'%s' = '%s' is not a partition field. Available partition fields: %s.",
+                    CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(),
+                    sortPartitionField,
+                    schema.partitionKeys());
         }
     }
 }

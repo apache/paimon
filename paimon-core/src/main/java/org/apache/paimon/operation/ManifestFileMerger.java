@@ -75,8 +75,9 @@ public class ManifestFileMerger {
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
-            // If manifest-sort.enable is enabled and there are partition fields, use trySortRewrite
-            if (options.manifestSortEnable() && partitionType.getFieldCount() > 0) {
+            // If manifest-sort.enabled is enabled and there are partition fields, use
+            // trySortRewrite
+            if (options.manifestSortEnabled() && partitionType.getFieldCount() > 0) {
                 Optional<List<ManifestFileMeta>> sorted =
                         ManifestFileSorter.trySortRewrite(
                                 input, newFilesForAbort, manifestFile, partitionType, options);
