@@ -38,9 +38,6 @@ from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
-from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
@@ -666,35 +663,7 @@ class PyArrowFileIO(FileIO):
             with self.new_output_stream(path) as output_stream:
                 writer = BlobFormatWriter(output_stream)
                 for i in range(num_rows):
-                    col_data = records_dict[field_name][i]
-                    if col_data is None:
-                        row = GenericRow([None], fields, RowKind.INSERT)
-                        writer.add_element(row)
-                        continue
-                    if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if hasattr(col_data, 'as_py'):
-                            col_data = col_data.as_py()
-                        if isinstance(col_data, str):
-                            col_data = col_data.encode('utf-8')
-                        if isinstance(col_data, bytearray):
-                            col_data = bytes(col_data)
-
-                        if isinstance(col_data, bytes):
-                            if BlobDescriptor.is_blob_descriptor(col_data):
-                                descriptor = BlobDescriptor.deserialize(col_data)
-                                uri_reader = self.uri_reader_factory.create(descriptor.uri)
-                                blob_data = Blob.from_descriptor(uri_reader, descriptor)
-                            else:
-                                blob_data = BlobData(col_data)
-                        else:
-                            raise RuntimeError(
-                                "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
-                            )
-                        row_values = [blob_data]
-                    else:
-                        row_values = [col_data]
-                    row = GenericRow(row_values, fields, RowKind.INSERT)
-                    writer.add_element(row)
+                    writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
                 writer.close()
 
         except Exception as e:

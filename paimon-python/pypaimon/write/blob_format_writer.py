@@ -17,9 +17,9 @@
 
 import struct
 import zlib
-from typing import BinaryIO, List
+from typing import BinaryIO, List, Optional
 
-from pypaimon.table.row.blob import Blob, BlobData
+from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
@@ -87,6 +87,40 @@ class BlobFormatWriter:
         self.output_stream.write(data)
         self.position += len(data)
         return crc32
+
+    def write_value(self, col_data, fields, uri_reader_factory=None) -> None:
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.table.row.row_kind import RowKind
+
+        if col_data is None:
+            self.lengths.append(-1)
+            return
+
+        if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
+            if hasattr(col_data, 'as_py'):
+                col_data = col_data.as_py()
+            if isinstance(col_data, str):
+                col_data = col_data.encode('utf-8')
+            if isinstance(col_data, bytearray):
+                col_data = bytes(col_data)
+
+            if isinstance(col_data, bytes):
+                if BlobDescriptor.is_blob_descriptor(col_data):
+                    descriptor = BlobDescriptor.deserialize(col_data)
+                    uri_reader = uri_reader_factory.create(descriptor.uri)
+                    blob_value = Blob.from_descriptor(uri_reader, descriptor)
+                else:
+                    blob_value = BlobData(col_data)
+            else:
+                raise RuntimeError(
+                    "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
+                )
+            row_values = [blob_value]
+        else:
+            row_values = [col_data]
+
+        row = GenericRow(row_values, fields, RowKind.INSERT)
+        self.add_element(row)
 
     def reach_target_size(self, target_size: int) -> bool:
         return self.position >= target_size
