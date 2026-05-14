@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -46,6 +47,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.FineGrainedSplitGenerator;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
@@ -425,15 +427,26 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 List<SplitGenerator.SplitGroup> splitGroups =
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
-                                : splitGenerator.splitForBatch(bucketFiles);
+                                : splitGenerator instanceof FineGrainedSplitGenerator
+                                        ? ((FineGrainedSplitGenerator) splitGenerator)
+                                                .splitForBatch(bucketFiles, partition, bucket)
+                                        : splitGenerator.splitForBatch(bucketFiles);
 
-                // Calculate bucketPath once per bucket to avoid repeated computation
                 String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
+
+                    if (splitGroup.boundary != null) {
+                        Map<Integer, List<FileSplitBoundary>> splitBoundaries = new HashMap<>();
+                        splitBoundaries.put(
+                                0, Collections.singletonList(splitGroup.boundary));
+                        builder.withFileSplitBoundaries(splitBoundaries);
+                    }
+
                     if (deletionVectors && deletionFilesMap != null) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(

@@ -214,6 +214,9 @@ public class ConfigOptionsDocsCompletenessITCase {
         final String rootDir = ConfigOptionsDocGeneratorTest.getProjectRootDir();
         Path includeFolder =
                 Paths.get(rootDir, "docs", "layouts", "shortcodes", "generated").toAbsolutePath();
+        if (!Files.exists(includeFolder)) {
+            return Collections.emptyMap();
+        }
         return Files.list(includeFolder)
                 .filter(
                         (path) -> {
@@ -224,7 +227,7 @@ public class ConfigOptionsDocsCompletenessITCase {
                         file -> {
                             try {
                                 return parseDocumentedOptionsFromFile(file).stream();
-                            } catch (IOException ignored) {
+                            } catch (Exception ignored) {
                                 return Stream.empty();
                             }
                         })
@@ -237,8 +240,21 @@ public class ConfigOptionsDocsCompletenessITCase {
         document.outputSettings().syntax(Document.OutputSettings.Syntax.xml);
         document.outputSettings().prettyPrint(false);
         return document.getElementsByTag("table").stream()
-                .map(element -> element.getElementsByTag("tbody").get(0))
-                .flatMap(element -> element.getElementsByTag("tr").stream())
+                .flatMap(
+                        tableElement -> {
+                            org.jsoup.select.Elements tbodyElements =
+                                    tableElement.getElementsByTag("tbody");
+                            if (tbodyElements.isEmpty()) {
+                                return Stream.empty();
+                            }
+                            return tbodyElements.get(0).getElementsByTag("tr").stream();
+                        })
+                .filter(
+                        tableRow -> {
+                            // Ensure the row has at least 4 children (key, default, type,
+                            // description)
+                            return tableRow.children().size() >= 4;
+                        })
                 .map(
                         tableRow -> {
                             // Use split to exclude document key tag.

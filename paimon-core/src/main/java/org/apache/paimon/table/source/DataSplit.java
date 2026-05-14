@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
@@ -48,7 +49,9 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -61,9 +64,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 7L;
+    private static final long serialVersionUID = 8L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 8;
+    private static final int VERSION = 9;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -76,6 +79,9 @@ public class DataSplit implements Split {
 
     private boolean isStreaming = false;
     private boolean rawConvertible;
+
+    /** Maps file index in dataFiles to its split boundaries (null when not fine-grained split). */
+    @Nullable private Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries;
 
     public DataSplit() {}
 
@@ -246,24 +252,50 @@ public class DataSplit implements Split {
     @Override
     public Optional<List<RawFile>> convertToRawFiles() {
         if (rawConvertible) {
-            return Optional.of(
-                    dataFiles.stream()
-                            .map(f -> makeRawTableFile(bucketPath, f))
-                            .collect(Collectors.toList()));
+            List<RawFile> rawFiles = new ArrayList<>();
+            for (int i = 0; i < dataFiles.size(); i++) {
+                DataFileMeta file = dataFiles.get(i);
+                List<FileSplitBoundary> boundaries =
+                        fileSplitBoundaries != null ? fileSplitBoundaries.get(i) : null;
+
+                if (boundaries != null && !boundaries.isEmpty()) {
+                    // Create one RawFile per boundary
+                    // For fine-grained splits, there should be exactly one boundary per file
+                    // (each DataSplit represents one row group/stripe)
+                    for (FileSplitBoundary boundary : boundaries) {
+                        rawFiles.add(
+                                makeRawTableFile(
+                                        bucketPath,
+                                        file,
+                                        boundary.offset(),
+                                        boundary.length(),
+                                        boundary.rowCount()));
+                    }
+                } else {
+                    // No boundaries, create single RawFile for whole file
+                    rawFiles.add(makeRawTableFile(bucketPath, file));
+                }
+            }
+            return Optional.of(rawFiles);
         } else {
             return Optional.empty();
         }
     }
 
     private RawFile makeRawTableFile(String bucketPath, DataFileMeta file) {
+        return makeRawTableFile(bucketPath, file, 0, file.fileSize(), file.rowCount());
+    }
+
+    private RawFile makeRawTableFile(
+            String bucketPath, DataFileMeta file, long offset, long length, long rowCount) {
         return new RawFile(
                 file.externalPath().orElse(bucketPath + "/" + file.fileName()),
                 file.fileSize(),
-                0,
-                file.fileSize(),
+                offset,
+                length,
                 file.fileFormat(),
                 file.schemaId(),
-                file.rowCount());
+                rowCount);
     }
 
     @Override
@@ -383,6 +415,7 @@ public class DataSplit implements Split {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
+        this.fileSplitBoundaries = other.fileSplitBoundaries;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -415,6 +448,24 @@ public class DataSplit implements Split {
         out.writeBoolean(isStreaming);
 
         out.writeBoolean(rawConvertible);
+
+        if (fileSplitBoundaries != null && !fileSplitBoundaries.isEmpty()) {
+            out.writeBoolean(true);
+            out.writeInt(fileSplitBoundaries.size());
+            for (Map.Entry<Integer, List<FileSplitBoundary>> entry :
+                    fileSplitBoundaries.entrySet()) {
+                out.writeInt(entry.getKey());
+                List<FileSplitBoundary> boundaries = entry.getValue();
+                out.writeInt(boundaries.size());
+                for (FileSplitBoundary b : boundaries) {
+                    out.writeLong(b.offset());
+                    out.writeLong(b.length());
+                    out.writeLong(b.rowCount());
+                }
+            }
+        } else {
+            out.writeBoolean(false);
+        }
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -453,6 +504,23 @@ public class DataSplit implements Split {
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
 
+        Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries = null;
+        if (version >= 9 && in.readBoolean()) {
+            int mapSize = in.readInt();
+            fileSplitBoundaries = new HashMap<>(mapSize);
+            for (int i = 0; i < mapSize; i++) {
+                int fileIndex = in.readInt();
+                int boundaryCount = in.readInt();
+                List<FileSplitBoundary> boundaries = new ArrayList<>(boundaryCount);
+                for (int j = 0; j < boundaryCount; j++) {
+                    boundaries.add(
+                            new FileSplitBoundary(
+                                    in.readLong(), in.readLong(), in.readLong()));
+                }
+                fileSplitBoundaries.put(fileIndex, boundaries);
+            }
+        }
+
         DataSplit.Builder builder =
                 builder()
                         .withSnapshot(snapshotId)
@@ -466,6 +534,9 @@ public class DataSplit implements Split {
 
         if (dataDeletionFiles != null) {
             builder.withDataDeletionFiles(dataDeletionFiles);
+        }
+        if (fileSplitBoundaries != null) {
+            builder.withFileSplitBoundaries(fileSplitBoundaries);
         }
         return builder.build();
     }
@@ -488,7 +559,7 @@ public class DataSplit implements Split {
             DataFileMetaFirstRowIdLegacySerializer serializer =
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
-        } else if (version == 8) {
+        } else if (version == 8 || version == 9) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
@@ -558,6 +629,14 @@ public class DataSplit implements Split {
 
         public Builder rawConvertible(boolean rawConvertible) {
             this.split.rawConvertible = rawConvertible;
+            return this;
+        }
+
+        public Builder withFileSplitBoundaries(
+                Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries) {
+            if (fileSplitBoundaries != null && !fileSplitBoundaries.isEmpty()) {
+                this.split.fileSplitBoundaries = new HashMap<>(fileSplitBoundaries);
+            }
             return this;
         }
 
