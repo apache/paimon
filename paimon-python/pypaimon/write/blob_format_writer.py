@@ -92,11 +92,15 @@ class BlobFormatWriter:
         from pypaimon.table.row.generic_row import GenericRow
         from pypaimon.table.row.row_kind import RowKind
 
+        is_blob = hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB"
+
         if col_data is None:
+            if not is_blob:
+                raise RuntimeError("Null values are only supported for BLOB type fields")
             self.lengths.append(-1)
             return
 
-        if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
+        if is_blob:
             if hasattr(col_data, 'as_py'):
                 col_data = col_data.as_py()
             if isinstance(col_data, str):

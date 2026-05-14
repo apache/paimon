@@ -745,14 +745,28 @@ class BlobEndToEndTest(unittest.TestCase):
             file_io.write_blob(multi_column_url, multi_column_table)
         self.assertIn("single column", str(context.exception))
 
-        # Test that FileIO.write_blob supports null values
+        # Test that FileIO.write_blob supports null values and round-trips correctly
         null_schema = pa.schema([pa.field("blob_with_nulls", pa.large_binary())])
         null_table = pa.table([[b"data", None]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "null_data.blob"
         null_file_url = _to_url(null_file)
         file_io.write_blob(null_file_url, null_table)
-        self.assertTrue(file_io.exists(null_file_url))
+
+        null_read_fields = [DataField(0, "blob_with_nulls", AtomicType("BLOB"))]
+        null_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(null_file),
+            read_fields=["blob_with_nulls"],
+            full_fields=null_read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False
+        )
+        null_batch = null_reader.read_arrow_batch()
+        self.assertEqual(null_batch.num_rows, 2)
+        self.assertEqual(null_batch.column(0)[0].as_py(), b"data")
+        self.assertIsNone(null_batch.column(0)[1].as_py())
+        null_reader.close()
 
         # ========== Test FormatBlobReader with complex type schema ==========
         # Create a valid blob file first
@@ -1024,14 +1038,29 @@ class BlobEndToEndTest(unittest.TestCase):
             "Field must be Blob/BlobData instance" in str(context.exception)
         )
 
-        # Test that blob format supports tables with null values
+        # Test that blob format supports tables with null values (round-trip)
         null_schema = pa.schema([pa.field("blob_with_null", pa.large_binary())])
         null_table = pa.table([[b"data", None, b"more_data"]], schema=null_schema)
 
         null_file = Path(self.temp_dir) / "with_nulls.blob"
         null_file_url = _to_url(null_file)
         file_io.write_blob(null_file_url, null_table)
-        self.assertTrue(file_io.exists(null_file_url))
+
+        null_read_fields = [DataField(0, "blob_with_null", AtomicType("BLOB"))]
+        null_reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(null_file),
+            read_fields=["blob_with_null"],
+            full_fields=null_read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False
+        )
+        null_batch = null_reader.read_arrow_batch()
+        self.assertEqual(null_batch.num_rows, 3)
+        self.assertEqual(null_batch.column(0)[0].as_py(), b"data")
+        self.assertIsNone(null_batch.column(0)[1].as_py())
+        self.assertEqual(null_batch.column(0)[2].as_py(), b"more_data")
+        null_reader.close()
 
     def test_blob_write_with_raw_bytes_starting_with_v1_prefix(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))
