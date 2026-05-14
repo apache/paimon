@@ -70,8 +70,11 @@ public class ManifestPickStrategy {
     }
 
     /**
-     * SizeAmp check: if all lower-level (0~3) runs' total size > highest-level (level4) run's size
-     * * sizeAmpThreshold, pick all runs for full compaction.
+     * SizeAmp check: if all lower-level (0~3) runs' total size exceeds the highest-level run's size
+     * by more than {@code sizeAmpThreshold} percent, pick all runs for full compaction.
+     *
+     * <p>Formula (consistent with {@code UniversalCompaction#pickForSizeAmp}): {@code
+     * lowerLevelTotalSize * 100 > sizeAmpThreshold * highestRunSize}
      */
     private List<ManifestSortedRun> pickForSizeAmp(List<ManifestSortedRun> levelRuns) {
         if (levelRuns.isEmpty()) {
@@ -93,7 +96,8 @@ public class ManifestPickStrategy {
             }
         }
 
-        if (lowerLevelTotalSize / sizeAmpThreshold > highestRun.totalSize()) {
+        // size amplification = percentage of additional size
+        if (lowerLevelTotalSize * 100 > (long) sizeAmpThreshold * highestRun.totalSize()) {
             return new ArrayList<>(levelRuns);
         }
         return null;
@@ -104,9 +108,12 @@ public class ManifestPickStrategy {
      *
      * <ul>
      *   <li>Level0 and level1 are always picked.
-     *   <li>From low to high, if the cumulative picked size * sizeRatioThreshold >= next run's
-     *       size, continue picking.
+     *   <li>From low to high, if the cumulative picked size with ratio amplification covers the
+     *       next run's size, continue picking.
      * </ul>
+     *
+     * <p>Formula (consistent with {@code UniversalCompaction#pickForSizeRatio}): {@code pickedSize
+     * * (100.0 + sizeRatioThreshold) / 100.0 >= nextRunSize}
      */
     private List<ManifestSortedRun> pickForSizeRatioAndForce(List<ManifestSortedRun> levelRuns) {
         // levelRuns is already sorted by level ascending (set by buildLevelSortedRuns)
@@ -124,13 +131,15 @@ public class ManifestPickStrategy {
                 pickedSize += run.totalSize();
             } else {
                 long nextRunSize = run.totalSize();
-                if (pickedSize * sizeRatioThreshold >= nextRunSize) {
+                if (pickedSize * (100.0 + sizeRatioThreshold) / 100.0 >= nextRunSize) {
                     picked.add(run);
                     pickedSize += nextRunSize;
                 }
             }
         }
-
+        if (picked.size() == 1) {
+            return new ArrayList<>();
+        }
         return picked;
     }
 }
