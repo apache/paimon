@@ -39,6 +39,7 @@ import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.SchemaBucketFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.BlobDescriptorUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
@@ -328,10 +329,13 @@ public class FlinkSinkBuilder {
             return sink.sinkFrom(partitioned);
         } else {
             Map<BinaryRow, Integer> knownNumBuckets = PostponeUtils.getKnownNumBuckets(table);
+            PartitionBucketMapping partitionBucketMapping =
+                    PartitionBucketMapping.loadFromTable(table);
             DataStream<InternalRow> partitioned =
                     partition(
                             input,
-                            new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
+                            new PostponeFixedBucketChannelComputer(
+                                    table.schema(), knownNumBuckets, partitionBucketMapping),
                             parallelism);
 
             FileStoreTable tableForWrite = PostponeUtils.tableForFixBucketWrite(table);

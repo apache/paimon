@@ -24,6 +24,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Restore for write to restore data files by partition and bucket from file system. */
@@ -38,8 +39,9 @@ public interface WriteRestore {
             boolean scanDeleteVectorsIndex);
 
     @Nullable
-    static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {
+    static List<DataFileMeta> extractDataFiles(List<ManifestEntry> entries) {
         Integer totalBuckets = null;
+        List<DataFileMeta> dataFiles = new ArrayList<>();
         for (ManifestEntry entry : entries) {
             if (totalBuckets != null && totalBuckets != entry.totalBuckets()) {
                 throw new RuntimeException(
@@ -50,6 +52,6 @@ public interface WriteRestore {
             totalBuckets = entry.totalBuckets();
             dataFiles.add(entry.file());
         }
-        return totalBuckets;
+        return dataFiles;
     }
 }

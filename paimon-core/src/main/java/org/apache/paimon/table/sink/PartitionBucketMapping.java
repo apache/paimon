@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.io.Serializable;
@@ -93,9 +94,12 @@ public class PartitionBucketMapping implements Serializable {
         if (table.partitionKeys().isEmpty()) {
             return new PartitionBucketMapping(defaultBuckets, Collections.emptyMap());
         }
+        return loadFromScan(table.store().newScan(), defaultBuckets);
+    }
 
+    public static PartitionBucketMapping loadFromScan(FileStoreScan scan, int defaultBuckets) {
         try {
-            List<PartitionEntry> partitionEntries = table.store().newScan().readPartitionEntries();
+            List<PartitionEntry> partitionEntries = scan.readPartitionEntries();
             Map<BinaryRow, Integer> partitionBucketMap = new HashMap<>();
             for (PartitionEntry entry : partitionEntries) {
                 int totalBuckets = entry.totalBuckets();
