@@ -38,7 +38,6 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     private Predicate filter;
     private int limit;
     private DataField vectorColumn;
-    private float[] vector;
     private float[][] vectors;
 
     public VectorSearchBuilderImpl(InnerTable table) {
@@ -77,7 +76,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorSearchBuilder withVector(float[] vector) {
-        this.vector = vector;
+        this.vectors = new float[][] {vector};
         return this;
     }
 
@@ -99,6 +98,6 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                 filter,
                 limit,
                 vectorColumn,
-                vectors != null ? vectors : (vector != null ? new float[][] {vector} : null));
+                vectors);
     }
 }

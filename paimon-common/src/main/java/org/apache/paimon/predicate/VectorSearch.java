@@ -42,9 +42,6 @@ public class VectorSearch implements Serializable {
 
     public VectorSearch(float[] vector, int limit, String fieldName) {
         this(new float[][] {vector}, limit, fieldName);
-        if (vector == null) {
-            throw new IllegalArgumentException("Search cannot be null");
-        }
     }
 
     public VectorSearch(float[][] vectors, int limit, String fieldName) {

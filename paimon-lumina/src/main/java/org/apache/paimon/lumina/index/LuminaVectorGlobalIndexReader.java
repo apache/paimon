@@ -194,8 +194,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             PriorityQueue<ScoredRow> topK =
-                    new PriorityQueue<>(
-                            effectiveK + 1, Comparator.comparingDouble(s -> s.score));
+                    new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
             int offset = i * effectiveK;
             for (int j = 0; j < effectiveK; j++) {
                 long rowId = labels[offset + j];
