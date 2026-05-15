@@ -249,7 +249,6 @@ public class ManifestFileMerger {
         }
 
         // 2.2. merge
-
         if (toBeMerged.size() <= 1) {
             return Optional.empty();
         }
