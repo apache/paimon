@@ -108,32 +108,37 @@ class PaimonPredicateVisitor(PredicateVisitor[Any]):
 
     # -- Comparison operators --
 
-    def _cmp(self, left: Expression, right: Expression, fn: Any) -> Predicate | None:
-        """Fold a binary comparison: extract col ref and literal value, then apply fn."""
+    def _cmp(self, left: Expression, right: Expression, fn: Any, fn_swapped: Any) -> Predicate | None:
+        """Fold a binary comparison: extract col ref and literal value, then apply fn.
+
+        If the column is on the right side (e.g. ``3 < col``), apply ``fn_swapped``
+        instead so the operator is reversed along with the operands. For symmetric
+        operators (==, !=), ``fn`` and ``fn_swapped`` are the same.
+        """
         lhs, rhs = self.visit(left), self.visit(right)
         if isinstance(lhs, _ColRef) and not isinstance(rhs, _ColRef):
             return fn(lhs.name, rhs)
         if isinstance(rhs, _ColRef) and not isinstance(lhs, _ColRef):
-            return fn(rhs.name, lhs)
+            return fn_swapped(rhs.name, lhs)
         return None
 
     def visit_equal(self, left: Expression, right: Expression) -> Predicate | None:
-        return self._cmp(left, right, self._builder.equal)
+        return self._cmp(left, right, self._builder.equal, self._builder.equal)
 
     def visit_not_equal(self, left: Expression, right: Expression) -> Predicate | None:
-        return self._cmp(left, right, self._builder.not_equal)
+        return self._cmp(left, right, self._builder.not_equal, self._builder.not_equal)
 
     def visit_less_than(self, left: Expression, right: Expression) -> Predicate | None:
-        return self._cmp(left, right, self._builder.less_than)
+        return self._cmp(left, right, self._builder.less_than, self._builder.greater_than)
 
     def visit_less_than_or_equal(self, left: Expression, right: Expression) -> Predicate | None:
-        return self._cmp(left, right, self._builder.less_or_equal)
+        return self._cmp(left, right, self._builder.less_or_equal, self._builder.greater_or_equal)
 
     def visit_greater_than(self, left: Expression, right: Expression) -> Predicate | None:
-        return self._cmp(left, right, self._builder.greater_than)
+        return self._cmp(left, right, self._builder.greater_than, self._builder.less_than)
 
     def visit_greater_than_or_equal(self, left: Expression, right: Expression) -> Predicate | None:
-        return self._cmp(left, right, self._builder.greater_or_equal)
+        return self._cmp(left, right, self._builder.greater_or_equal, self._builder.less_or_equal)
 
     # -- Set/range predicates --
 
