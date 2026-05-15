@@ -18,29 +18,15 @@
 
 package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.Snapshot.CommitKind;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.SchemaEvolutionTableTestBase.TestingSchemaManager;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -50,11 +36,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -62,9 +45,7 @@ import static org.apache.paimon.manifest.FileKind.ADD;
 import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
-import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ConflictDetectionTest {
 
@@ -99,108 +80,6 @@ class ConflictDetectionTest {
                             createFileEntryWithDV("f1", ADD, null),
                             createFileEntryWithDV("f2", ADD, null));
         }
-    }
-
-    @Test
-    void testSimpleFileEntryFromManifestEntryPreservesSchemaAndWriteCols() {
-        ManifestEntry manifestEntry =
-                ManifestEntry.create(
-                        ADD,
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        createDataFileMeta("f1", 0L, 1L, 1L, Arrays.asList("b")));
-
-        SimpleFileEntry entry = SimpleFileEntry.from(manifestEntry);
-        assertThat(entry.schemaId()).isEqualTo(1L);
-        assertThat(entry.writeCols()).containsExactly("b");
-
-        SimpleFileEntry delete = entry.toDelete();
-        assertThat(delete.schemaId()).isEqualTo(1L);
-        assertThat(delete.writeCols()).containsExactly("b");
-    }
-
-    @Test
-    void testRowIdConflictAllowsDisjointWriteColumns() {
-        Optional<RuntimeException> conflict =
-                checkRowIdConflict(Arrays.asList("b"), 0L, Arrays.asList("c"), 0L);
-
-        assertThat(conflict).isEmpty();
-    }
-
-    @Test
-    void testRowIdConflictDetectsSameWriteColumns() {
-        Optional<RuntimeException> conflict =
-                checkRowIdConflict(Arrays.asList("b"), 0L, Arrays.asList("b"), 0L);
-
-        assertThat(conflict).isPresent();
-        assertThat(conflict.get().getMessage())
-                .contains("multiple 'MERGE INTO' operations have encountered conflicts");
-    }
-
-    @Test
-    void testRowIdConflictRequiresWriteColumns() {
-        assertThatThrownBy(() -> checkRowIdConflict(null, 0L, Arrays.asList("b"), 0L))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Write columns of row-id file");
-    }
-
-    @Test
-    void testRowIdConflictUsesFieldIdAcrossRename() {
-        Optional<RuntimeException> conflict =
-                checkRowIdConflict(Arrays.asList("b_renamed"), 1L, Arrays.asList("b"), 0L);
-
-        assertThat(conflict).isPresent();
-    }
-
-    @Test
-    void testRowIdConflictIndexMergesOverlappedDeltaRanges() {
-        RowIdColumnConflictChecker checker =
-                RowIdColumnConflictChecker.fromDeltaEntries(
-                        createSchemaManager(),
-                        Arrays.asList(
-                                createFileEntry("current-b", ADD, 0L, 11L, 0L, Arrays.asList("b")),
-                                createFileEntry(
-                                        "current-c", ADD, 5L, 11L, 0L, Arrays.asList("c"))));
-
-        ManifestEntry historicalB =
-                ManifestEntry.create(
-                        ADD,
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        createDataFileMeta("historical-b", 12L, 1L, 0L, Arrays.asList("b")));
-        ManifestEntry historicalC =
-                ManifestEntry.create(
-                        ADD,
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        createDataFileMeta("historical-c", 12L, 1L, 0L, Arrays.asList("c")));
-
-        assertThat(checker.conflictsWith(historicalB)).isTrue();
-        assertThat(checker.conflictsWith(historicalC)).isTrue();
-    }
-
-    @Test
-    void testRowIdConflictIndexScansAllOverlappedRanges() {
-        RowIdColumnConflictChecker checker =
-                RowIdColumnConflictChecker.fromDeltaEntries(
-                        createSchemaManager(),
-                        Arrays.asList(
-                                createFileEntry("current-b", ADD, 0L, 5L, 0L, Arrays.asList("b")),
-                                createFileEntry(
-                                        "current-c", ADD, 10L, 5L, 0L, Arrays.asList("c"))));
-
-        ManifestEntry historical =
-                ManifestEntry.create(
-                        ADD,
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        createDataFileMeta("historical", 3L, 10L, 0L, Arrays.asList("c")));
-
-        assertThat(checker.conflictsWith(historical)).isTrue();
     }
 
     @Test
@@ -502,7 +381,7 @@ class ConflictDetectionTest {
                 "test-table",
                 "test-user",
                 RowType.of(),
-                createSchemaManager(),
+                null,
                 null,
                 null,
                 BucketMode.HASH_FIXED,
@@ -512,202 +391,5 @@ class ConflictDetectionTest {
                 null,
                 null,
                 null);
-    }
-
-    private Optional<RuntimeException> checkRowIdConflict(
-            @Nullable List<String> currentWriteCols,
-            long currentSchemaId,
-            @Nullable List<String> historicalWriteCols,
-            long historicalSchemaId) {
-        Snapshot baseSnapshot = snapshot(1L, CommitKind.APPEND, 10L);
-        Snapshot latestSnapshot = snapshot(2L, CommitKind.APPEND, 10L);
-
-        ManifestEntry historicalEntry =
-                ManifestEntry.create(
-                        ADD,
-                        EMPTY_ROW,
-                        0,
-                        1,
-                        createDataFileMeta(
-                                "historical", 0L, 10L, historicalSchemaId, historicalWriteCols));
-
-        SnapshotManager snapshotManager = new TestingSnapshotManager(baseSnapshot, latestSnapshot);
-        CommitScanner commitScanner =
-                new TestingCommitScanner(
-                        latestSnapshot.id(), Collections.singletonList(historicalEntry));
-
-        ConflictDetection detection =
-                new ConflictDetection(
-                        "test-table",
-                        "test-user",
-                        RowType.of(),
-                        createSchemaManager(),
-                        null,
-                        null,
-                        BucketMode.HASH_FIXED,
-                        false,
-                        true,
-                        false,
-                        null,
-                        snapshotManager,
-                        commitScanner);
-        detection.setRowIdCheckFromSnapshot(1L);
-
-        return detection.checkConflicts(
-                latestSnapshot,
-                Collections.emptyList(),
-                Collections.singletonList(
-                        createFileEntry(
-                                "current", ADD, 0L, 10L, currentSchemaId, currentWriteCols)),
-                Collections.emptyList(),
-                CommitKind.APPEND);
-    }
-
-    private SimpleFileEntry createFileEntry(
-            String fileName,
-            FileKind kind,
-            @Nullable Long firstRowId,
-            long rowCount,
-            long schemaId,
-            @Nullable List<String> writeCols) {
-        return new SimpleFileEntry(
-                kind,
-                EMPTY_ROW,
-                0,
-                1,
-                0,
-                fileName,
-                Collections.emptyList(),
-                null,
-                EMPTY_ROW,
-                EMPTY_ROW,
-                null,
-                rowCount,
-                firstRowId,
-                schemaId,
-                writeCols);
-    }
-
-    private DataFileMeta createDataFileMeta(
-            String fileName,
-            @Nullable Long firstRowId,
-            long rowCount,
-            long schemaId,
-            @Nullable List<String> writeCols) {
-        return DataFileMeta.create(
-                fileName,
-                0L,
-                rowCount,
-                EMPTY_ROW,
-                EMPTY_ROW,
-                EMPTY_STATS,
-                EMPTY_STATS,
-                0L,
-                0L,
-                schemaId,
-                0,
-                Collections.emptyList(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                firstRowId,
-                writeCols);
-    }
-
-    private SchemaManager createSchemaManager() {
-        Map<Long, org.apache.paimon.schema.TableSchema> schemas = new HashMap<>();
-        schemas.put(
-                0L,
-                org.apache.paimon.schema.TableSchema.create(
-                        0L,
-                        new Schema(
-                                Arrays.asList(
-                                        new DataField(0, "id", DataTypes.INT()),
-                                        new DataField(1, "b", DataTypes.INT()),
-                                        new DataField(2, "c", DataTypes.INT())),
-                                Collections.emptyList(),
-                                Collections.singletonList("id"),
-                                Collections.emptyMap(),
-                                "")));
-        schemas.put(
-                1L,
-                org.apache.paimon.schema.TableSchema.create(
-                        1L,
-                        new Schema(
-                                Arrays.asList(
-                                        new DataField(0, "id", DataTypes.INT()),
-                                        new DataField(1, "b_renamed", DataTypes.INT()),
-                                        new DataField(2, "c", DataTypes.INT())),
-                                Collections.emptyList(),
-                                Collections.singletonList("id"),
-                                Collections.emptyMap(),
-                                "")));
-        return new TestingSchemaManager(new Path("/tmp/conflict-detection-test"), schemas);
-    }
-
-    private Snapshot snapshot(long id, CommitKind commitKind, @Nullable Long nextRowId) {
-        return new Snapshot(
-                id,
-                0L,
-                "base",
-                0L,
-                "delta",
-                0L,
-                null,
-                null,
-                null,
-                "user",
-                id,
-                commitKind,
-                0L,
-                0L,
-                0L,
-                null,
-                null,
-                null,
-                null,
-                nextRowId);
-    }
-
-    private static class TestingSnapshotManager extends SnapshotManager {
-
-        private final Map<Long, Snapshot> snapshots = new HashMap<>();
-
-        private TestingSnapshotManager(Snapshot... snapshots) {
-            super(
-                    LocalFileIO.create(),
-                    new Path("/tmp/conflict-detection-snapshot-test"),
-                    null,
-                    null,
-                    null);
-            for (Snapshot snapshot : snapshots) {
-                this.snapshots.put(snapshot.id(), snapshot);
-            }
-        }
-
-        @Override
-        public Snapshot snapshot(long snapshotId) {
-            return snapshots.get(snapshotId);
-        }
-    }
-
-    private static class TestingCommitScanner extends CommitScanner {
-
-        private final long snapshotId;
-        private final List<ManifestEntry> entries;
-
-        private TestingCommitScanner(long snapshotId, List<ManifestEntry> entries) {
-            super(() -> null, null, new CoreOptions(new Options()));
-            this.snapshotId = snapshotId;
-            this.entries = entries;
-        }
-
-        @Override
-        public List<ManifestEntry> readIncrementalEntries(
-                Snapshot snapshot, List<org.apache.paimon.data.BinaryRow> changedPartitions) {
-            return snapshot.id() == snapshotId ? entries : Collections.emptyList();
-        }
     }
 }

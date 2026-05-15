@@ -160,7 +160,7 @@ class RowIdColumnConflictChecker {
     }
 
     /**
-     * Binary search to find the first range whose `to` >= target range's `from`
+     * Binary search to find the first range whose `to` >= target range's `from`.
      *
      * @param range querying range
      * @return index of the first range
