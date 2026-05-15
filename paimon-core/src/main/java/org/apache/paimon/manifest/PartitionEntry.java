@@ -83,13 +83,21 @@ public class PartitionEntry {
     }
 
     public PartitionEntry merge(PartitionEntry entry) {
+        // Use the totalBuckets from the most recently created file. This correctly handles
+        // the case where a partition has been overwritten with a different bucket count: the
+        // newer files carry the new totalBuckets, and their creation time is always later.
+        long newLastCreationTime = Math.max(lastFileCreationTime, entry.lastFileCreationTime);
+        int newTotalBuckets =
+                lastFileCreationTime >= entry.lastFileCreationTime
+                        ? totalBuckets
+                        : entry.totalBuckets;
         return new PartitionEntry(
                 partition,
                 recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
-                Math.max(lastFileCreationTime, entry.lastFileCreationTime),
-                entry.totalBuckets);
+                newLastCreationTime,
+                newTotalBuckets);
     }
 
     public Partition toPartition(InternalRowPartitionComputer computer) {
