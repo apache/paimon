@@ -81,11 +81,8 @@ public class FileSystemWriteRestore implements WriteRestore {
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
         List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
 
-        // Resolve the totalBuckets from the partition-level mapping rather than
-        // using the bucket entries, because a partition may have been rescaled to a
-        // different totalBuckets. If we used the bucket entries for an empty bucket,
-        // we would incorrectly return the table default totalBuckets for that partition.
-        Integer totalBuckets = partitionBucketMapping.resolveNumBuckets(partition);
+        Integer totalBuckets =
+                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {

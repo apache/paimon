@@ -19,236 +19,219 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for {@link FileSystemWriteRestore} covering the scenario where a partition has a different
- * bucket count than the table default (e.g., after a rescale operation).
+ * Tests for {@link FileSystemWriteRestore}, covering the {@code totalBuckets} resolution logic for
+ * both empty and non-empty buckets across partitioned and unpartitioned tables.
+ *
+ * <p>When restoring files for a {@code (partition, bucket)} that has no existing data files, there
+ * are no manifest entries to derive {@code totalBuckets} from. For partitioned tables, {@link
+ * WriteRestore#extractTotalBuckets} falls back to {@link
+ * org.apache.paimon.table.sink.PartitionBucketMapping} to correctly return the per-partition bucket
+ * count (e.g. after a rescale). For unpartitioned tables, {@code null} is returned so the write
+ * path falls back to {@code numBuckets} and the committer-side mismatch check still fires.
  */
-public class FileSystemWriteRestoreTest extends TableTestBase {
+public class FileSystemWriteRestoreTest {
 
-    /**
-     * Scenario:
-     *
-     * <ul>
-     *   <li>Table bucket (default): 32
-     *   <li>Partition A bucket: 2 (rescaled)
-     *   <li>Partition A bucket=0: has data files, totalBuckets=2
-     *   <li>Partition A bucket=1: no data files
-     * </ul>
-     *
-     * <p>When restoring bucket=1 of partition A (empty bucket), the returned {@code totalBuckets}
-     * must be 2 (from the per-partition mapping), not 32 (the table default).
-     */
+    @TempDir java.nio.file.Path tempDir;
+
+    private static final RowType ROW_TYPE =
+            RowType.of(
+                    new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                    new String[] {"pt", "k", "v"});
+
     @Test
-    public void testEmptyBucketUsesPartitionBucketCount() throws Exception {
-        // Table default: 32 buckets
-        int tableBuckets = 32;
-        // Partition A was rescaled to 2 buckets
-        int partitionBuckets = 2;
+    public void testEmptyBucketUsesPartitionBucketMapping() throws Exception {
+        // Build a table with default bucket=4 and write data into partition 1.
+        // Some buckets within partition 1 will end up with files (bucket 0 OR
+        // bucket 1, depending on hash); the OTHER bucket will be empty. Then
+        // "rescale" the table-level default to 32 (without rewriting partition 1)
+        // and ask the WriteRestore for an empty bucket. It must return
+        // totalBuckets=4 (the partition's actual bucket count), NOT 32 (the new
+        // table default).
+        FileStoreTable table = createPartitionedPkTable(4);
 
-        Identifier identifier = new Identifier("db", "table");
-        catalog.createDatabase("db", false);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("pt", DataTypes.INT())
-                        .column("k", DataTypes.INT())
-                        .column("v", DataTypes.INT())
-                        .primaryKey("pt", "k")
-                        .partitionKeys("pt")
-                        .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
-                        .build();
-        catalog.createTable(identifier, schema, false);
-        FileStoreTable table = getTable(identifier);
+        // Write enough rows to populate at least one bucket within partition 1.
+        commitOneRow(table, /* pt */ 1, /* k */ 1);
+        commitOneRow(table, /* pt */ 1, /* k */ 2);
 
-        // Write data to partition A, bucket=0 with totalBuckets=2 (simulating a rescaled
-        // partition). We write normally first, then re-wrap the commit message to override
-        // totalBuckets.
-        BinaryRow partitionA = partitionRow(1);
-        String commitUser = UUID.randomUUID().toString();
-        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
-        List<CommitMessage> messages;
-        try (StreamTableWrite write = writeBuilder.newWrite()) {
-            // Write to partition=1, key=1, value=100 with bucket=0 explicitly
-            write.write(GenericRow.of(1, 1, 100), 0);
-            messages = write.prepareCommit(false, 0);
-        }
+        // Find an empty bucket in partition 1 by inspecting the existing files.
+        int emptyBucket = findEmptyBucket(table, 1, /* totalBuckets */ 4);
 
-        // Rewrap the commit message so that totalBuckets=2 (the rescaled partition bucket count)
-        CommitMessageImpl original = (CommitMessageImpl) messages.get(0);
-        CommitMessageImpl rescaled =
-                new CommitMessageImpl(
-                        original.partition(),
-                        original.bucket(),
-                        partitionBuckets,
-                        original.newFilesIncrement(),
-                        original.compactIncrement());
+        // Simulate a rescale by raising the table-level default bucket count
+        // (without rewriting existing files). Existing manifest entries still
+        // carry totalBuckets=4.
+        table = withBucket(table, 32);
 
-        try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.commit(0, Collections.<CommitMessage>singletonList(rescaled));
-        }
+        WriteRestore restore = newWriteRestore(table);
 
-        // Now create the FileSystemWriteRestore for this table
-        FileStoreTable freshTable = getTable(identifier);
-        FileSystemWriteRestore writeRestore = newWriteRestore(freshTable);
+        RestoreFiles restored = restore.restoreFiles(binaryRow(1), emptyBucket, false, false);
 
-        // Restore bucket=0 (has data files): totalBuckets should be 2
-        RestoreFiles restored0 = writeRestore.restoreFiles(partitionA, 0, false, false);
-        assertThat(restored0.totalBuckets())
-                .as("bucket=0 (has files) should use partition bucket count, not table default")
-                .isEqualTo(partitionBuckets);
-        assertThat(restored0.dataFiles()).isNotEmpty();
-
-        // Restore bucket=1 (empty bucket): totalBuckets should ALSO be 2, not 32
-        RestoreFiles restored1 = writeRestore.restoreFiles(partitionA, 1, false, false);
-        assertThat(restored1.totalBuckets())
-                .as("bucket=1 (empty bucket) should use partition bucket count, not table default")
-                .isEqualTo(partitionBuckets);
-        assertThat(restored1.dataFiles()).isEmpty();
-    }
-
-    /**
-     * Sanity check: a partition that has never been rescaled uses the table default bucket count.
-     */
-    @Test
-    public void testPartitionWithDefaultBucketCount() throws Exception {
-        int tableBuckets = 32;
-
-        Identifier identifier = new Identifier("db2", "table");
-        catalog.createDatabase("db2", false);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("pt", DataTypes.INT())
-                        .column("k", DataTypes.INT())
-                        .column("v", DataTypes.INT())
-                        .primaryKey("pt", "k")
-                        .partitionKeys("pt")
-                        .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
-                        .build();
-        catalog.createTable(identifier, schema, false);
-        FileStoreTable table = getTable(identifier);
-
-        // Write data using the default bucket count (no totalBuckets override)
-        write(table, GenericRow.of(1, 1, 100));
-
-        FileStoreTable freshTable = getTable(identifier);
-        FileSystemWriteRestore writeRestore = newWriteRestore(freshTable);
-
-        BinaryRow partitionA = partitionRow(1);
-
-        // Restore bucket=0 (has data with default totalBuckets=32)
-        RestoreFiles restored = writeRestore.restoreFiles(partitionA, 0, false, false);
         assertThat(restored.totalBuckets())
-                .as("partition with default bucket count should return table bucket count")
-                .isEqualTo(tableBuckets);
+                .as(
+                        "Empty (partition 1, bucket %d): totalBuckets must be inferred from "
+                                + "PartitionBucketMapping (4), not the new table default (32).",
+                        emptyBucket)
+                .isEqualTo(4);
+        assertThat(restored.dataFiles()).isNullOrEmpty();
     }
 
-    /**
-     * Scenario with two partitions: partition A rescaled to 2 buckets, partition B uses default 32.
-     * Each partition's empty buckets must return their own bucket count.
-     */
     @Test
-    public void testMixedPartitionsWithDifferentBucketCounts() throws Exception {
-        int tableBuckets = 32;
-        int partitionABuckets = 2;
+    public void testEmptyBucketInUnseenPartitionUsesDefault() throws Exception {
+        // For an entirely unseen partition (no files anywhere), no per-partition
+        // mapping exists and PartitionBucketMapping.resolveNumBuckets falls back to
+        // the table's default bucket count.
+        FileStoreTable table = createPartitionedPkTable(8);
+        commitOneRow(table, 1, 100); // ensures the snapshot exists
 
-        Identifier identifier = new Identifier("db3", "table");
-        catalog.createDatabase("db3", false);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("pt", DataTypes.INT())
-                        .column("k", DataTypes.INT())
-                        .column("v", DataTypes.INT())
-                        .primaryKey("pt", "k")
-                        .partitionKeys("pt")
-                        .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
-                        .build();
-        catalog.createTable(identifier, schema, false);
-        FileStoreTable table = getTable(identifier);
+        WriteRestore restore = newWriteRestore(table);
+        RestoreFiles restored = restore.restoreFiles(binaryRow(/* unseen */ 999), 0, false, false);
 
-        String commitUser = UUID.randomUUID().toString();
-
-        // Write partition A, bucket=0 with rescaled totalBuckets=2
-        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
-        List<CommitMessage> messagesA;
-        try (StreamTableWrite write = writeBuilder.newWrite()) {
-            write.write(GenericRow.of(1, 1, 100), 0);
-            messagesA = write.prepareCommit(false, 0);
-        }
-        CommitMessageImpl originalA = (CommitMessageImpl) messagesA.get(0);
-        CommitMessageImpl rescaledA =
-                new CommitMessageImpl(
-                        originalA.partition(),
-                        originalA.bucket(),
-                        partitionABuckets,
-                        originalA.newFilesIncrement(),
-                        originalA.compactIncrement());
-        try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.commit(0, Collections.<CommitMessage>singletonList(rescaledA));
-        }
-
-        // Write partition B, bucket=0 with default totalBuckets=32
-        try (StreamTableWrite write = writeBuilder.newWrite()) {
-            write.write(GenericRow.of(2, 1, 200), 0);
-            List<CommitMessage> messagesB = write.prepareCommit(false, 1);
-            try (TableCommitImpl commit = table.newCommit(commitUser)) {
-                commit.commit(1, messagesB);
-            }
-        }
-
-        FileStoreTable freshTable = getTable(identifier);
-        FileSystemWriteRestore writeRestore = newWriteRestore(freshTable);
-
-        BinaryRow partitionA = partitionRow(1);
-        BinaryRow partitionB = partitionRow(2);
-
-        // Partition A: bucket=1 (empty) should use 2, not 32
-        RestoreFiles restoredA1 = writeRestore.restoreFiles(partitionA, 1, false, false);
-        assertThat(restoredA1.totalBuckets())
-                .as("partition A empty bucket should use rescaled partition bucket count 2")
-                .isEqualTo(partitionABuckets);
-        assertThat(restoredA1.dataFiles()).isEmpty();
-
-        // Partition B: bucket=0 (has files) should use 32
-        RestoreFiles restoredB0 = writeRestore.restoreFiles(partitionB, 0, false, false);
-        assertThat(restoredB0.totalBuckets())
-                .as("partition B should use table default bucket count 32")
-                .isEqualTo(tableBuckets);
-        assertThat(restoredB0.dataFiles()).isNotEmpty();
+        assertThat(restored.totalBuckets()).isEqualTo(8);
+        assertThat(restored.dataFiles()).isNullOrEmpty();
     }
 
-    private static FileSystemWriteRestore newWriteRestore(FileStoreTable table) {
+    @Test
+    public void testNonEmptyBucketReportsManifestTotalBuckets() throws Exception {
+        // Sanity test: when a bucket has files, totalBuckets must come from the
+        // manifest entries (not from the fallback path). This guards against
+        // accidentally always overriding totalBuckets via PartitionBucketMapping.
+        FileStoreTable table = createPartitionedPkTable(2);
+        commitOneRow(table, 1, 1);
+        commitOneRow(table, 1, 2);
+
+        // Locate a non-empty bucket within partition 1.
+        int nonEmptyBucket = findNonEmptyBucket(table, 1, 2);
+
+        // Change the table default to ensure the returned totalBuckets is from the
+        // manifest entry, not the schema.
+        table = withBucket(table, 32);
+
+        WriteRestore restore = newWriteRestore(table);
+        RestoreFiles restored = restore.restoreFiles(binaryRow(1), nonEmptyBucket, false, false);
+
+        assertThat(restored.totalBuckets()).isEqualTo(2);
+        assertThat(restored.dataFiles()).isNotEmpty();
+    }
+
+    // ------------------------------------------------------------------------
+    // helpers
+    // ------------------------------------------------------------------------
+
+    private FileStoreTable createPartitionedPkTable(int bucket) throws Exception {
+        Path path = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path.toString());
+        options.set(CoreOptions.BUCKET, bucket);
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), path),
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(), path, tableSchema, CatalogEnvironment.empty());
+    }
+
+    private FileStoreTable withBucket(FileStoreTable table, int newBucket) {
+        Options options = new Options(table.options());
+        options.set(CoreOptions.BUCKET, newBucket);
+        return table.copy(table.schema().copy(options.toMap()));
+    }
+
+    private WriteRestore newWriteRestore(FileStoreTable table) {
         return new FileSystemWriteRestore(
                 table.store().options(),
-                table.store().snapshotManager(),
+                table.snapshotManager(),
                 table.store().newScan(),
                 table.store().newIndexFileHandler());
     }
 
-    private BinaryRow partitionRow(int partitionValue) {
+    private void commitOneRow(FileStoreTable table, int pt, int k) throws Exception {
+        String user = UUID.randomUUID().toString();
+        Long latest = table.snapshotManager().latestSnapshotId();
+        long id = latest == null ? 0L : latest;
+        try (StreamTableWrite write = table.newWrite(user);
+                StreamTableCommit commit = table.newCommit(user)) {
+            write.write(GenericRow.of(pt, k, (long) k));
+            commit.commit(id, write.prepareCommit(true, id));
+        }
+    }
+
+    /** Returns a bucket id (0..totalBuckets-1) that has no data files within the partition. */
+    private int findEmptyBucket(FileStoreTable table, int pt, int totalBuckets) throws Exception {
+        BinaryRow partition = binaryRow(pt);
+        for (int b = 0; b < totalBuckets; b++) {
+            int bucket = b;
+            boolean nonEmpty =
+                    table.newSnapshotReader()
+                            .withPartitionFilter(Collections.singletonList(partition))
+                            .withBucket(bucket).read().dataSplits().stream()
+                            .anyMatch(s -> !s.dataFiles().isEmpty());
+            if (!nonEmpty) {
+                return bucket;
+            }
+        }
+        throw new IllegalStateException(
+                "Could not find an empty bucket in partition "
+                        + pt
+                        + " (every bucket has files); test scenario could not be set up.");
+    }
+
+    /** Returns a bucket id (0..totalBuckets-1) that has at least one data file. */
+    private int findNonEmptyBucket(FileStoreTable table, int pt, int totalBuckets)
+            throws Exception {
+        BinaryRow partition = binaryRow(pt);
+        for (int b = 0; b < totalBuckets; b++) {
+            int bucket = b;
+            boolean nonEmpty =
+                    table.newSnapshotReader()
+                            .withPartitionFilter(Collections.singletonList(partition))
+                            .withBucket(bucket).read().dataSplits().stream()
+                            .anyMatch(s -> !s.dataFiles().isEmpty());
+            if (nonEmpty) {
+                return bucket;
+            }
+        }
+        throw new IllegalStateException("Could not find a non-empty bucket in partition " + pt);
+    }
+
+    private static BinaryRow binaryRow(int pt) {
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.writeInt(0, partitionValue);
+        writer.writeInt(0, pt);
         writer.complete();
         return row;
     }
