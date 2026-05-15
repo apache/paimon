@@ -163,7 +163,6 @@ class SplitRead(ABC):
             if len(effective_row_ranges) == 0:
                 return EmptyRecordBatchReader()
             if file_format in (CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
-                # Convert global row ranges to local file indices for native pushdown
                 row_indices = []
                 for r in effective_row_ranges:
                     start = r.from_ - file.first_row_id
@@ -219,6 +218,14 @@ class SplitRead(ABC):
             SpecialFields.row_type_with_row_tracking(self.table.table_schema.fields)
             if row_tracking_enabled else self.table.table_schema.fields
         )
+
+        # When native shard pushdown is used, the format reader only returns rows
+        # starting from shard_range[0], so _ROW_ID must be offset accordingly.
+        effective_first_row_id = file.first_row_id
+        if shard_range is not None and file_format in (
+                CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
+            effective_first_row_id = file.first_row_id + shard_range[0]
+
         if for_merge_read:
             reader = DataFileBatchReader(
                 format_reader,
@@ -227,12 +234,13 @@ class SplitRead(ABC):
                 self.trimmed_primary_key,
                 table_schema_fields,
                 file.max_sequence_number,
-                file.first_row_id,
+                effective_first_row_id,
                 row_tracking_enabled,
                 system_fields,
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
-                file_io=self.table.file_io)
+                file_io=self.table.file_io,
+                row_id_offsets=row_indices)
         else:
             reader = DataFileBatchReader(
                 format_reader,
@@ -241,12 +249,13 @@ class SplitRead(ABC):
                 None,
                 table_schema_fields,
                 file.max_sequence_number,
-                file.first_row_id,
+                effective_first_row_id,
                 row_tracking_enabled,
                 system_fields,
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
-                file_io=self.table.file_io)
+                file_io=self.table.file_io,
+                row_id_offsets=row_indices)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
         if row_ranges is not None and row_indices is None:

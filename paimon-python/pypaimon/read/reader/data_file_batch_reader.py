@@ -43,7 +43,8 @@ class DataFileBatchReader(RecordBatchReader):
                  system_fields: dict,
                  blob_as_descriptor: bool = False,
                  blob_descriptor_fields: Optional[set] = None,
-                 file_io: Optional[FileIO] = None):
+                 file_io: Optional[FileIO] = None,
+                 row_id_offsets: Optional[List[int]] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -51,6 +52,8 @@ class DataFileBatchReader(RecordBatchReader):
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
+        self.row_id_offsets = row_id_offsets
+        self._row_id_cursor = 0
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
         self.blob_as_descriptor = blob_as_descriptor
@@ -209,9 +212,14 @@ class DataFileBatchReader(RecordBatchReader):
         # Handle _ROW_ID field
         if SpecialFields.ROW_ID.name in self.system_fields.keys():
             idx = self.system_fields[SpecialFields.ROW_ID.name]
-            # Create a new array that fills with computed row IDs
-            arrays[idx] = pa.array(range(self.first_row_id, self.first_row_id + record_batch.num_rows), type=pa.int64())
-            self.first_row_id += record_batch.num_rows
+            if self.row_id_offsets is not None:
+                end = self._row_id_cursor + record_batch.num_rows
+                row_ids = [self.first_row_id + o for o in self.row_id_offsets[self._row_id_cursor:end]]
+                arrays[idx] = pa.array(row_ids, type=pa.int64())
+                self._row_id_cursor = end
+            else:
+                arrays[idx] = pa.array(range(self.first_row_id, self.first_row_id + record_batch.num_rows), type=pa.int64())
+                self.first_row_id += record_batch.num_rows
 
         # Handle _SEQUENCE_NUMBER field
         if SpecialFields.SEQUENCE_NUMBER.name in self.system_fields.keys():

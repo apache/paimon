@@ -365,6 +365,52 @@ class AoReaderTest(unittest.TestCase):
         result_ids = sorted(result.column('id').to_pylist())
         self.assertEqual(result_ids, list(range(slice_start, slice_end)))
 
+    def test_lance_shard_row_id_correctness(self):
+        """
+        with_shard splits a file into contiguous ranges via SlicedSplit.
+        _ROW_ID across all shards must equal the full table's _ROW_ID.
+        """
+        try:
+            import lance as _lance
+            import lance.file
+        except ImportError:
+            self.skipTest("lance not installed")
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('id', pa.int64()), ('value', pa.string())]),
+            options={'file.format': 'lance',
+                     'row-tracking.enabled': 'true',
+                     'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_lance_shard_row_id', schema, False)
+        table = self.catalog.get_table('default.test_lance_shard_row_id')
+
+        n = 1000
+        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Read full table _ROW_ID as ground truth
+        read_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        full_splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        full_result = table_read.to_arrow(full_splits)
+        expected_row_ids = sorted(full_result.column('_ROW_ID').to_pylist())
+
+        # Read via with_shard and collect _ROW_ID from all shards
+        total_shards = 3
+        all_row_ids = []
+        for i in range(total_shards):
+            shard_splits = read_builder.new_scan().with_shard(i, total_shards).plan().splits()
+            shard_result = table_read.to_arrow(shard_splits)
+            all_row_ids.extend(shard_result.column('_ROW_ID').to_pylist())
+
+        self.assertEqual(sorted(all_row_ids), expected_row_ids)
+
     def test_lance_indexed_split_take_rows_pushdown(self):
         """
         IndexedSplit row ranges (from ANN global index results) are converted to
@@ -450,6 +496,66 @@ class AoReaderTest(unittest.TestCase):
         self.assertEqual(result.num_rows, len(target_global_ids))
         result_ids = sorted(result.column('id').to_pylist())
         self.assertEqual(result_ids, [50, 300, 700])
+
+    def test_lance_indexed_split_row_id_correctness(self):
+        """
+        IndexedSplit (ANN vector search) with native take_rows pushdown must
+        return correct _ROW_ID values matching the original global row IDs.
+        """
+        try:
+            import lance as _lance
+            import lance.file
+        except ImportError:
+            self.skipTest("lance not installed")
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('id', pa.int64()), ('value', pa.string())]),
+            options={'file.format': 'lance',
+                     'row-tracking.enabled': 'true',
+                     'data-evolution.enabled': 'true'})
+        self.catalog.create_table('default.test_lance_indexed_row_id', schema, False)
+        table = self.catalog.get_table('default.test_lance_indexed_row_id')
+
+        n = 1000
+        pa_table = pa.table({'id': list(range(n)), 'value': [f'v{i}' for i in range(n)]})
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Read full table to get ground-truth _ROW_ID for specific rows
+        read_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        full_splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        full_result = table_read.to_arrow(full_splits)
+        # Build id -> _ROW_ID mapping from full scan
+        id_to_row_id = dict(zip(
+            full_result.column('id').to_pylist(),
+            full_result.column('_ROW_ID').to_pylist()))
+
+        # Construct IndexedSplit targeting specific rows
+        data_split = full_splits[0]
+        file_meta = data_split.files[0]
+        first_row_id = file_meta.first_row_id
+
+        from pypaimon.globalindex.indexed_split import IndexedSplit
+        from pypaimon.utils.range import Range
+        target_local_offsets = [50, 300, 700]
+        target_global_ids = [first_row_id + o for o in target_local_offsets]
+        row_ranges = [Range(g, g) for g in target_global_ids]
+        indexed = IndexedSplit(data_split, row_ranges)
+
+        result = table_read.to_arrow([indexed])
+
+        self.assertEqual(result.num_rows, len(target_global_ids))
+        for i in range(result.num_rows):
+            row_id = result.column('_ROW_ID')[i].as_py()
+            data_id = result.column('id')[i].as_py()
+            self.assertEqual(row_id, id_to_row_id[data_id],
+                             f"row id={data_id}: _ROW_ID should be {id_to_row_id[data_id]}, got {row_id}")
 
     def test_append_only_multi_write_once_commit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
