@@ -1,0 +1,221 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.operation.commit;
+
+import org.apache.paimon.manifest.FileEntry;
+import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/** Detects row-id range conflicts only when written field ids overlap. */
+class RowIdColumnConflictChecker {
+
+    private final SchemaManager schemaManager;
+    private final List<WriteRange> writeRanges;
+    private final Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
+
+    private RowIdColumnConflictChecker(
+            SchemaManager schemaManager, List<SimpleFileEntry> deltaEntries) {
+        this.schemaManager = schemaManager;
+        this.writeRanges = buildWriteRanges(deltaEntries);
+    }
+
+    static RowIdColumnConflictChecker fromDeltaEntries(
+            SchemaManager schemaManager, List<SimpleFileEntry> deltaEntries) {
+        return new RowIdColumnConflictChecker(schemaManager, deltaEntries);
+    }
+
+    private List<WriteRange> buildWriteRanges(List<SimpleFileEntry> deltaEntries) {
+        List<SimpleFileEntry> rowIdEntries = new ArrayList<>();
+        for (SimpleFileEntry entry : deltaEntries) {
+            if (entry.firstRowId() != null) {
+                rowIdEntries.add(entry);
+            }
+        }
+
+        if (rowIdEntries.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        RangeHelper<SimpleFileEntry> rangeHelper =
+                new RangeHelper<>(SimpleFileEntry::nonNullRowIdRange);
+        List<WriteRange> writeRanges = new ArrayList<>();
+        for (List<SimpleFileEntry> group : rangeHelper.mergeOverlappingRanges(rowIdEntries)) {
+            Range range = mergeRange(group);
+            Set<Integer> fieldIds = new HashSet<>();
+            for (SimpleFileEntry entry : group) {
+                addWriteFieldIds(fieldIds, entry);
+            }
+
+            if (!fieldIds.isEmpty()) {
+                writeRanges.add(new WriteRange(range, fieldIds));
+            }
+        }
+        writeRanges.sort(
+                Comparator.comparingLong((WriteRange writeRange) -> writeRange.range.from)
+                        .thenComparingLong(writeRange -> writeRange.range.to));
+
+        return writeRanges;
+    }
+
+    boolean isEmpty() {
+        return writeRanges.isEmpty();
+    }
+
+    boolean conflictsWith(FileEntry entry) {
+        if (entry.firstRowId() == null) {
+            return false;
+        }
+
+        Range range = rowIdRange(entry);
+        int index = firstPossibleRange(range);
+        while (index < writeRanges.size()) {
+            WriteRange writeRange = writeRanges.get(index);
+            if (writeRange.range.from > range.to) {
+                break;
+            }
+            if (writeRange.range.hasIntersection(range)
+                    && containsAnyWriteField(writeRange.fieldIds, entry)) {
+                return true;
+            }
+            index++;
+        }
+        return false;
+    }
+
+    private static Range mergeRange(List<SimpleFileEntry> entries) {
+        long from = Long.MAX_VALUE;
+        long to = Long.MIN_VALUE;
+        for (SimpleFileEntry entry : entries) {
+            Range range = entry.nonNullRowIdRange();
+            from = Math.min(from, range.from);
+            to = Math.max(to, range.to);
+        }
+        return new Range(from, to);
+    }
+
+    private int firstPossibleRange(Range range) {
+        int low = 0;
+        int high = writeRanges.size();
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (writeRanges.get(mid).range.to < range.from) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        return low;
+    }
+
+    private void addWriteFieldIds(Set<Integer> fieldIds, FileEntry entry) {
+        List<String> writeCols = entry.writeCols();
+        if (writeCols == null) {
+            throw nullWriteColsException(entry);
+        }
+
+        for (String writeCol : writeCols) {
+            Integer fieldId = fieldId(entry, writeCol);
+            if (fieldId != null && !SpecialFields.isSystemField(fieldId)) {
+                fieldIds.add(fieldId);
+            }
+        }
+    }
+
+    private boolean containsAnyWriteField(Set<Integer> fieldIds, FileEntry entry) {
+        List<String> writeCols = entry.writeCols();
+        if (writeCols == null) {
+            throw nullWriteColsException(entry);
+        }
+
+        for (String writeCol : writeCols) {
+            Integer fieldId = fieldId(entry, writeCol);
+            if (fieldId != null
+                    && !SpecialFields.isSystemField(fieldId)
+                    && fieldIds.contains(fieldId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Integer fieldId(FileEntry entry, String writeCol) {
+        Integer fieldId =
+                fieldIdByNameCache
+                        .computeIfAbsent(entry.schemaId(), this::fieldIdByName)
+                        .get(writeCol);
+        if (fieldId == null) {
+            if (SpecialFields.isSystemField(writeCol)) {
+                return null;
+            }
+            throw new RuntimeException(
+                    String.format(
+                            "Cannot find write column '%s' in schema %s.",
+                            writeCol, entry.schemaId()));
+        }
+        return fieldId;
+    }
+
+    private Map<String, Integer> fieldIdByName(long schemaId) {
+        Map<String, Integer> fieldIdByName = new HashMap<>();
+        for (DataField field : schemaManager.schema(schemaId).logicalRowType().getFields()) {
+            fieldIdByName.put(field.name(), field.id());
+        }
+        return fieldIdByName;
+    }
+
+    private static RuntimeException nullWriteColsException(FileEntry entry) {
+        return new RuntimeException(
+                String.format(
+                        "Write columns of row-id file '%s' in schema %s cannot be null.",
+                        entry.fileName(), entry.schemaId()));
+    }
+
+    private static Range rowIdRange(FileEntry entry) {
+        Long firstRowId = entry.firstRowId();
+        if (firstRowId == null) {
+            throw new IllegalArgumentException(
+                    String.format("First row id of '%s' should not be null.", entry.fileName()));
+        }
+        return new Range(firstRowId, firstRowId + entry.rowCount() - 1);
+    }
+
+    private static class WriteRange {
+
+        private final Range range;
+        private final Set<Integer> fieldIds;
+
+        private WriteRange(Range range, Set<Integer> fieldIds) {
+            this.range = range;
+            this.fieldIds = fieldIds;
+        }
+    }
+}

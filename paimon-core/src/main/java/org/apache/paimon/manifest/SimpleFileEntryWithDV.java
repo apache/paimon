@@ -41,7 +41,9 @@ public class SimpleFileEntryWithDV extends SimpleFileEntry {
                 entry.maxKey(),
                 entry.externalPath(),
                 entry.rowCount(),
-                entry.firstRowId());
+                entry.firstRowId(),
+                entry.schemaId(),
+                entry.writeCols());
         this.dvFileName = dvFileName;
     }
 

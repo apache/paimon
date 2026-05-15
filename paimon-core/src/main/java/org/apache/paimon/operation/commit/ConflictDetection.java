@@ -33,11 +33,11 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -64,6 +64,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -76,6 +77,7 @@ public class ConflictDetection {
     private final String tableName;
     private final String commitUser;
     private final RowType partitionType;
+    private final SchemaManager schemaManager;
     private final FileStorePathFactory pathFactory;
     private final @Nullable Comparator<InternalRow> keyComparator;
     private final BucketMode bucketMode;
@@ -100,6 +102,7 @@ public class ConflictDetection {
             String tableName,
             String commitUser,
             RowType partitionType,
+            SchemaManager schemaManager,
             FileStorePathFactory pathFactory,
             @Nullable Comparator<InternalRow> keyComparator,
             BucketMode bucketMode,
@@ -112,6 +115,7 @@ public class ConflictDetection {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
+        this.schemaManager = schemaManager;
         this.pathFactory = pathFactory;
         this.keyComparator = keyComparator;
         this.bucketMode = bucketMode;
@@ -473,7 +477,7 @@ public class ConflictDetection {
         for (List<SimpleFileEntry> group : merged) {
             List<SimpleFileEntry> dataFiles = new ArrayList<>();
             for (SimpleFileEntry f : group) {
-                if (!isBlobFile(f.fileName())) {
+                if (!dedicatedStorageFile(f.fileName())) {
                     dataFiles.add(f);
                 }
             }
@@ -500,14 +504,10 @@ public class ConflictDetection {
         }
 
         List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
-        // collect history row id ranges
-        List<Range> historyIdRanges = new ArrayList<>();
-        for (SimpleFileEntry entry : deltaEntries) {
-            Long firstRowId = entry.firstRowId();
-            long rowCount = entry.rowCount();
-            if (firstRowId != null) {
-                historyIdRanges.add(new Range(firstRowId, firstRowId + rowCount - 1));
-            }
+        RowIdColumnConflictChecker conflictChecker =
+                RowIdColumnConflictChecker.fromDeltaEntries(schemaManager, deltaEntries);
+        if (conflictChecker.isEmpty()) {
+            return Optional.empty();
         }
 
         // check history row id ranges
@@ -525,21 +525,22 @@ public class ConflictDetection {
                     commitScanner.readIncrementalEntries(snapshot, changedPartitions);
             for (ManifestEntry entry : changes) {
                 DataFileMeta file = entry.file();
-                Range fileRange = file.nonNullRowIdRange();
-                if (fileRange.from < checkNextRowId) {
-                    for (Range range : historyIdRanges) {
-                        if (range.hasIntersection(fileRange)) {
-                            return Optional.of(
-                                    new RuntimeException(
-                                            "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
-                                                    + " updating the same file, which can render some updates ineffective."));
-                        }
-                    }
+                if (file.firstRowId() != null
+                        && file.nonNullRowIdRange().from < checkNextRowId
+                        && conflictChecker.conflictsWith(entry)) {
+                    return Optional.of(
+                            new RuntimeException(
+                                    "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
+                                            + " updating the same file, which can render some updates ineffective."));
                 }
             }
         }
 
         return Optional.empty();
+    }
+
+    private static boolean dedicatedStorageFile(String fileName) {
+        return isBlobFile(fileName) || isVectorStoreFile(fileName);
     }
 
     static List<SimpleFileEntry> buildBaseEntriesWithDV(

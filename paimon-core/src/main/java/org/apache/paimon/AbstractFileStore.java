@@ -284,6 +284,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 tableName,
                                 commitUser,
                                 partitionType,
+                                schemaManager,
                                 pathFactory(),
                                 newKeyComparator(),
                                 bucketMode(),
