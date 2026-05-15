@@ -586,8 +586,25 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists) {
-        throw new UnsupportedOperationException("RESTCatalog does not support replaceTable yet.");
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        checkNotBranch(identifier, "replaceTable");
+        checkNotSystemTable(identifier, "replaceTable");
+        validateCreateTable(newSchema, dataTokenEnabled);
+        try {
+            tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+            api.replaceTable(identifier, newSchema);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
     }
 
     @Override

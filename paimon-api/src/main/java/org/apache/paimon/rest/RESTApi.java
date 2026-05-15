@@ -51,6 +51,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
@@ -774,6 +775,24 @@ public class RESTApi {
         AlterTableRequest request = new AlterTableRequest(changes);
         client.post(
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
+     * Replace table.
+     *
+     * @param identifier database name and table name.
+     * @param schema schema to replace table
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void replaceTable(Identifier identifier, Schema schema) {
+        ReplaceTableRequest request = new ReplaceTableRequest(schema);
+        client.post(
+                resourcePaths.replaceTable(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);
     }

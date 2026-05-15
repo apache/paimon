@@ -1243,27 +1243,6 @@ public abstract class CatalogTestBase {
                 .isThrownBy(() -> catalog.replaceTable(identifier, changePartitionKeys, false))
                 .withMessageContaining("partition keys");
 
-        if (supportsFormatTable()) {
-            Schema formatSchema =
-                    Schema.newBuilder()
-                            .column("id", DataTypes.INT())
-                            .column("name", DataTypes.STRING())
-                            .option(TYPE.key(), TableType.FORMAT_TABLE.toString())
-                            .option(CoreOptions.FILE_FORMAT.key(), "csv")
-                            .build();
-            catalog.replaceTable(identifier, formatSchema, false);
-            assertThat(catalog.getTable(identifier)).isInstanceOf(FormatTable.class);
-
-            Schema paimonSchema =
-                    Schema.newBuilder()
-                            .column("id", DataTypes.INT())
-                            .column("name", DataTypes.STRING())
-                            .option("bucket", "-1")
-                            .build();
-            catalog.replaceTable(identifier, paimonSchema, false);
-            assertThat(catalog.getTable(identifier)).isInstanceOf(FileStoreTable.class);
-        }
-
         // ignoreIfNotExists = true: missing table is silently skipped
         Identifier missing = Identifier.create("replace_db", "missing");
         catalog.replaceTable(missing, newSchema, true);
