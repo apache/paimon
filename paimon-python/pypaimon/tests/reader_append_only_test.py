@@ -371,8 +371,7 @@ class AoReaderTest(unittest.TestCase):
         _ROW_ID across all shards must equal the full table's _ROW_ID.
         """
         try:
-            import lance as _lance
-            import lance.file
+            import lance  # noqa: F401
         except ImportError:
             self.skipTest("lance not installed")
 
@@ -503,8 +502,7 @@ class AoReaderTest(unittest.TestCase):
         return correct _ROW_ID values matching the original global row IDs.
         """
         try:
-            import lance as _lance
-            import lance.file
+            import lance  # noqa: F401
         except ImportError:
             self.skipTest("lance not installed")
 

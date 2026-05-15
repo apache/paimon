@@ -222,8 +222,9 @@ class SplitRead(ABC):
         # When native shard pushdown is used, the format reader only returns rows
         # starting from shard_range[0], so _ROW_ID must be offset accordingly.
         effective_first_row_id = file.first_row_id
-        if shard_range is not None and file_format in (
-                CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE):
+        if (shard_range is not None and file.first_row_id is not None
+                and file_format in (
+                    CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
             effective_first_row_id = file.first_row_id + shard_range[0]
 
         if for_merge_read:

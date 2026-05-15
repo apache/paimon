@@ -218,7 +218,8 @@ class DataFileBatchReader(RecordBatchReader):
                 arrays[idx] = pa.array(row_ids, type=pa.int64())
                 self._row_id_cursor = end
             else:
-                arrays[idx] = pa.array(range(self.first_row_id, self.first_row_id + record_batch.num_rows), type=pa.int64())
+                row_id_range = range(self.first_row_id, self.first_row_id + record_batch.num_rows)
+                arrays[idx] = pa.array(row_id_range, type=pa.int64())
                 self.first_row_id += record_batch.num_rows
 
         # Handle _SEQUENCE_NUMBER field
