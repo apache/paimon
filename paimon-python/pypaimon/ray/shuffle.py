@@ -25,20 +25,18 @@ task then opens its own writer and emits its own data file, producing
 ``partitions × buckets × ray_tasks`` files instead of the
 ``partitions × buckets`` the writer would naturally produce.
 
-When ``shuffle=True`` and the table is HASH_FIXED, we group rows by
-``(partition_keys..., bucket)`` so every distinct group lands in a
-single Ray task. ``bucket`` is computed using the same
-``FixedBucketRowKeyExtractor`` the writer uses, so the shuffle-time
-bucket assignment is byte-equivalent to the writer's.
+For HASH_FIXED tables we group rows by ``(partition_keys..., bucket)``
+so every distinct group lands in a single Ray task. ``bucket`` is
+computed using the same ``FixedBucketRowKeyExtractor`` the writer
+uses, so the bucket assignment seen by the groupby is byte-equivalent
+to the writer's. HASH_FIXED writes are always pre-clustered; no user
+opt-in is required.
 
-For any other bucket mode the shuffle is a soft no-op with a warning;
-we never raise. ``shuffle=False`` is the default and preserves the
-original Ray round-robin behaviour.
+For any other bucket mode the dataset is returned unchanged.
 """
 
-import logging
 import uuid
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List
 
 import pyarrow as pa
 
@@ -48,8 +46,6 @@ if TYPE_CHECKING:
     import ray.data
 
     from pypaimon.table.table import Table
-
-logger = logging.getLogger(__name__)
 
 # Default transient column name. A collision-safe variant is picked at
 # runtime by ``_pick_bucket_col_name`` so user tables that happen to
@@ -71,61 +67,29 @@ def _pick_bucket_col_name(existing_names) -> str:
 def maybe_apply_repartition(
         dataset: "ray.data.Dataset",
         table: "Table",
-        *,
-        shuffle: bool,
-        override_num_blocks: Optional[int],
-) -> Tuple["ray.data.Dataset", bool]:
-    """Optionally rewrite ``dataset`` so rows are clustered for the writer.
+) -> "ray.data.Dataset":
+    """Cluster rows by ``(partition_keys..., bucket)`` for HASH_FIXED tables.
 
-    Args:
-        dataset: The input Ray Dataset.
-        table: The Paimon target table (used for bucket mode + schema).
-        shuffle: When True, group rows by ``(partition_keys..., bucket)``.
-            Falls through to a warning + no-op for non-HASH_FIXED tables.
-        override_num_blocks: Optional. When ``shuffle=True``, used as the
-            ``num_partitions`` hint for the groupby shuffle. When
-            ``shuffle=False``, triggers a plain block rebalance to that
-            count. ``None`` + ``shuffle=False`` means no-op.
-
-    Returns:
-        ``(dataset, was_shuffle_applied)`` — the dataset to hand to the
-        sink, plus a flag the caller can use for telemetry.
+    For any other bucket mode the dataset is returned unchanged.
+    HASH_FIXED writes are always pre-clustered, with no user opt-in
+    required.
     """
-    if not shuffle and override_num_blocks is None:
-        return dataset, False
+    if table.bucket_mode() != BucketMode.HASH_FIXED:
+        return dataset
 
-    if shuffle:
-        bucket_mode = table.bucket_mode()
-        if bucket_mode != BucketMode.HASH_FIXED:
-            logger.warning(
-                "shuffle=True requires a HASH_FIXED table; got %s. "
-                "Falling back to no-shuffle write.",
-                bucket_mode.name,
-            )
-            shuffle = False
+    partition_keys = list(table.table_schema.partition_keys or [])
+    extractor = table.create_row_key_extractor()
+    col_names = set(f.name for f in table.table_schema.fields)
+    bucket_col = _pick_bucket_col_name(col_names)
+    bucket_udf = _make_bucket_udf(extractor, bucket_col)
 
-    if shuffle:
-        partition_keys = list(table.table_schema.partition_keys or [])
-        extractor = table.create_row_key_extractor()
-        col_names = set(f.name for f in table.table_schema.fields)
-        bucket_col = _pick_bucket_col_name(col_names)
-        bucket_udf = _make_bucket_udf(extractor, bucket_col)
-
-        ds_with_bucket = dataset.map_batches(
-            bucket_udf, batch_format="pyarrow", zero_copy_batch=True,
-        )
-        group_keys: List[str] = partition_keys + [bucket_col]
-        grouped = ds_with_bucket.groupby(
-            group_keys, num_partitions=override_num_blocks,
-        )
-        regrouped = grouped.map_groups(_identity_batch, batch_format="pyarrow")
-        return regrouped.drop_columns([bucket_col]), True
-
-    # After a soft fallback, override_num_blocks may still be None —
-    # keep the contract that None means "no Ray-side repartition".
-    if override_num_blocks is None:
-        return dataset, False
-    return dataset.repartition(override_num_blocks, shuffle=False), False
+    ds_with_bucket = dataset.map_batches(
+        bucket_udf, batch_format="pyarrow", zero_copy_batch=True,
+    )
+    group_keys: List[str] = partition_keys + [bucket_col]
+    grouped = ds_with_bucket.groupby(group_keys)
+    regrouped = grouped.map_groups(_identity_batch, batch_format="pyarrow")
+    return regrouped.drop_columns([bucket_col])
 
 
 def _identity_batch(batch: pa.Table) -> pa.Table:

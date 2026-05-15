@@ -107,30 +107,22 @@ def write_paimon(
     catalog_options: Dict[str, str],
     *,
     overwrite: bool = False,
-    shuffle: bool = False,
-    override_num_blocks: Optional[int] = None,
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write a Ray Dataset to a Paimon table.
+
+    For HASH_FIXED tables, rows are automatically clustered by
+    ``(partition_keys..., bucket)`` before writing so that each
+    (partition, bucket) lands in a single Ray task. This avoids the
+    small-file storm that Ray's default round-robin distribution would
+    otherwise produce. No user configuration is required.
 
     Args:
         dataset: The Ray Dataset to write.
         table_identifier: Full table name, e.g. ``"db_name.table_name"``.
         catalog_options: Options passed to ``CatalogFactory.create()``.
         overwrite: If ``True``, overwrite existing data in the table.
-        shuffle: When ``True`` and the target is a HASH_FIXED table, cluster
-            rows by ``(partition_keys..., bucket)`` so each (partition,
-            bucket) lands in one Ray task — reduces the small-file count
-            for distributed writes. Non-HASH_FIXED tables log a warning
-            and fall back to no-shuffle. Defaults to ``False`` (Ray's
-            default round-robin distribution).
-        override_num_blocks: Optional Ray output block count. Must be
-            ``>= 1`` when set. With ``shuffle=True``, used as a
-            parallelism hint for the groupby shuffle; with
-            ``shuffle=False``, triggers a plain block rebalance to that
-            count. ``None`` (default) skips the rebalance. Mirrors the
-            ``override_num_blocks`` parameter on :func:`read_paimon`.
         concurrency: Optional max number of Ray write tasks to run concurrently.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in write tasks.
     """
@@ -138,19 +130,10 @@ def write_paimon(
     from pypaimon.ray.shuffle import maybe_apply_repartition
     from pypaimon.write.ray_datasink import PaimonDatasink
 
-    if override_num_blocks is not None and override_num_blocks < 1:
-        raise ValueError(
-            "override_num_blocks must be at least 1, got {}".format(
-                override_num_blocks)
-        )
-
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(table_identifier)
 
-    dataset, _ = maybe_apply_repartition(
-        dataset, table,
-        shuffle=shuffle, override_num_blocks=override_num_blocks,
-    )
+    dataset = maybe_apply_repartition(dataset, table)
 
     datasink = PaimonDatasink(table, overwrite=overwrite)
 

@@ -16,22 +16,24 @@
 # limitations under the License.
 ################################################################################
 
-"""End-to-end tests for shuffle / override_num_blocks on ``write_paimon``.
+"""End-to-end tests for HASH_FIXED auto-clustering on ``write_paimon``.
 
-Covers:
+For HASH_FIXED tables, ``write_paimon`` automatically pre-clusters rows
+by ``(partition_keys..., bucket)`` (matching Spark/Flink). These tests
+cover:
 
-  * back-compat: ``shuffle=False`` (default) write + read roundtrip.
-  * HASH_FIXED + ``shuffle=True``: roundtrip correctness, output-file
-    count reduction, transient bucket column stripped from the sink-
-    visible schema.
-  * Soft fallback: ``shuffle=True`` on a non-HASH_FIXED table logs a
-    warning and writes successfully.
-  * ``override_num_blocks`` alone (no shuffle) is a plain Ray block
-    rebalance.
+  * roundtrip correctness on a HASH_FIXED PK table.
+  * roundtrip correctness on a partitioned HASH_FIXED PK table.
+  * the transient bucket column is stripped from the sink-visible
+    schema.
+  * the output is one file per (partition, bucket) — i.e. the
+    small-file storm is eliminated.
+  * regression: a table whose schema already contains a column named
+    ``__paimon_bucket__`` still works (collision-safe column name).
+  * non-HASH_FIXED tables (BUCKET_UNAWARE etc.) pass through unchanged.
 """
 
 import glob
-import logging
 import os
 import shutil
 import tempfile
@@ -112,41 +114,16 @@ class RayShuffleTest(unittest.TestCase):
             ))
         return files
 
-    # ----- back-compat -----
+    # ----- HASH_FIXED auto-clustering -----
 
-    def test_shuffle_off_is_default_and_roundtrip_works(self):
-        from pypaimon.ray import read_paimon, write_paimon
-
-        pa_schema = pa.schema([
-            pa.field('id', pa.int32(), nullable=False),
-            ('name', pa.string()),
-        ])
-        table_name = 'test_shuffle_off'
-        identifier = self._make_table(
-            table_name, pa_schema,
-            primary_keys=['id'], options={'bucket': '2'},
-        )
-
-        rows = pa.Table.from_pydict(
-            {'id': list(range(20)), 'name': [f'v{i}' for i in range(20)]},
-            schema=pa_schema,
-        )
-        write_paimon(ray.data.from_arrow(rows), identifier, self.catalog_options)
-
-        result = read_paimon(identifier, self.catalog_options).to_pandas()
-        self.assertEqual(len(result), 20)
-        self.assertEqual(set(result['id']), set(range(20)))
-
-    # ----- HASH_FIXED + shuffle=True -----
-
-    def test_shuffle_on_fixed_bucket_roundtrip(self):
+    def test_fixed_bucket_roundtrip(self):
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
             pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
         ])
-        table_name = 'test_shuffle_on_roundtrip'
+        table_name = 'test_fixed_bucket_roundtrip'
         identifier = self._make_table(
             table_name, pa_schema,
             primary_keys=['id'], options={'bucket': '4'},
@@ -157,14 +134,14 @@ class RayShuffleTest(unittest.TestCase):
             schema=pa_schema,
         )
         ds = ray.data.from_arrow(rows).repartition(4)
-        write_paimon(ds, identifier, self.catalog_options, shuffle=True)
+        write_paimon(ds, identifier, self.catalog_options)
 
         result = self._read_table(identifier)
         self.assertEqual(len(result), 40)
         self.assertEqual(set(result['id']), set(range(40)))
         self.assertNotIn('__paimon_bucket__', result.columns)
 
-    def test_shuffle_on_partitioned_fixed_bucket_roundtrip(self):
+    def test_partitioned_fixed_bucket_roundtrip(self):
         """Partitioned table — confirms the post-groupby schema does not
         end up with duplicated partition-key or bucket columns."""
         from pypaimon.ray import write_paimon
@@ -174,7 +151,7 @@ class RayShuffleTest(unittest.TestCase):
             ('dt', pa.string()),
             ('value', pa.int64()),
         ])
-        table_name = 'test_shuffle_on_partitioned'
+        table_name = 'test_partitioned_fixed_bucket_roundtrip'
         identifier = self._make_table(
             table_name, pa_schema,
             primary_keys=['id', 'dt'], partition_keys=['dt'],
@@ -187,15 +164,15 @@ class RayShuffleTest(unittest.TestCase):
             'value': list(range(20)),
         }, schema=pa_schema)
         ds = ray.data.from_arrow(rows).repartition(4)
-        write_paimon(ds, identifier, self.catalog_options, shuffle=True)
+        write_paimon(ds, identifier, self.catalog_options)
 
         result = self._read_table(identifier)
         self.assertEqual(set(result.columns), {'id', 'dt', 'value'})
         self.assertEqual(len(result), 20)
         self.assertEqual(set(result['dt']), {'2026-01-01', '2026-01-02'})
 
-    def test_shuffle_reduces_data_file_count(self):
-        """With multiple input blocks, shuffle=True collapses per-task
+    def test_fixed_bucket_writes_one_file_per_bucket(self):
+        """With multiple input blocks, auto-clustering collapses per-task
         files into per-bucket files."""
         from pypaimon.ray import write_paimon
 
@@ -208,47 +185,33 @@ class RayShuffleTest(unittest.TestCase):
             schema=pa_schema,
         )
 
-        without_shuffle = self._make_table(
-            'test_files_without_shuffle', pa_schema,
-            primary_keys=['id'], options={'bucket': '4'},
-        )
-        with_shuffle = self._make_table(
-            'test_files_with_shuffle', pa_schema,
+        identifier = self._make_table(
+            'test_one_file_per_bucket', pa_schema,
             primary_keys=['id'], options={'bucket': '4'},
         )
 
-        # Materialise 4 input blocks so shuffle=False has 4 writers per
-        # bucket worth of opportunities to scatter rows.
+        # Materialise 4 input blocks. Without auto-clustering each task
+        # would emit one file per bucket it touched (up to 16 files).
         write_paimon(
             ray.data.from_arrow(rows).repartition(4),
-            without_shuffle, self.catalog_options,
-        )
-        write_paimon(
-            ray.data.from_arrow(rows).repartition(4),
-            with_shuffle, self.catalog_options, shuffle=True,
+            identifier, self.catalog_options,
         )
 
-        files_off = self._count_data_files('test_files_without_shuffle')
-        files_on = self._count_data_files('test_files_with_shuffle')
+        files = self._count_data_files('test_one_file_per_bucket')
+        # 4 buckets × 1 file each.
+        self.assertEqual(len(files), 4)
 
-        # With 4 buckets and shuffle=True, every (partition, bucket) is
-        # a single Ray task → 4 files (one per bucket).
-        self.assertEqual(len(files_on), 4)
-        # Without shuffle, multiple Ray tasks each produce one file per
-        # bucket they touch → strictly more files.
-        self.assertGreater(len(files_off), len(files_on))
-
-    def test_shuffle_with_colliding_column_name(self):
+    def test_fixed_bucket_with_colliding_column_name(self):
         """A table that has a column named ``__paimon_bucket__`` must
-        still work with ``shuffle=True`` — the helper picks a
-        collision-free transient column name."""
+        still work — the helper picks a collision-free transient
+        column name."""
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
             pa.field('id', pa.int32(), nullable=False),
             ('__paimon_bucket__', pa.string()),
         ])
-        table_name = 'test_shuffle_collide_col'
+        table_name = 'test_fixed_bucket_collide_col'
         identifier = self._make_table(
             table_name, pa_schema,
             primary_keys=['id'], options={'bucket': '2'},
@@ -260,15 +223,17 @@ class RayShuffleTest(unittest.TestCase):
             schema=pa_schema,
         )
         ds = ray.data.from_arrow(rows).repartition(2)
-        write_paimon(ds, identifier, self.catalog_options, shuffle=True)
+        write_paimon(ds, identifier, self.catalog_options)
 
         result = self._read_table(identifier)
         self.assertEqual(len(result), 10)
         self.assertEqual(set(result.columns), {'id', '__paimon_bucket__'})
 
-    # ----- soft fallback -----
+    # ----- non-HASH_FIXED passthrough -----
 
-    def test_shuffle_on_non_fixed_bucket_falls_through(self):
+    def test_non_fixed_bucket_roundtrip(self):
+        """BUCKET_UNAWARE tables are written without pre-clustering;
+        roundtrip data must still be correct."""
         from pypaimon.ray import read_paimon, write_paimon
 
         pa_schema = pa.schema([
@@ -276,7 +241,7 @@ class RayShuffleTest(unittest.TestCase):
             ('value', pa.int64()),
         ])
         # bucket=-1 + no primary keys → BUCKET_UNAWARE
-        table_name = 'test_shuffle_on_unaware'
+        table_name = 'test_non_fixed_bucket_roundtrip'
         identifier = self._make_table(
             table_name, pa_schema, options={'bucket': '-1'},
         )
@@ -285,52 +250,13 @@ class RayShuffleTest(unittest.TestCase):
             {'id': list(range(10)), 'value': list(range(10))},
             schema=pa_schema,
         )
-        with self.assertLogs('pypaimon.ray.shuffle', level=logging.WARNING) as cm:
-            write_paimon(
-                ray.data.from_arrow(rows), identifier,
-                self.catalog_options, shuffle=True,
-            )
-        self.assertTrue(any('HASH_FIXED' in m for m in cm.output))
+        write_paimon(
+            ray.data.from_arrow(rows), identifier, self.catalog_options,
+        )
 
         result = read_paimon(identifier, self.catalog_options).to_pandas()
         self.assertEqual(len(result), 10)
-
-    # ----- override_num_blocks-only path -----
-
-    def test_invalid_override_num_blocks_raises(self):
-        from pypaimon.ray import write_paimon
-
-        pa_schema = pa.schema([('id', pa.int32())])
-        identifier = self._make_table(
-            'test_invalid_override_num_blocks', pa_schema,
-        )
-        ds = ray.data.from_arrow(pa.Table.from_pydict(
-            {'id': [1]}, schema=pa_schema,
-        ))
-
-        with self.assertRaises(ValueError):
-            write_paimon(
-                ds, identifier, self.catalog_options, override_num_blocks=0,
-            )
-
-    def test_override_num_blocks_only_does_plain_rebalance(self):
-        from pypaimon.ray import read_paimon, write_paimon
-
-        pa_schema = pa.schema([('id', pa.int32())])
-        table_name = 'test_override_num_blocks_only'
-        identifier = self._make_table(table_name, pa_schema)
-
-        rows = pa.Table.from_pydict({'id': list(range(30))}, schema=pa_schema)
-        # Start with many blocks; override_num_blocks=2 + shuffle=False
-        # should collapse them via plain Ray rebalance. Row content
-        # unchanged.
-        ds = ray.data.from_arrow(rows).repartition(8)
-        write_paimon(
-            ds, identifier, self.catalog_options, override_num_blocks=2,
-        )
-
-        result = read_paimon(identifier, self.catalog_options).to_pandas()
-        self.assertEqual(set(result['id']), set(range(30)))
+        self.assertEqual(set(result['id']), set(range(10)))
 
 
 if __name__ == '__main__':

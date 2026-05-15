@@ -207,57 +207,25 @@ write_paimon(
 )
 ```
 
-**Cluster rows by (partition, bucket) before writing:**
+**Automatic (partition, bucket) clustering for HASH_FIXED tables:**
 
-For HASH_FIXED tables, Ray's default round-robin block distribution can
-scatter rows that share the same `(partition, bucket)` across many Ray
-tasks. Each task opens its own writer and emits its own data file, so
-the write produces `partitions × buckets × ray_tasks` files instead of
-the `partitions × buckets` the writer would naturally produce.
-
-`shuffle=True` clusters rows by `(partition_keys..., bucket)` so each
-group lands in one Ray task — one writer, one file group:
-
-```python
-write_paimon(
-    ray_dataset,
-    "database_name.table_name",
-    catalog_options={"warehouse": "/path/to/warehouse"},
-    shuffle=True,
-)
-```
+For HASH_FIXED tables, `write_paimon` automatically clusters rows by
+`(partition_keys..., bucket)` before writing so each (partition,
+bucket) lands in a single Ray task — one writer, one file group. This
+avoids the small-file storm that Ray's default round-robin
+distribution would otherwise produce (`partitions × buckets ×
+ray_tasks` files instead of `partitions × buckets`).
 
 Bucket assignment uses the same hash routine the writer uses, so the
-shuffle-time bucket is byte-equivalent to the writer's. For
-non-HASH_FIXED tables the shuffle is a soft no-op with a warning; the
-write still succeeds.
-
-`override_num_blocks` is an optional Ray output block count
-(mirrors the same-named option on `read_paimon`). With `shuffle=True`
-it is a parallelism hint for the groupby shuffle; with `shuffle=False`
-it triggers a plain block rebalance to that count:
-
-```python
-write_paimon(
-    ray_dataset,
-    "database_name.table_name",
-    catalog_options={"warehouse": "/path/to/warehouse"},
-    override_num_blocks=4,
-)
-```
+bucket seen by the groupby is byte-equivalent to the one the writer
+would compute. No user configuration is required. For non-HASH_FIXED
+tables the dataset is written as-is.
 
 **Parameters:**
 - `dataset`: the Ray Dataset to write.
 - `table_identifier`: full table name, e.g. `"db_name.table_name"`.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`.
 - `overwrite`: if `True`, overwrite existing data in the table.
-- `shuffle`: if `True` and the target is HASH_FIXED, cluster rows by
-  `(partition_keys..., bucket)` so each (partition, bucket) lands in
-  one Ray task. Non-HASH_FIXED tables log a warning and fall back to
-  no-shuffle. Defaults to `False`.
-- `override_num_blocks`: optional Ray output block count. Must be `>= 1`.
-  With `shuffle=True`, a parallelism hint for the groupby shuffle;
-  with `shuffle=False`, a plain Ray block rebalance to that count.
 - `concurrency`: optional max number of Ray write tasks to run concurrently.
 - `ray_remote_args`: optional kwargs passed to `ray.remote()` in write tasks
   (e.g. `{"num_cpus": 2}`).

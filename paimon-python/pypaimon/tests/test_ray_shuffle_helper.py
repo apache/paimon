@@ -19,12 +19,12 @@
 """Unit tests for the Ray pre-shuffle helper in pypaimon/ray/shuffle.py.
 
 These tests exercise the helper in isolation: the bucket-key UDF (with a
-stub extractor) and the no-op / soft-fallback branches of
+stub extractor), the collision-safe column name picker, the
+large-type coercion, and the bucket-mode dispatch in
 ``maybe_apply_repartition``. Ray-based end-to-end behaviour is covered
 in ``pypaimon/tests/ray_repartition_test.py``.
 """
 
-import logging
 import unittest
 from unittest.mock import MagicMock
 
@@ -134,85 +134,76 @@ class CoerceLargeStringTypesTest(unittest.TestCase):
         self.assertEqual(out.schema.field("blob").type, pa.binary())
 
 
-class NoOpBranchTest(unittest.TestCase):
-    """The off / fallback branches don't touch the dataset object."""
+class BucketModeDispatchTest(unittest.TestCase):
+    """``maybe_apply_repartition`` clusters HASH_FIXED tables and
+    returns other bucket modes unchanged."""
 
     def _make_table(self, bucket_mode):
         table = MagicMock()
         table.bucket_mode.return_value = bucket_mode
         return table
 
-    def test_shuffle_off_and_no_override_num_blocks_is_noop(self):
-        dataset = object()  # sentinel; not touched
-        table = self._make_table(BucketMode.HASH_FIXED)
-
-        out_ds, applied = maybe_apply_repartition(
-            dataset, table, shuffle=False, override_num_blocks=None,
-        )
-
-        self.assertIs(out_ds, dataset)
-        self.assertFalse(applied)
-        table.bucket_mode.assert_not_called()  # short-circuit early
-
-    def test_shuffle_on_non_fixed_bucket_falls_through_with_warning(self):
-        dataset = MagicMock()
-        # The non-HASH_FIXED branch flips shuffle off internally; with
-        # override_num_blocks=None the helper then returns the dataset
-        # unchanged via the post-fallback early-no-op guard.
+    def test_bucket_unaware_returns_dataset_unchanged(self):
+        dataset = object()  # sentinel; must not be wrapped or mutated
         table = self._make_table(BucketMode.BUCKET_UNAWARE)
 
-        with self.assertLogs("pypaimon.ray.shuffle", level=logging.WARNING) as cm:
-            out_ds, applied = maybe_apply_repartition(
-                dataset, table, shuffle=True, override_num_blocks=None,
-            )
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
 
-        self.assertIs(out_ds, dataset)
-        self.assertFalse(applied)
-        self.assertTrue(
-            any("HASH_FIXED" in msg for msg in cm.output),
-            "expected the soft-fallback warning to mention HASH_FIXED",
-        )
-
-    def test_shuffle_on_dynamic_bucket_falls_through(self):
-        dataset = MagicMock()
+    def test_hash_dynamic_returns_dataset_unchanged(self):
+        dataset = object()
         table = self._make_table(BucketMode.HASH_DYNAMIC)
 
-        with self.assertLogs("pypaimon.ray.shuffle", level=logging.WARNING):
-            out_ds, applied = maybe_apply_repartition(
-                dataset, table, shuffle=True, override_num_blocks=None,
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
+
+    def test_cross_partition_returns_dataset_unchanged(self):
+        dataset = object()
+        table = self._make_table(BucketMode.CROSS_PARTITION)
+
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
+
+    def test_hash_fixed_runs_map_batches_groupby_chain(self):
+        dataset = MagicMock(name="dataset")
+        dataset.map_batches.return_value.groupby.return_value \
+            .map_groups.return_value.drop_columns.return_value = "clustered"
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.table_schema.partition_keys = []
+        table.table_schema.fields = [
+            type("F", (), {"name": "id"})(),
+            type("F", (), {"name": "value"})(),
+        ]
+
+        out = maybe_apply_repartition(dataset, table)
+
+        self.assertEqual(out, "clustered")
+        # The helper appends a transient bucket column, groups by it,
+        # runs the identity batch over each group, then drops the
+        # transient column. We assert the call chain, not its kwargs,
+        # since defaults are an implementation detail.
+        dataset.map_batches.assert_called_once()
+        dataset.map_batches.return_value.groupby.assert_called_once()
+        dataset.map_batches.return_value.groupby.return_value \
+            .map_groups.assert_called_once()
+        dataset.map_batches.return_value.groupby.return_value \
+            .map_groups.return_value.drop_columns.assert_called_once_with(
+                [BUCKET_KEY_COL]
             )
 
-        self.assertIs(out_ds, dataset)
-        self.assertFalse(applied)
+    def test_hash_fixed_groups_include_partition_keys(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.table_schema.partition_keys = ["dt"]
+        table.table_schema.fields = [
+            type("F", (), {"name": "id"})(),
+            type("F", (), {"name": "dt"})(),
+        ]
 
-    def test_shuffle_off_with_override_num_blocks_calls_plain_repartition(self):
-        dataset = MagicMock()
-        dataset.repartition.return_value = "rebalanced"
-        table = self._make_table(BucketMode.HASH_FIXED)
+        maybe_apply_repartition(dataset, table)
 
-        out_ds, applied = maybe_apply_repartition(
-            dataset, table, shuffle=False, override_num_blocks=8,
-        )
-
-        self.assertEqual(out_ds, "rebalanced")
-        self.assertFalse(applied)
-        dataset.repartition.assert_called_once_with(8, shuffle=False)
-
-    def test_soft_fallback_with_override_num_blocks_runs_plain_repartition(self):
-        # shuffle=True on a non-fixed bucket table flips to shuffle=False,
-        # so an override_num_blocks=N caller still gets a block rebalance.
-        dataset = MagicMock()
-        dataset.repartition.return_value = "rebalanced"
-        table = self._make_table(BucketMode.BUCKET_UNAWARE)
-
-        with self.assertLogs("pypaimon.ray.shuffle", level=logging.WARNING):
-            out_ds, applied = maybe_apply_repartition(
-                dataset, table, shuffle=True, override_num_blocks=4,
-            )
-
-        self.assertEqual(out_ds, "rebalanced")
-        self.assertFalse(applied)
-        dataset.repartition.assert_called_once_with(4, shuffle=False)
+        group_call = dataset.map_batches.return_value.groupby.call_args
+        passed_keys = group_call.args[0]
+        self.assertEqual(passed_keys, ["dt", BUCKET_KEY_COL])
 
 
 if __name__ == "__main__":
