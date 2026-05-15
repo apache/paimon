@@ -76,9 +76,8 @@ class FormatVortexReader(RecordBatchReader):
         if row_indices is not None:
             indices = vortex.array(row_indices)
         elif shard_range is not None:
-            # Materializes a contiguous index array; benchmarked at ~5% faster than
-            # full-file read + Python slice for 5M rows. Acceptable until Vortex
-            # exposes a native range/slice scan API.
+            # Vortex lacks a native range/slice scan API, so we materialize an
+            # index array. Acceptable trade-off vs reading the full file.
             indices = vortex.array(range(shard_range[0], shard_range[1]))
 
         self.record_batch_reader = vortex_file.scan(
