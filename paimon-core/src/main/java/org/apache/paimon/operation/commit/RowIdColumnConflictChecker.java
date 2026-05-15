@@ -138,11 +138,12 @@ class RowIdColumnConflictChecker {
      * @return true if conflict
      */
     boolean conflictsWith(FileEntry entry) {
-        if (entry.firstRowId() == null) {
+        Long firstRowId = entry.firstRowId();
+        if (firstRowId == null) {
             return false;
         }
 
-        Range range = rowIdRange(entry);
+        Range range = new Range(firstRowId, firstRowId + entry.rowCount() - 1);
         int index = firstPossibleRange(range);
         while (index < writeRanges.size()) {
             WriteRange writeRange = writeRanges.get(index);
@@ -218,15 +219,6 @@ class RowIdColumnConflictChecker {
             fieldIdByName.put(field.name(), field.id());
         }
         return fieldIdByName;
-    }
-
-    private static Range rowIdRange(FileEntry entry) {
-        Long firstRowId = entry.firstRowId();
-        if (firstRowId == null) {
-            throw new IllegalArgumentException(
-                    String.format("First row id of '%s' should not be null.", entry.fileName()));
-        }
-        return new Range(firstRowId, firstRowId + entry.rowCount() - 1);
     }
 
     /** Range and field id Set. */
