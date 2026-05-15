@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
@@ -43,6 +44,14 @@ class TableScan:
 
     def plan(self) -> Plan:
         return self.file_scanner.scan()
+
+    def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
+        """Run :meth:`plan` while recording manifest / pruning counters.
+
+        Only used by :meth:`ReadBuilder.explain`; the regular read path
+        keeps going through :meth:`plan`.
+        """
+        return self.file_scanner.scan_with_stats()
 
     def _create_file_scanner(self) -> FileScanner:
         options = self.table.options.options

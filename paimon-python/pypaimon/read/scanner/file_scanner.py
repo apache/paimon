@@ -35,6 +35,7 @@ from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            remove_row_id_filter,
                                            trim_and_transform_predicate)
+from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.bucket_select_converter import \
@@ -210,6 +211,10 @@ class FileScanner:
         self._global_index_result = None
         self._scanned_snapshot = None
         self._scanned_snapshot_id = None
+        # Opt-in scan-plan tracking. Stays ``None`` for the read hot path;
+        # ``scan_with_stats()`` flips it on for a single explain pass and
+        # the filter callbacks below increment counters when present.
+        self.scan_stats: Optional[ScanStats] = None
 
         # Predicate-driven bucket pruning (HASH_FIXED only). Mirrors Java
         # BucketSelectConverter. Set on demand and reused across all
@@ -345,7 +350,20 @@ class FileScanner:
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
+        if self.scan_stats is not None:
+            self.scan_stats.manifest_files_total += len(manifest_files)
+            # ``num_added_files + num_deleted_files`` is the entry count
+            # recorded in the manifest-file metadata; combined across
+            # all input manifest files this is the partition-prune-free
+            # baseline. The difference against ``entries_total`` reveals
+            # how much manifest-level pruning saved.
+            self.scan_stats.entries_potential_total += sum(
+                f.num_added_files + f.num_deleted_files for f in manifest_files)
         manifest_files = [entry for entry in manifest_files if self._filter_manifest_file(entry)]
+        if self.scan_stats is not None:
+            self.scan_stats.manifest_files_after_partition += len(manifest_files)
+            # Force single-threaded so we can mutate stats without locking.
+            max_workers = 1
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
@@ -364,6 +382,11 @@ class FileScanner:
         still happens later in ``_filter_manifest_entry`` once the entry
         is fully decoded.
         """
+        # explain() needs accurate before/after pruning counters; suppress
+        # the early bucket filter so every entry reaches
+        # ``_filter_manifest_entry`` where each rejection stage is counted.
+        if self.scan_stats is not None:
+            return None
         only_real = self.only_read_real_buckets
         selector = self._bucket_selector
         if not only_real and selector is None:
@@ -401,6 +424,19 @@ class FileScanner:
     def with_global_index_result(self, result) -> 'FileScanner':
         self._global_index_result = result
         return self
+
+    def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
+        """Run one scan pass while recording :class:`ScanStats` counters.
+
+        Side-effects: forces single-thread manifest reads and disables the
+        early bucket filter so every entry reaches
+        ``_filter_manifest_entry`` exactly once. The scanner is one-shot
+        in this mode — call ``scan()`` on a fresh instance afterwards if
+        you need the regular hot path.
+        """
+        self.scan_stats = ScanStats()
+        plan = self.scan()
+        return plan, self.scan_stats
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
         """Mirror Java ``DataTableBatchScan.applyPushDownLimit``: sum the
@@ -498,9 +534,30 @@ class FileScanner:
         )
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
-        # Redundant safety net: the early filter in the manifest reader
-        # already enforces these, but guard here too so this method is
-        # self-contained if called outside read_entries_parallel.
+        stats = self.scan_stats
+        if stats is not None:
+            stats.entries_total += 1
+            partition_key = tuple(entry.partition.values)
+            stats.partition_keys_before.add(partition_key)
+            stats.buckets_seen.add((partition_key, entry.bucket))
+        # Stage 1: partition predicate. The early manifest-reader filter
+        # only sees ``(bucket, total_buckets)`` and never enforces
+        # partition predicates, so this check is the sole partition gate
+        # at the entry level — not a "redundant safety net".
+        if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
+            return False
+        if stats is not None:
+            stats.entries_after_partition += 1
+            stats.partition_keys_after.add(partition_key)
+        # Stage 2: bucket rejection. Two reasons land here:
+        #   * ``only_read_real_buckets`` drops the synthetic
+        #     POSTPONE_BUCKET bucket id (also enforced by the early
+        #     filter when present; kept here so the method is correct
+        #     standalone).
+        #   * ``_bucket_selector`` is the HASH_FIXED predicate-driven
+        #     selector built by ``_init_bucket_selector``.
+        # Both are accounted for under ``entries_after_bucket`` so the
+        # explain funnel reports bucket-level pruning end-to-end.
         if self.only_read_real_buckets and entry.bucket < 0:
             return False
         if (self._bucket_selector is not None
@@ -508,8 +565,9 @@ class FileScanner:
                 and not self._bucket_selector(
                     entry.partition, entry.bucket, entry.total_buckets)):
             return False
-        if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
-            return False
+        if stats is not None:
+            stats.entries_after_bucket += 1
+            stats.buckets_after_pruning.add((partition_key, entry.bucket))
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
 
@@ -540,14 +598,18 @@ class FileScanner:
                     entry.file.row_count
                 ):
                     return False
+            if stats is not None:
+                stats.entries_after_stats += 1
             return True
         else:
-            if not self.predicate:
-                return True
-            if self.predicate_for_stats is None:
+            if not self.predicate or self.predicate_for_stats is None:
+                if stats is not None:
+                    stats.entries_after_stats += 1
                 return True
             # Data evolution: file stats may be from another schema, skip stats filter and filter in reader.
             if self.data_evolution:
+                if stats is not None:
+                    stats.entries_after_stats += 1
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
@@ -558,10 +620,13 @@ class FileScanner:
                 entry.file.row_count,
                 stats_fields
             )
-            return self.predicate_for_stats.test_by_simple_stats(
+            kept = self.predicate_for_stats.test_by_simple_stats(
                 evolved_stats,
                 entry.file.row_count
             )
+            if kept and stats is not None:
+                stats.entries_after_stats += 1
+            return kept
 
     def _scan_dv_index(self, snapshot, buckets: Set[tuple]) -> Dict[tuple, Dict[str, DeletionFile]]:
         """
