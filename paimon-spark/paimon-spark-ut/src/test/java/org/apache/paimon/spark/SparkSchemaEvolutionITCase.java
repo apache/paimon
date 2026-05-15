@@ -415,7 +415,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         () -> {
                             writeTable("testAlterColumnType", "(1, null, 'a')");
                         })
-                .hasMessageContaining("Cannot write null to non-null column(b)");
+                .hasStackTraceContaining("value appeared in non-nullable field");
 
         List<Row> beforeAlter = spark.sql("SHOW CREATE TABLE testAlterColumnType").collectAsList();
         assertThat(beforeAlter.toString())
@@ -437,7 +437,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         () -> {
                             writeTable("testAlterColumnType", "(1, null, 'a')");
                         })
-                .hasMessageContaining("Cannot write null to non-null column(b)");
+                .hasStackTraceContaining("value appeared in non-nullable field");
     }
 
     @Test

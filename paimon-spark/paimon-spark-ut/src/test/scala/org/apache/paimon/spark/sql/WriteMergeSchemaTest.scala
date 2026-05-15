@@ -110,7 +110,7 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
         val error = intercept[RuntimeException] {
           spark.sql("INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c")
         }.getMessage
-        assert(error.contains("the number of data columns don't match with the table schema's"))
+        assert(error.contains("extra columns"))
       }
     }
   }
@@ -496,6 +496,54 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
           Seq(Row(1, Row(10L, "a", null)), Row(2, Row(20L, "b", "new")))
         )
       }
+    }
+  }
+
+  test("Write merge schema: array of struct missing nested field by dataframe") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  ids ARRAY<BIGINT>,
+            |  a BIGINT,
+            |  b BIGINT,
+            |  items ARRAY<STRUCT<
+            |    f1: INT,
+            |    f2: STRING,
+            |    f3: STRING,
+            |    f4: STRING,
+            |    f5: STRING,
+            |    f6: INT>>)
+            |""".stripMargin)
+
+      val sourceDataFrame = sql("""
+                                  |SELECT
+                                  |  array(1, 2) AS ids,
+                                  |  1 AS a,
+                                  |  2 AS b,
+                                  |  array(named_struct(
+                                  |    'f1', 10,
+                                  |    'f2', 'v2',
+                                  |    'f3', 'v3',
+                                  |    'f4', 'v4',
+                                  |    'f5', 'v5')) AS items
+                                  |""".stripMargin)
+
+      val alignedDataFrame = sourceDataFrame.select(
+        sourceDataFrame("ids").cast("ARRAY<BIGINT>").as("ids"),
+        sourceDataFrame("a").cast("BIGINT").as("a"),
+        sourceDataFrame("b").cast("BIGINT").as("b"),
+        sourceDataFrame("items")
+      )
+
+      alignedDataFrame.write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("t")
+
+      checkAnswer(
+        sql("SELECT * FROM t"),
+        Seq(Row(Seq(1L, 2L), 1L, 2L, Seq(Row(10, "v2", "v3", "v4", "v5", null)))))
     }
   }
 }
