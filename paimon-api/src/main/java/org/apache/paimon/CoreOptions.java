@@ -483,8 +483,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Partition field name to sort manifest entries by. Validated by"
-                                    + " schema validation; If"
-                                    + " not configured, defaults to the first partition field.");
+                                    + " schema validation; If not configured, defaults to the first partition field.");
 
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
@@ -499,7 +498,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<MemorySize> MANIFEST_SORT_OPEN_FILE_COST =
             key("manifest-sort.open-file-cost")
                     .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(4))
+                    .defaultValue(MemorySize.ofKibiBytes(40))
                     .withDescription(
                             "Open file cost of a manifest file during sort rewrite. "
                                     + "It is added to each manifest file's size when computing "
