@@ -504,9 +504,9 @@ public class ConflictDetection {
         }
 
         List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
-        RowIdColumnConflictChecker conflictChecker =
+        RowIdColumnConflictChecker columnChecker =
                 RowIdColumnConflictChecker.fromDeltaEntries(schemaManager, deltaEntries);
-        if (conflictChecker.isEmpty()) {
+        if (columnChecker.isEmpty()) {
             return Optional.empty();
         }
 
@@ -527,7 +527,7 @@ public class ConflictDetection {
                 DataFileMeta file = entry.file();
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
-                        && conflictChecker.conflictsWith(entry)) {
+                        && columnChecker.conflictsWith(entry)) {
                     return Optional.of(
                             new RuntimeException(
                                     "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
