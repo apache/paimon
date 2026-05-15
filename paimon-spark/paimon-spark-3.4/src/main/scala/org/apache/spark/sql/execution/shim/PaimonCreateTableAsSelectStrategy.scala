@@ -46,7 +46,7 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           ifNotExists,
           analyzedQuery) =>
       assert(analyzedQuery.isDefined)
-      val (tableOptions, writeOptions) = PaimonTableOptionUtils.splitTableAndWriteOptions(options)
+      val (tableOptions, writeOptions) = PaimonStrategyHelper.splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
 
       val isPartitionedFormatTable = {

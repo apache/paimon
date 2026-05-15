@@ -51,7 +51,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           orCreate,
           analyzedQuery) if PaimonReplaceTableStrategyHelper.supportsCatalog(catalog, tableSpec) =>
       assert(analyzedQuery.isDefined)
-      val (tableOptions, writeOptions) = PaimonTableOptionUtils.splitTableAndWriteOptions(options)
+      val (tableOptions, writeOptions) = PaimonStrategyHelper.splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
       val writeOpts = new CaseInsensitiveStringMap(writeOptions.asJava)
       if (PaimonReplaceTableStrategyHelper.canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {

@@ -46,7 +46,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           options,
           orCreate,
           true) if PaimonReplaceTableStrategyHelper.supportsCatalog(catalog, tableSpec) =>
-      val (tableOptions, writeOptions) = PaimonTableOptionUtils.splitTableAndWriteOptions(options)
+      val (tableOptions, writeOptions) = PaimonStrategyHelper.splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
       if (PaimonReplaceTableStrategyHelper.canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
         SparkShimLoader.shim.createAtomicReplaceTableAsSelectExec(
