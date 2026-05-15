@@ -396,6 +396,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     public DataStream<Committable> commit(
             DataStream<Committable> written, Set<String> updatedColumns) {
         FileStoreTable storeTable = (FileStoreTable) table;
+        // copy to avoid serialization issue
+        long baseSnapshotId = this.baseSnapshotId;
 
         // Check if some global-indexed columns are updated
         DataStream<Committable> checked =
