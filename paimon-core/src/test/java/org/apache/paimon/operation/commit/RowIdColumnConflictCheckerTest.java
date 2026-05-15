@@ -116,7 +116,8 @@ class RowIdColumnConflictCheckerTest {
     }
 
     private RowIdColumnConflictChecker checker(SimpleFileEntry... entries) {
-        return RowIdColumnConflictChecker.fromDeltaEntries(createSchemaManager(), Arrays.asList(entries));
+        return RowIdColumnConflictChecker.fromDeltaEntries(
+                createSchemaManager(), Arrays.asList(entries));
     }
 
     private SimpleFileEntry file(
@@ -171,6 +172,7 @@ class RowIdColumnConflictCheckerTest {
                                 Collections.singletonList("id"),
                                 Collections.emptyMap(),
                                 "")));
-        return new TestingSchemaManager(new Path("/tmp/row-id-column-conflict-checker-test"), schemas);
+        return new TestingSchemaManager(
+                new Path("/tmp/row-id-column-conflict-checker-test"), schemas);
     }
 }
