@@ -126,6 +126,9 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
 
     private int sinkParallelism;
 
+    // the snapshot id this action based on
+    private long baseSnapshotId;
+
     public DataEvolutionMergeIntoAction(
             String databaseName, String tableName, Map<String, String> catalogConfig) {
         super(databaseName, tableName, catalogConfig);
@@ -142,6 +145,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             throw new UnsupportedOperationException(
                     "merge-into action doesn't support updating an empty table.");
         }
+        this.baseSnapshotId = latestSnapshotId;
         table =
                 table.copy(
                         Collections.singletonMap(
@@ -324,7 +328,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         Transformation<RowData> sourceTransformation = source.getTransformation();
         List<Long> firstRowIds =
                 ((FileStoreTable) table)
-                        .store().newScan()
+                        .store().newScan().withSnapshot(baseSnapshotId)
                                 .withManifestEntryFilter(
                                         entry ->
                                                 entry.file().firstRowId() != null
@@ -384,7 +388,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         return sorted.transform(
                         "PARTIAL WRITE COLUMNS",
                         new CommittableTypeInfo(),
-                        new DataEvolutionPartialWriteOperator((FileStoreTable) table, rowType))
+                        new DataEvolutionPartialWriteOperator(
+                                (FileStoreTable) table, rowType, baseSnapshotId))
                 .setParallelism(sinkParallelism);
     }
 
@@ -409,7 +414,9 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         context ->
                                 new StoreCommitter(
                                         storeTable,
-                                        storeTable.newCommit(context.commitUser()),
+                                        storeTable
+                                                .newCommit(context.commitUser())
+                                                .rowIdCheckConflict(baseSnapshotId),
                                         context),
                         new NoopCommittableStateManager());
 
