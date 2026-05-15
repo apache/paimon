@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
@@ -61,7 +62,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with WithFileStoreTable {
+  with WithFileStoreTable
+  with Logging {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -86,14 +88,22 @@ case class MergeIntoPaimonDataEvolutionTable(
       action match {
         case updateAction: UpdateAction =>
           for (assignment <- updateAction.assignments) {
-            if (!assignment.key.equals(assignment.value)) {
+            val keyEqualsValue = assignment.key.equals(assignment.value)
+            val keySameRefValue = sameAttributeReference(assignment.key, assignment.value)
+            val includeColumn = !(keyEqualsValue || keySameRefValue)
+
+            if (includeColumn) {
               val key = assignment.key.asInstanceOf[AttributeReference]
               columns ++= Seq(key)
             }
           }
       }
     }
-    columns.toSet
+    val result = columns.toSet
+    logInfo(
+      s"MergeIntoPaimonDataEvolutionTable update columns: " +
+        s"${result.map(_.name).toSeq.sorted.mkString("[", ", ", "]")}.")
+    result
   }
 
   /**
@@ -599,6 +609,14 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def attribute(name: String, plan: LogicalPlan) =
     plan.output.find(attr => resolver(name, attr.name)).get
+
+  private def sameAttributeReference(left: Expression, right: Expression): Boolean = {
+    (left, right) match {
+      case (leftAttr: AttributeReference, rightAttr: AttributeReference) =>
+        leftAttr.sameRef(rightAttr)
+      case _ => false
+    }
+  }
 
   private def addFirstRowId(
       sparkSession: SparkSession,
