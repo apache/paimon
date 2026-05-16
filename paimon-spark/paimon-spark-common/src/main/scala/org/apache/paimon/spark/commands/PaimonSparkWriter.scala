@@ -114,11 +114,7 @@ case class PaimonSparkWriter(
     val writeEmptyPartitionEnable = coreOptions.writeEmptyPartitionEnable()
     val dynamicPartitionOverwriteMode = coreOptions.dynamicPartitionOverwrite()
     val overwritePartition =
-      if (
-        !dynamicPartitionOverwriteMode &&
-        staticOverwritePartition != null &&
-        !staticOverwritePartition.isEmpty
-      ) {
+      if (!dynamicPartitionOverwriteMode && isFullStaticOverwrite(staticOverwritePartition)) {
         val partitionType = table.schema().logicalPartitionType()
         InternalSerializers
           .create(partitionType)
@@ -391,6 +387,12 @@ case class PaimonSparkWriter(
       res ++= WriteTaskResult.merge(emptyDataWrite(overwritePartition, 0).collect())
     }
     res
+  }
+
+  private def isFullStaticOverwrite(partition: JMap[String, String]): Boolean = {
+    partition != null &&
+    !partition.isEmpty &&
+    table.schema().partitionKeys().asScala.forall(partition.containsKey)
   }
 
   def hasNewFiles(commitMessages: Seq[CommitMessage]): Boolean = {

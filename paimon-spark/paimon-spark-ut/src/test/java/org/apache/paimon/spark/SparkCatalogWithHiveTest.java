@@ -195,6 +195,41 @@ public class SparkCatalogWithHiveTest {
         }
     }
 
+    @Test
+    public void testPartialStaticOverwriteDoesNotCreateEmptyPartition() throws IOException {
+        try (SparkSession spark =
+                createSessionBuilder()
+                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
+                        .getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+            spark.sql("USE spark_catalog.my_db1");
+
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS `my_db1`.`append_test_partial` ("
+                            + "`t1` BIGINT COMMENT 't1', "
+                            + "`t2` BIGINT COMMENT 't2', "
+                            + "`t3` STRING COMMENT 't3') "
+                            + "PARTITIONED BY (`dt` STRING COMMENT 'dt', `hh` STRING COMMENT 'hh') "
+                            + "ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe' "
+                            + "WITH SERDEPROPERTIES ('serialization.format' = '1') "
+                            + "STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' "
+                            + "OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' "
+                            + "TBLPROPERTIES ('metastore.partitioned-table' = 'true')");
+
+            spark.sql("set spark.paimon.write.empty.partition.enable=true");
+            spark.sql(
+                    "insert overwrite table `my_db1`.`append_test_partial` partition (dt = '20251127') "
+                            + "select t1,t2,t3,hh from `my_db1`.`append_test_partial` "
+                            + "where dt = '20251126'");
+
+            Dataset<Row> partitions =
+                    spark.sql("SELECT * FROM `my_db1`.`append_test_partial$partitions`");
+            assertThat(partitions.count()).isZero();
+
+            spark.sql("DROP TABLE IF EXISTS `my_db1`.`append_test_partial`");
+        }
+    }
+
     private SparkSession.Builder createSessionBuilder() {
         Path warehousePath = new Path("file:" + tempDir.toString());
         return SparkSession.builder()
