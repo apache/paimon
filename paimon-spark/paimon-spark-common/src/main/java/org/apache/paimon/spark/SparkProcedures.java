@@ -37,6 +37,7 @@ import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
+import org.apache.paimon.spark.procedure.ExportParquetProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MigrateDatabaseProcedure;
@@ -122,6 +123,7 @@ public class SparkProcedures {
         procedureBuilders.put(
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
+        procedureBuilders.put("export_parquet", ExportParquetProcedure::builder);
         procedureBuilders.put("copy", CopyFilesProcedure::builder);
         return procedureBuilders.build();
     }
