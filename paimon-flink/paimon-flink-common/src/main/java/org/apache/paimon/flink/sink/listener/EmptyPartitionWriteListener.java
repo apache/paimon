@@ -24,17 +24,20 @@ import org.apache.paimon.flink.sink.CommitterOperator;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -50,44 +53,52 @@ public class EmptyPartitionWriteListener implements CommitListener {
     private static final Logger LOG = LoggerFactory.getLogger(EmptyPartitionWriteListener.class);
 
     private final FileStoreTable table;
-    private final TableCommitImpl tableCommit;
+    private final BatchTableCommit tableCommit;
+    private final Map<String, String> overwritePartitionSpec;
 
-    public EmptyPartitionWriteListener(FileStoreTable table, TableCommitImpl tableCommit) {
+    public EmptyPartitionWriteListener(
+            FileStoreTable table,
+            BatchTableCommit tableCommit,
+            Map<String, String> overwritePartitionSpec) {
         this.table = table;
         this.tableCommit = tableCommit;
+        this.overwritePartitionSpec = overwritePartitionSpec;
     }
 
     public static Optional<EmptyPartitionWriteListener> create(
-            FileStoreTable table, TableCommitImpl tableCommit) {
+            FileStoreTable table,
+            BatchTableCommit tableCommit,
+            @Nullable Map<String, String> overwritePartitionSpec) {
         if (!table.coreOptions().writeEmptyPartitionEnable()
-                || !tableCommit.getOverwrite().isPresent()
-                || tableCommit.getOverwrite().get().isEmpty()) {
+                || overwritePartitionSpec == null
+                || overwritePartitionSpec.isEmpty()) {
             return Optional.empty();
         }
-        LOG.info("Create empty write listener: {}", tableCommit.getOverwrite());
-        return Optional.of(new EmptyPartitionWriteListener(table, tableCommit));
+        LOG.info("Create empty write listener: {}", overwritePartitionSpec);
+        return Optional.of(
+                new EmptyPartitionWriteListener(table, tableCommit, overwritePartitionSpec));
     }
 
     @Override
     public void notifyCommittable(List<ManifestCommittable> committables) {
-        LOG.info("Empty write, overwritePartitions: {}", tableCommit.getOverwrite());
+        LOG.info("Empty write, overwritePartitions: {}", overwritePartitionSpec);
         Preconditions.checkArgument(
-                tableCommit.getOverwrite().isPresent() && !tableCommit.getOverwrite().get().isEmpty(),
+                overwritePartitionSpec != null && !overwritePartitionSpec.isEmpty(),
                 "Overwrite partitions must not be empty");
-        if (!isStaticOverwrite(table, tableCommit)
+        if (!isStaticOverwrite(table, overwritePartitionSpec)
                 || !CommitterOperator.isEndInputCommit(committables)
                 || hasNewFiles(committables)) {
             return;
         }
         BinaryRow overwritePartition =
                 convertSpecToBinaryRow(
-                        tableCommit.getOverwrite().get(), table.schema().logicalPartitionType());
+                        overwritePartitionSpec, table.schema().logicalPartitionType());
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite()) {
-            write.notifyNewEmptyOutputWriter(overwritePartition, 0);
+            ((InnerTableWrite) write).writeEmptyFile(overwritePartition, 0);
             List<CommitMessage> commitMessages = write.prepareCommit();
             this.tableCommit.commit(commitMessages);
-            LOG.info("Commit for empty overwrite: {}.", tableCommit.getOverwrite().get());
+            LOG.info("Commit for empty overwrite: {}.", overwritePartitionSpec);
         } catch (Exception e) {
             LOG.error("Failed to prepare commit for empty partition write.", e);
             throw new RuntimeException("Failed to prepare commit for empty partition write.", e);
@@ -122,11 +133,10 @@ public class EmptyPartitionWriteListener implements CommitListener {
         return false;
     }
 
-    private static boolean isStaticOverwrite(FileStoreTable table, TableCommitImpl tableCommit) {
-        Optional<Map<String, String>> overwritePartitions = tableCommit.getOverwrite();
-        return overwritePartitions.isPresent()
-                && table.schema().partitionKeys().stream()
-                        .allMatch(overwritePartitions.get()::containsKey);
+    private static boolean isStaticOverwrite(
+            FileStoreTable table, Map<String, String> overwritePartitionSpec) {
+        return table.schema().partitionKeys().stream()
+                .allMatch(overwritePartitionSpec::containsKey);
     }
 
     private BinaryRow convertSpecToBinaryRow(Map<String, String> spec, RowType partitionType) {

@@ -40,6 +40,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -175,9 +176,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
-        getWriterWrapper(partition, bucket).writer.notifyNewEmptyOutputWriter(partition, bucket);
-        LOG.info("Notify new empty output writer for partition {}, bucket {}", partition, bucket);
+    public void writeEmptyFile(BinaryRow partition, int bucket) throws Exception {
+        ((EmptyFileWriter) getWriterWrapper(partition, bucket).writer).writeEmptyFile();
+        LOG.info("Wrote empty data file for partition {}, bucket {}", partition, bucket);
     }
 
     @Override

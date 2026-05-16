@@ -64,12 +64,6 @@ public interface BatchWriteBuilder extends WriteBuilder {
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
     BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition);
 
-    /** Static overwrite partition, null when this is not an overwrite write. */
-    @Nullable
-    default Map<String, String> staticPartition() {
-        return null;
-    }
-
     /** Create a {@link TableWrite} to write {@link InternalRow}s. */
     @Override
     BatchTableWrite newWrite();

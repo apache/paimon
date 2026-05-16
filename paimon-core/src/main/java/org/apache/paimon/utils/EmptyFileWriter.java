@@ -16,18 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.operation.WriteRestore;
+/** A writer that can produce an empty data file. */
+public interface EmptyFileWriter {
 
-/** Inner {@link TableWrite} contains overwrite setter. */
-public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
-
-    InnerTableWrite withWriteRestore(WriteRestore writeRestore);
-
-    InnerTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles);
-
-    /** Write an empty data file for the given partition and bucket. */
-    void writeEmptyFile(BinaryRow partition, int bucket) throws Exception;
+    /** Write an empty data file. */
+    void writeEmptyFile() throws Exception;
 }

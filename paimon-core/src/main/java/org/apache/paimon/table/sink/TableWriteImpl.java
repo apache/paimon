@@ -230,8 +230,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
-    public void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
-        write.notifyNewEmptyOutputWriter(partition, bucket);
+    public void writeEmptyFile(BinaryRow partition, int bucket) throws Exception {
+        write.writeEmptyFile(partition, bucket);
     }
 
     @Override

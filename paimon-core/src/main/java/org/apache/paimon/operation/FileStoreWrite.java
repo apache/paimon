@@ -95,8 +95,8 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      */
     void write(BinaryRow partition, int bucket, T data) throws Exception;
 
-    /** Notify create a new empty output writer for the given partition and bucket. */
-    void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception;
+    /** Write an empty data file for the given partition and bucket. */
+    void writeEmptyFile(BinaryRow partition, int bucket) throws Exception;
 
     /**
      * Compact data stored in given partition and bucket. Note that compaction process is only

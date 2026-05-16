@@ -25,7 +25,6 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
@@ -40,6 +39,7 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.RecordWriter;
 
@@ -56,7 +56,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link CompactIncrement}. */
-public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
+public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner, EmptyFileWriter {
 
     private final boolean writeBufferSpillable;
     private final MemorySize maxDiskSize;
@@ -200,7 +200,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
+    public void writeEmptyFile() throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
                 writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         dataWriter.writeEmptyFile();
