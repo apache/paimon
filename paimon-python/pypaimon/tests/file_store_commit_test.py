@@ -24,6 +24,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
@@ -86,7 +87,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -151,7 +152,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta_1, file_meta_2]
+            data_increment=DataIncrement(new_files=[file_meta_1, file_meta_2])
         )
 
         # Test method
@@ -223,13 +224,13 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message_1 = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta_1]
+            data_increment=DataIncrement(new_files=[file_meta_1])
         )
 
         commit_message_2 = CommitMessage(
             partition=('2024-01-15', 'us-west-2'),
             bucket=0,
-            new_files=[file_meta_2]
+            data_increment=DataIncrement(new_files=[file_meta_2])
         )
 
         # Test method
@@ -292,7 +293,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=(),  # Empty partition for unpartitioned table
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -331,7 +332,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -373,7 +374,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1', 'extra-value'),  # 3 values but table has 2 keys
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
