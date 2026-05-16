@@ -28,21 +28,22 @@ from pypaimon.write.data_increment import DataIncrement
 
 
 class CommitMessageSerializer:
-    """Cross-process serializer for CommitMessage payloads.
+    """JSON wire format for shipping CommitMessage between pypaimon processes
+    (e.g. Ray driver ↔ workers).
 
-    JSON-based on purpose: human-debuggable, version-tolerant across worker
-    Python versions, and avoids the security/compat pitfalls of pickle when
-    shipping CompactTask outputs from Ray workers back to the driver.
+    JSON on purpose: human-debuggable, tolerant of Python version drift, and
+    avoids pickle's compat/security pitfalls when shipping CompactTask outputs
+    from Ray workers back to the driver.
 
-    The wire shape mirrors org.apache.paimon.table.sink.CommitMessageImpl:
-    every message is (partition, bucket, total_buckets, data_increment,
-    compact_increment), with each increment carrying its own new/deleted/
+    Every message round-trips (partition, bucket, total_buckets, data_increment,
+    compact_increment), with each increment carrying its own new / deleted /
     changelog file lists plus index file deltas. Today the index slots are
     populated only by tables that opt into them; the serializer round-trips
     them either way so adding deletion vectors / global index later does
     not need a new payload version.
     """
 
+    # Wire format version; bump on incompatible payload changes.
     VERSION = 1
 
     @classmethod

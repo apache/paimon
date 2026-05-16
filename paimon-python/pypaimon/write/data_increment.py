@@ -27,10 +27,9 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 class DataIncrement:
     """Increment of data files, changelog files and index files produced by a write.
 
-    Direct port of org.apache.paimon.io.DataIncrement. Carries everything one
-    write attempt contributes to a snapshot, so a CommitMessage can be
-    constructed from a (DataIncrement, CompactIncrement) pair just like the
-    Java side.
+    Carries everything one write attempt contributes to a snapshot, so a
+    CommitMessage can be constructed from a (DataIncrement, CompactIncrement)
+    pair.
 
     - new_files: data files this write created (ADD entries).
     - deleted_files: data files this write removed without compaction
@@ -57,5 +56,5 @@ class DataIncrement:
         )
 
     @classmethod
-    def empty(cls) -> "DataIncrement":
+    def empty_increment(cls) -> "DataIncrement":
         return cls()

@@ -27,8 +27,6 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 class CompactIncrement:
     """Files changed before and after compaction, with changelog produced during compaction.
 
-    Direct port of org.apache.paimon.io.CompactIncrement.
-
     - compact_before: input files consumed by compaction (DELETE entries).
     - compact_after: rewritten output files (ADD entries).
     - changelog_files: changelog files emitted while compacting (used by the
@@ -54,5 +52,5 @@ class CompactIncrement:
         )
 
     @classmethod
-    def empty(cls) -> "CompactIncrement":
+    def empty_increment(cls) -> "CompactIncrement":
         return cls()

@@ -110,43 +110,6 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         self.assertEqual(['old-1.parquet', 'old-2.parquet', 'merged.parquet'], names)
         self.assertTrue(all(e.bucket == 1 for e in entries))
 
-    def test_commit_with_only_compact_messages_uses_compact_kind(self, *_):
-        commit = self._create_commit()
-        commit._try_commit = Mock()
-        msg = CommitMessage(
-            partition=('p1',),
-            bucket=0,
-            compact_increment=CompactIncrement(
-                compact_before=[_make_file('old.parquet')],
-                compact_after=[_make_file('new.parquet')],
-            ),
-        )
-
-        commit.commit([msg], commit_identifier=100)
-
-        commit._try_commit.assert_called_once()
-        call_kwargs = commit._try_commit.call_args.kwargs
-        self.assertEqual('COMPACT', call_kwargs['commit_kind'])
-        self.assertEqual(100, call_kwargs['commit_identifier'])
-
-    def test_commit_with_new_files_keeps_append_kind_even_when_compact_fields_present(self, *_):
-        commit = self._create_commit()
-        commit._try_commit = Mock()
-        msg = CommitMessage(
-            partition=('p1',),
-            bucket=0,
-            data_increment=DataIncrement(new_files=[_make_file('new.parquet')]),
-            compact_increment=CompactIncrement(
-                compact_before=[_make_file('old.parquet')],
-                compact_after=[_make_file('merged.parquet')],
-            ),
-        )
-
-        commit.commit([msg], commit_identifier=200)
-
-        call_kwargs = commit._try_commit.call_args.kwargs
-        self.assertEqual('APPEND', call_kwargs['commit_kind'])
-
     def test_commit_compact_uses_compact_kind_and_no_conflict_detection(self, *_):
         commit = self._create_commit()
         commit._try_commit = Mock()
@@ -199,6 +162,90 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         commit.commit_compact([empty_msg], commit_identifier=600)
 
         commit._try_commit.assert_not_called()
+
+    # _build_commit_entries must reject increment fields it does not yet
+    # wire up so a future writer cannot silently drop them at commit time.
+
+    def test_build_entries_rejects_data_increment_deleted_files(self, *_):
+        commit = self._create_commit()
+        msg = CommitMessage(
+            partition=('2024-01-15',),
+            bucket=0,
+            data_increment=DataIncrement(deleted_files=[_make_file('d.parquet')]),
+        )
+        with self.assertRaises(NotImplementedError):
+            commit._build_commit_entries([msg])
+
+    def test_build_entries_rejects_data_increment_changelog_files(self, *_):
+        commit = self._create_commit()
+        msg = CommitMessage(
+            partition=('2024-01-15',),
+            bucket=0,
+            data_increment=DataIncrement(changelog_files=[_make_file('c.parquet')]),
+        )
+        with self.assertRaises(NotImplementedError):
+            commit._build_commit_entries([msg])
+
+    def test_build_entries_rejects_compact_increment_changelog_files(self, *_):
+        commit = self._create_commit()
+        msg = CommitMessage(
+            partition=('2024-01-15',),
+            bucket=0,
+            compact_increment=CompactIncrement(changelog_files=[_make_file('c.parquet')]),
+        )
+        with self.assertRaises(NotImplementedError):
+            commit._build_commit_entries([msg])
+
+    def test_build_entries_uses_message_total_buckets_when_set(self, *_):
+        """A stale plan whose bucket count has been rescaled should keep the
+        message's own total_buckets, not be silently overwritten with the
+        table's current value.
+        """
+        commit = self._create_commit()
+        # Table claims 4 buckets; message was planned when there were 8.
+        self.mock_table.total_buckets = 4
+        msg = CommitMessage(
+            partition=('2024-01-15',),
+            bucket=0,
+            total_buckets=8,
+            data_increment=DataIncrement(new_files=[_make_file('a.parquet')]),
+        )
+
+        entries = commit._build_commit_entries([msg])
+
+        self.assertEqual(1, len(entries))
+        self.assertEqual(8, entries[0].total_buckets)
+
+    def test_commit_rejects_messages_with_compact_increment(self, *_):
+        """commit() is the write-side entry; compaction results must go through
+        commit_compact(). A caller that mixes them is almost certainly wrong
+        (would otherwise silently flatten two snapshot kinds into one)."""
+        commit = self._create_commit()
+        commit._try_commit = Mock()
+        msg = CommitMessage(
+            partition=('p1',),
+            bucket=0,
+            compact_increment=CompactIncrement(compact_after=[_make_file('a.parquet')]),
+        )
+
+        with self.assertRaises(ValueError):
+            commit.commit([msg], commit_identifier=700)
+
+        commit._try_commit.assert_not_called()
+
+    def test_build_entries_falls_back_to_table_total_buckets_when_message_has_none(self, *_):
+        commit = self._create_commit()
+        self.mock_table.total_buckets = 4
+        msg = CommitMessage(
+            partition=('2024-01-15',),
+            bucket=0,
+            total_buckets=None,
+            data_increment=DataIncrement(new_files=[_make_file('a.parquet')]),
+        )
+
+        entries = commit._build_commit_entries([msg])
+
+        self.assertEqual(4, entries[0].total_buckets)
 
 
 if __name__ == '__main__':

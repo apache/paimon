@@ -27,10 +27,9 @@ from pypaimon.write.data_increment import DataIncrement
 class CommitMessage:
     """File committable for sink.
 
-    Direct port of org.apache.paimon.table.sink.CommitMessageImpl. Carries
-    everything one (partition, bucket) writer or compactor contributes to a
-    snapshot, packaged as a (data_increment, compact_increment) pair so the
-    same message type can describe both pure writes and compaction results.
+    Carries everything one (partition, bucket) writer or compactor contributes
+    to a snapshot, packaged as a (data_increment, compact_increment) pair so
+    the same message type can describe both pure writes and compaction results.
 
     - partition / bucket: identify the (partition, bucket) the message
       applies to.
@@ -39,7 +38,7 @@ class CommitMessage:
     - data_increment: ADD/DELETE/changelog/index deltas from a normal write.
     - compact_increment: ADD/DELETE/changelog/index deltas from compaction.
     - check_from_snapshot: row-tracking conflict-detection anchor; -1 means
-      "no check" (default).
+      "no check" (default). Read per-message by write/commit/conflict_detection.py.
     """
 
     partition: Tuple
@@ -50,8 +49,8 @@ class CommitMessage:
     check_from_snapshot: Optional[int] = -1
 
     # ---- Convenience accessors ---------------------------------------------
-    # Mirror Java's CommitMessageImpl shape: callers usually want the
-    # individual file lists rather than reaching through the increment.
+    # Callers usually want the individual file lists rather than reaching
+    # through the increment.
 
     @property
     def new_files(self) -> List[DataFileMeta]:

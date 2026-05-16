@@ -110,14 +110,21 @@ class FileStoreCommit:
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        """Commit the given commit messages in normal append mode.
+        """Commit write-side messages (data_increment only).
 
-        new_files in each message generate ADD entries; compact_before/compact_after
-        generate DELETE/ADD entries respectively. If only compact_* fields are present
-        across all messages (no new_files), commit_kind becomes COMPACT.
+        Compaction results (compact_before / compact_after) must be committed
+        through commit_compact() instead — they produce a separate snapshot kind
+        and skip row-id assignment.
         """
         if not commit_messages:
             return
+
+        for msg in commit_messages:
+            if not msg.compact_increment.is_empty():
+                raise ValueError(
+                    "commit() rejects messages carrying compact_increment; "
+                    "use commit_compact() for compaction results."
+                )
 
         # Extract the minimum check_from_snapshot from commit messages
         valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
@@ -131,11 +138,10 @@ class FileStoreCommit:
             len(commit_messages),
         )
         commit_entries = self._build_commit_entries(commit_messages)
-        has_new_files = any(msg.new_files for msg in commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries", len(commit_entries))
 
-        commit_kind = "APPEND" if has_new_files else "COMPACT"
+        commit_kind = "APPEND"
         detect_conflicts = False
         allow_rollback = False
         if self.conflict_detection.should_be_overwrite_commit():
@@ -153,10 +159,11 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback)
 
     def commit_compact(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        """Commit compaction results (compact_before/compact_after only).
+        """Commit compaction-only messages.
 
-        Each message must carry no new_files. compact_before generate DELETE entries,
-        compact_after generate ADD entries. Snapshot kind is COMPACT.
+        Each message must carry no new_files; compact_before → DELETE entries,
+        compact_after → ADD entries; snapshot kind = COMPACT. Skips row-id
+        assignment and conflict detection (a compaction never produces new rows).
         """
         if not commit_messages:
             return
@@ -187,15 +194,40 @@ class FileStoreCommit:
         )
 
     def _build_commit_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        # Only new_files / compact_before / compact_after are wired up today;
+        # reject the other 7 increment slots loudly so a future writer that
+        # starts filling them cannot silently lose data at commit time.
+        for msg in commit_messages:
+            di = msg.data_increment
+            if (di.deleted_files or di.changelog_files
+                    or di.new_index_files or di.deleted_index_files):
+                raise NotImplementedError(
+                    "FileStoreCommit does not yet handle DataIncrement.deleted_files / "
+                    "changelog_files / new_index_files / deleted_index_files; these slots "
+                    "will be wired in by the feature that first needs each one."
+                )
+            ci = msg.compact_increment
+            if (ci.changelog_files or ci.new_index_files or ci.deleted_index_files):
+                raise NotImplementedError(
+                    "FileStoreCommit does not yet handle CompactIncrement.changelog_files / "
+                    "new_index_files / deleted_index_files; these slots will be wired in by "
+                    "the feature that first needs each one."
+                )
+
         entries: List[ManifestEntry] = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            # Prefer the message's total_buckets (captured when the plan was
+            # built) over the current table value, so a plan that survived a
+            # bucket rescale is not silently rewritten with the new count.
+            total_buckets = msg.total_buckets if msg.total_buckets is not None \
+                else self.table.total_buckets
             for file in msg.new_files:
                 entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
             for file in msg.compact_before:
@@ -203,7 +235,7 @@ class FileStoreCommit:
                     kind=1,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
             for file in msg.compact_after:
@@ -211,7 +243,7 @@ class FileStoreCommit:
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
         return entries
