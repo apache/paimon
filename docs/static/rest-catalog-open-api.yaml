@@ -1267,6 +1267,48 @@ paths:
           $ref: '#/components/responses/BranchNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/merge:
+    post:
+      tags:
+        - branch
+      summary: Merge branch
+      description: >-
+        Merge data files from source branch into target branch.
+        The table must be created with 'branch-merge.enabled' = 'true'. This option
+        enforces a pure-append table history by rejecting compaction and INSERT OVERWRITE,
+        and it is incompatible with deletion vectors. Requires an append-only table with
+        consistent row-tracking settings and compatible schema history.
+      operationId: mergeBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/tags:
     get:
       tags:
@@ -3303,6 +3345,16 @@ components:
       type: object
       properties:
         branch:
+          type: string
+    MergeBranchRequest:
+      type: object
+      required:
+        - sourceBranch
+        - targetBranch
+      properties:
+        sourceBranch:
+          type: string
+        targetBranch:
           type: string
     ListBranchesResponse:
       type: object

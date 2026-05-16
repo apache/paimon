@@ -93,6 +93,12 @@
             <td>Target size of a blob file. Default is value of TARGET_FILE_SIZE.</td>
         </tr>
         <tr>
+            <td><h5>branch-merge.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable branch merge for this table. When enabled, the table must keep a pure-append history: compaction and INSERT OVERWRITE are rejected, and deletion vectors are not supported. This provides the invariant required by branch merge.</td>
+        </tr>
+        <tr>
             <td><h5>bucket</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>

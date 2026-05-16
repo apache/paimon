@@ -329,6 +329,8 @@ public interface DataFileMeta {
 
     DataFileMeta assignFirstRowId(long firstRowId);
 
+    DataFileMeta clearFirstRowId();
+
     default List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
         paths.add(pathFactory.toPath(this));

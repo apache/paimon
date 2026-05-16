@@ -69,7 +69,7 @@ class FileSystemBranchManagerTest {
         tagManager = new TagManager(fileIO, tablePath);
         branchManager =
                 new FileSystemBranchManager(
-                        fileIO, tablePath, snapshotManager, tagManager, schemaManager);
+                        fileIO, tablePath, snapshotManager, tagManager, schemaManager, null);
     }
 
     @Test

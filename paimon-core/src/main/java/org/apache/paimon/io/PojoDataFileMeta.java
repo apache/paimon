@@ -380,6 +380,31 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
+    public PojoDataFileMeta clearFirstRowId() {
+        return new PojoDataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                minKey,
+                maxKey,
+                keyStats,
+                valueStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                level,
+                extraFiles,
+                creationTime,
+                deleteRowCount,
+                embeddedIndex,
+                fileSource,
+                valueStatsCols,
+                externalPath,
+                null,
+                writeCols);
+    }
+
+    @Override
     public PojoDataFileMeta copy(List<String> newExtraFiles) {
         return new PojoDataFileMeta(
                 fileName,

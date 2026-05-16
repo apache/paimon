@@ -61,6 +61,7 @@ import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.MergeBranchRequest;
 import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
@@ -1924,6 +1925,44 @@ public class RESTCatalogServer {
                                     identifier.getFullName(),
                                     tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
                         }
+                    } else if (resources.length == 5 && "merge".equals(resources[4])) {
+                        // Merge branch: /branches/merge
+                        MergeBranchRequest mergeRequest =
+                                RESTApi.fromJson(data, MergeBranchRequest.class);
+                        try {
+                            table.mergeBranch(
+                                    mergeRequest.sourceBranch(), mergeRequest.targetBranch());
+                        } catch (Exception e) {
+                            String msg = e.getMessage();
+                            if (msg != null && msg.contains("doesn't exist")) {
+                                String branchName =
+                                        msg.contains(mergeRequest.sourceBranch())
+                                                ? mergeRequest.sourceBranch()
+                                                : mergeRequest.targetBranch();
+                                response =
+                                        new ErrorResponse(
+                                                ErrorResponse.RESOURCE_TYPE_BRANCH,
+                                                branchName,
+                                                msg,
+                                                404);
+                                return mockResponse(response, 404);
+                            }
+                            throw e;
+                        }
+                        String targetBranchName = mergeRequest.targetBranch();
+                        Identifier targetIdentifier =
+                                BranchManager.isMainBranch(targetBranchName)
+                                        ? identifier
+                                        : new Identifier(
+                                                identifier.getDatabaseName(),
+                                                identifier.getTableName(),
+                                                targetBranchName);
+                        FileStoreTable targetTable =
+                                (FileStoreTable) catalog.getTable(targetIdentifier);
+                        Snapshot targetSnapshot = targetTable.snapshotManager().latestSnapshot();
+                        tableLatestSnapshotStore.put(
+                                targetIdentifier.getFullName(),
+                                new TableSnapshot(targetSnapshot, 0, 0, 0, 0));
                     } else {
                         CreateBranchRequest requestBody =
                                 RESTApi.fromJson(data, CreateBranchRequest.class);

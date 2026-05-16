@@ -301,6 +301,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         int attempts = 0;
 
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
+        if (options.branchMergeEnabled()) {
+            validatePureAppendCommit(changes);
+        }
         try {
             List<SimpleFileEntry> appendSimpleEntries =
                     SimpleFileEntry.from(changes.appendTableFiles);
@@ -429,6 +432,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     partition,
                     committable,
                     properties);
+        }
+
+        if (options.branchMergeEnabled()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "INSERT OVERWRITE is not allowed when %s is true.",
+                            CoreOptions.BRANCH_MERGE_ENABLED.key()));
         }
 
         long started = System.nanoTime();
@@ -687,6 +697,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         commitMessages.forEach(changes::collect);
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
+    }
+
+    private void validatePureAppendCommit(ManifestEntryChanges changes) {
+        checkArgument(
+                changes.compactTableFiles.isEmpty()
+                        && changes.compactChangelog.isEmpty()
+                        && changes.compactIndexFiles.isEmpty(),
+                "Compaction is not allowed when %s is true.",
+                CoreOptions.BRANCH_MERGE_ENABLED.key());
     }
 
     private int tryCommit(

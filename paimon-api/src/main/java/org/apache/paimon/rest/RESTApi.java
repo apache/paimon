@@ -48,6 +48,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.MergeBranchRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -1021,6 +1022,25 @@ public class RESTApi {
         client.post(
                 resourcePaths.forwardBranch(
                         identifier.getDatabaseName(), identifier.getObjectName(), branch),
+                request,
+                restAuthFunction);
+    }
+
+    /**
+     * Merge branch for table.
+     *
+     * @param identifier database name and table name.
+     * @param sourceBranch source branch name
+     * @param targetBranch target branch name
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the branch or table not
+     *     exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void mergeBranch(Identifier identifier, String sourceBranch, String targetBranch) {
+        MergeBranchRequest request = new MergeBranchRequest(sourceBranch, targetBranch);
+        client.post(
+                resourcePaths.mergeBranch(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);
     }

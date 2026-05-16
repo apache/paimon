@@ -109,6 +109,15 @@ public class CatalogBranchManager implements BranchManager {
     }
 
     @Override
+    public void mergeBranch(String sourceBranch, String targetBranch) {
+        executePost(
+                catalog -> {
+                    BranchManager.mergeValidate(sourceBranch, targetBranch);
+                    catalog.mergeBranch(identifier, sourceBranch, targetBranch);
+                });
+    }
+
+    @Override
     public void renameBranch(String fromBranch, String toBranch) {
         executePost(catalog -> catalog.renameBranch(identifier, fromBranch, toBranch));
     }

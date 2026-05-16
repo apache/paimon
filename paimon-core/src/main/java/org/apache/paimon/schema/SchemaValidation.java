@@ -307,6 +307,8 @@ public class SchemaValidation {
 
         validateRowTracking(schema, options);
 
+        validateBranchMerge(schema, options);
+
         validateIncrementalClustering(schema, options);
 
         validateChainTable(schema, options);
@@ -792,6 +794,29 @@ public class SchemaValidation {
             List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
             vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
         }
+    }
+
+    private static void validateBranchMerge(TableSchema schema, CoreOptions options) {
+        if (!options.branchMergeEnabled()) {
+            return;
+        }
+
+        checkArgument(
+                schema.primaryKeys().isEmpty(),
+                "%s is not supported for tables with primary keys.",
+                CoreOptions.BRANCH_MERGE_ENABLED.key());
+
+        checkArgument(
+                !options.deletionVectorsEnabled(),
+                "%s is incompatible with %s.",
+                CoreOptions.BRANCH_MERGE_ENABLED.key(),
+                CoreOptions.DELETION_VECTORS_ENABLED.key());
+
+        checkArgument(
+                !options.dataEvolutionEnabled(),
+                "%s is incompatible with %s.",
+                CoreOptions.BRANCH_MERGE_ENABLED.key(),
+                CoreOptions.DATA_EVOLUTION_ENABLED.key());
     }
 
     private static void validateBlobFields(RowType rowType, CoreOptions options) {

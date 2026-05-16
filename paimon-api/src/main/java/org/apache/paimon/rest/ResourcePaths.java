@@ -286,6 +286,18 @@ public class ResourcePaths {
                 "rename");
     }
 
+    public String mergeBranch(String databaseName, String tableName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(tableName),
+                BRANCHES,
+                "merge");
+    }
+
     public String tags(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
