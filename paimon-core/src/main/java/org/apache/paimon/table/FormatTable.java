@@ -428,6 +428,11 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void mergeBranch(String sourceBranch, String targetBranch) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default ExpireSnapshots newExpireSnapshots() {
         throw new UnsupportedOperationException();
     }

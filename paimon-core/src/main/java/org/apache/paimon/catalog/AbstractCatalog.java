@@ -632,6 +632,12 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public void mergeBranch(Identifier identifier, String sourceBranch, String targetBranch)
+            throws BranchNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public List<String> listBranches(Identifier identifier) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }

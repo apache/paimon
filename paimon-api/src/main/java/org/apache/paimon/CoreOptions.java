@@ -2224,6 +2224,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    @Immutable
+    public static final ConfigOption<Boolean> BRANCH_MERGE_ENABLED =
+            key("branch-merge.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable branch merge for this table. "
+                                    + "When enabled, the table must keep a pure-append history: "
+                                    + "compaction and INSERT OVERWRITE are rejected, and deletion vectors "
+                                    + "are not supported. This provides the invariant required by branch merge.");
+
     public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
             key("snapshot.ignore-empty-commit")
                     .booleanType()
@@ -3688,6 +3699,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean branchMergeEnabled() {
+        return options.get(BRANCH_MERGE_ENABLED);
     }
 
     public boolean prepareCommitWaitCompaction() {

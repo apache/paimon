@@ -205,6 +205,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public void mergeBranch(String sourceBranch, String targetBranch) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.mergeBranch(sourceBranch, targetBranch);
+    }
+
+    @Override
     public ExpireSnapshots newExpireSnapshots() {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newExpireSnapshots();
