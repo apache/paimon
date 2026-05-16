@@ -68,12 +68,6 @@ public interface TableWrite extends AutoCloseable {
     /** Write a bundle records directly, not per row. */
     void writeBundle(BinaryRow partition, int bucket, BundleRecords bundle) throws Exception;
 
-    /** Notify create a new empty output writer for the given partition and bucket. */
-    default void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
-        throw new UnsupportedOperationException(
-                "Currently we don't provide default implementation.");
-    }
-
     /**
      * Compact a bucket of a partition. By default, it will determine whether to perform the
      * compaction according to the 'num-sorted-run.compaction-trigger' option. If fullCompaction is

@@ -49,6 +49,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util.{Map => JMap}
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -56,7 +57,8 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Option[Long] = None)
+    batchId: Option[Long] = None,
+    staticOverwritePartition: JMap[String, String] = null)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -94,12 +96,12 @@ case class PaimonSparkWriter(
   }
 
   def writeOnly(): PaimonSparkWriter = {
-    PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
+    copy(table = table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
 
   def withRowTracking(): PaimonSparkWriter = {
     if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowTracking = true)
+      copy(writeRowTracking = true)
     } else {
       this
     }
@@ -111,19 +113,21 @@ case class PaimonSparkWriter(
 
     val writeEmptyPartitionEnable = coreOptions.writeEmptyPartitionEnable()
     val dynamicPartitionOverwriteMode = coreOptions.dynamicPartitionOverwrite()
-    val staticPartition = writeBuilder.staticPartition()
     val overwritePartition =
       if (
         !dynamicPartitionOverwriteMode &&
-        staticPartition != null &&
-        !staticPartition.isEmpty
+        staticOverwritePartition != null &&
+        !staticOverwritePartition.isEmpty
       ) {
         val partitionType = table.schema().logicalPartitionType()
-        InternalSerializers.create(partitionType).toBinaryRow(
-          InternalRowPartitionComputer.convertSpecToInternalRow(
-            staticPartition,
-            partitionType,
-            coreOptions.partitionDefaultName())).copy()
+        InternalSerializers
+          .create(partitionType)
+          .toBinaryRow(
+            InternalRowPartitionComputer.convertSpecToInternalRow(
+              staticOverwritePartition,
+              partitionType,
+              coreOptions.partitionDefaultName()))
+          .copy()
       } else {
         null
       }
@@ -203,7 +207,7 @@ case class PaimonSparkWriter(
           {
             val emptyWrite = newWrite()
             try {
-              emptyWrite.write.notifyNewEmptyOutputWriter(overwritePartition, bucket)
+              emptyWrite.write.writeEmptyFile(overwritePartition, bucket)
               Iterator.apply(emptyWrite.commit)
             } finally {
               emptyWrite.close()

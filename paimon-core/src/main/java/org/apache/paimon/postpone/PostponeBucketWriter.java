@@ -38,6 +38,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SinkWriter;
@@ -52,7 +53,7 @@ import java.util.Collections;
 import java.util.List;
 
 /** {@link RecordWriter} for {@code bucket = -2} tables. */
-public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner {
+public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner, EmptyFileWriter {
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
@@ -162,6 +163,14 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
     @Override
     public long memoryOccupancy() {
         return sinkWriter.memoryOccupancy();
+    }
+
+    @Override
+    public void writeEmptyFile() throws Exception {
+        RollingFileWriter<KeyValue, DataFileMeta> writer = createRollingRowWriter();
+        writer.writeEmptyFile();
+        writer.close();
+        files.addAll(writer.result());
     }
 
     @Override

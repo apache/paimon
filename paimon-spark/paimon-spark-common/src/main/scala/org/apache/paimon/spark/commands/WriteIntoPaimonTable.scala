@@ -51,7 +51,11 @@ case class WriteIntoPaimonTable(
     updateTableWithOptions(
       Map(DYNAMIC_PARTITION_OVERWRITE.key -> dynamicPartitionOverwriteMode.toString))
 
-    val writer = PaimonSparkWriter(table, batchId = batchId)
+    val writer = PaimonSparkWriter(
+      table,
+      batchId = batchId,
+      staticOverwritePartition =
+        if (overwritePartition == null) null else overwritePartition.asJava)
     if (overwritePartition != null) {
       writer.writeBuilder.withOverwrite(overwritePartition.asJava)
     }

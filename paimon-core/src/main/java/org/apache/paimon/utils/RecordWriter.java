@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.util.Collection;
@@ -35,12 +34,6 @@ public interface RecordWriter<T> {
 
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
-
-    /** Notify create a new empty output writer for the given partition and bucket. */
-    default void notifyNewEmptyOutputWriter(BinaryRow partition, int bucket) throws Exception {
-        throw new UnsupportedOperationException(
-                "Currently we don't provide default implementation.");
-    }
 
     /**
      * Compact files related to the writer. Note that compaction process is only submitted and may
