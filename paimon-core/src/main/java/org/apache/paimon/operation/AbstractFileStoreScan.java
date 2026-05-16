@@ -43,6 +43,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -66,6 +69,8 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreScan.class);
 
     private final ManifestsReader manifestsReader;
     private final SnapshotManager snapshotManager;
@@ -251,14 +256,35 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public Plan plan() {
         long started = System.nanoTime();
+        long startManifests = System.currentTimeMillis();
         ManifestsReader.Result manifestsResult = readManifests();
+        long manifestsDuration = System.currentTimeMillis() - startManifests;
+        LOG.info(
+                "Read manifests, duration: {}ms, count: {}",
+                manifestsDuration,
+                manifestsResult.filteredManifests.size());
+
         Snapshot snapshot = manifestsResult.snapshot;
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
+        long startIterator = System.currentTimeMillis();
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
+        long iteratorDuration = System.currentTimeMillis() - startIterator;
+        LOG.info("Obtained iterator for manifest entries, duration: {}ms", iteratorDuration);
+
         List<ManifestEntry> files = new ArrayList<>();
         while (iterator.hasNext()) {
-            files.add(iterator.next());
+            long startIteration = System.currentTimeMillis();
+            ManifestEntry entry = iterator.next();
+            long iterationDuration = System.currentTimeMillis() - startIteration;
+            // this step is pretty fast - entries are become available in "chunks"
+            // i.e. once a manifest is read in full, and returned by readManifest, the individual
+            // entries are processed and made available to the iterator in one batch
+            //            LOG.info(
+            //                    "Iterated manifest entry: {}, duration: {}ms",
+            //                    entry.file().fileName(),
+            //                    iterationDuration);
+            files.add(entry);
         }
 
         if (wholeBucketFilterEnabled()) {
@@ -372,16 +398,28 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             List<ManifestFileMeta> manifests,
             Function<List<ManifestEntry>, List<T>> converter,
             boolean useSequential) {
+        long startDeletedEntriesTime = System.currentTimeMillis();
         Set<Identifier> deletedEntries =
                 FileEntry.readDeletedEntries(
                         manifest -> readManifest(manifest, FileEntry.deletedFilter(), null),
                         manifests,
                         parallelism);
+        long deletedEntriesDuration = System.currentTimeMillis() - startDeletedEntriesTime;
+        LOG.info(
+                "Read deleted entries: {}, duration: {}ms",
+                deletedEntries.size(),
+                deletedEntriesDuration);
 
+        long startFilterTime = System.currentTimeMillis();
         manifests =
                 manifests.stream()
                         .filter(file -> file.numAddedFiles() > 0)
                         .collect(Collectors.toList());
+        long filterDuration = System.currentTimeMillis() - startFilterTime;
+        LOG.info(
+                "Filtered manifests: {} remaining manifests, duration: {}ms",
+                manifests.size(),
+                filterDuration);
 
         Function<ManifestFileMeta, List<T>> processor =
                 manifest ->
@@ -391,8 +429,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         FileEntry.addFilter(),
                                         entry -> !deletedEntries.contains(entry.identifier())));
         if (useSequential) {
+            LOG.info("Using sequential execution for file entry processing");
             return sequentialBatchedExecute(processor, manifests, parallelism).iterator();
         } else {
+            LOG.info("Using random execution for file entry processing");
             return randomlyExecuteSequentialReturn(processor, manifests, parallelism);
         }
     }
@@ -446,6 +486,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestFileMeta manifest,
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
+        long startTime = System.currentTimeMillis();
+        LOG.info("Reading manifest file: {}", manifest.fileName());
         List<ManifestEntry> entries =
                 manifestFileFactory
                         .create()
@@ -462,12 +504,25 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
                                                 && filterByStats(entry));
+        // SLOW PART IS HERE!!!
+        long duration = System.currentTimeMillis() - startTime;
+        LOG.info(
+                "Successfully read manifest file: {}, entries: {}, duration: {}ms",
+                manifest.fileName(),
+                entries.size(),
+                duration);
         if (dropStats) {
             List<ManifestEntry> copied = new ArrayList<>(entries.size());
             for (ManifestEntry entry : entries) {
                 copied.add(dropStats(entry));
             }
             entries = copied;
+            long duration2 = System.currentTimeMillis() - startTime;
+            LOG.info(
+                    "Successfully pruned manifest file due to dropStats: {}, entries: {}, duration: {}ms",
+                    manifest.fileName(),
+                    entries.size(),
+                    duration2);
         }
         return entries;
     }
