@@ -55,7 +55,7 @@ public class ManifestPickStrategy {
      * @return list of picked runs to compact
      */
     public List<ManifestSortedRun> pick(List<ManifestSortedRun> levelRuns) {
-        if (levelRuns.isEmpty()) {
+        if (levelRuns.isEmpty() || levelRuns.size() < 5) {
             return new ArrayList<>();
         }
 
