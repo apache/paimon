@@ -907,12 +907,15 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         if (ThreadLocalRandom.current().nextBoolean()) {
             StreamExecutionEnvironment env =
                     streamExecutionEnvironmentBuilder().streamingMode().build();
-            createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
+            createAction(CompactDatabaseAction.class,
+                    "compact_database",
+                    "--warehouse", warehouse,
+                    "--mode", "divided")
                     .withStreamExecutionEnvironment(env)
                     .build();
             env.executeAsync();
         } else {
-            executeSQL("CALL sys.compact_database()");
+            executeSQL("CALL sys.compact_database(mode => 'divided')");
         }
 
         for (FileStoreTable table : tables) {

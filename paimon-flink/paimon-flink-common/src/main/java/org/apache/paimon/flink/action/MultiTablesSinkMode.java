@@ -37,7 +37,7 @@ public enum MultiTablesSinkMode implements Serializable {
 
     public static MultiTablesSinkMode fromString(@Nullable String mode) {
         if (mode == null) {
-            return DIVIDED;
+            return COMBINED;
         }
 
         switch (mode.toLowerCase()) {
