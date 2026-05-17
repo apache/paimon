@@ -149,7 +149,7 @@ public class ManifestFileSorter {
                         sortFieldType,
                         defaultCompactionSet,
                         openFileCost);
-//        sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+        sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
         System.out.println(
                 "After splitIntoSections: sections="
                         + sections.size()
@@ -167,7 +167,7 @@ public class ManifestFileSorter {
                         sortFieldIndex,
                         sortFieldType,
                         deleteEntries,
-                        suggestedMetaSize,
+                        manifestFullCompactionSize,
                         maxRewriteSize,
                         openFileCost,
                         sortNewFiles,
@@ -212,7 +212,7 @@ public class ManifestFileSorter {
 
         List<ManifestFileMeta> defaultCompactionManifests = new ArrayList<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        Set<FileEntry.Identifier> deleteEntries = null;
+        Set<FileEntry.Identifier> deleteEntries = new HashSet<>();
 
         if (totalDeltaFileSize >= manifestFullCompactionSize) {
             // Full compact triggered: read delete entries and classify by predicate.
@@ -268,8 +268,8 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             int sortFieldIndex,
             DataType sortFieldType,
-            @Nullable Set<FileEntry.Identifier> deleteEntries,
-            long suggestedMetaSize,
+            Set<FileEntry.Identifier> deleteEntries,
+            long manifestFullCompactionSize,
             long maxRewriteSize,
             long openFileCost,
             List<ManifestFileMeta> sortNewFiles,
@@ -284,7 +284,7 @@ public class ManifestFileSorter {
             Section section = sections.get(i);
             // Single-file section without defaultCompaction: already sorted, skip rewrite.
             if (section.files.size() == 1) {
-                if (!section.hasDefaultCompactMeta || deleteEntries == null) {
+                if (!section.hasDefaultCompactMeta || deleteEntries.isEmpty()) {
                     result.addAll(section.files);
                 } else {
                     processedSize = processedSize + section.totalSizeWithCost;
@@ -295,7 +295,7 @@ public class ManifestFileSorter {
                             sortFieldIndex,
                             sortFieldType,
                             deleteEntries,
-                            suggestedMetaSize,
+                            manifestFullCompactionSize,
                             sortNewFiles,
                             result,
                             manifestReadParallelism);
@@ -381,7 +381,7 @@ public class ManifestFileSorter {
                         sortFieldIndex,
                         sortFieldType,
                         deleteEntries,
-                        suggestedMetaSize,
+                        manifestFullCompactionSize,
                         sortNewFiles,
                         result,
                         manifestReadParallelism);
@@ -403,7 +403,7 @@ public class ManifestFileSorter {
             int sortFieldIndex,
             DataType sortFieldType,
             @Nullable Set<FileEntry.Identifier> deleteEntries,
-            long suggestedMetaSize,
+            long manifestFullCompactionSize,
             List<ManifestFileMeta> sortNewFiles,
             List<ManifestFileMeta> result,
             @Nullable Integer manifestReadParallelism)
@@ -411,13 +411,19 @@ public class ManifestFileSorter {
         List<ManifestFileMeta> subSegment = new ArrayList<>();
         long subSegmentSize = 0;
         for (ManifestFileMeta m : section) {
-            if (defaultCompactionSet.contains(m)) {
+            boolean shouldAccumulate =
+                    defaultCompactionSet.contains(m)
+                            && subSegmentSize + m.fileSize() < manifestFullCompactionSize;
+
+            if (shouldAccumulate) {
+                // Continue accumulating
                 subSegment.add(m);
                 subSegmentSize += m.fileSize();
-            } else if (!subSegment.isEmpty()) {
-                subSegment.add(m);
-                subSegmentSize += m.fileSize();
-                if (subSegmentSize >= suggestedMetaSize) {
+            } else {
+                // Need to break the segment
+                if (!subSegment.isEmpty()) {
+                    // Process accumulated subSegment first
+                    subSegment.add(m);
                     List<ManifestFileMeta> merged =
                             sortAndRewriteSection(
                                     subSegment,
@@ -428,11 +434,12 @@ public class ManifestFileSorter {
                                     manifestReadParallelism);
                     sortNewFiles.addAll(merged);
                     result.addAll(merged);
-                    subSegment = new ArrayList<>();
+                    subSegment.clear();
                     subSegmentSize = 0;
+                } else {
+                    // Directly add to result
+                    result.add(m);
                 }
-            } else {
-                result.add(m);
             }
         }
         // Flush remaining sub-segment
@@ -720,10 +727,12 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             int sortFieldIndex,
             DataType sortFieldType,
-            @Nullable Set<FileEntry.Identifier> deletedIdentifiers,
+            Set<FileEntry.Identifier> deletedIdentifiers,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-
+        if (section.size() == 1 && deletedIdentifiers.isEmpty()) {
+            return section;
+        }
         long totalStart = System.currentTimeMillis();
         long readTime = 0;
         long sortTime = 0;
@@ -882,7 +891,7 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             Set<FileEntry.Identifier> deletedIdentifiers) {
         List<ManifestEntry> entries = new ArrayList<>();
-        if (deletedIdentifiers == null || deletedIdentifiers.isEmpty()) {
+        if (deletedIdentifiers.isEmpty()) {
             entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
         } else {
             for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {

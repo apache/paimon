@@ -207,6 +207,7 @@ public class ManifestFileMerger {
                 totalManifestSize,
                 deltaDeleteFileNum,
                 totalDeltaFileSize);
+        System.out.println("Start Manifest File Full Compaction: totalManifestSize: " + totalManifestSize + ", deltaDeleteFileNum " + deltaDeleteFileNum + ", totalDeltaFileSize " + totalDeltaFileSize);
 
         // 2.1. read all delete entries
 
