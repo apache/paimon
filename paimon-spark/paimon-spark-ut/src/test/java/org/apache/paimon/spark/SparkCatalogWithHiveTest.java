@@ -167,15 +167,13 @@ public class SparkCatalogWithHiveTest {
             spark.sql("USE spark_catalog.my_db1");
 
             spark.sql(
-                    "CREATE TABLE IF NOT EXISTS `my_db1`.`append_test` ("
+                    "CREATE TABLE IF NOT EXISTS append_test ("
                             + "`t1` BIGINT COMMENT 't1', "
                             + "`t2` BIGINT COMMENT 't2', "
-                            + "`t3` STRING COMMENT 't3') "
-                            + "PARTITIONED BY (`dt` STRING COMMENT 'dt') "
-                            + "ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe' "
-                            + "WITH SERDEPROPERTIES ('serialization.format' = '1') "
-                            + "STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' "
-                            + "OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' "
+                            + "`t3` STRING COMMENT 't3', "
+                            + "`dt` STRING COMMENT 'dt') "
+                            + "USING paimon "
+                            + "PARTITIONED BY (`dt`) "
                             + "TBLPROPERTIES ("
                             + "'partition.timestamp-pattern' = '$dt', "
                             + "'partition.timestamp-formatter' = 'yyyyMMdd', "
@@ -183,15 +181,15 @@ public class SparkCatalogWithHiveTest {
 
             spark.sql("set spark.paimon.write.empty.partition.enable=true");
             spark.sql(
-                    "insert overwrite table `my_db1`.`append_test` partition (dt = '20251127') "
-                            + "select t1,t2,t3 from `my_db1`.`append_test` where dt = '20251126'");
+                    "insert overwrite table append_test partition (dt = '20251127') "
+                            + "select t1,t2,t3 from append_test where dt = '20251126'");
 
-            Dataset<Row> partitions = spark.sql("SELECT * FROM `my_db1`.`append_test$partitions`");
+            Dataset<Row> partitions = spark.sql("SELECT * FROM `append_test$partitions`");
             assertThat(partitions.count()).isEqualTo(1);
             long recordCount = partitions.first().getAs("record_count");
             assertThat(recordCount).isEqualTo(0);
 
-            spark.sql("DROP TABLE IF EXISTS `my_db1`.`append_test`");
+            spark.sql("DROP TABLE IF EXISTS append_test");
         }
     }
 
@@ -205,28 +203,26 @@ public class SparkCatalogWithHiveTest {
             spark.sql("USE spark_catalog.my_db1");
 
             spark.sql(
-                    "CREATE TABLE IF NOT EXISTS `my_db1`.`append_test_partial` ("
+                    "CREATE TABLE IF NOT EXISTS append_test_partial ("
                             + "`t1` BIGINT COMMENT 't1', "
                             + "`t2` BIGINT COMMENT 't2', "
-                            + "`t3` STRING COMMENT 't3') "
-                            + "PARTITIONED BY (`dt` STRING COMMENT 'dt', `hh` STRING COMMENT 'hh') "
-                            + "ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe' "
-                            + "WITH SERDEPROPERTIES ('serialization.format' = '1') "
-                            + "STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' "
-                            + "OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' "
+                            + "`t3` STRING COMMENT 't3', "
+                            + "`dt` STRING COMMENT 'dt', "
+                            + "`hh` STRING COMMENT 'hh') "
+                            + "USING paimon "
+                            + "PARTITIONED BY (`dt`, `hh`) "
                             + "TBLPROPERTIES ('metastore.partitioned-table' = 'true')");
 
             spark.sql("set spark.paimon.write.empty.partition.enable=true");
             spark.sql(
-                    "insert overwrite table `my_db1`.`append_test_partial` partition (dt = '20251127') "
-                            + "select t1,t2,t3,hh from `my_db1`.`append_test_partial` "
+                    "insert overwrite table append_test_partial partition (dt = '20251127') "
+                            + "select t1,t2,t3,hh from append_test_partial "
                             + "where dt = '20251126'");
 
-            Dataset<Row> partitions =
-                    spark.sql("SELECT * FROM `my_db1`.`append_test_partial$partitions`");
+            Dataset<Row> partitions = spark.sql("SELECT * FROM `append_test_partial$partitions`");
             assertThat(partitions.count()).isZero();
 
-            spark.sql("DROP TABLE IF EXISTS `my_db1`.`append_test_partial`");
+            spark.sql("DROP TABLE IF EXISTS append_test_partial");
         }
     }
 
