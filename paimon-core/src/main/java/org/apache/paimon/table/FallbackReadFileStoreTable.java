@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -154,12 +155,24 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         Options branchOptions = new Options(branchSchema.options());
         branchOptions.set(CoreOptions.BRANCH, branchName);
         branchSchema = branchSchema.copy(branchOptions.toMap());
+
+        // Create branch-aware CatalogEnvironment so that REST snapshot loading
+        // targets the branch table (e.g. tableName$branch_branchName) instead of main.
+        CatalogEnvironment wrappedEnv = wrapped.catalogEnvironment();
+        CatalogEnvironment branchEnv = wrappedEnv;
+        Identifier wrappedId = wrappedEnv.identifier();
+        if (wrappedId != null) {
+            branchEnv =
+                    wrappedEnv.copy(
+                            new Identifier(
+                                    wrappedId.getDatabaseName(),
+                                    wrappedId.getTableName(),
+                                    branchName,
+                                    wrappedId.getSystemTableName()));
+        }
+
         return FileStoreTableFactory.createWithoutFallbackBranch(
-                wrapped.fileIO(),
-                wrapped.location(),
-                branchSchema,
-                new Options(),
-                wrapped.catalogEnvironment());
+                wrapped.fileIO(), wrapped.location(), branchSchema, new Options(), branchEnv);
     }
 
     protected Map<String, String> rewriteOtherOptions(Map<String, String> options) {

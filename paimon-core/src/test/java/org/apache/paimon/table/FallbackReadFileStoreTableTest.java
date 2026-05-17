@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -330,6 +331,43 @@ public class FallbackReadFileStoreTableTest {
                 throw new IOException("injected fallback failure");
             }
         };
+    }
+
+    @Test
+    void testSwitchToBranch() throws Exception {
+        String branchName = "bc";
+
+        Identifier mainId = Identifier.create("mydb", "mytable");
+        CatalogEnvironment env =
+                new CatalogEnvironment(mainId, "uuid-1", null, null, null, null, false, false);
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                Collections.emptyMap(),
+                                ""));
+        AppendOnlyFileStoreTable mainTable =
+                new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema, env);
+
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch(branchName);
+
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        FallbackReadFileStoreTable fallbackTable =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+
+        FileStoreTable switched = fallbackTable.switchToBranch(branchName);
+        Identifier switchedId = switched.catalogEnvironment().identifier();
+
+        assertThat(switchedId).isNotNull();
+        assertThat(switchedId.getDatabaseName()).isEqualTo("mydb");
+        assertThat(switchedId.getBranchName()).isEqualTo(branchName);
     }
 
     private void writeDataIntoTable(
