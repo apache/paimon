@@ -252,6 +252,37 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 2), Row(3, 3, 2, 3))
       )
+
+      sql("INSERT INTO t VALUES (4, '4')")
+      sql("INSERT INTO t VALUES (5, '5')")
+      // snapshot 7: should merge files with sequence numbers [1, 6]
+      sql("CALL sys.compact(table => 't')")
+      checkAnswer(
+        sql("SELECT min_sequence_number, max_sequence_number FROM `t$files`"),
+        Seq(Row(1, 6))
+      )
+      // snapshot 8: Updated record has null sequence number
+      sql("UPDATE t SET data = 22 WHERE id = 2")
+
+      // snapshot 9 ~ 10: add new file, and set sequence number to null
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(6, 8)")
+      sql("UPDATE t SET data = 67 WHERE _SEQUENCE_NUMBER = 9")
+      checkAnswer(
+        sql(
+          "SELECT min_sequence_number, max_sequence_number FROM `t$files` order by min_sequence_number"),
+        Seq(Row(1, 8), Row(10, 10))
+      )
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(
+          Row(1, 1, 0, 1),
+          Row(2, 22, 1, 8),
+          Row(3, 3, 2, 3),
+          Row(4, 4, 3, 5),
+          Row(5, 5, 4, 6),
+          Row(6, 67, 5, 10),
+          Row(7, 67, 6, 10))
+      )
     }
   }
 
