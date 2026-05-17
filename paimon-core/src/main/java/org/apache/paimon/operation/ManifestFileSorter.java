@@ -196,57 +196,45 @@ public class ManifestFileSorter {
     private static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
             long suggestedMetaSize,
-            long manifestFullCompactionSize,
             ManifestFile manifestFile,
             RowType partitionType,
             @Nullable Integer manifestReadParallelism) {
         Filter<ManifestFileMeta> mustChange =
                 file -> file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize;
 
-        long totalDeltaFileSize = 0;
-        for (ManifestFileMeta file : input) {
-            if (mustChange.test(file)) {
-                totalDeltaFileSize += file.fileSize();
-            }
-        }
 
         List<ManifestFileMeta> defaultCompactionManifests = new ArrayList<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        Set<FileEntry.Identifier> deleteEntries = new HashSet<>();
+        Set<FileEntry.Identifier> deleteEntries =
+                FileEntry.readDeletedEntries(manifestFile, input, manifestReadParallelism);
 
-        if (totalDeltaFileSize >= manifestFullCompactionSize) {
-            // Full compact triggered: read delete entries and classify by predicate.
-            deleteEntries =
-                    FileEntry.readDeletedEntries(manifestFile, input, manifestReadParallelism);
-
-            PartitionPredicate predicate;
-            if (deleteEntries.isEmpty()) {
-                predicate = PartitionPredicate.ALWAYS_FALSE;
+        PartitionPredicate predicate;
+        if (deleteEntries.isEmpty()) {
+            predicate = PartitionPredicate.ALWAYS_FALSE;
+        } else {
+            if (partitionType.getFieldCount() > 0) {
+                Set<BinaryRow> deletePartitions =
+                        ManifestFileMerger.computeDeletePartitions(deleteEntries);
+                predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
             } else {
-                if (partitionType.getFieldCount() > 0) {
-                    Set<BinaryRow> deletePartitions =
-                            ManifestFileMerger.computeDeletePartitions(deleteEntries);
-                    predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
-                } else {
-                    predicate = PartitionPredicate.ALWAYS_TRUE;
-                }
+                predicate = PartitionPredicate.ALWAYS_TRUE;
             }
+        }
 
-            Iterator<ManifestFileMeta> iterator = lsmFiles.iterator();
-            while (iterator.hasNext()) {
-                ManifestFileMeta file = iterator.next();
-                if (mustChange.test(file)) {
-                    iterator.remove();
-                    defaultCompactionManifests.add(file);
-                } else if (predicate != null
-                        && predicate.test(
-                                file.numAddedFiles() + file.numDeletedFiles(),
-                                file.partitionStats().minValues(),
-                                file.partitionStats().maxValues(),
-                                file.partitionStats().nullCounts())) {
-                    iterator.remove();
-                    defaultCompactionManifests.add(file);
-                }
+        Iterator<ManifestFileMeta> iterator = lsmFiles.iterator();
+        while (iterator.hasNext()) {
+            ManifestFileMeta file = iterator.next();
+            if (mustChange.test(file)) {
+                iterator.remove();
+                defaultCompactionManifests.add(file);
+            } else if (predicate != null
+                    && predicate.test(
+                    file.numAddedFiles() + file.numDeletedFiles(),
+                    file.partitionStats().minValues(),
+                    file.partitionStats().maxValues(),
+                    file.partitionStats().nullCounts())) {
+                iterator.remove();
+                defaultCompactionManifests.add(file);
             }
         }
         return new ClassifyResult(defaultCompactionManifests, lsmFiles, deleteEntries);
