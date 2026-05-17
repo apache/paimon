@@ -31,6 +31,15 @@ public class FullSimpleColStatsCollector extends AbstractSimpleColStatsCollector
             return;
         }
 
+        if (field instanceof Double && Double.isNaN((Double) field)) {
+            nanCount++;
+            return;
+        }
+        if (field instanceof Float && Float.isNaN((Float) field)) {
+            nanCount++;
+            return;
+        }
+
         // TODO use comparator for not comparable types and extract this logic to a util class
         if (!(field instanceof Comparable)) {
             return;

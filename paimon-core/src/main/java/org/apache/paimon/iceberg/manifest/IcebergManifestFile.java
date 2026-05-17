@@ -259,7 +259,8 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 switch (type.getTypeRoot()) {
                     case FLOAT:
                     case DOUBLE:
-                        containsNan = isNaN(fieldStats.min()) || isNaN(fieldStats.max());
+                        Long nanCount = fieldStats.nanCount();
+                        containsNan = nanCount != null && nanCount > 0;
                         break;
                     default:
                         // contains_nan is only meaningful for FLOAT/DOUBLE per the Iceberg spec
@@ -286,16 +287,6 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     existingRowsCount,
                     deletedRowsCount,
                     partitionSummaries);
-        }
-
-        private boolean isNaN(@Nullable Object value) {
-            if (value instanceof Float) {
-                return Float.isNaN((Float) value);
-            }
-            if (value instanceof Double) {
-                return Double.isNaN((Double) value);
-            }
-            return false;
         }
     }
 }

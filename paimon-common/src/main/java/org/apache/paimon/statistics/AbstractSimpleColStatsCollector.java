@@ -29,8 +29,10 @@ public abstract class AbstractSimpleColStatsCollector implements SimpleColStatsC
 
     protected long nullCount;
 
+    protected long nanCount;
+
     @Override
     public SimpleColStats result() {
-        return new SimpleColStats(minValue, maxValue, nullCount);
+        return new SimpleColStats(minValue, maxValue, nullCount, nanCount);
     }
 }

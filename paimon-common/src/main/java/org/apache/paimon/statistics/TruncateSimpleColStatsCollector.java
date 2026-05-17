@@ -53,6 +53,15 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
             return;
         }
 
+        if (field instanceof Double && Double.isNaN((Double) field)) {
+            nanCount++;
+            return;
+        }
+        if (field instanceof Float && Float.isNaN((Float) field)) {
+            nanCount++;
+            return;
+        }
+
         // fast fail since the result is not correct
         if (failed) {
             return;
@@ -86,17 +95,17 @@ public class TruncateSimpleColStatsCollector extends AbstractSimpleColStatsColle
         Object min = truncateMin(source.min());
         Object max = truncateMax(source.max());
         if (max == null) {
-            return new SimpleColStats(null, null, source.nullCount());
+            return new SimpleColStats(null, null, source.nullCount(), source.nanCount());
         }
-        return new SimpleColStats(min, max, source.nullCount());
+        return new SimpleColStats(min, max, source.nullCount(), source.nanCount());
     }
 
     @Override
     public SimpleColStats result() {
         if (failed) {
-            return new SimpleColStats(null, null, nullCount);
+            return new SimpleColStats(null, null, nullCount, nanCount);
         }
-        return new SimpleColStats(minValue, maxValue, nullCount);
+        return new SimpleColStats(minValue, maxValue, nullCount, nanCount);
     }
 
     /** @return a truncated value less or equal than the old value. */

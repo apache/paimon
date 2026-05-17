@@ -28,11 +28,17 @@ public class CountsSimpleColStatsCollector extends AbstractSimpleColStatsCollect
     public void collect(Object field, Serializer<Object> serializer) {
         if (field == null) {
             nullCount++;
+            return;
+        }
+        if (field instanceof Double && Double.isNaN((Double) field)) {
+            nanCount++;
+        } else if (field instanceof Float && Float.isNaN((Float) field)) {
+            nanCount++;
         }
     }
 
     @Override
     public SimpleColStats convert(SimpleColStats source) {
-        return new SimpleColStats(null, null, source.nullCount());
+        return new SimpleColStats(null, null, source.nullCount(), source.nanCount());
     }
 }

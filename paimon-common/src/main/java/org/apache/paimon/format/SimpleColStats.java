@@ -29,6 +29,7 @@ import java.util.Objects;
  *   <li>min: the minimum value of the column
  *   <li>max: the maximum value of the column
  *   <li>nullCount: the number of nulls
+ *   <li>nanCount: the number of NaN values for FLOAT/DOUBLE columns, null if unknown
  * </ul>
  */
 public class SimpleColStats {
@@ -38,11 +39,21 @@ public class SimpleColStats {
     @Nullable private final Object min;
     @Nullable private final Object max;
     private final Long nullCount;
+    @Nullable private final Long nanCount;
 
     public SimpleColStats(@Nullable Object min, @Nullable Object max, @Nullable Long nullCount) {
+        this(min, max, nullCount, null);
+    }
+
+    public SimpleColStats(
+            @Nullable Object min,
+            @Nullable Object max,
+            @Nullable Long nullCount,
+            @Nullable Long nanCount) {
         this.min = min;
         this.max = max;
         this.nullCount = nullCount;
+        this.nanCount = nanCount;
     }
 
     @Nullable
@@ -60,6 +71,11 @@ public class SimpleColStats {
         return nullCount;
     }
 
+    @Nullable
+    public Long nanCount() {
+        return nanCount;
+    }
+
     public boolean isNone() {
         return min == null && max == null && nullCount == null;
     }
@@ -72,16 +88,17 @@ public class SimpleColStats {
         SimpleColStats that = (SimpleColStats) o;
         return Objects.equals(min, that.min)
                 && Objects.equals(max, that.max)
-                && Objects.equals(nullCount, that.nullCount);
+                && Objects.equals(nullCount, that.nullCount)
+                && Objects.equals(nanCount, that.nanCount);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(min, max, nullCount);
+        return Objects.hash(min, max, nullCount, nanCount);
     }
 
     @Override
     public String toString() {
-        return String.format("{%s, %s, %d}", min, max, nullCount);
+        return String.format("{%s, %s, %d, %s}", min, max, nullCount, nanCount);
     }
 }

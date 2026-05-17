@@ -26,6 +26,8 @@ import org.apache.paimon.format.SimpleStatsCollector;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -59,24 +61,26 @@ public class SimpleStatsCollectorTest {
         assertThat(collector.extract())
                 .isEqualTo(
                         new SimpleColStats[] {
-                            new SimpleColStats(1, 1, 0L),
+                            new SimpleColStats(1, 1, 0L, 0L),
                             new SimpleColStats(
                                     BinaryString.fromString("Paimon"),
                                     BinaryString.fromString("Paimon"),
+                                    0L,
                                     0L),
-                            new SimpleColStats(null, null, 0L)
+                            new SimpleColStats(null, null, 0L, 0L)
                         });
 
         collector.collect(GenericRow.of(3, null, new GenericArray(new int[] {3, 30})));
         assertThat(collector.extract())
                 .isEqualTo(
                         new SimpleColStats[] {
-                            new SimpleColStats(1, 3, 0L),
+                            new SimpleColStats(1, 3, 0L, 0L),
                             new SimpleColStats(
                                     BinaryString.fromString("Paimon"),
                                     BinaryString.fromString("Paimon"),
-                                    1L),
-                            new SimpleColStats(null, null, 0L)
+                                    1L,
+                                    0L),
+                            new SimpleColStats(null, null, 0L, 0L)
                         });
 
         collector.collect(
@@ -87,24 +91,59 @@ public class SimpleStatsCollectorTest {
         assertThat(collector.extract())
                 .isEqualTo(
                         new SimpleColStats[] {
-                            new SimpleColStats(1, 3, 1L),
+                            new SimpleColStats(1, 3, 1L, 0L),
                             new SimpleColStats(
                                     BinaryString.fromString("Apache"),
                                     BinaryString.fromString("Paimon"),
-                                    1L),
-                            new SimpleColStats(null, null, 0L)
+                                    1L,
+                                    0L),
+                            new SimpleColStats(null, null, 0L, 0L)
                         });
 
         collector.collect(GenericRow.of(2, BinaryString.fromString("Batch"), null));
         assertThat(collector.extract())
                 .isEqualTo(
                         new SimpleColStats[] {
-                            new SimpleColStats(1, 3, 1L),
+                            new SimpleColStats(1, 3, 1L, 0L),
                             new SimpleColStats(
                                     BinaryString.fromString("Apache"),
                                     BinaryString.fromString("Paimon"),
-                                    1L),
-                            new SimpleColStats(null, null, 1L)
+                                    1L,
+                                    0L),
+                            new SimpleColStats(null, null, 1L, 0L)
+                        });
+    }
+
+    @Test
+    public void testCollectNaN() {
+        RowType rowType =
+                RowType.of(new DoubleType(), new FloatType(), new IntType(), new VarCharType(10));
+        SimpleStatsCollector collector =
+                new SimpleStatsCollector(
+                        rowType,
+                        IntStream.range(0, rowType.getFieldCount())
+                                .mapToObj(
+                                        i ->
+                                                (SimpleColStatsCollector.Factory)
+                                                        FullSimpleColStatsCollector::new)
+                                .toArray(SimpleColStatsCollector.Factory[]::new));
+
+        collector.collect(GenericRow.of(1.0d, 1.0f, 1, BinaryString.fromString("a")));
+        collector.collect(GenericRow.of(Double.NaN, 2.0f, 2, BinaryString.fromString("b")));
+        collector.collect(GenericRow.of(5.0d, Float.NaN, 3, null));
+        collector.collect(GenericRow.of(Double.NaN, Float.NaN, null, BinaryString.fromString("c")));
+
+        assertThat(collector.extract())
+                .isEqualTo(
+                        new SimpleColStats[] {
+                            new SimpleColStats(1.0d, 5.0d, 0L, 2L),
+                            new SimpleColStats(1.0f, 2.0f, 0L, 2L),
+                            new SimpleColStats(1, 3, 1L, 0L),
+                            new SimpleColStats(
+                                    BinaryString.fromString("a"),
+                                    BinaryString.fromString("c"),
+                                    1L,
+                                    0L)
                         });
     }
 }

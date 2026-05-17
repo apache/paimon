@@ -25,6 +25,8 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -112,14 +114,14 @@ public class SimpleColStatsCollectorTest {
         check(
                 rows,
                 0,
-                new SimpleColStats(null, null, 0L),
-                new SimpleColStats(1, 4, 0L),
+                new SimpleColStats(null, null, 0L, 0L),
+                new SimpleColStats(1, 4, 0L, 0L),
                 new CountsSimpleColStatsCollector());
         check(
                 rows,
                 1,
-                new SimpleColStats(null, null, 1L),
-                new SimpleColStats(s1, s3, 1L),
+                new SimpleColStats(null, null, 1L, 0L),
+                new SimpleColStats(s1, s3, 1L, 0L),
                 new CountsSimpleColStatsCollector());
     }
 
@@ -130,14 +132,16 @@ public class SimpleColStatsCollectorTest {
         check(
                 rows,
                 0,
-                new SimpleColStats(1, 4, 0L),
-                new SimpleColStats(1, 4, 0L),
+                new SimpleColStats(1, 4, 0L, 0L),
+                new SimpleColStats(1, 4, 0L, 0L),
                 new FullSimpleColStatsCollector());
         check(
                 rows,
                 1,
-                new SimpleColStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
-                new SimpleColStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
+                new SimpleColStats(
+                        BinaryString.fromString(s1), BinaryString.fromString(s3), 1L, 0L),
+                new SimpleColStats(
+                        BinaryString.fromString(s1), BinaryString.fromString(s3), 1L, 0L),
                 new FullSimpleColStatsCollector());
     }
 
@@ -148,16 +152,108 @@ public class SimpleColStatsCollectorTest {
         check(
                 rows,
                 0,
-                new SimpleColStats(1, 4, 0L),
-                new SimpleColStats(1, 4, 0L),
+                new SimpleColStats(1, 4, 0L, 0L),
+                new SimpleColStats(1, 4, 0L, 0L),
                 new TruncateSimpleColStatsCollector(1));
         check(
                 rows,
                 1,
                 new SimpleColStats(
-                        BinaryString.fromString(s1_t), BinaryString.fromString(s3_t), 1L),
-                new SimpleColStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
+                        BinaryString.fromString(s1_t), BinaryString.fromString(s3_t), 1L, 0L),
+                new SimpleColStats(
+                        BinaryString.fromString(s1), BinaryString.fromString(s3), 1L, 0L),
                 new TruncateSimpleColStatsCollector(2));
+    }
+
+    @Test
+    public void testFullCountsNaNAndExcludesFromBounds() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "d", new DoubleType()),
+                                new DataField(1, "f", new FloatType())));
+        Serializer<Object>[] floatSerializers = new Serializer[2];
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            floatSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
+        }
+
+        FullSimpleColStatsCollector doubleCollector = new FullSimpleColStatsCollector();
+        doubleCollector.collect(1.0d, floatSerializers[0]);
+        doubleCollector.collect(Double.NaN, floatSerializers[0]);
+        doubleCollector.collect(5.0d, floatSerializers[0]);
+        doubleCollector.collect(Double.NaN, floatSerializers[0]);
+        doubleCollector.collect(null, floatSerializers[0]);
+        assertThat(doubleCollector.result()).isEqualTo(new SimpleColStats(1.0d, 5.0d, 1L, 2L));
+
+        FullSimpleColStatsCollector floatCollector = new FullSimpleColStatsCollector();
+        floatCollector.collect(2.0f, floatSerializers[1]);
+        floatCollector.collect(Float.NaN, floatSerializers[1]);
+        floatCollector.collect(7.0f, floatSerializers[1]);
+        assertThat(floatCollector.result()).isEqualTo(new SimpleColStats(2.0f, 7.0f, 0L, 1L));
+    }
+
+    @Test
+    public void testCountsNaN() {
+        Serializer<Object> doubleSerializer = InternalSerializers.create(new DoubleType());
+        CountsSimpleColStatsCollector collector = new CountsSimpleColStatsCollector();
+        collector.collect(1.0d, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        collector.collect(null, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        assertThat(collector.result()).isEqualTo(new SimpleColStats(null, null, 1L, 2L));
+    }
+
+    @Test
+    public void testFullAllNaN() {
+        Serializer<Object> doubleSerializer = InternalSerializers.create(new DoubleType());
+        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
+        collector.collect(Double.NaN, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        assertThat(collector.result()).isEqualTo(new SimpleColStats(null, null, 0L, 3L));
+    }
+
+    @Test
+    public void testFullOnlyNaNAndNull() {
+        Serializer<Object> doubleSerializer = InternalSerializers.create(new DoubleType());
+        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
+        collector.collect(null, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        collector.collect(null, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        collector.collect(null, doubleSerializer);
+        assertThat(collector.result()).isEqualTo(new SimpleColStats(null, null, 3L, 2L));
+    }
+
+    @Test
+    public void testNoneIgnoresNaN() {
+        Serializer<Object> doubleSerializer = InternalSerializers.create(new DoubleType());
+        NoneSimpleColStatsCollector collector = new NoneSimpleColStatsCollector();
+        collector.collect(Double.NaN, doubleSerializer);
+        collector.collect(1.0d, doubleSerializer);
+        collector.collect(Double.NaN, doubleSerializer);
+        assertThat(collector.result()).isEqualTo(SimpleColStats.NONE);
+        assertThat(collector.result().nanCount()).isNull();
+    }
+
+    @Test
+    public void testConvertPreservesNanCount() {
+        SimpleColStats source = new SimpleColStats(1.0d, 5.0d, 2L, 7L);
+        assertThat(new FullSimpleColStatsCollector().convert(source).nanCount()).isEqualTo(7L);
+        assertThat(new CountsSimpleColStatsCollector().convert(source).nanCount()).isEqualTo(7L);
+        assertThat(new TruncateSimpleColStatsCollector(16).convert(source).nanCount())
+                .isEqualTo(7L);
+        assertThat(new NoneSimpleColStatsCollector().convert(source).nanCount()).isNull();
+    }
+
+    @Test
+    public void testSimpleColStatsEqualityIncludesNanCount() {
+        assertThat(new SimpleColStats(1.0d, 5.0d, 0L, 0L))
+                .isNotEqualTo(new SimpleColStats(1.0d, 5.0d, 0L, 1L));
+        assertThat(new SimpleColStats(1.0d, 5.0d, 0L, 0L))
+                .isNotEqualTo(new SimpleColStats(1.0d, 5.0d, 0L, null));
+        assertThat(new SimpleColStats(1.0d, 5.0d, 0L, 7L))
+                .isEqualTo(new SimpleColStats(1.0d, 5.0d, 0L, 7L));
     }
 
     @Test
