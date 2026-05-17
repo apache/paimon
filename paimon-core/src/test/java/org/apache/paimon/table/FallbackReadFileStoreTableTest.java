@@ -368,6 +368,7 @@ public class FallbackReadFileStoreTableTest {
         assertThat(switchedId).isNotNull();
         assertThat(switchedId.getDatabaseName()).isEqualTo("mydb");
         assertThat(switchedId.getBranchName()).isEqualTo(branchName);
+        assertThat(switchedId.getObjectName()).isEqualTo("mytable$branch_bc");
     }
 
     private void writeDataIntoTable(
