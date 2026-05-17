@@ -436,6 +436,33 @@ public class CoreOptions implements Serializable {
                     .defaultValue(4096)
                     .withDescription("Maximum number of rows to buffer for schema inference.");
 
+    public static final ConfigOption<String> MAP_SHREDDING_COLUMNS =
+            key("map.shredding.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated MAP<STRING, T> column paths to write with map shredding.");
+
+    public static final ConfigOption<Integer> MAP_SHREDDING_MAX_KEYS =
+            key("map.shredding.maxKeys")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription("Maximum number of hot keys extracted for each map.");
+
+    public static final ConfigOption<MemorySize> MAP_SHREDDING_MAX_INFER_BUFFER_MEMORY =
+            key("map.shredding.maxInferBufferMemory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(32))
+                    .withDescription(
+                            "Maximum memory used to buffer rows while inferring map shredding keys.");
+
+    public static final ConfigOption<Integer> MAP_SHREDDING_MAX_INFER_BUFFER_ROW =
+            key("map.shredding.maxInferBufferRow")
+                    .intType()
+                    .defaultValue(10000)
+                    .withDescription(
+                            "Maximum number of rows to buffer for map shredding key inference.");
+
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
                     .stringType()

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.heap.CastedArrayColumnVector;
 import org.apache.paimon.data.columnar.heap.CastedMapColumnVector;
@@ -36,8 +37,10 @@ import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
+import org.apache.paimon.format.parquet.MapShreddingUtils;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.format.parquet.VariantUtils;
+import org.apache.paimon.format.parquet.type.MapShreddingField;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
@@ -60,6 +63,7 @@ import org.apache.parquet.io.ColumnIO;
 import org.apache.parquet.io.GroupColumnIO;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.PrimitiveColumnIO;
+import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
@@ -67,8 +71,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_KEY_NAME;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.MAP_VALUE_NAME;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.parquet.schema.Type.Repetition.REPEATED;
@@ -224,19 +231,103 @@ public class ParquetReaderUtil {
 
     public static List<ParquetField> buildFieldsList(
             DataField[] readFields, MessageColumnIO columnIO, MessageType requestedFileSchema) {
+        return buildFieldsList(readFields, columnIO, requestedFileSchema, Collections.emptyMap());
+    }
+
+    public static List<ParquetField> buildFieldsList(
+            DataField[] readFields,
+            MessageColumnIO columnIO,
+            MessageType requestedFileSchema,
+            Map<String, List<String>> dynamicMapKeys) {
+        return buildFieldsList(readFields, columnIO, requestedFileSchema, dynamicMapKeys, "");
+    }
+
+    private static List<ParquetField> buildFieldsList(
+            DataField[] readFields,
+            GroupColumnIO columnIO,
+            Type requestedFileSchema,
+            Map<String, List<String>> dynamicMapKeys,
+            String parentPath) {
         List<ParquetField> list = new ArrayList<>();
         for (int i = 0; i < readFields.length; i++) {
+            DataField readField = readFields[i];
+            String path = MapShreddingUtils.path(parentPath, readField.name());
+            if (MapShreddingUtils.isMapShreddingPath(dynamicMapKeys, path)
+                    && requestedFileSchema
+                            .asGroupType()
+                            .containsField(MapShreddingUtils.sidecarColumnName(path, 0))) {
+                list.add(
+                        constructMapShreddingField(
+                                readField,
+                                columnIO,
+                                requestedFileSchema.asGroupType(),
+                                dynamicMapKeys.get(path),
+                                path,
+                                dynamicMapKeys));
+                continue;
+            }
             list.add(
                     constructField(
-                            readFields[i],
-                            lookupColumnByName(columnIO, readFields[i].name()),
-                            requestedFileSchema.getType(i)));
+                            readField,
+                            lookupColumnByName(columnIO, readField.name()),
+                            requestedFileSchema.asGroupType().getType(readField.name()),
+                            path,
+                            dynamicMapKeys));
         }
         return list;
     }
 
+    private static ParquetField constructMapShreddingField(
+            DataField dataField,
+            GroupColumnIO columnIO,
+            GroupType requestedFileSchema,
+            List<String> keys,
+            String path,
+            Map<String, List<String>> dynamicMapKeys) {
+        ParquetGroupField residualMapField =
+                (ParquetGroupField)
+                        constructField(
+                                dataField,
+                                lookupColumnByName(columnIO, dataField.name()),
+                                requestedFileSchema.getType(dataField.name()),
+                                path,
+                                dynamicMapKeys);
+
+        List<ParquetField> sidecarFields = new ArrayList<>();
+        List<BinaryString> sidecarKeys = new ArrayList<>();
+        int keyOrdinal = 0;
+        while (keyOrdinal < keys.size()) {
+            String sidecarName = MapShreddingUtils.sidecarColumnName(path, keyOrdinal);
+            if (!requestedFileSchema.containsField(sidecarName)) {
+                break;
+            }
+            MapType mapType = (MapType) dataField.type();
+            sidecarFields.add(
+                    constructField(
+                            new DataField(0, sidecarName, mapType.getValueType()),
+                            lookupColumnByName(columnIO, sidecarName),
+                            requestedFileSchema.getType(sidecarName),
+                            sidecarName,
+                            dynamicMapKeys));
+            sidecarKeys.add(BinaryString.fromString(keys.get(keyOrdinal)));
+            keyOrdinal++;
+        }
+        return new MapShreddingField(
+                dataField.type(), residualMapField, sidecarFields, sidecarKeys);
+    }
+
     private static ParquetField constructField(
             DataField dataField, ColumnIO columnIO, Type parquetType) {
+        return constructField(
+                dataField, columnIO, parquetType, dataField.name(), Collections.emptyMap());
+    }
+
+    private static ParquetField constructField(
+            DataField dataField,
+            ColumnIO columnIO,
+            Type parquetType,
+            String path,
+            Map<String, List<String>> dynamicMapKeys) {
         boolean required = columnIO.getType().getRepetition() == REQUIRED;
         int repetitionLevel = columnIO.getRepetitionLevel();
         int definitionLevel = columnIO.getDefinitionLevel();
@@ -249,24 +340,20 @@ public class ParquetReaderUtil {
                 return constructVariantField(dataField, columnIO, parquetType);
             }
 
-            ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
-            List<String> fieldNames = rowType.getFieldNames();
-            List<DataField> children = rowType.getFields();
-            for (int i = 0; i < children.size(); i++) {
-                String childName = fieldNames.get(i);
-                fieldsBuilder.add(
-                        constructField(
-                                children.get(i),
-                                lookupColumnByName(groupColumnIO, childName),
-                                parquetType.asGroupType().getType(childName)));
-            }
+            List<ParquetField> fields =
+                    buildFieldsList(
+                            rowType.getFields().toArray(new DataField[0]),
+                            groupColumnIO,
+                            parquetType,
+                            dynamicMapKeys,
+                            path);
 
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
                     definitionLevel,
                     required,
-                    fieldsBuilder.build(),
+                    fields,
                     groupColumnIO.getFieldPath());
         }
 
@@ -283,12 +370,16 @@ public class ParquetReaderUtil {
                     constructField(
                             new DataField(0, "", mapType.getKeyType()),
                             keyValueColumnIO.getChild(0),
-                            keyValueType.getKey());
+                            keyValueType.getKey(),
+                            path + "." + MAP_KEY_NAME,
+                            dynamicMapKeys);
             ParquetField valueField =
                     constructField(
                             new DataField(0, "", mapType.getValueType()),
                             keyValueColumnIO.getChild(1),
-                            keyValueType.getValue());
+                            keyValueType.getValue(),
+                            path + "." + MAP_VALUE_NAME,
+                            dynamicMapKeys);
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
@@ -307,12 +398,16 @@ public class ParquetReaderUtil {
                     constructField(
                             new DataField(0, "", multisetType.getElementType()),
                             keyValueColumnIO.getChild(0),
-                            keyValueType.getKey());
+                            keyValueType.getKey(),
+                            path + "." + MAP_KEY_NAME,
+                            dynamicMapKeys);
             ParquetField valueField =
                     constructField(
                             new DataField(0, "", new IntType()),
                             keyValueColumnIO.getChild(1),
-                            keyValueType.getValue());
+                            keyValueType.getValue(),
+                            path + "." + MAP_VALUE_NAME,
+                            dynamicMapKeys);
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
@@ -349,7 +444,9 @@ public class ParquetReaderUtil {
                     constructField(
                             new DataField(0, "", arrayType.getElementType()),
                             getArrayElementColumn(elementTypeColumnIO),
-                            parquetListElementType(parquetType.asGroupType()));
+                            parquetListElementType(parquetType.asGroupType()),
+                            path + "." + ParquetSchemaConverter.LIST_ELEMENT_NAME,
+                            dynamicMapKeys);
             if (repetitionLevel == field.getRepetitionLevel()) {
                 repetitionLevel = columnIO.getParent().getRepetitionLevel();
             }

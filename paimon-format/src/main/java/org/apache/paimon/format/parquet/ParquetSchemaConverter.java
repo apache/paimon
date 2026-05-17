@@ -42,6 +42,7 @@ import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY;
@@ -63,10 +64,56 @@ public class ParquetSchemaConverter {
         return new MessageType(PAIMON_SCHEMA, convertToParquetTypes(rowType));
     }
 
+    public static MessageType convertToParquetMessageType(
+            RowType rowType, Map<String, List<String>> dynamicMapKeys) {
+        if (dynamicMapKeys.isEmpty()) {
+            return convertToParquetMessageType(rowType);
+        }
+        return new MessageType(PAIMON_SCHEMA, convertToParquetTypes(rowType, dynamicMapKeys));
+    }
+
     public static Type[] convertToParquetTypes(RowType rowType) {
         return rowType.getFields().stream()
                 .map(ParquetSchemaConverter::convertToParquetType)
                 .toArray(Type[]::new);
+    }
+
+    public static Type[] convertToParquetTypes(
+            RowType rowType, Map<String, List<String>> dynamicMapKeys) {
+        return convertToParquetTypes(rowType, dynamicMapKeys, "", 0);
+    }
+
+    private static Type[] convertToParquetTypes(
+            RowType rowType,
+            Map<String, List<String>> dynamicMapKeys,
+            String parentPath,
+            int depth) {
+        List<Type> types = new java.util.ArrayList<>();
+        for (DataField field : rowType.getFields()) {
+            String path = MapShreddingUtils.path(parentPath, field.name());
+            types.add(
+                    convertToParquetType(
+                            field.name(), field.type(), field.id(), depth, path, dynamicMapKeys));
+            if (MapShreddingUtils.isMapShreddingPath(dynamicMapKeys, path)) {
+                MapType mapType = (MapType) field.type();
+                List<String> keys = dynamicMapKeys.get(path);
+                for (int i = 0; i < keys.size(); i++) {
+                    types.add(
+                            convertToParquetType(
+                                            MapShreddingUtils.sidecarColumnName(path, i),
+                                            mapType.getValueType(),
+                                            SpecialFields.getMapValueFieldId(field.id(), 1)
+                                                    + 1024
+                                                    + i,
+                                            0)
+                                    .withId(
+                                            SpecialFields.getMapValueFieldId(field.id(), 1)
+                                                    + 1024
+                                                    + i));
+                }
+            }
+        }
+        return types.toArray(new Type[0]);
     }
 
     /** Convert paimon {@link DataField} to parquet {@link Type}. */
@@ -75,6 +122,17 @@ public class ParquetSchemaConverter {
     }
 
     public static Type convertToParquetType(String name, DataType type, int fieldId, int depth) {
+        return convertToParquetType(
+                name, type, fieldId, depth, name, java.util.Collections.emptyMap());
+    }
+
+    private static Type convertToParquetType(
+            String name,
+            DataType type,
+            int fieldId,
+            int depth,
+            String path,
+            Map<String, List<String>> dynamicMapKeys) {
         Type.Repetition repetition =
                 type.isNullable() ? Type.Repetition.OPTIONAL : Type.Repetition.REQUIRED;
         switch (type.getTypeRoot()) {
@@ -165,7 +223,9 @@ public class ParquetSchemaConverter {
                                         LIST_ELEMENT_NAME,
                                         arrayType.getElementType(),
                                         fieldId,
-                                        depth + 1)
+                                        depth + 1,
+                                        path + "." + LIST_ELEMENT_NAME,
+                                        dynamicMapKeys)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
                         .withId(fieldId);
@@ -178,11 +238,22 @@ public class ParquetSchemaConverter {
                     keyType = keyType.copy(false);
                 }
                 Type mapKeyParquetType =
-                        convertToParquetType(MAP_KEY_NAME, keyType, fieldId, depth + 1)
+                        convertToParquetType(
+                                        MAP_KEY_NAME,
+                                        keyType,
+                                        fieldId,
+                                        depth + 1,
+                                        path + "." + MAP_KEY_NAME,
+                                        dynamicMapKeys)
                                 .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
                 Type mapValueParquetType =
                         convertToParquetType(
-                                        MAP_VALUE_NAME, mapType.getValueType(), fieldId, depth + 1)
+                                        MAP_VALUE_NAME,
+                                        mapType.getValueType(),
+                                        fieldId,
+                                        depth + 1,
+                                        path + "." + MAP_VALUE_NAME,
+                                        dynamicMapKeys)
                                 .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
                                 repetition,
@@ -200,10 +271,22 @@ public class ParquetSchemaConverter {
                     elementType = elementType.copy(false);
                 }
                 Type multisetKeyParquetType =
-                        convertToParquetType(MAP_KEY_NAME, elementType, fieldId, depth + 1)
+                        convertToParquetType(
+                                        MAP_KEY_NAME,
+                                        elementType,
+                                        fieldId,
+                                        depth + 1,
+                                        path + "." + MAP_KEY_NAME,
+                                        dynamicMapKeys)
                                 .withId(SpecialFields.getMapKeyFieldId(fieldId, depth + 1));
                 Type multisetValueParquetType =
-                        convertToParquetType(MAP_VALUE_NAME, new IntType(false), fieldId, depth + 1)
+                        convertToParquetType(
+                                        MAP_VALUE_NAME,
+                                        new IntType(false),
+                                        fieldId,
+                                        depth + 1,
+                                        path + "." + MAP_VALUE_NAME,
+                                        dynamicMapKeys)
                                 .withId(SpecialFields.getMapValueFieldId(fieldId, depth + 1));
                 return ConversionPatterns.mapType(
                                 repetition,
@@ -221,7 +304,7 @@ public class ParquetSchemaConverter {
                 //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
                 // }
                 return groupTypeBuilder
-                        .addFields(convertToParquetTypes(rowType))
+                        .addFields(convertToParquetTypes(rowType, dynamicMapKeys, path, depth + 1))
                         .named(name)
                         .withId(fieldId);
             case VARIANT:

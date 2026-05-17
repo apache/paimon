@@ -29,6 +29,7 @@ import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.data.variant.VariantSchema;
+import org.apache.paimon.format.parquet.MapShreddingUtils;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -53,7 +54,11 @@ import javax.annotation.Nullable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.computeMinBytesForDecimalPrecision;
@@ -71,6 +76,7 @@ public class ParquetRowDataWriter {
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
     @Nullable private final RowType shreddingSchemas;
+    private final Map<String, List<String>> dynamicMapKeys;
 
     public ParquetRowDataWriter(
             RecordConsumer recordConsumer,
@@ -78,10 +84,21 @@ public class ParquetRowDataWriter {
             GroupType schema,
             Configuration conf,
             @Nullable RowType shreddingSchemas) {
+        this(recordConsumer, rowType, schema, conf, shreddingSchemas, Collections.emptyMap());
+    }
+
+    public ParquetRowDataWriter(
+            RecordConsumer recordConsumer,
+            RowType rowType,
+            GroupType schema,
+            Configuration conf,
+            @Nullable RowType shreddingSchemas,
+            Map<String, List<String>> dynamicMapKeys) {
         this.conf = conf;
         this.recordConsumer = recordConsumer;
         this.shreddingSchemas = shreddingSchemas;
-        this.rowWriter = new RowWriter(rowType, schema);
+        this.dynamicMapKeys = dynamicMapKeys;
+        this.rowWriter = new RowWriter(rowType, schema, dynamicMapKeys, "");
     }
 
     /**
@@ -96,6 +113,10 @@ public class ParquetRowDataWriter {
     }
 
     private FieldWriter createWriter(DataType t, Type type) {
+        return createWriter(t, type, type.getName());
+    }
+
+    private FieldWriter createWriter(DataType t, Type type, String path) {
         if (type.isPrimitive()) {
             switch (t.getTypeRoot()) {
                 case CHAR:
@@ -144,13 +165,13 @@ public class ParquetRowDataWriter {
             } else if (t instanceof MapType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
-                        ((MapType) t).getKeyType(), ((MapType) t).getValueType(), groupType);
+                        ((MapType) t).getKeyType(), ((MapType) t).getValueType(), groupType, null);
             } else if (t instanceof MultisetType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
-                        ((MultisetType) t).getElementType(), new IntType(false), groupType);
+                        ((MultisetType) t).getElementType(), new IntType(false), groupType, null);
             } else if (t instanceof RowType && type instanceof GroupType) {
-                return new RowWriter((RowType) t, groupType);
+                return new RowWriter((RowType) t, groupType, dynamicMapKeys, path);
             } else if (t instanceof VariantType && type instanceof GroupType) {
                 RowType shreddingSchema =
                         shreddingSchemas != null && shreddingSchemas.containsField(type.getName())
@@ -442,7 +463,14 @@ public class ParquetRowDataWriter {
         private final FieldWriter keyWriter;
         private final FieldWriter valueWriter;
 
-        private MapWriter(DataType keyType, DataType valueType, GroupType groupType) {
+        @Nullable private final Set<BinaryString> residualKeysToSkip;
+
+        private MapWriter(
+                DataType keyType,
+                DataType valueType,
+                GroupType groupType,
+                @Nullable Set<BinaryString> residualKeysToSkip) {
+            this.residualKeysToSkip = residualKeysToSkip;
             // Get the internal map structure (MAP_KEY_VALUE)
             GroupType repeatedType = groupType.getType(0).asGroupType();
             this.repeatedGroupName = repeatedType.getName();
@@ -471,12 +499,15 @@ public class ParquetRowDataWriter {
         private void writeMapData(InternalMap mapData) {
             recordConsumer.startGroup();
 
-            if (mapData != null && mapData.size() > 0) {
+            if (mapData != null && hasResidualEntry(mapData)) {
                 recordConsumer.startField(repeatedGroupName, 0);
 
                 InternalArray keyArray = mapData.keyArray();
                 InternalArray valueArray = mapData.valueArray();
                 for (int i = 0; i < keyArray.size(); i++) {
+                    if (shouldSkipResidualEntry(keyArray, valueArray, i)) {
+                        continue;
+                    }
                     recordConsumer.startGroup();
                     if (!keyArray.isNullAt(i)) {
                         // write key element
@@ -502,6 +533,25 @@ public class ParquetRowDataWriter {
                 recordConsumer.endField(repeatedGroupName, 0);
             }
             recordConsumer.endGroup();
+        }
+
+        private boolean hasResidualEntry(InternalMap mapData) {
+            InternalArray keyArray = mapData.keyArray();
+            InternalArray valueArray = mapData.valueArray();
+            for (int i = 0; i < keyArray.size(); i++) {
+                if (!shouldSkipResidualEntry(keyArray, valueArray, i)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean shouldSkipResidualEntry(
+                InternalArray keyArray, InternalArray valueArray, int ordinal) {
+            return residualKeysToSkip != null
+                    && !keyArray.isNullAt(ordinal)
+                    && !valueArray.isNullAt(ordinal)
+                    && residualKeysToSkip.contains(keyArray.getString(ordinal));
         }
     }
 
@@ -557,38 +607,87 @@ public class ParquetRowDataWriter {
 
     /** It writes a row type field to parquet. */
     private class RowWriter implements FieldWriter {
-        private final FieldWriter[] fieldWriters;
-        private final String[] fieldNames;
-        private final boolean[] isNullable;
+        private final RowFieldWriter[] rowFieldWriters;
+        private final int fieldCount;
 
         public RowWriter(RowType rowType, GroupType groupType) {
-            this.fieldNames = rowType.getFieldNames().toArray(new String[0]);
+            this(rowType, groupType, null, "");
+        }
+
+        public RowWriter(
+                RowType rowType,
+                GroupType groupType,
+                @Nullable Map<String, List<String>> mapShreddingKeys,
+                String parentPath) {
+            this.fieldCount = rowType.getFieldCount();
             List<DataType> fieldTypes = rowType.getFieldTypes();
-            this.fieldWriters = new FieldWriter[rowType.getFieldCount()];
-            this.isNullable = new boolean[rowType.getFieldCount()];
-            for (int i = 0; i < fieldWriters.length; i++) {
-                fieldWriters[i] = createWriter(fieldTypes.get(i), groupType.getType(i));
-                isNullable[i] = fieldTypes.get(i).isNullable();
+            List<RowFieldWriter> writers = new java.util.ArrayList<>();
+            int physicalOrdinal = 0;
+            for (int i = 0; i < rowType.getFieldCount(); i++) {
+                String fieldName = rowType.getFieldNames().get(i);
+                String path = MapShreddingUtils.path(parentPath, fieldName);
+                DataType fieldType = fieldTypes.get(i);
+                Type parquetType = groupType.getType(physicalOrdinal);
+                if (mapShreddingKeys != null
+                        && MapShreddingUtils.isMapShreddingPath(mapShreddingKeys, path)) {
+                    List<String> keys = mapShreddingKeys.get(path);
+                    Set<BinaryString> keysToSkip = new HashSet<>();
+                    for (String key : keys) {
+                        keysToSkip.add(BinaryString.fromString(key));
+                    }
+                    MapType mapType = (MapType) fieldType;
+                    writers.add(
+                            new RowFieldWriter(
+                                    fieldName,
+                                    i,
+                                    fieldType.isNullable(),
+                                    new MapWriter(
+                                            mapType.getKeyType(),
+                                            mapType.getValueType(),
+                                            parquetType.asGroupType(),
+                                            keysToSkip)));
+                    physicalOrdinal++;
+                    for (int keyOrdinal = 0; keyOrdinal < keys.size(); keyOrdinal++) {
+                        Type sidecarType = groupType.getType(physicalOrdinal);
+                        writers.add(
+                                new RowFieldWriter(
+                                        sidecarType.getName(),
+                                        i,
+                                        true,
+                                        new MapSidecarWriter(
+                                                keys.get(keyOrdinal),
+                                                createWriter(
+                                                        mapType.getValueType(), sidecarType))));
+                        physicalOrdinal++;
+                    }
+                } else {
+                    writers.add(
+                            new RowFieldWriter(
+                                    fieldName,
+                                    i,
+                                    fieldType.isNullable(),
+                                    createWriter(fieldType, parquetType, path)));
+                    physicalOrdinal++;
+                }
             }
+            this.rowFieldWriters = writers.toArray(new RowFieldWriter[0]);
         }
 
         public void write(InternalRow row) {
-            for (int i = 0; i < fieldWriters.length; i++) {
-                if (!row.isNullAt(i)) {
-                    String fieldName = fieldNames[i];
-                    FieldWriter writer = fieldWriters[i];
-
-                    recordConsumer.startField(fieldName, i);
-                    writer.write(row, i);
-                    recordConsumer.endField(fieldName, i);
+            for (int i = 0; i < rowFieldWriters.length; i++) {
+                RowFieldWriter rowFieldWriter = rowFieldWriters[i];
+                if (rowFieldWriter.shouldWrite(row)) {
+                    recordConsumer.startField(rowFieldWriter.fieldName, i);
+                    rowFieldWriter.write(row);
+                    recordConsumer.endField(rowFieldWriter.fieldName, i);
                 } else {
-                    if (!isNullable[i]) {
+                    if (!rowFieldWriter.isNullable) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Field '%s' expected not null but found null value. A possible cause is that the "
                                                 + "table used %s or %s merge-engine and the aggregate function produced "
                                                 + "null value when retracting.",
-                                        fieldNames[i],
+                                        rowFieldWriter.fieldName,
                                         CoreOptions.MergeEngine.PARTIAL_UPDATE,
                                         CoreOptions.MergeEngine.AGGREGATE));
                     }
@@ -599,7 +698,7 @@ public class ParquetRowDataWriter {
         @Override
         public void write(InternalRow row, int ordinal) {
             recordConsumer.startGroup();
-            InternalRow rowData = row.getRow(ordinal, fieldWriters.length);
+            InternalRow rowData = row.getRow(ordinal, fieldCount);
             write(rowData);
             recordConsumer.endGroup();
         }
@@ -607,9 +706,78 @@ public class ParquetRowDataWriter {
         @Override
         public void write(InternalArray arrayData, int ordinal) {
             recordConsumer.startGroup();
-            InternalRow rowData = arrayData.getRow(ordinal, fieldWriters.length);
+            InternalRow rowData = arrayData.getRow(ordinal, fieldCount);
             write(rowData);
             recordConsumer.endGroup();
+        }
+    }
+
+    private class RowFieldWriter {
+
+        private final String fieldName;
+        private final int logicalOrdinal;
+        private final boolean isNullable;
+        private final FieldWriter writer;
+
+        private RowFieldWriter(
+                String fieldName, int logicalOrdinal, boolean isNullable, FieldWriter writer) {
+            this.fieldName = fieldName;
+            this.logicalOrdinal = logicalOrdinal;
+            this.isNullable = isNullable;
+            this.writer = writer;
+        }
+
+        private boolean shouldWrite(InternalRow row) {
+            if (writer instanceof MapSidecarWriter) {
+                return !row.isNullAt(logicalOrdinal)
+                        && ((MapSidecarWriter) writer).findValueIndex(row.getMap(logicalOrdinal))
+                                >= 0;
+            }
+            return !row.isNullAt(logicalOrdinal);
+        }
+
+        private void write(InternalRow row) {
+            writer.write(row, logicalOrdinal);
+        }
+    }
+
+    private class MapSidecarWriter implements FieldWriter {
+
+        private final BinaryString key;
+        private final FieldWriter valueWriter;
+        private int valueIndex = -1;
+
+        private MapSidecarWriter(String key, FieldWriter valueWriter) {
+            this.key = BinaryString.fromString(key);
+            this.valueWriter = valueWriter;
+        }
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            InternalMap map = row.getMap(ordinal);
+            int index = valueIndex >= 0 ? valueIndex : findValueIndex(map);
+            valueIndex = -1;
+            valueWriter.write(map.valueArray(), index);
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            throw new UnsupportedOperationException("Map sidecar writer only supports rows.");
+        }
+
+        private int findValueIndex(InternalMap map) {
+            InternalArray keyArray = map.keyArray();
+            InternalArray valueArray = map.valueArray();
+            for (int i = 0; i < keyArray.size(); i++) {
+                if (!keyArray.isNullAt(i)
+                        && !valueArray.isNullAt(i)
+                        && key.equals(keyArray.getString(i))) {
+                    valueIndex = i;
+                    return i;
+                }
+            }
+            valueIndex = -1;
+            return -1;
         }
     }
 

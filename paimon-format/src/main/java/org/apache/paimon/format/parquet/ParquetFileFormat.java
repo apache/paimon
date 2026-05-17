@@ -69,13 +69,18 @@ public class ParquetFileFormat extends FileFormat {
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
         return new ParquetReaderFactory(
-                options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
+                options,
+                dataSchemaRowType,
+                projectedRowType,
+                readBatchSize,
+                ParquetFilters.convert(filters));
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         ParquetWriterFactory baseFactory =
-                new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+                new ParquetWriterFactory(
+                        new RowDataParquetBuilder(type, options, formatContext.options()));
         // Wrap with variant inference decorator
         return new VariantInferenceWriterFactory(
                 baseFactory, new VariantInferenceConfig(type, formatContext.options()));
