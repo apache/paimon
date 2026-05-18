@@ -619,8 +619,7 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
 
   private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
-    !(assignment.key.equals(assignment.value) ||
-      sameAttributeReference(assignment.key, assignment.value))
+    !sameAttributeReference(assignment.key, assignment.value)
   }
 
   private def sameAttributeReference(left: Expression, right: Expression): Boolean = {
