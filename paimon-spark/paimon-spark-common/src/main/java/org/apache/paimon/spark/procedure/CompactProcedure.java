@@ -667,6 +667,9 @@ public class CompactProcedure extends BaseProcedure {
                 incrementalClusterManager.clusterCurve(),
                 incrementalClusterManager.clusterKeys());
 
+        CoreOptions.ClusteringIncrementalMode mode =
+                incrementalClusterManager.clusteringIncrementalMode();
+
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
                         .map(Pair::getKey)
@@ -678,7 +681,12 @@ public class CompactProcedure extends BaseProcedure {
                                                     ScanPlanHelper$.MODULE$.createNewScanPlan(
                                                             splits.toArray(new DataSplit[0]),
                                                             relation));
-                                    return sorter.sort(dataset);
+                                    // Use sortLocal() for LOCAL_SORT, sort() for GLOBAL_SORT
+                                    if (mode == CoreOptions.ClusteringIncrementalMode.LOCAL_SORT) {
+                                        return sorter.sortLocal(dataset);
+                                    } else {
+                                        return sorter.sort(dataset);
+                                    }
                                 })
                         .reduce(Dataset::union)
                         .orElse(null);
