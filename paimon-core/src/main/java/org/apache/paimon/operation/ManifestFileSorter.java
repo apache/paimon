@@ -83,7 +83,7 @@ public class ManifestFileSorter {
         int sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
         DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
 
-        // Step 2: Classify manifests into defaultCompaction and LSM groups.
+        // Step 2: Classify manifests into defaultCompaction and LSM.
         ClassifyResult classified =
                 classifyManifests(
                         input,
