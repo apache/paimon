@@ -207,7 +207,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             ('f10', pa.decimal128(10, 2)),
             ('f11', pa.date32()),
         ])
-        schema = Schema.from_pyarrow_schema(simple_pa_schema)
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, options={'metadata.stats-mode': 'truncate(16)'})
         self.rest_catalog.create_table('default.test_full_data_types', schema, False)
         table = self.rest_catalog.get_table('default.test_full_data_types')
 
@@ -247,7 +247,7 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             manifest_files[0].file_name,
             lambda row: table_scan.file_scanner._filter_manifest_entry(row),
             drop_stats=False)
-        # Both 'full' and default 'truncate(16)' modes produce value stats
+        # truncate(16) mode produces value stats for all columns
         self.assertEqual(manifest_entries[0].file.value_stats_cols, None)
         min_value_stats = GenericRowDeserializer.from_bytes(manifest_entries[0].file.value_stats.min_values.data,
                                                             table.fields).values
