@@ -34,10 +34,13 @@ public class LuminaVectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
     private final LuminaVectorIndexOptions options;
+    private final LuminaSearcherPool searcherPool;
 
-    public LuminaVectorGlobalIndexer(DataType fieldType, Options options) {
+    public LuminaVectorGlobalIndexer(
+            DataType fieldType, Options options, LuminaSearcherPool searcherPool) {
         this.fieldType = fieldType;
         this.options = new LuminaVectorIndexOptions(options);
+        this.searcherPool = searcherPool;
     }
 
     @Override
@@ -48,6 +51,6 @@ public class LuminaVectorGlobalIndexer implements GlobalIndexer {
     @Override
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) {
-        return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options);
+        return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, searcherPool);
     }
 }

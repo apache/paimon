@@ -109,6 +109,16 @@ public class LuminaVectorIndexOptions {
                     .defaultValue(5)
                     .withDescription("The parallel number for search.");
 
+    public static final ConfigOption<Integer> SEARCHER_POOL_MAX_SIZE =
+            ConfigOptions.key("lumina.searcher-pool.max-size")
+                    .intType()
+                    .defaultValue(32)
+                    .withDescription(
+                            "Maximum number of idle LuminaSearcher instances kept in the pool "
+                                    + "across all index shards. Each entry holds the index open in "
+                                    + "native memory, so memory usage scales with this value times "
+                                    + "the index size per shard. Set to 0 to disable pooling.");
+
     private final int dimension;
     private final LuminaVectorMetric metric;
     private final String indexType;

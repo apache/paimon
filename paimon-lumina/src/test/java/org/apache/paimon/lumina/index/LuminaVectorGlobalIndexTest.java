@@ -63,6 +63,7 @@ public class LuminaVectorGlobalIndexTest {
     private FileIO fileIO;
     private Path indexPath;
     private DataType vectorType;
+    private LuminaSearcherPool pool;
     private final String fieldName = "vec";
 
     @BeforeEach
@@ -86,6 +87,7 @@ public class LuminaVectorGlobalIndexTest {
         fileIO = new LocalFileIO();
         indexPath = new Path(tempDir.toString());
         vectorType = new ArrayType(new FloatType());
+        pool = new LuminaSearcherPool(4);
     }
 
     @AfterEach
@@ -111,6 +113,14 @@ public class LuminaVectorGlobalIndexTest {
 
     private GlobalIndexFileReader createFileReader(Path path) {
         return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
+    }
+
+    private LuminaVectorGlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> metas,
+            DataType fieldType,
+            LuminaVectorIndexOptions indexOptions) {
+        return new LuminaVectorGlobalIndexReader(fileReader, metas, fieldType, indexOptions, pool);
     }
 
     private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results, Path path)
@@ -150,8 +160,7 @@ public class LuminaVectorGlobalIndexTest {
 
             GlobalIndexFileReader fileReader = createFileReader(metricIndexPath);
             try (LuminaVectorGlobalIndexReader reader =
-                    new LuminaVectorGlobalIndexReader(
-                            fileReader, metas, vectorType, indexOptions)) {
+                    createReader(fileReader, metas, vectorType, indexOptions)) {
                 VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 3, fieldName);
                 LuminaScoredGlobalIndexResult searchResult =
                         (LuminaScoredGlobalIndexResult)
@@ -185,8 +194,7 @@ public class LuminaVectorGlobalIndexTest {
 
             GlobalIndexFileReader fileReader = createFileReader(dimIndexPath);
             try (LuminaVectorGlobalIndexReader reader =
-                    new LuminaVectorGlobalIndexReader(
-                            fileReader, metas, vectorType, indexOptions)) {
+                    createReader(fileReader, metas, vectorType, indexOptions)) {
                 VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
                 LuminaScoredGlobalIndexResult searchResult =
                         (LuminaScoredGlobalIndexResult)
@@ -236,7 +244,7 @@ public class LuminaVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (LuminaVectorGlobalIndexReader reader =
-                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+                createReader(fileReader, metas, vectorType, indexOptions)) {
             // Query vector[0] = (1.0, 0.0); nearest neighbors by L2 should be
             // row 0 (1.0, 0.0), row 3 (0.98, 0.05), row 1 (0.95, 0.1).
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
@@ -292,7 +300,7 @@ public class LuminaVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (LuminaVectorGlobalIndexReader reader =
-                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+                createReader(fileReader, metas, vectorType, indexOptions)) {
 
             // Unfiltered: query (1,0) top-3 should come from the first cluster (rows 0,1,2).
             VectorSearch search = new VectorSearch(vectors[0], 3, fieldName);
@@ -363,7 +371,7 @@ public class LuminaVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (LuminaVectorGlobalIndexReader reader =
-                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+                createReader(fileReader, metas, vectorType, indexOptions)) {
             for (int queryIdx : new int[] {50, 150, 320}) {
                 VectorSearch vectorSearch =
                         new VectorSearch(testVectors.get(queryIdx), 3, fieldName);
@@ -417,8 +425,7 @@ public class LuminaVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (LuminaVectorGlobalIndexReader reader =
-                new LuminaVectorGlobalIndexReader(
-                        fileReader, metas, vectorType, readIndexOptions)) {
+                createReader(fileReader, metas, vectorType, readIndexOptions)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
             LuminaScoredGlobalIndexResult result =
                     (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
@@ -459,7 +466,7 @@ public class LuminaVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(vecIndexPath);
         try (LuminaVectorGlobalIndexReader reader =
-                new LuminaVectorGlobalIndexReader(fileReader, metas, vecFieldType, indexOptions)) {
+                createReader(fileReader, metas, vecFieldType, indexOptions)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
             LuminaScoredGlobalIndexResult result =
                     (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
@@ -509,6 +516,40 @@ public class LuminaVectorGlobalIndexTest {
                                         fileWriter, intVecType, indexOptions))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("float vector");
+    }
+
+    @Test
+    public void testPoolReuse() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+
+        float[][] vectors = {new float[] {1.0f, 0.0f}, new float[] {0.0f, 1.0f}};
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        Arrays.stream(vectors).forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        VectorSearch search = new VectorSearch(vectors[0], 1, fieldName);
+
+        // First query: pool miss — index is loaded from disk and returned to pool on close.
+        try (LuminaVectorGlobalIndexReader reader = createReader(fileReader, metas, vectorType, indexOptions)) {
+            LuminaScoredGlobalIndexResult result =
+                    (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(search).get();
+            assertThat(result.results().contains(0L)).isTrue();
+        }
+
+        // Second query: pool hit — same native index is reused; results must be identical.
+        try (LuminaVectorGlobalIndexReader reader = createReader(fileReader, metas, vectorType, indexOptions)) {
+            LuminaScoredGlobalIndexResult result =
+                    (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(search).get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(1);
+            assertThat(result.results().contains(0L)).isTrue();
+        }
     }
 
     private Options createDefaultOptions(int dimension) {
