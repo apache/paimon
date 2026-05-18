@@ -594,6 +594,72 @@ Key points about shard read:
 - **Parallel Processing**: Each shard can be processed independently for better performance
 - **Consistency**: Combining all shards should produce the complete table data
 
+### Explain Scan Plan
+
+`ReadBuilder.explain()` returns a structured view of the scan plan without reading any data files. It is useful for understanding which splits a query will produce, how aggressively the pushdown pruned the input, and whether the resulting splits can be read on the zero-copy fast path.
+
+```python
+table = catalog.get_table('default.events')
+read_builder = table.new_read_builder()
+predicate_builder = read_builder.new_predicate_builder()
+read_builder = read_builder.with_filter(predicate_builder.equal('dt', '2026-05-16'))
+print(read_builder.explain())
+
+# == PyPaimon Scan Plan ==
+# Table:              default.events (PK, HASH_FIXED)
+# Snapshot:           1  (schema 0)
+# Predicate:          dt = '2026-05-16'
+# Projection:         <all columns>
+# Limit:              <none>
+#
+# Partition pruning:  12 -> 4  (pruned 8)
+# Bucket pruning:     4 -> 4  (pruned 0)
+# File skipping:      4 -> 4  (pruned 0)
+#
+# Splits:             4
+#   raw-convertible:  4 / 4
+#   with DV:          0 / 4
+#   all-above-L0:     0 / 4
+#   files/split:      min=1  max=1  avg=1.00
+#   size/split:       min=2.8 KiB  p50=2.9 KiB  p95=3.0 KiB  max=3.0 KiB
+#
+# Files:              4
+# Total size:         11.6 KiB
+# Estimated rows:     20   (merged: 20)
+# Level histogram:    L0=4
+# Deletion files:     0
+```
+
+Pass `verbose=True` to also list every split with its partition, bucket, file count, size, level histogram, and file paths:
+
+```python
+print(read_builder.explain(verbose=True))
+
+# ...
+#
+# Splits[]
+#   [0] partition={'dt': '2026-05-16'} bucket=3 files=1 size=2.9 KiB rows=4 raw=True dv=False
+#       levels: L0=1
+#       file: /warehouse/default.db/events/dt=2026-05-16/bucket-3/data-...parquet
+#   [1] partition={'dt': '2026-05-16'} bucket=2 files=1 size=2.8 KiB rows=2 raw=True dv=False
+#       levels: L0=1
+#       file: /warehouse/default.db/events/dt=2026-05-16/bucket-2/data-...parquet
+#   ...
+```
+
+What the fields tell you:
+
+- **Pushdown** (`Predicate` / `Projection` / `Limit`): exactly what the reader sees after `with_filter` / `with_projection` / `with_limit`.
+- **Pruning funnel** (`Partition pruning` / `Bucket pruning` / `File skipping`): three `before -> after` counts that show at which stage the predicate paid off. `n/a` means the stage did not apply — for example, bucket pruning is reported for HASH_FIXED tables where every bucket key is pinned by the predicate, and for POSTPONE_BUCKET tables that skip their synthetic-bucket entries.
+- **Split shape**: `raw-convertible` counts splits that can be read zero-copy (no merge, no deletion-vector apply); `with DV` counts splits whose files need a deletion vector applied; `all-above-L0` counts splits whose data lives entirely on L1+, i.e. the merge pipeline can skip the L0 buffer.
+- **File aggregates**: total file size + estimated rows (with the post-merge row estimate for primary-key tables in parentheses), plus a level histogram of where the data sits.
+
+{{< hint info >}}
+**Cost**: `explain()` reads the manifest list and manifest files but does not open any data files. It suppresses the manifest-reader's early bucket filter and forces single-threaded manifest decoding so the before/after counters are accurate. On tables where the early filter usually prunes aggressively (e.g. very wide HASH_FIXED tables with a tight predicate), this can make `explain()` measurably slower than a regular `new_scan().plan()`.
+{{< /hint >}}
+
+`ExplainResult` is a plain dataclass — alongside the human-readable `__str__` shown above, every field (`partition_pruning`, `bucket_pruning`, `file_skipping`, `split_count`, `splits_raw_convertible`, `level_histogram`, `splits`, ...) is addressable in Python for programmatic use.
+
 ## Rollback
 
 Paimon supports rolling back a table to a previous snapshot or tag. This is useful for undoing unwanted changes or
