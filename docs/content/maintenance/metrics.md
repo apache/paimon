@@ -63,6 +63,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Distributions of the time taken by the last few scans.</td>
         </tr>
         <tr>
+            <td>lastScannedSnapshotId</td>
+            <td>Gauge</td>
+            <td>The snapshot ID scanned in the last scan. 0 if no scan has occurred.</td>
+        </tr>
+        <tr>
             <td>lastScannedManifests</td>
             <td>Gauge</td>
             <td>Number of scanned manifest files in the last scan.</td>
@@ -180,6 +185,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>lastCompactionOutputFileSize</td>
             <td>Gauge</td>
             <td>Total size of the output files for the last compaction.</td>
+        </tr>
+        <tr>
+            <td>lastCommittedSnapshotId</td>
+            <td>Gauge</td>
+            <td>The snapshot ID created by the last commit. -1 if no commit has occurred.</td>
         </tr>
     </tbody>
 </table>
