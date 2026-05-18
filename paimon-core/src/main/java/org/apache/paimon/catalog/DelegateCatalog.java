@@ -159,6 +159,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+        return wrapped.loadTableMetadata(identifier);
+    }
+
+    @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         wrapped.renameTable(fromTable, toTable, ignoreIfNotExists);

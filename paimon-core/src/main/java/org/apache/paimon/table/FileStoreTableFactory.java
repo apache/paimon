@@ -19,7 +19,9 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -192,17 +194,31 @@ public class FileStoreTableFactory {
             CatalogEnvironment catalogEnvironment) {
         Options branchOptions = new Options(dynamicOptions.toMap());
         branchOptions.set(CoreOptions.BRANCH, branchName);
-        Optional<TableSchema> schema = new SchemaManager(fileIO, tablePath, branchName).latest();
+
+        Identifier identifier = catalogEnvironment.identifier();
+        Identifier branchIdentifier = null;
+        if (identifier != null) {
+            branchIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(), identifier.getObjectName(), branchName);
+        }
+        CatalogLoader catalogLoader = catalogEnvironment.catalogLoader();
+
+        Optional<TableSchema> schema;
+        if (branchIdentifier != null && catalogLoader != null) {
+            try (Catalog catalog = catalogLoader.load()) {
+                schema = Optional.of(catalog.loadTableMetadata(branchIdentifier).schema());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            schema = new SchemaManager(fileIO, tablePath, branchName).latest();
+        }
+
         if (schema.isPresent()) {
-            Identifier identifier = catalogEnvironment.identifier();
             CatalogEnvironment branchCatalogEnvironment = catalogEnvironment;
-            if (identifier != null) {
-                branchCatalogEnvironment =
-                        catalogEnvironment.copy(
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getObjectName(),
-                                        branchName));
+            if (branchIdentifier != null) {
+                branchCatalogEnvironment = catalogEnvironment.copy(branchIdentifier);
             }
             return createWithoutFallbackBranch(
                     fileIO, tablePath, schema.get(), branchOptions, branchCatalogEnvironment);

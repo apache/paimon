@@ -682,7 +682,8 @@ public abstract class AbstractCatalog implements Catalog {
         return newDatabasePath(warehouse(), database);
     }
 
-    protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+    @Override
+    public TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         return new TableMetadata(loadTableSchema(identifier), false, null);
     }
 
