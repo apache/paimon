@@ -25,6 +25,54 @@ import sys
 from pypaimon.common.json_util import JSON
 
 
+def _parse_partition_spec(partition_spec):
+    if not partition_spec:
+        return None
+
+    partition = {}
+    for item in partition_spec.split(','):
+        if '=' not in item:
+            raise ValueError(
+                "Invalid partition spec '{}'. Expected format: key=value,key2=value2".format(partition_spec)
+            )
+        key, value = item.split('=', 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(
+                "Invalid partition spec '{}'. Partition key cannot be empty.".format(partition_spec)
+            )
+        partition[key] = value.strip()
+    return partition
+
+
+def _load_file_store_table(args):
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.table.file_store_table import FileStoreTable
+
+    config = load_catalog_config(args.config)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        table = catalog.get_table(table_identifier)
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not isinstance(table, FileStoreTable):
+        print(f"Error: Table '{table_identifier}' is not a FileStoreTable. "
+              f"This operation is not supported for this table type.", file=sys.stderr)
+        sys.exit(1)
+
+    return table_identifier, table
+
+
 def cmd_table_read(args):
     """
     Execute the 'table read' command.
@@ -306,10 +354,21 @@ def cmd_table_snapshot(args):
               f"Snapshot operation is not supported for this table type.", file=sys.stderr)
         sys.exit(1)
     
-    # Get latest snapshot
+    # Get snapshot
     try:
         snapshot_manager = table.snapshot_manager()
-        snapshot = snapshot_manager.get_latest_snapshot()
+        if getattr(args, 'all', False):
+            snapshots = snapshot_manager.list_snapshots()
+            print(JSON.to_json(snapshots, indent=2))
+            return
+        if getattr(args, 'snapshot_id', None) is not None:
+            snapshot = snapshot_manager.get_snapshot_by_id(args.snapshot_id)
+        elif getattr(args, 'earliest', False):
+            snapshot = snapshot_manager.try_get_earliest_snapshot()
+        elif getattr(args, 'time_millis', None) is not None:
+            snapshot = snapshot_manager.earlier_or_equal_time_mills(args.time_millis)
+        else:
+            snapshot = snapshot_manager.get_latest_snapshot()
         
         if snapshot is None:
             print(f"Error: No snapshot found for table '{table_identifier}'.", file=sys.stderr)
@@ -320,6 +379,30 @@ def cmd_table_snapshot(args):
         
     except Exception as e:
         print(f"Error: Failed to get snapshot: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_compact(args):
+    """Execute the 'table compact' command."""
+    table_identifier, table = _load_file_store_table(args)
+    try:
+        partition = _parse_partition_spec(getattr(args, 'partition', None))
+        result = table.new_maintenance().compact(partition)
+        print(JSON.to_json(result, indent=2))
+    except Exception as e:
+        print(f"Error: Failed to compact table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_table_rescale(args):
+    """Execute the 'table rescale' command."""
+    table_identifier, table = _load_file_store_table(args)
+    try:
+        partition = _parse_partition_spec(getattr(args, 'partition', None))
+        result = table.new_maintenance().rescale_bucket(args.bucket_num, partition)
+        print(JSON.to_json(result, indent=2))
+    except Exception as e:
+        print(f"Error: Failed to rescale table '{table_identifier}': {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -776,12 +859,70 @@ def add_table_subcommands(table_parser):
     get_parser.set_defaults(func=cmd_table_get)
     
     # table snapshot command
-    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest snapshot of a table')
+    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get snapshots of a table')
     snapshot_parser.add_argument(
         'table',
         help='Table identifier in format: database.table'
     )
+    snapshot_group = snapshot_parser.add_mutually_exclusive_group()
+    snapshot_group.add_argument(
+        '--id',
+        dest='snapshot_id',
+        type=int,
+        default=None,
+        help='Get a snapshot by ID'
+    )
+    snapshot_group.add_argument(
+        '--earliest',
+        action='store_true',
+        help='Get the earliest available snapshot'
+    )
+    snapshot_group.add_argument(
+        '--time-millis',
+        type=int,
+        default=None,
+        help='Get the latest snapshot whose commit time is less than or equal to this epoch millis'
+    )
+    snapshot_group.add_argument(
+        '--all',
+        action='store_true',
+        help='List all available snapshots'
+    )
     snapshot_parser.set_defaults(func=cmd_table_snapshot)
+
+    # table compact command
+    compact_parser = table_subparsers.add_parser('compact', help='Compact a table or partition')
+    compact_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    compact_parser.add_argument(
+        '--partition',
+        type=str,
+        default=None,
+        help='Partition spec to compact, e.g. "dt=2024-01-01,hh=08"'
+    )
+    compact_parser.set_defaults(func=cmd_table_compact)
+
+    # table rescale command
+    rescale_parser = table_subparsers.add_parser('rescale', help='Rewrite data with a new bucket number')
+    rescale_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    rescale_parser.add_argument(
+        '--bucket-num',
+        type=int,
+        required=True,
+        help='Target bucket number'
+    )
+    rescale_parser.add_argument(
+        '--partition',
+        type=str,
+        default=None,
+        help='Partition spec to rescale, e.g. "dt=2024-01-01,hh=08"'
+    )
+    rescale_parser.set_defaults(func=cmd_table_rescale)
     
     # table create command
     create_parser = table_subparsers.add_parser('create', help='Create a new table')
