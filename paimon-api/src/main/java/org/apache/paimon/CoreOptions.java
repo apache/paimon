@@ -497,16 +497,6 @@ public class CoreOptions implements Serializable {
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting.");
 
-    public static final ConfigOption<MemorySize> MANIFEST_SORT_OPEN_FILE_COST =
-            key("manifest-sort.open-file-cost")
-                    .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(4))
-                    .withDescription(
-                            "Open file cost of a manifest file during sort rewrite. "
-                                    + "It is added to each manifest file's size when computing "
-                                    + "section size, to avoid rewriting too many small manifest "
-                                    + "files in a single section.");
-
     public static final ConfigOption<String> UPSERT_KEY =
             key("upsert-key")
                     .stringType()
@@ -2650,10 +2640,6 @@ public class CoreOptions implements Serializable {
 
     public long manifestSortMaxRewriteSize() {
         return options.get(MANIFEST_SORT_MAX_REWRITE_SIZE).getBytes();
-    }
-
-    public long manifestSortOpenFileCost() {
-        return options.get(MANIFEST_SORT_OPEN_FILE_COST).getBytes();
     }
 
     public String partitionDefaultName() {
