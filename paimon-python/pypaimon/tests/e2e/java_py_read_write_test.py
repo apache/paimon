@@ -135,6 +135,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 ('ts', pa.timestamp('us')),
                 ('ts_ltz', pa.timestamp('us', tz='UTC')),
                 ('t', pa.time32('ms')),
+                ('blob', pa.binary()),
                 ('metadata', pa.struct([
                     pa.field('source', pa.string()),
                     pa.field('created_at', pa.int64()),
@@ -187,6 +188,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
                 't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
                       datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)],
+                'blob': [b'a' * 30, b'b' * 5, b'\xff' * 16, b'binary_value_4', b'binary_value_5', b'binary_value_6'],
                 'metadata': [
                     {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
                     {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
@@ -211,6 +213,19 @@ class JavaPyReadWriteTest(unittest.TestCase):
         result = table_read.to_pandas(table_scan.plan().splits())
         print(f"Format: {file_format}, Result:\n{result}")
         self.assertEqual(initial_data.to_dict(), result.to_dict())
+
+        # Verify binary column stats are None (aligned with Java behavior)
+        if file_format != 'lance' and 'blob' in [f.name for f in table.fields]:
+            from pypaimon.table.row.generic_row import GenericRowDeserializer
+            latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+            manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+            manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+                manifest_files[0].file_name, lambda row: True, drop_stats=False)
+            stats = manifest_entries[0].file.value_stats
+            min_row = GenericRowDeserializer.from_bytes(stats.min_values.data, table.fields)
+            blob_idx = next(i for i, f in enumerate(table.fields) if f.name == 'blob')
+            self.assertIsNone(min_row.values[blob_idx],
+                              "binary column should have no min/max stats")
 
         from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2

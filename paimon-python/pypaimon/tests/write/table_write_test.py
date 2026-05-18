@@ -30,6 +30,7 @@ from parameterized import parameterized
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
+from pypaimon.write.writer.data_writer import DataWriter
 
 
 class TableWriteTest(unittest.TestCase):
@@ -96,6 +97,81 @@ class TableWriteTest(unittest.TestCase):
         snapshot_json: str = JSON.to_json(table.snapshot_manager().get_latest_snapshot())
         self.assertEquals(True, snapshot_json.__contains__("baseManifestList"))
         self.assertEquals(False, snapshot_json.__contains__("nextRowId"))
+
+    def test_partial_write_requires_partition_key(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_partial_missing_partition_key', schema, False)
+        table = self.catalog.get_table('default.test_partial_missing_partition_key')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['user_id', 'item_id', 'behavior'])
+        partial_schema = pa.schema([
+            ('user_id', pa.int32()),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string())
+        ])
+        partial_data = pa.Table.from_pydict({
+            'user_id': [1],
+            'item_id': [1001],
+            'behavior': ['a']
+        }, schema=partial_schema)
+
+        try:
+            with self.assertRaisesRegex(ValueError, "Missing routing fields.*dt"):
+                table_write.write_arrow(partial_data)
+        finally:
+            table_write.close()
+
+    def test_partial_write_requires_bucket_key(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pk_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '2'},
+        )
+        self.catalog.create_table('default.test_partial_missing_bucket_key', schema, False)
+        table = self.catalog.get_table('default.test_partial_missing_bucket_key')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['item_id', 'behavior', 'dt'])
+        partial_schema = pa.schema([
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            pa.field('dt', pa.string(), nullable=False)
+        ])
+        partial_data = pa.Table.from_pydict({
+            'item_id': [1001],
+            'behavior': ['a'],
+            'dt': ['p1']
+        }, schema=partial_schema)
+
+        try:
+            with self.assertRaisesRegex(ValueError, "Missing routing fields.*user_id"):
+                table_write.write_arrow(partial_data)
+        finally:
+            table_write.close()
+
+    def test_full_stats_skip_binary_minmax(self):
+        data = pa.Table.from_pydict({
+            'payload': [b'zulu', b'alpha', None]
+        }, schema=pa.schema([('payload', pa.binary())]))
+
+        stats = DataWriter._get_column_stats(data, 'payload', 'full')
+
+        self.assertIsNone(stats['min_values'])
+        self.assertIsNone(stats['max_values'])
+        self.assertEqual(stats['null_counts'], 1)
+
+    def test_truncate_stats_skip_binary_minmax(self):
+        data = pa.Table.from_pydict({
+            'payload': [b'zulu', b'alpha']
+        }, schema=pa.schema([('payload', pa.binary())]))
+
+        stats = DataWriter._get_column_stats(data, 'payload', 'truncate(16)')
+
+        self.assertIsNone(stats['min_values'])
+        self.assertIsNone(stats['max_values'])
+        self.assertEqual(stats['null_counts'], 0)
 
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

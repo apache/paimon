@@ -466,17 +466,18 @@ public class JavaPyE2ETest {
             assertThat(table.rowType().getFieldTypes().get(5))
                     .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
             assertThat(table.rowType().getFieldTypes().get(6)).isEqualTo(DataTypes.TIME());
-            assertThat(table.rowType().getFieldTypes().get(7)).isInstanceOf(RowType.class);
-            RowType metadataType = (RowType) table.rowType().getFieldTypes().get(7);
+            assertThat(table.rowType().getFieldTypes().get(7)).isEqualTo(DataTypes.BYTES());
+            assertThat(table.rowType().getFieldTypes().get(8)).isInstanceOf(RowType.class);
+            RowType metadataType = (RowType) table.rowType().getFieldTypes().get(8);
             assertThat(metadataType.getFieldTypes().get(2)).isInstanceOf(RowType.class);
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, 1000, (store1, 1001, (Beijing, China))]",
-                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, 2000, (store1, 1002, (Shanghai, China))]",
-                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, (store2, 1003, (Tokyo, Japan))]",
-                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, (store2, 1004, (Seoul, Korea))]",
-                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, (store3, 1005, (NewYork, USA))]",
-                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, (store3, 1006, (London, UK))]");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, 1000, [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97], (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, 2000, [98, 98, 98, 98, 98], (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1], (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, [98, 105, 110, 97, 114, 121, 95, 118, 97, 108, 117, 101, 95, 52], (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, [98, 105, 110, 97, 114, 121, 95, 118, 97, 108, 117, 101, 95, 53], (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, [98, 105, 110, 97, 114, 121, 95, 118, 97, 108, 117, 101, 95, 54], (store3, 1006, (London, UK))]");
 
             PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
             int[] ids = {1, 2, 3, 4, 5, 6};
