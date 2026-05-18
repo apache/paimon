@@ -502,5 +502,34 @@ This section introduce all available spark procedures about paimon.
          CALL sys.rescale(table => 'default.T', bucket_num => 16, partitions => 'dt=20250217,hh=08;dt=20250217,hh=09')<br/>
       </td>
    </tr>
+   <tr>
+      <td>load_csv</td>
+      <td>
+         Load CSV files into an existing Paimon table. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>path: path to the CSV file or directory. Cannot be empty.</li>
+            <li>options: optional map of CSV reader options (e.g., sep, escape). header=true is required and used by default. Header columns are matched to target table columns by exact name. Missing columns become null, extra columns are dropped. Nested columns (Struct/Array/Map) are restored via from_json; invalid JSON results in null fields. The procedure always uses PERMISSIVE mode: malformed rows are counted in invalid_count and excluded from the write.</li>
+         <br/>Returns: (result BOOLEAN, imported_count LONG, invalid_count LONG)
+      </td>
+      <td>
+         CALL sys.load_csv(table => 'db.T', path => '/tmp/data.csv')<br/>
+         CALL sys.load_csv(table => 'db.T', path => '/tmp/data.tsv', options => map('sep', '\t'))
+      </td>
+   </tr>
+   <tr>
+      <td>export_csv</td>
+      <td>
+         Export data from a Paimon table to a CSV directory. Arguments:
+            <li>table: the source table identifier. Cannot be empty.</li>
+            <li>path: output directory path. Cannot be empty. If the path already exists, it is overwritten.</li>
+            <li>where: optional filter predicate to export a subset of rows.</li>
+            <li>options: optional map of CSV writer options (e.g., sep, escape). Nested columns (Struct/Array/Map) are serialized as JSON strings. quoteAll=true by default to ensure JSON values with commas are properly quoted.</li>
+         <br/>Returns: (result BOOLEAN, exported_count LONG)
+      </td>
+      <td>
+         CALL sys.export_csv(table => 'db.T', path => '/tmp/output')<br/>
+         CALL sys.export_csv(table => 'db.T', path => '/tmp/output', where => 'dt = "2024-01-01"')
+      </td>
+   </tr>
    </tbody>
 </table>
