@@ -21,14 +21,12 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ScanMode;
 
 import javax.annotation.Nullable;
@@ -41,8 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
-
-import static java.util.Collections.emptyList;
 
 /** Manifest entries scanner for commit. */
 public class CommitScanner {
@@ -129,46 +125,24 @@ public class CommitScanner {
         }
     }
 
-    public CommitChanges readOverwriteChanges(
+    /**
+     * Returns a stateful {@link CommitChangesProvider} for overwrite operations. The returned
+     * provider caches the current files of the target partitions across retries and only walks
+     * delta manifests when the latest snapshot advances, avoiding repeated full scans on every
+     * commit retry.
+     */
+    public CommitChangesProvider overwriteChangesProvider(
             int numBucket,
             List<ManifestEntry> changes,
             List<IndexManifestEntry> indexFiles,
-            @Nullable Snapshot latestSnapshot,
             @Nullable PartitionPredicate partitionFilter) {
-        List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
-        List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
-        if (latestSnapshot != null) {
-            scan.withSnapshot(latestSnapshot)
-                    .withPartitionFilter(partitionFilter)
-                    .withKind(ScanMode.ALL);
-            if (numBucket != BucketMode.POSTPONE_BUCKET) {
-                // bucket = -2 can only be overwritten in postpone bucket tables
-                scan.withBucketFilter(bucket -> bucket >= 0);
-            }
-            List<ManifestEntry> currentEntries = scan.plan().files();
-            for (ManifestEntry entry : currentEntries) {
-                changesWithOverwrite.add(
-                        ManifestEntry.create(
-                                FileKind.DELETE,
-                                entry.partition(),
-                                entry.bucket(),
-                                entry.totalBuckets(),
-                                entry.file()));
-            }
-
-            // collect index files
-            if (latestSnapshot.indexManifest() != null) {
-                List<IndexManifestEntry> entries =
-                        indexManifestFile.read(latestSnapshot.indexManifest());
-                for (IndexManifestEntry entry : entries) {
-                    if (partitionFilter == null || partitionFilter.test(entry.partition())) {
-                        indexChangesWithOverwrite.add(entry.toDeleteEntry());
-                    }
-                }
-            }
-        }
-        changesWithOverwrite.addAll(changes);
-        indexChangesWithOverwrite.addAll(indexFiles);
-        return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
+        return new OverwriteChangesProvider(
+                scanSupplier,
+                indexManifestFile,
+                dropStats,
+                numBucket,
+                changes,
+                indexFiles,
+                partitionFilter);
     }
 }
