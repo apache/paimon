@@ -217,7 +217,11 @@ public class FlinkSinkBuilder {
                         table.coreOptions().toConfiguration());
 
         DataStream<InternalRow> input =
-                mapToInternalRow(this.input, table.rowType(), contextForDescriptor);
+                mapToInternalRow(
+                        this.input,
+                        table.rowType(),
+                        contextForDescriptor,
+                        table.coreOptions().blobWriteNullOnMissingFile());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -250,10 +254,22 @@ public class FlinkSinkBuilder {
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext) {
+        return mapToInternalRow(input, rowType, catalogContext, false);
+    }
+
+    public static DataStream<InternalRow> mapToInternalRow(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists) {
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
-                                        r -> new FlinkRowWrapper(r, catalogContext))
+                                        r ->
+                                                new FlinkRowWrapper(
+                                                        r,
+                                                        catalogContext,
+                                                        checkBlobDescriptorExists))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));

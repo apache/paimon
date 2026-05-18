@@ -127,6 +127,15 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       </td>
     </tr>
     <tr>
+      <td><h5>blob-write-null-on-missing-file</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>
+        When enabled for Flink writes, if a descriptor BLOB value references a file that does not exist, Paimon writes <code>NULL</code> for that value and logs a warning instead of failing when reading the descriptor.
+      </td>
+    </tr>
+    <tr>
       <td><h5>blob-view-field</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
