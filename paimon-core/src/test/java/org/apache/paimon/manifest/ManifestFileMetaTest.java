@@ -671,7 +671,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                             Long.MAX_VALUE,
                             1,
                             getPartitionType(),
-                            2);
+                            2,
+                            true);
         } finally {
             fileIO.stopBlockingManifestReads();
         }
