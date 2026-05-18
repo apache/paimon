@@ -30,10 +30,12 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -137,15 +139,9 @@ public class ManifestFileSorter {
         pickedFiles.addAll(defaultCompactionMap.keySet());
 
         long maxRewriteSize = options.manifestSortMaxRewriteSize();
-        long openFileCost = options.manifestSortOpenFileCost();
 
         List<Section> sections =
-                splitIntoSections(
-                        pickedFiles,
-                        sortFieldIndex,
-                        sortFieldType,
-                        defaultCompactionMap,
-                        openFileCost);
+                splitIntoSections(pickedFiles, sortFieldIndex, sortFieldType, defaultCompactionMap);
         sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
         LOG.info("After mergeSmallAdjacentSections: sections={}.", sections.size());
 
@@ -161,7 +157,6 @@ public class ManifestFileSorter {
                         deleteEntries,
                         suggestedMetaSize,
                         maxRewriteSize,
-                        openFileCost,
                         sortNewFiles,
                         manifestReadParallelism);
         result.addAll(rewritten);
@@ -325,8 +320,7 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> pickedFiles,
             int sortFieldIndex,
             DataType sortFieldType,
-            Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
-            long openFileCost) {
+            Map<ManifestFileMeta, boolean[]> defaultCompactionMap) {
         pickedFiles.sort(
                 (a, b) -> {
                     int cmp =
@@ -348,12 +342,10 @@ public class ManifestFileSorter {
         List<Section> sections = new ArrayList<>();
         List<ManifestFileMeta> currentFiles = new ArrayList<>();
         long currentTotalSize = 0;
-        long currentTotalSizeWithCost = 0;
         boolean currentHasDefault = false;
         ManifestFileMeta first = pickedFiles.get(0);
         currentFiles.add(first);
         currentTotalSize += first.fileSize();
-        currentTotalSizeWithCost += Math.max(first.fileSize(), openFileCost);
         currentHasDefault = defaultCompactionMap.containsKey(first);
         BinaryRow sectionMaxBound = first.partitionStats().maxValues();
 
@@ -365,24 +357,16 @@ public class ManifestFileSorter {
                             sortFieldIndex,
                             sortFieldType)
                     >= 0) {
-                sections.add(
-                        new Section(
-                                currentFiles,
-                                currentTotalSize,
-                                currentTotalSizeWithCost,
-                                currentHasDefault));
+                sections.add(new Section(currentFiles, currentTotalSize, currentHasDefault));
                 currentFiles = new ArrayList<>();
                 currentTotalSize = 0;
-                currentTotalSizeWithCost = 0;
                 currentFiles.add(file);
                 currentTotalSize += file.fileSize();
-                currentTotalSizeWithCost += Math.max(file.fileSize(), openFileCost);
                 currentHasDefault = defaultCompactionMap.containsKey(file);
                 sectionMaxBound = file.partitionStats().maxValues();
             } else {
                 currentFiles.add(file);
                 currentTotalSize += file.fileSize();
-                currentTotalSizeWithCost += Math.max(file.fileSize(), openFileCost);
                 if (!currentHasDefault && defaultCompactionMap.containsKey(file)) {
                     currentHasDefault = true;
                 }
@@ -396,12 +380,7 @@ public class ManifestFileSorter {
                 }
             }
         }
-        sections.add(
-                new Section(
-                        currentFiles,
-                        currentTotalSize,
-                        currentTotalSizeWithCost,
-                        currentHasDefault));
+        sections.add(new Section(currentFiles, currentTotalSize, currentHasDefault));
         return sections;
     }
 
@@ -452,7 +431,6 @@ public class ManifestFileSorter {
             Set<FileEntry.Identifier> deleteEntries,
             long suggestedMetaSize,
             long maxRewriteSize,
-            long openFileCost,
             List<ManifestFileMeta> sortNewFiles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
@@ -476,7 +454,7 @@ public class ManifestFileSorter {
                         manifestReadParallelism);
                 continue;
             }
-            long sectionSize = section.totalSizeWithCost;
+            long sectionSize = section.totalSize;
             boolean exceedsThreshold = processedSize + sectionSize > maxRewriteSize;
 
             if (!exceedsThreshold) {
@@ -501,18 +479,15 @@ public class ManifestFileSorter {
                 List<ManifestFileMeta> remainingFiles = new ArrayList<>();
                 long rewriteSize = 0;
                 long remainingSize = 0;
-                long remainingSizeWithCost = 0;
                 boolean remainingHasDefault = false;
 
                 for (ManifestFileMeta file : section.files) {
-                    long fileCost = Math.max(file.fileSize(), openFileCost);
-                    if (rewriteSize + fileCost <= remaining) {
+                    if (rewriteSize + file.fileSize() <= remaining) {
                         toRewrite.add(file);
-                        rewriteSize += fileCost;
+                        rewriteSize += file.fileSize();
                     } else {
                         remainingFiles.add(file);
                         remainingSize += file.fileSize();
-                        remainingSizeWithCost += fileCost;
                         if (defaultCompactionMap.containsKey(file)) {
                             remainingHasDefault = true;
                         }
@@ -533,11 +508,7 @@ public class ManifestFileSorter {
                 // Create new section for remaining files and append to sections list
                 if (!remainingFiles.isEmpty()) {
                     Section remainingSection =
-                            new Section(
-                                    remainingFiles,
-                                    remainingSize,
-                                    remainingSizeWithCost,
-                                    remainingHasDefault);
+                            new Section(remainingFiles, remainingSize, remainingHasDefault);
                     // Append remaining section to the end of sections list
                     sections.add(remainingSection);
                 }
@@ -783,17 +754,11 @@ public class ManifestFileSorter {
     static class Section {
         final List<ManifestFileMeta> files;
         final long totalSize;
-        final long totalSizeWithCost;
         final boolean hasDefaultCompactMeta;
 
-        Section(
-                List<ManifestFileMeta> files,
-                long totalSize,
-                long totalSizeWithCost,
-                boolean hasDefaultCompactMeta) {
+        Section(List<ManifestFileMeta> files, long totalSize, boolean hasDefaultCompactMeta) {
             this.files = files;
             this.totalSize = totalSize;
-            this.totalSizeWithCost = totalSizeWithCost;
             this.hasDefaultCompactMeta = hasDefaultCompactMeta;
         }
 
@@ -804,7 +769,6 @@ public class ManifestFileSorter {
             return new Section(
                     merged,
                     a.totalSize + b.totalSize,
-                    a.totalSizeWithCost + b.totalSizeWithCost,
                     a.hasDefaultCompactMeta || b.hasDefaultCompactMeta);
         }
     }

@@ -915,12 +915,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>MemorySize</td>
             <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting.</td>
         </tr>
-        <tr>
-            <td><h5>manifest-sort.open-file-cost</h5></td>
-            <td style="word-wrap: break-word;">4 mb</td>
-            <td>MemorySize</td>
-            <td>Open file cost of a manifest file during sort rewrite. It is added to each manifest file's size when computing section size, to avoid rewriting too many small manifest files in a single section.</td>
-        </tr>
+
         <tr>
             <td><h5>manifest-sort.partition-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
