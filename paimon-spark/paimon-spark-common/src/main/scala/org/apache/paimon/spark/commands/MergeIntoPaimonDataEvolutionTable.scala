@@ -87,8 +87,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         case updateAction: UpdateAction =>
           for (assignment <- updateAction.assignments) {
             if (isModifiedAssignment(assignment)) {
-              val key = assignment.key.asInstanceOf[AttributeReference]
-              columns ++= Seq(key)
+              columns += assignmentKeyAttribute(assignment)
             }
           }
       }
@@ -281,9 +280,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           UpdateAction.apply(
             update.condition,
             update.assignments.filter(
-              a =>
-                updateColumnsSorted.contains(
-                  a.key.asInstanceOf[AttributeReference])) ++ assignments))
+              a => updateColumnsSorted.contains(assignmentKeyAttribute(a))) ++ assignments))
 
     for (action <- realUpdateActions) {
       allFields ++= action.references.flatMap(r => extractFields(r)).seq
@@ -620,6 +617,15 @@ object MergeIntoPaimonDataEvolutionTable {
 
   private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
     !sameAttributeReference(assignment.key, assignment.value)
+  }
+
+  private[commands] def assignmentKeyAttribute(assignment: Assignment): AttributeReference = {
+    assignment.key match {
+      case key: AttributeReference => key
+      case other =>
+        throw new UnsupportedOperationException(
+          s"Unsupported update assignment key: $other. Only top-level attributes are supported.")
+    }
   }
 
   private def sameAttributeReference(left: Expression, right: Expression): Boolean = {

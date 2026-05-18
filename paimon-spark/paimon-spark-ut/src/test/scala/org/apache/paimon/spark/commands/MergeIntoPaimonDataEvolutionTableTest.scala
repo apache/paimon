@@ -19,9 +19,9 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.sql.catalyst.expressions.AttributeReference
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, GetStructField, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Assignment
-import org.apache.spark.sql.types.{BinaryType, StringType}
+import org.apache.spark.sql.types.{BinaryType, StringType, StructField, StructType}
 
 class MergeIntoPaimonDataEvolutionTableTest extends SparkFunSuite {
 
@@ -44,5 +44,16 @@ class MergeIntoPaimonDataEvolutionTableTest extends SparkFunSuite {
     assert(
       MergeIntoPaimonDataEvolutionTable.isModifiedAssignment(
         Assignment(targetFileType, sourceFileType)))
+  }
+
+  test("update column detection rejects non top-level assignment key") {
+    val targetStruct =
+      AttributeReference("metadata", StructType(Seq(StructField("name", StringType))))()
+    val nestedKey = GetStructField(targetStruct, 0, Some("name"))
+
+    intercept[UnsupportedOperationException] {
+      MergeIntoPaimonDataEvolutionTable.assignmentKeyAttribute(
+        Assignment(nestedKey, Literal("new-name")))
+    }
   }
 }
