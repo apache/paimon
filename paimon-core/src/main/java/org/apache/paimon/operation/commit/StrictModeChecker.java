@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.ScanMode;
@@ -39,6 +41,7 @@ public class StrictModeChecker {
     private final SnapshotManager snapshotManager;
     private final String commitUser;
     private final Supplier<FileStoreScan> scanSupplier;
+    private final IndexManifestFile indexManifestFile;
 
     private long strictModeLastSafeSnapshot;
 
@@ -46,10 +49,12 @@ public class StrictModeChecker {
             SnapshotManager snapshotManager,
             String commitUser,
             Supplier<FileStoreScan> scanSupplier,
+            IndexManifestFile indexManifestFile,
             long strictModeLastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.scanSupplier = scanSupplier;
+        this.indexManifestFile = indexManifestFile;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
     }
 
@@ -115,7 +120,28 @@ public class StrictModeChecker {
                         .withKind(ScanMode.DELTA)
                         .dropStats()
                         .readFileIterator();
-        return hasOverlappedPartition(entries, newPartitions);
+        if (hasOverlappedPartition(entries, newPartitions)) {
+            return true;
+        }
+
+        String indexManifest = snapshot.indexManifest();
+        if (indexManifest == null) {
+            return false;
+        }
+        // Fast exit: if this snapshot's indexManifest file name equals the
+        // previous snapshot's, no index file was added/removed by this commit
+        // (writeIndexFiles reuses the previous file when newIndexFiles is empty).
+        long prevId = snapshot.id() - 1;
+        if (snapshotManager.snapshotExists(prevId)
+                && indexManifest.equals(snapshotManager.snapshot(prevId).indexManifest())) {
+            return false;
+        }
+        for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
+            if (newPartitions.contains(entry.partition())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasOverlappedPartition(
