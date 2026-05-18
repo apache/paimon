@@ -186,6 +186,35 @@ public class SchemaValidation {
         }
         fileFormat.validateDataFields(new RowType(fieldsInNormalFile));
 
+        for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
+            if (!"avro".equalsIgnoreCase(entry.getValue())) {
+                continue;
+            }
+            for (DataField field : fieldsInNormalFile) {
+                DataType type = field.type();
+                int precision = -1;
+                if (type instanceof TimestampType) {
+                    precision = ((TimestampType) type).getPrecision();
+                } else if (type instanceof LocalZonedTimestampType) {
+                    precision = ((LocalZonedTimestampType) type).getPrecision();
+                }
+                if (precision > 6) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "'%s' entry '%d:avro' is incompatible with column '%s' of type %s: "
+                                            + "Avro supports timestamp precision up to 6, got %d. "
+                                            + "Either lower the column precision, drop the per-level mapping for level %d, "
+                                            + "or use a different format (parquet or orc) for that level.",
+                                    CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
+                                    entry.getKey(),
+                                    field.name(),
+                                    type,
+                                    precision,
+                                    entry.getKey()));
+                }
+            }
+        }
+
         // Check column names in schema
         schema.fieldNames()
                 .forEach(
