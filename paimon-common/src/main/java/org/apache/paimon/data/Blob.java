@@ -38,6 +38,31 @@ import java.util.function.Supplier;
 @Public
 public interface Blob {
 
+    /**
+     * The placeholder blob, mainly for blob update in data-evolution. It should never be exposed to
+     * users.
+     */
+    Blob PLACE_HOLDER =
+            new Blob() {
+                @Override
+                public byte[] toData() {
+                    throw new UnsupportedOperationException(
+                            "Should never call this method for placeholder blob.");
+                }
+
+                @Override
+                public BlobDescriptor toDescriptor() {
+                    throw new UnsupportedOperationException(
+                            "Should never call this method for placeholder blob.");
+                }
+
+                @Override
+                public SeekableInputStream newInputStream() throws IOException {
+                    throw new UnsupportedOperationException(
+                            "Should never call this method for placeholder blob.");
+                }
+            };
+
     byte[] toData();
 
     BlobDescriptor toDescriptor();

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
@@ -30,15 +31,22 @@ import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
@@ -48,6 +56,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.RowTrackingTable;
 import org.apache.paimon.types.DataField;
@@ -148,6 +157,73 @@ public class BlobTableTest extends TableTestBase {
                 });
 
         assertThat(integer.get()).isEqualTo(1000);
+    }
+
+    @Test
+    public void testReadBlobPlaceHolderFallback() throws Exception {
+        createTableDefault();
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(1, BinaryString.fromString("first"), new BlobData(blobBytes)),
+                        GenericRow.of(
+                                2, BinaryString.fromString("second"), new BlobData(blobBytes)),
+                        GenericRow.of(
+                                3, BinaryString.fromString("third"), new BlobData(blobBytes))));
+
+        FileStoreTable table = getTableDefault();
+        List<DataFileMeta> files =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        DataFileMeta dataFile =
+                files.stream()
+                        .filter(file -> !BlobFileFormat.isBlobFile(file.fileName()))
+                        .findFirst()
+                        .get();
+        DataFileMeta oldBlobFile =
+                files.stream()
+                        .filter(file -> BlobFileFormat.isBlobFile(file.fileName()))
+                        .findFirst()
+                        .get();
+
+        byte[] updatedBytes = "updated-blob".getBytes();
+        DataFilePathFactory pathFactory =
+                table.store().pathFactory().createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0);
+        DataFileMeta newBlobFile =
+                writeBlobFile(
+                        table.fileIO(),
+                        pathFactory.newBlobPath(),
+                        Arrays.asList(Blob.PLACE_HOLDER, new BlobData(updatedBytes)),
+                        dataFile.nonNullFirstRowId(),
+                        oldBlobFile.maxSequenceNumber() + 1,
+                        oldBlobFile.schemaId(),
+                        oldBlobFile.writeCols());
+
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath(pathFactory.parent().toString())
+                        .withDataFiles(Arrays.asList(dataFile, newBlobFile, oldBlobFile))
+                        .build();
+
+        DataEvolutionSplitRead read =
+                new DataEvolutionSplitRead(
+                        table.fileIO(),
+                        table.schemaManager(),
+                        table.schema(),
+                        table.rowType(),
+                        table.coreOptions(),
+                        table.store().pathFactory());
+
+        List<byte[]> actual = new ArrayList<>();
+        read.createReader(split).forEachRemaining(row -> actual.add(row.getBlob(2).toData()));
+
+        assertThat(actual.size()).isEqualTo(3);
+        assertThat(actual.get(0)).isEqualTo(blobBytes);
+        assertThat(actual.get(1)).isEqualTo(updatedBytes);
+        assertThat(actual.get(2)).isEqualTo(blobBytes);
     }
 
     @Test
@@ -969,6 +1045,48 @@ public class BlobTableTest extends TableTestBase {
         try (org.apache.paimon.fs.PositionOutputStream out = fileIO.newOutputStream(path, true)) {
             out.write(bytes);
         }
+    }
+
+    private static DataFileMeta writeBlobFile(
+            FileIO fileIO,
+            Path path,
+            List<Blob> blobs,
+            long firstRowId,
+            long maxSequenceNumber,
+            long schemaId,
+            List<String> writeCols)
+            throws IOException {
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            FormatWriter writer =
+                    new BlobFileFormat()
+                            .createWriterFactory(RowType.of(DataTypes.BLOB()))
+                            .create(out, "none");
+            for (Blob blob : blobs) {
+                writer.addElement(GenericRow.of(blob));
+            }
+            writer.close();
+        }
+        return DataFileMeta.create(
+                path.getName(),
+                fileIO.getFileSize(path),
+                blobs.size(),
+                DataFileMeta.EMPTY_MIN_KEY,
+                DataFileMeta.EMPTY_MAX_KEY,
+                SimpleStats.EMPTY_STATS,
+                SimpleStats.EMPTY_STATS,
+                0,
+                maxSequenceNumber,
+                schemaId,
+                DataFileMeta.DUMMY_LEVEL,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(System.currentTimeMillis()),
+                0L,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                firstRowId,
+                writeCols);
     }
 
     private static long countFilesWithSuffix(FileIO fileIO, Path root, String suffix)

@@ -94,6 +94,8 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                 Blob blob;
                 if (fileMeta.isNull(currentPosition)) {
                     blob = null;
+                } else if (fileMeta.isPlaceHolder(currentPosition)) {
+                    blob = Blob.PLACE_HOLDER;
                 } else {
                     long offset = fileMeta.blobOffset(currentPosition) + 4;
                     long length = fileMeta.blobLength(currentPosition) - 16;
