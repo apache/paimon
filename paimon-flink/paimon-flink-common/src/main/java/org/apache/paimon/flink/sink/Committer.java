@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.sink.state.StateStore;
 
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
+import org.apache.flink.metrics.MetricGroup;
 
 import javax.annotation.Nullable;
 
@@ -83,7 +83,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
         String commitUser();
 
         @Nullable
-        OperatorMetricGroup metricGroup();
+        MetricGroup metricGroup();
 
         boolean streamingCheckpointEnabled();
 
@@ -98,7 +98,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
 
     static Context createContext(
             String commitUser,
-            @Nullable OperatorMetricGroup metricGroup,
+            @Nullable MetricGroup metricGroup,
             boolean streamingCheckpointEnabled,
             boolean isRestored,
             StateStore stateStore,
@@ -111,7 +111,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             }
 
             @Override
-            public OperatorMetricGroup metricGroup() {
+            public MetricGroup metricGroup() {
                 return metricGroup;
             }
 

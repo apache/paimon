@@ -52,7 +52,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
         if (context.metricGroup() != null) {
             this.commit.withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
-            this.committerMetrics = new CommitterMetrics(context.metricGroup().getIOMetricGroup());
+            this.committerMetrics = new CommitterMetrics(context.metricGroup());
         } else {
             this.committerMetrics = null;
         }
