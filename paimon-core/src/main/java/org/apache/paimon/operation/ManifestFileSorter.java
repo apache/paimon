@@ -215,6 +215,7 @@ public class ManifestFileSorter {
         }
         return new ClassifyResult(defaultCompactionManifests, lsmFiles, deleteEntries);
     }
+
     /**
      * Build level-sorted runs from a list of manifest files. Sorts files by min partition value,
      * greedy-scans to build non-overlapping SortedRuns, then assigns levels by totalSize (Top-4
@@ -405,6 +406,7 @@ public class ManifestFileSorter {
         }
         return merged;
     }
+
     /**
      * Iterate over sections, decide whether to rewrite each section fully or partially based on the
      * maxRewriteSize threshold and whether the section contains defaultCompaction files.
