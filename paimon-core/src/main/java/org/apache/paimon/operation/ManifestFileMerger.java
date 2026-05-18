@@ -41,6 +41,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -63,9 +64,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 
-import static java.util.Collections.singletonList;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -311,12 +310,8 @@ public class ManifestFileMerger {
 
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
-        Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
-                file ->
-                        singletonList(
-                                readForFullCompaction(
-                                        file, manifestFile, mustChange, deleteEntries));
         Exception exception = null;
+        int actualRewriteCount;
         try {
             if (manifestMergeSorted) {
                 actualRewriteCount =
@@ -472,7 +467,7 @@ public class ManifestFileMerger {
                         row.setField(0, entry.partition());
                         row.setField(1, entry.bucket());
                         row.setField(2, entry.level());
-                        row.setField(3, entry.toBytes());
+                        row.setField(3, entrySerializer.serializeToBytes(entry));
                         sortBuffer.write(row);
                     }
                     actualRewriteCount++;
@@ -513,14 +508,19 @@ public class ManifestFileMerger {
                 manifestMergeSortBufferSize >= minBufferSize,
                 "Manifest merge sort buffer must be at least three pages (" + minBufferSize + ")");
 
+        RecordComparator partitionRmpr = null;
+        if (partitionType.getFieldCount() > 0) {
+            partitionRmpr = createPartitionRecordComparator(partitionType);
+        }
+        RecordComparator partitionComparator = partitionRmpr;
+
         RecordComparator comparator =
                 (a, b) -> {
-                    if (partitionType.getFieldCount() > 0) {
+                    if (partitionComparator != null) {
                         int cmp =
-                                InternalRowUtils.compare(
+                                partitionComparator.compare(
                                         a.getRow(0, partitionType.getFieldCount()),
-                                        b.getRow(0, partitionType.getFieldCount()),
-                                        partitionType);
+                                        b.getRow(0, partitionType.getFieldCount()));
                         if (cmp != 0) {
                             return cmp;
                         }
@@ -560,21 +560,45 @@ public class ManifestFileMerger {
                 SerializationUtils.newBytesType(false));
     }
 
+    private static Comparator<BinaryRow> createPartitionRecordComparator(RowType partitionType) {
+        try {
+            int[] sortFields = new int[partitionType.getFieldCount()];
+            boolean[] ascendingOrders = new boolean[sortFields.length];
+            for (int i = 0; i < sortFields.length; i++) {
+                sortFields[i] = i;
+                ascendingOrders[i] = true;
+            }
+            RecordComparator codegenComparator =
+                    newRecordComparator(
+                            partitionType.getFieldTypes(), sortFields, ascendingOrders);
+            return (a, b) -> codegenComparator.compare(a, b);
+        } catch (Throwable t) {
+            // Fallback to pure-java comparison for environments where codegen is unavailable.
+            List<DataType> fieldTypes = partitionType.getFieldTypes();
+            InternalRow.FieldGetter[] getters = new InternalRow.FieldGetter[fieldTypes.size()];
+            for (int i = 0; i < getters.length; i++) {
+                getters[i] = InternalRow.createFieldGetter(fieldTypes.get(i), i);
+            }
+            return (a, b) -> {
+                for (int i = 0; i < getters.length; i++) {
+                    int cmp =
+                            InternalRowUtils.compare(
+                                    getters[i].getFieldOrNull(a),
+                                    getters[i].getFieldOrNull(b),
+                                    fieldTypes.get(i).getTypeRoot());
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+                }
+                return 0;
+            };
+        }
+    }
+
     static Comparator<ManifestEntry> createManifestEntryComparator(RowType partitionType) {
         Comparator<BinaryRow> partitionComparator = null;
         if (partitionType.getFieldCount() > 0) {
-            try {
-                int[] sortFields = new int[partitionType.getFieldCount()];
-                for (int i = 0; i < sortFields.length; i++) {
-                    sortFields[i] = i;
-                }
-                RecordComparator codegenComparator =
-                        newRecordComparator(partitionType.getFieldTypes(), sortFields, true);
-                partitionComparator = (a, b) -> codegenComparator.compare(a, b);
-            } catch (Throwable t) {
-                // Fallback to pure-java comparison for environments where codegen is unavailable.
-                partitionComparator = (a, b) -> InternalRowUtils.compare(a, b, partitionType);
-            }
+            partitionComparator = createPartitionRecordComparator(partitionType);
         }
 
         Comparator<BinaryRow> finalPartitionComparator = partitionComparator;

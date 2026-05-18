@@ -955,14 +955,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     ManifestFileMerger.merge(
                             mergeBeforeManifests,
                             manifestFile,
-                            manifestTargetSize.getBytes(),
-                            manifestMergeMinCount,
-                            manifestFullCompactionSize.getBytes(),
+                            options.manifestTargetSize().getBytes(),
+                            options.manifestMergeMinCount(),
+                            options.manifestFullCompactionThresholdSize().getBytes(),
                             partitionType,
-                            manifestReadParallelism,
-                            coreOptions.manifestMergeSorted()
-                                    && coreOptions.manifestMergeSortOnCommit(),
-                            coreOptions.manifestMergeSortBufferSize());
+                            options.scanManifestParallelism(),
+                            options.manifestMergeSorted()
+                                    && options.manifestMergeSortOnCommit(),
+                            options.manifestMergeSortBufferSize());
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -988,7 +988,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // write new delta files into manifest files
             deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
             List<ManifestEntry> deltaFilesForWrite = deltaFiles;
-            if (coreOptions.manifestDeltaSorted() && deltaFiles.size() > 1) {
+            if (options.manifestDeltaSorted() && deltaFiles.size() > 1) {
                 deltaFilesForWrite = new ArrayList<>(deltaFiles);
                 deltaFilesForWrite.sort(
                         ManifestFileMerger.createManifestEntryComparator(partitionType));
@@ -1198,8 +1198,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         1,
                         partitionType,
                         options.scanManifestParallelism(),
-                        coreOptions.manifestMergeSorted(),
-                        coreOptions.manifestMergeSortBufferSize());
+                        options.manifestMergeSorted(),
+                        options.manifestMergeSortBufferSize());
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
