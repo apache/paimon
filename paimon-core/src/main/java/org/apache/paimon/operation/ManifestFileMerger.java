@@ -67,7 +67,6 @@ import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
-import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Util for merging manifest files. */
