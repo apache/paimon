@@ -73,6 +73,7 @@ under the License.
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-api</module>
         <module>paimon-lumina</module>
+        <module>paimon-elasticsearch</module>
         <module>paimon-vortex</module>
         <module>paimon-tantivy</module>
     </modules>
