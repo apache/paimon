@@ -86,9 +86,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       action match {
         case updateAction: UpdateAction =>
           for (assignment <- updateAction.assignments) {
-            if (!assignment.key.equals(assignment.value)) {
-              val key = assignment.key.asInstanceOf[AttributeReference]
-              columns ++= Seq(key)
+            if (isModifiedAssignment(assignment)) {
+              columns += assignmentKeyAttribute(assignment)
             }
           }
       }
@@ -281,9 +280,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           UpdateAction.apply(
             update.condition,
             update.assignments.filter(
-              a =>
-                updateColumnsSorted.contains(
-                  a.key.asInstanceOf[AttributeReference])) ++ assignments))
+              a => updateColumnsSorted.contains(assignmentKeyAttribute(a))) ++ assignments))
 
     for (action <- realUpdateActions) {
       allFields ++= action.references.flatMap(r => extractFields(r)).seq
@@ -617,6 +614,27 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val ROW_FROM_TARGET = "__row_from_target"
   final private val ROW_ID_NAME = "_ROW_ID"
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
+
+  private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
+    !sameAttributeReference(assignment.key, assignment.value)
+  }
+
+  private[commands] def assignmentKeyAttribute(assignment: Assignment): AttributeReference = {
+    assignment.key match {
+      case key: AttributeReference => key
+      case other =>
+        throw new UnsupportedOperationException(
+          s"Unsupported update assignment key: $other. Only top-level attributes are supported.")
+    }
+  }
+
+  private def sameAttributeReference(left: Expression, right: Expression): Boolean = {
+    (left, right) match {
+      case (leftAttr: AttributeReference, rightAttr: AttributeReference) =>
+        leftAttr.sameRef(rightAttr)
+      case _ => false
+    }
+  }
 
   private def floorBinarySearch(indexed: immutable.IndexedSeq[Long], value: Long): Long = {
     if (indexed.isEmpty) {
