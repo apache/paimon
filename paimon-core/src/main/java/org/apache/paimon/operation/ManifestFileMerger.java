@@ -560,7 +560,7 @@ public class ManifestFileMerger {
                 SerializationUtils.newBytesType(false));
     }
 
-    private static Comparator<BinaryRow> createPartitionRecordComparator(RowType partitionType) {
+    private static RecordComparator createPartitionRecordComparator(RowType partitionType) {
         try {
             int[] sortFields = new int[partitionType.getFieldCount()];
             boolean[] ascendingOrders = new boolean[sortFields.length];
@@ -568,9 +568,7 @@ public class ManifestFileMerger {
                 sortFields[i] = i;
                 ascendingOrders[i] = true;
             }
-            RecordComparator codegenComparator =
-                    newRecordComparator(partitionType.getFieldTypes(), sortFields, ascendingOrders);
-            return (a, b) -> codegenComparator.compare(a, b);
+            return newRecordComparator(partitionType.getFieldTypes(), sortFields, ascendingOrders);
         } catch (Throwable t) {
             // Fallback to pure-java comparison for environments where codegen is unavailable.
             List<DataType> fieldTypes = partitionType.getFieldTypes();
@@ -595,12 +593,12 @@ public class ManifestFileMerger {
     }
 
     static Comparator<ManifestEntry> createManifestEntryComparator(RowType partitionType) {
-        Comparator<BinaryRow> partitionComparator = null;
+        Comparator<InternalRow> partitionComparator = null;
         if (partitionType.getFieldCount() > 0) {
             partitionComparator = createPartitionRecordComparator(partitionType);
         }
 
-        Comparator<BinaryRow> finalPartitionComparator = partitionComparator;
+        Comparator<InternalRow> finalPartitionComparator = partitionComparator;
         return (a, b) -> {
             int cmp = 0;
             if (finalPartitionComparator != null) {
