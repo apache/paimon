@@ -960,8 +960,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             options.manifestFullCompactionThresholdSize().getBytes(),
                             partitionType,
                             options.scanManifestParallelism(),
-                            options.manifestMergeSorted()
-                                    && options.manifestMergeSortOnCommit(),
+                            options.manifestMergeSorted() && options.manifestMergeSortOnCommit(),
                             options.manifestMergeSortBufferSize());
             baseManifestList = manifestList.write(mergeAfterManifests);
 

@@ -569,8 +569,7 @@ public class ManifestFileMerger {
                 ascendingOrders[i] = true;
             }
             RecordComparator codegenComparator =
-                    newRecordComparator(
-                            partitionType.getFieldTypes(), sortFields, ascendingOrders);
+                    newRecordComparator(partitionType.getFieldTypes(), sortFields, ascendingOrders);
             return (a, b) -> codegenComparator.compare(a, b);
         } catch (Throwable t) {
             // Fallback to pure-java comparison for environments where codegen is unavailable.
