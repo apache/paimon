@@ -735,6 +735,7 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                                 put(DATA_EVOLUTION_ENABLED.key(), "true");
                                 put("blob-field", "picture");
                                 put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+                                put("sink.parallelism", "1");
                             }
                         }));
         insertInto(
