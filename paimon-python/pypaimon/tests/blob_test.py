@@ -1134,7 +1134,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertGreater(file_size, 0)
 
         # ========== Step 3: Read data and check ==========
-        # Define schema for reading
+        # Reading always resolves blob to actual content (aligned with Java getBlob behavior)
         read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
         reader = FormatBlobReader(
             file_io=file_io,
@@ -1142,44 +1142,17 @@ class BlobEndToEndTest(unittest.TestCase):
             read_fields=[blob_field_name],
             full_fields=read_fields,
             push_down_predicate=None,
-            blob_as_descriptor=True
         )
 
-        # Read with blob_as_descriptor=True (read output as descriptor bytes)
         batch = reader.read_arrow_batch()
         self.assertIsNotNone(batch)
         self.assertEqual(batch.num_rows, 1)
         self.assertEqual(batch.num_columns, 1)
 
-        read_blob_bytes = batch.column(0)[0].as_py()
-        self.assertIsInstance(read_blob_bytes, bytes)
-
-        # Deserialize the returned descriptor
-        returned_descriptor = BlobDescriptor.deserialize(read_blob_bytes)
-
-        # The returned descriptor should point to the blob file (simplified implementation)
-        # because the current implementation creates a descriptor pointing to the blob file location
-        self.assertEqual(returned_descriptor.uri, str(blob_file_path))
-        self.assertGreater(returned_descriptor.offset, 0)  # Should have some offset in the blob file
-
-        reader.close()
-
-        reader_content = FormatBlobReader(
-            file_io=file_io,
-            file_path=str(blob_file_path),
-            read_fields=[blob_field_name],
-            full_fields=read_fields,
-            push_down_predicate=None,
-            blob_as_descriptor=False
-        )
-        batch_content = reader_content.read_arrow_batch()
-        self.assertIsNotNone(batch_content)
-        self.assertEqual(batch_content.num_rows, 1)
-        read_content_bytes = batch_content.column(0)[0].as_py()
+        read_content_bytes = batch.column(0)[0].as_py()
         self.assertIsInstance(read_content_bytes, bytes)
-        # With blob_as_descriptor=False, we should get the actual blob content
         self.assertEqual(read_content_bytes, test_content)
-        reader_content.close()
+        reader.close()
 
     def test_null_blob_write(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
@@ -1229,7 +1202,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(batch.column(0)[2].as_py(), b"world")
         reader.close()
 
-    def test_null_blob_read_as_descriptor(self):
+    def test_null_blob_read_resolves_content(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -1251,17 +1224,14 @@ class BlobEndToEndTest(unittest.TestCase):
             read_fields=[blob_field_name],
             full_fields=read_fields,
             push_down_predicate=None,
-            blob_as_descriptor=True
         )
 
         batch = reader.read_arrow_batch()
         self.assertIsNotNone(batch)
         self.assertEqual(batch.num_rows, 3)
-        desc0 = BlobDescriptor.deserialize(batch.column(0)[0].as_py())
-        self.assertEqual(desc0.uri, blob_file_path)
+        self.assertEqual(batch.column(0)[0].as_py(), b"hello")
         self.assertIsNone(batch.column(0)[1].as_py())
-        desc2 = BlobDescriptor.deserialize(batch.column(0)[2].as_py())
-        self.assertEqual(desc2.uri, blob_file_path)
+        self.assertEqual(batch.column(0)[2].as_py(), b"world")
         reader.close()
 
 
