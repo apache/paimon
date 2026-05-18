@@ -1189,7 +1189,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         mergeBeforeManifests,
                         manifestFile,
                         partitionType,
-                        CoreOptions.fromMap(compactOptions.toMap()));
+                        new CoreOptions(compactOptions));
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened

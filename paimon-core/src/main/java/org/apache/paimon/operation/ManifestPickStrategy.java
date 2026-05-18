@@ -40,6 +40,7 @@ public class ManifestPickStrategy {
 
     private final int sizeAmpThreshold;
     private final int sizeRatioThreshold;
+    private static final int MAX_LEVEL = 4;
 
     public ManifestPickStrategy(int sizeAmpThreshold, int sizeRatioThreshold) {
         Preconditions.checkArgument(sizeAmpThreshold > 0, "sizeAmpThreshold must be positive");
@@ -55,7 +56,7 @@ public class ManifestPickStrategy {
      * @return list of picked runs to compact
      */
     public List<ManifestSortedRun> pick(List<ManifestSortedRun> levelRuns) {
-        if (levelRuns.isEmpty() || levelRuns.size() < 5) {
+        if (levelRuns.isEmpty() || levelRuns.size() <= MAX_LEVEL) {
             return new ArrayList<>();
         }
 
@@ -131,7 +132,7 @@ public class ManifestPickStrategy {
                 pickedSize += run.totalSize();
             } else {
                 long nextRunSize = run.totalSize();
-                if (pickedSize * (100.0 + sizeRatioThreshold) / 100.0 >= nextRunSize) {
+                if (pickedSize * (100 + sizeRatioThreshold) >= nextRunSize * 100L) {
                     picked.add(run);
                     pickedSize += nextRunSize;
                 }

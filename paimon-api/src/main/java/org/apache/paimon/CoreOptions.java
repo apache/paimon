@@ -473,9 +473,7 @@ public class CoreOptions implements Serializable {
             key("manifest-sort.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription(
-                            "Whether to invoke manifest sort rewrite right after manifest merge"
-                                    + " during commit.");
+                    .withDescription("Whether to invoke manifest sort rewrite during commit.");
 
     public static final ConfigOption<String> MANIFEST_SORT_PARTITION_FIELD =
             key("manifest-sort.partition-field")

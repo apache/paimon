@@ -30,6 +30,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,16 +103,15 @@ public class ManifestFileSorter {
                         : buildLevelSortedRuns(lsmFiles, sortFieldIndex, sortFieldType);
 
         // Step 4: Pick runs to compact.
-        int sizeAmpThreshold = options.maxSizeAmplificationPercent();
-        int sizeRatioThreshold = options.sortedRunSizeRatio();
         ManifestPickStrategy pickStrategy =
-                new ManifestPickStrategy(sizeAmpThreshold, sizeRatioThreshold);
+                new ManifestPickStrategy(
+                        options.maxSizeAmplificationPercent(), options.sortedRunSizeRatio());
         List<ManifestSortedRun> pickedRuns = pickStrategy.pick(levelRuns);
 
         if (pickedRuns.isEmpty() && defaultCompactionMap.isEmpty()) {
             LOG.debug(
                     "Manifest sort rewrite skipped: no runs picked and no defaultCompaction files.");
-            return Optional.of(input);
+            return Optional.empty();
         }
 
         LOG.info(
@@ -138,34 +138,27 @@ public class ManifestFileSorter {
         }
         pickedFiles.addAll(defaultCompactionMap.keySet());
 
-        long maxRewriteSize = options.manifestSortMaxRewriteSize();
-
         List<Section> sections =
                 splitIntoSections(pickedFiles, sortFieldIndex, sortFieldType, defaultCompactionMap);
         sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
-        LOG.info("After mergeSmallAdjacentSections: sections={}.", sections.size());
 
-        List<ManifestFileMeta> sortNewFiles = new ArrayList<>();
+        rewriteSections(
+                sections,
+                defaultCompactionMap,
+                manifestFile,
+                sortFieldIndex,
+                sortFieldType,
+                deleteEntries,
+                suggestedMetaSize,
+                options.manifestSortMaxRewriteSize(),
+                result,
+                newFilesForAbort,
+                manifestReadParallelism);
 
-        List<ManifestFileMeta> rewritten =
-                rewriteSections(
-                        sections,
-                        defaultCompactionMap,
-                        manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
-                        deleteEntries,
-                        suggestedMetaSize,
-                        maxRewriteSize,
-                        sortNewFiles,
-                        manifestReadParallelism);
-        result.addAll(rewritten);
-
-        newFilesForAbort.addAll(sortNewFiles);
         LOG.info(
                 "Manifest sort rewrite completed: sections={}, newFiles={}, resultFiles={}.",
                 sections.size(),
-                sortNewFiles.size(),
+                newFilesForAbort.size(),
                 result.size());
         return Optional.of(result);
     }
@@ -419,10 +412,8 @@ public class ManifestFileSorter {
      * <p>Within threshold: read all metas, sort and rewrite the entire section. Exceeds threshold
      * but contains defaultCompaction files: only rewrite sub-segments around those files. Exceeds
      * threshold with no defaultCompaction files: skip (keep as-is).
-     *
-     * @return the list of result manifest files (both rewritten and kept-as-is)
      */
-    private static List<ManifestFileMeta> rewriteSections(
+    private static void rewriteSections(
             List<Section> sections,
             Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
             ManifestFile manifestFile,
@@ -431,16 +422,15 @@ public class ManifestFileSorter {
             Set<FileEntry.Identifier> deleteEntries,
             long suggestedMetaSize,
             long maxRewriteSize,
+            List<ManifestFileMeta> result,
             List<ManifestFileMeta> sortNewFiles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        List<ManifestFileMeta> result = new ArrayList<>();
         long processedSize = 0;
         boolean reachedLimit = false;
 
         for (int i = 0; i < sections.size(); i++) {
             Section section = sections.get(i);
-            // Single-file section without defaultCompaction: already sorted, skip rewrite.
             if (section.files.size() == 1) {
                 sortAndRewriteSection(
                         section.files,
@@ -454,11 +444,9 @@ public class ManifestFileSorter {
                         manifestReadParallelism);
                 continue;
             }
-            long sectionSize = section.totalSize;
-            boolean exceedsThreshold = processedSize + sectionSize > maxRewriteSize;
 
-            if (!exceedsThreshold) {
-                processedSize += sectionSize;
+            if (processedSize + section.totalSize <= maxRewriteSize) {
+                processedSize += section.totalSize;
                 sortAndRewriteSection(
                         section.files,
                         manifestFile,
@@ -472,18 +460,18 @@ public class ManifestFileSorter {
             } else if (!reachedLimit) {
                 // First time exceeding threshold without defaultCompaction:
                 // partial rewrite within remaining budget.
-                long remaining = maxRewriteSize - processedSize;
-                processedSize += sectionSize;
+                long rewriteTotalSize = maxRewriteSize - processedSize;
+                processedSize += section.totalSize;
                 // Split section into two parts: files within budget and remaining files
-                List<ManifestFileMeta> toRewrite = new ArrayList<>();
+                List<ManifestFileMeta> rewriteFiles = new ArrayList<>();
                 List<ManifestFileMeta> remainingFiles = new ArrayList<>();
                 long rewriteSize = 0;
                 long remainingSize = 0;
                 boolean remainingHasDefault = false;
 
                 for (ManifestFileMeta file : section.files) {
-                    if (rewriteSize + file.fileSize() <= remaining) {
-                        toRewrite.add(file);
+                    if (rewriteSize + file.fileSize() <= rewriteTotalSize) {
+                        rewriteFiles.add(file);
                         rewriteSize += file.fileSize();
                     } else {
                         remainingFiles.add(file);
@@ -495,7 +483,7 @@ public class ManifestFileSorter {
                 }
 
                 sortAndRewriteSection(
-                        toRewrite,
+                        rewriteFiles,
                         manifestFile,
                         sortFieldIndex,
                         sortFieldType,
@@ -529,7 +517,6 @@ public class ManifestFileSorter {
                 result.addAll(section.files);
             }
         }
-        return result;
     }
 
     /** Rewrite sub-segments within a section that exceeds the rewrite threshold. */
@@ -625,9 +612,7 @@ public class ManifestFileSorter {
                     manifestFile.createRollingWriter();
             Exception exception = null;
             try {
-                for (ManifestEntry entry : entriesToRewrite) {
-                    writer.write(entry);
-                }
+                writer.write(entriesToRewrite);
             } catch (Exception e) {
                 exception = e;
             } finally {
@@ -654,7 +639,7 @@ public class ManifestFileSorter {
         if (c != 0) {
             return c;
         }
-        // ADD before DELETE, so that mergeEntries can correctly cancel pairs
+        // ADD before DELETE
         int kindCmp = a.kind().compareTo(b.kind());
         if (kindCmp != 0) {
             return kindCmp;
@@ -741,7 +726,12 @@ public class ManifestFileSorter {
         if (deletedIdentifiers.isEmpty()) {
             entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
         } else {
-            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
+            for (ManifestEntry entry :
+                    manifestFile.read(
+                            meta.fileName(),
+                            meta.fileSize(),
+                            FileEntry.addFilter(),
+                            Filter.alwaysTrue())) {
                 if (!deletedIdentifiers.contains(entry.identifier())) {
                     entries.add(entry);
                 }

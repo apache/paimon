@@ -85,7 +85,7 @@ public class ManifestFileMerger {
             }
 
             // Otherwise try full compaction first, then minor compaction if needed
-            Optional<List<ManifestFileMeta>> merged =
+            Optional<List<ManifestFileMeta>> fullCompacted =
                     tryFullCompaction(
                             input,
                             newFilesForAbort,
@@ -94,8 +94,7 @@ public class ManifestFileMerger {
                             manifestFullCompactionSize,
                             partitionType,
                             manifestReadParallelism);
-
-            return merged.orElseGet(
+            return fullCompacted.orElseGet(
                     () ->
                             tryMinorCompaction(
                                     input,
