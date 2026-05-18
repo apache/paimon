@@ -500,7 +500,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<MemorySize> MANIFEST_SORT_OPEN_FILE_COST =
             key("manifest-sort.open-file-cost")
                     .memoryType()
-                    .defaultValue(MemorySize.ofKibiBytes(40))
+                    .defaultValue(MemorySize.ofMebiBytes(4))
                     .withDescription(
                             "Open file cost of a manifest file during sort rewrite. "
                                     + "It is added to each manifest file's size when computing "
