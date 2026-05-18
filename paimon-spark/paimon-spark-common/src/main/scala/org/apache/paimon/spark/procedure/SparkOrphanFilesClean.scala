@@ -112,10 +112,12 @@ case class SparkOrphanFilesClean(
           }
       }
 
-    // union manifest and data files
+    // union manifest and data files, including files from the latest snapshot
+    val latestSnapshotFiles = collectLatestSnapshotFiles(branches).asScala.toSeq
     val usedFiles = usedManifestFiles
       .map(_.manifestName)
       .union(dataFiles)
+      .union(spark.createDataset(latestSnapshotFiles))
       .toDF("used_name")
 
     // find candidate files which can be removed
