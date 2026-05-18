@@ -183,6 +183,58 @@ public class FileKeyRangesTableTest extends TableTestBase {
         assertThat(hasPt2).isTrue();
     }
 
+    @Test
+    public void testReadWithRecordCountPostFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FileKeyRangesTable.TABLE_TYPE);
+        assertThat(readPartBucketLevel(builder.greaterOrEqual(6, 1L))).isNotEmpty();
+        assertThat(readPartBucketLevel(builder.greaterThan(6, 100L))).isEmpty();
+    }
+
+    @Test
+    public void testReadWithSchemaIdPostFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(FileKeyRangesTable.TABLE_TYPE);
+        List<String> baseline = readPartBucketLevel(null);
+        assertThat(baseline).isNotEmpty();
+        assertThat(readPartBucketLevel(builder.equal(4, 0L))).isEqualTo(baseline);
+        assertThat(readPartBucketLevel(builder.equal(4, 9999L))).isEmpty();
+    }
+
+    @Test
+    public void testReadWithCombinedScanAndPostFilter() throws Exception {
+        // partition is scan-pushdown, record_count is post-filter only.
+        PredicateBuilder builder = new PredicateBuilder(FileKeyRangesTable.TABLE_TYPE);
+        Predicate combined =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("{1}")),
+                        builder.greaterOrEqual(6, 1L));
+        List<String> rows = readPartBucketLevel(combined);
+        assertThat(rows).isNotEmpty();
+        for (String row : rows) {
+            assertThat(row).startsWith("{1}-");
+        }
+        Predicate combinedEmpty =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("{1}")),
+                        builder.greaterThan(6, 100L));
+        assertThat(readPartBucketLevel(combinedEmpty)).isEmpty();
+    }
+
+    @Test
+    public void testReadWithPartitionRangeScanPushdown() throws Exception {
+        write(table, GenericRow.of(3, 11, 50));
+
+        PredicateBuilder builder = new PredicateBuilder(FileKeyRangesTable.TABLE_TYPE);
+        List<String> rows =
+                readPartBucketLevel(builder.lessThan(0, BinaryString.fromString("{11}")));
+
+        assertThat(rows).isNotEmpty();
+        for (String row : rows) {
+            assertThat(row).doesNotStartWith("{11}-");
+        }
+        assertThat(rows.stream().anyMatch(r -> r.startsWith("{1}-"))).isTrue();
+        assertThat(rows.stream().anyMatch(r -> r.startsWith("{2}-"))).isTrue();
+    }
+
     private List<String> readPartBucketLevel(Predicate predicate) throws IOException {
         ReadBuilder rb = fileKeyRangesTable.newReadBuilder();
         if (predicate != null) {
