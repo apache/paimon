@@ -54,6 +54,10 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     T visitIsNull(FieldRef fieldRef);
 
+    default T visitIsNaN(FieldRef fieldRef) {
+        throw new UnsupportedOperationException();
+    }
+
     // ----------------- Binary functions ------------------------
 
     T visitStartsWith(FieldRef fieldRef, Object literal);
