@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -45,20 +46,31 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <p>Reads the archive header to get file layout, then opens a Tantivy searcher backed by JNI
  * callbacks to the {@link SeekableInputStream}. No temp files are created.
+ *
+ * <p>On {@link #close()}, the searcher is returned to the {@link TantivySearcherPool} rather than
+ * destroyed, so the Rust-side index (including the FST term dictionary) stays warm across queries.
  */
 public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
 
     private final GlobalIndexIOMeta ioMeta;
     private final GlobalIndexFileReader fileReader;
+    private final Map<String, ArchiveLayout> layoutCache;
+    private final TantivySearcherPool searcherPool;
+    private final String poolKey;
 
-    private volatile TantivySearcher searcher;
-    private volatile SeekableInputStream openStream;
+    private volatile TantivySearcherPool.PooledEntry borrowed;
 
     public TantivyFullTextGlobalIndexReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> ioMetas) {
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> ioMetas,
+            Map<String, ArchiveLayout> layoutCache,
+            TantivySearcherPool searcherPool) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
+        this.layoutCache = layoutCache;
+        this.searcherPool = searcherPool;
+        this.poolKey = this.ioMeta.filePath().toString() + "@" + this.ioMeta.fileSize();
     }
 
     @Override
@@ -66,7 +78,7 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
         try {
             ensureLoaded();
             SearchResult result =
-                    searcher.search(fullTextSearch.queryText(), fullTextSearch.limit());
+                    borrowed.searcher.search(fullTextSearch.queryText(), fullTextSearch.limit());
             return Optional.of(toScoredResult(result));
         } catch (IOException e) {
             throw new RuntimeException("Failed to search Tantivy full-text index", e);
@@ -85,26 +97,35 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     }
 
     private void ensureLoaded() throws IOException {
-        if (searcher == null) {
+        if (borrowed == null) {
             synchronized (this) {
-                if (searcher == null) {
-                    SeekableInputStream in = fileReader.getInputStream(ioMeta);
-                    try {
-                        ArchiveLayout layout = parseArchiveHeader(in);
-                        StreamFileInput streamInput = new SynchronizedStreamFileInput(in);
-                        searcher =
-                                new TantivySearcher(
-                                        layout.fileNames,
-                                        layout.fileOffsets,
-                                        layout.fileLengths,
-                                        streamInput);
-                        openStream = in;
-                    } catch (Exception e) {
-                        in.close();
-                        throw e;
+                if (borrowed == null) {
+                    TantivySearcherPool.PooledEntry entry = searcherPool.borrow(poolKey);
+                    if (entry == null) {
+                        entry = createEntry();
                     }
+                    borrowed = entry;
                 }
             }
+        }
+    }
+
+    private TantivySearcherPool.PooledEntry createEntry() throws IOException {
+        SeekableInputStream in = fileReader.getInputStream(ioMeta);
+        try {
+            ArchiveLayout layout = layoutCache.get(poolKey);
+            if (layout == null) {
+                layout = parseArchiveHeader(in);
+                layoutCache.put(poolKey, layout);
+            }
+            StreamFileInput streamInput = new SynchronizedStreamFileInput(in);
+            TantivySearcher searcher =
+                    new TantivySearcher(
+                            layout.fileNames, layout.fileOffsets, layout.fileLengths, streamInput);
+            return new TantivySearcherPool.PooledEntry(searcher, in);
+        } catch (Exception e) {
+            in.close();
+            throw e;
         }
     }
 
@@ -170,35 +191,9 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
-        Throwable firstException = null;
-
-        if (searcher != null) {
-            try {
-                searcher.close();
-            } catch (Throwable t) {
-                firstException = t;
-            }
-            searcher = null;
-        }
-
-        if (openStream != null) {
-            try {
-                openStream.close();
-            } catch (Throwable t) {
-                if (firstException == null) {
-                    firstException = t;
-                } else {
-                    firstException.addSuppressed(t);
-                }
-            }
-            openStream = null;
-        }
-
-        if (firstException != null) {
-            if (firstException instanceof IOException) {
-                throw (IOException) firstException;
-            }
-            throw new RuntimeException("Failed to close Tantivy reader", firstException);
+        if (borrowed != null) {
+            searcherPool.returnEntry(poolKey, borrowed);
+            borrowed = null;
         }
     }
 
@@ -272,19 +267,6 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     @Override
     public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
         return Optional.empty();
-    }
-
-    /** Parsed archive layout: file names with their offsets and lengths in the stream. */
-    private static class ArchiveLayout {
-        final String[] fileNames;
-        final long[] fileOffsets;
-        final long[] fileLengths;
-
-        ArchiveLayout(String[] fileNames, long[] fileOffsets, long[] fileLengths) {
-            this.fileNames = fileNames;
-            this.fileOffsets = fileOffsets;
-            this.fileLengths = fileLengths;
-        }
     }
 
     /**
