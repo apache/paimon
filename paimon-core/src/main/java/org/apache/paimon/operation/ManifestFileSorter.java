@@ -69,7 +69,6 @@ public class ManifestFileSorter {
             throws Exception {
         // Extract configuration from options
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
-        long manifestFullCompactionSize = options.manifestFullCompactionThresholdSize().getBytes();
         Integer manifestReadParallelism = options.scanManifestParallelism();
         String sortPartitionField = options.manifestSortPartitionField();
         // Step 1: Resolve sort field.
@@ -260,303 +259,6 @@ public class ManifestFileSorter {
         }
         return new ClassifyResult(defaultCompactionManifests, lsmFiles, deleteEntries);
     }
-
-    /**
-     * Iterate over sections, decide whether to rewrite each section fully or partially based on the
-     * maxRewriteSize threshold and whether the section contains defaultCompaction files.
-     *
-     * <p>Within threshold: read all metas, sort and rewrite the entire section. Exceeds threshold
-     * but contains defaultCompaction files: only rewrite sub-segments around those files. Exceeds
-     * threshold with no defaultCompaction files: skip (keep as-is).
-     *
-     * @return the list of result manifest files (both rewritten and kept-as-is)
-     */
-    private static List<ManifestFileMeta> rewriteSections(
-            List<Section> sections,
-            Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
-            ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
-            Set<FileEntry.Identifier> deleteEntries,
-            long suggestedMetaSize,
-            long maxRewriteSize,
-            long openFileCost,
-            List<ManifestFileMeta> sortNewFiles,
-            @Nullable Integer manifestReadParallelism)
-            throws Exception {
-        List<ManifestFileMeta> result = new ArrayList<>();
-        long processedSize = 0;
-
-        boolean reachedLimit = false;
-        long totalRewriteSubSegmentsMs = 0;
-
-        for (int i = 0; i < sections.size(); i++) {
-            Section section = sections.get(i);
-            // Single-file section without defaultCompaction: already sorted, skip rewrite.
-            if (section.files.size() == 1) {
-                if (!section.hasDefaultCompactMeta || deleteEntries.isEmpty()) {
-                    result.addAll(section.files);
-                } else {
-                    processedSize = processedSize + section.totalSizeWithCost;
-                    long t0 = System.currentTimeMillis();
-                    rewriteSubSegments(
-                            section.files,
-                            defaultCompactionMap,
-                            manifestFile,
-                            sortFieldIndex,
-                            sortFieldType,
-                            deleteEntries,
-                            suggestedMetaSize,
-                            sortNewFiles,
-                            result,
-                            manifestReadParallelism);
-                    totalRewriteSubSegmentsMs += System.currentTimeMillis() - t0;
-                }
-                continue;
-            }
-            long sectionSize = section.totalSizeWithCost;
-            boolean exceedsThreshold = processedSize + sectionSize > maxRewriteSize;
-
-            if (!exceedsThreshold) {
-                processedSize += sectionSize;
-                List<ManifestFileMeta> merged =
-                        sortAndRewriteSection(
-                                section.files,
-                                manifestFile,
-                                sortFieldIndex,
-                                sortFieldType,
-                                deleteEntries,
-                                manifestReadParallelism);
-                sortNewFiles.addAll(merged);
-                result.addAll(merged);
-            } else if (!reachedLimit) {
-                // First time exceeding threshold without defaultCompaction:
-                // partial rewrite within remaining budget.
-                long remaining = maxRewriteSize - processedSize;
-                processedSize += sectionSize;
-                // Split section into two parts: files within budget and remaining files
-                List<ManifestFileMeta> toRewrite = new ArrayList<>();
-                List<ManifestFileMeta> remainingFiles = new ArrayList<>();
-                long rewriteSize = 0;
-                long remainingSize = 0;
-                long remainingSizeWithCost = 0;
-                boolean remainingHasDefault = false;
-
-                for (ManifestFileMeta file : section.files) {
-                    long fileCost = Math.max(file.fileSize(), openFileCost);
-                    if (rewriteSize + fileCost <= remaining) {
-                        toRewrite.add(file);
-                        rewriteSize += fileCost;
-                    } else {
-                        remainingFiles.add(file);
-                        remainingSize += file.fileSize();
-                        remainingSizeWithCost += fileCost;
-                        if (defaultCompactionMap.containsKey(file)) {
-                            remainingHasDefault = true;
-                        }
-                    }
-                }
-
-                if (toRewrite.size() > 1) {
-                    List<ManifestFileMeta> merged =
-                            sortAndRewriteSection(
-                                    toRewrite,
-                                    manifestFile,
-                                    sortFieldIndex,
-                                    sortFieldType,
-                                    deleteEntries,
-                                    manifestReadParallelism);
-                    sortNewFiles.addAll(merged);
-                    result.addAll(merged);
-                } else if (toRewrite.size() == 1) {
-                    sortNewFiles.addAll(toRewrite);
-                    result.addAll(toRewrite);
-                }
-
-                // Create new section for remaining files and append to sections list
-                if (!remainingFiles.isEmpty()) {
-                    Section remainingSection =
-                            new Section(
-                                    remainingFiles,
-                                    remainingSize,
-                                    remainingSizeWithCost,
-                                    remainingHasDefault);
-                    // Append remaining section to the end of sections list
-                    sections.add(remainingSection);
-                }
-                reachedLimit = true;
-            } else if (section.hasDefaultCompactMeta) {
-                long t0 = System.currentTimeMillis();
-                rewriteSubSegments(
-                        section.files,
-                        defaultCompactionMap,
-                        manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
-                        deleteEntries,
-                        suggestedMetaSize,
-                        sortNewFiles,
-                        result,
-                        manifestReadParallelism);
-                totalRewriteSubSegmentsMs += System.currentTimeMillis() - t0;
-            } else {
-                result.addAll(section.files);
-            }
-        }
-        System.out.println(
-                "[rewriteSections] rewriteSubSegments total took "
-                        + totalRewriteSubSegmentsMs
-                        + " ms");
-        return result;
-    }
-
-    /**
-     * Rewrite sub-segments within a section that exceeds the rewrite threshold. Only sub-segments
-     * containing defaultCompaction files are rewritten; other files are kept as-is.
-     */
-    private static void rewriteSubSegments(
-            List<ManifestFileMeta> section,
-            Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
-            ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
-            @Nullable Set<FileEntry.Identifier> deleteEntries,
-            long manifestTargetSize,
-            List<ManifestFileMeta> sortNewFiles,
-            List<ManifestFileMeta> result,
-            @Nullable Integer manifestReadParallelism)
-            throws Exception {
-        List<ManifestFileMeta> subSegment = new ArrayList<>();
-        long subSegmentSize = 0;
-        long totalSmallCount = 0;
-        int rewriteCount = 0;
-        for (ManifestFileMeta m : section) {
-            subSegmentSize += m.fileSize();
-            subSegment.add(m);
-
-            if (subSegmentSize >= manifestTargetSize) {
-                if (subSegment.size() == 1
-                        && (!defaultCompactionMap.containsKey(m)
-                                || !defaultCompactionMap.get(m)[1])) result.add(m);
-                else {
-                    List<ManifestFileMeta> merged =
-                            sortAndRewriteSection(
-                                    subSegment,
-                                    manifestFile,
-                                    sortFieldIndex,
-                                    sortFieldType,
-                                    deleteEntries,
-                                    manifestReadParallelism);
-                    long smallCount = 0;
-                    for (ManifestFileMeta f : merged) {
-                        if (f.fileSize() < manifestTargetSize) {
-                            smallCount++;
-                        }
-                    }
-                    rewriteCount++;
-                    totalSmallCount += smallCount;
-                    System.out.println(
-                            "[rewriteSubSegments] merged "
-                                    + subSegment.size()
-                                    + " -> "
-                                    + merged.size()
-                                    + " files, small files(<"
-                                    + manifestTargetSize
-                                    + "): "
-                                    + smallCount);
-                    sortNewFiles.addAll(merged);
-                    result.addAll(merged);
-                }
-                subSegment.clear();
-                subSegmentSize = 0;
-            }
-        }
-        // Flush remaining sub-segment
-        if (!subSegment.isEmpty()) {
-            List<ManifestFileMeta> merged =
-                    sortAndRewriteSection(
-                            subSegment,
-                            manifestFile,
-                            sortFieldIndex,
-                            sortFieldType,
-                            deleteEntries,
-                            manifestReadParallelism);
-            long smallCount = 0;
-            for (ManifestFileMeta f : merged) {
-                if (f.fileSize() < manifestTargetSize) {
-                    smallCount++;
-                }
-            }
-            rewriteCount++;
-            totalSmallCount += smallCount;
-            System.out.println(
-                    "[rewriteSubSegments-flush] merged "
-                            + subSegment.size()
-                            + " -> "
-                            + merged.size()
-                            + " files, small files(<"
-                            + manifestTargetSize
-                            + "): "
-                            + smallCount);
-            sortNewFiles.addAll(merged);
-            result.addAll(merged);
-        }
-        System.out.println(
-                "[rewriteSubSegments] sortAndRewriteSection called "
-                        + rewriteCount
-                        + " times, total small files: "
-                        + totalSmallCount
-                        + ", result size: "
-                        + result.size());
-    }
-
-    /**
-     * Partial rewrite of a section: only rewrite files that fit within the remaining budget. Files
-     * beyond the budget are kept as-is.
-     */
-    private static void partialRewriteSection(
-            List<ManifestFileMeta> sectionFiles,
-            long remaining,
-            long openFileCost,
-            ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
-            @Nullable Set<FileEntry.Identifier> deleteEntries,
-            List<ManifestFileMeta> sortNewFiles,
-            List<ManifestFileMeta> result,
-            @Nullable Integer manifestReadParallelism)
-            throws Exception {
-        List<ManifestFileMeta> toRewrite = new ArrayList<>();
-        int splitIndex = 0;
-        long partialSize = 0;
-        for (int i = 0; i < sectionFiles.size(); i++) {
-            long fileCost = Math.max(sectionFiles.get(i).fileSize(), openFileCost);
-            if (partialSize + fileCost > remaining) {
-                break;
-            }
-            toRewrite.add(sectionFiles.get(i));
-            partialSize += fileCost;
-            splitIndex = i + 1;
-        }
-        if (toRewrite.size() > 1) {
-            List<ManifestFileMeta> merged =
-                    sortAndRewriteSection(
-                            toRewrite,
-                            manifestFile,
-                            sortFieldIndex,
-                            sortFieldType,
-                            deleteEntries,
-                            manifestReadParallelism);
-            sortNewFiles.addAll(merged);
-            result.addAll(merged);
-        } else {
-            result.addAll(toRewrite);
-        }
-        for (int i = splitIndex; i < sectionFiles.size(); i++) {
-            result.add(sectionFiles.get(i));
-        }
-    }
-
     /**
      * Build level-sorted runs from a list of manifest files. Sorts files by min partition value,
      * greedy-scans to build non-overlapping SortedRuns, then assigns levels by totalSize (Top-4
@@ -764,6 +466,252 @@ public class ManifestFileSorter {
         }
         return merged;
     }
+    /**
+     * Iterate over sections, decide whether to rewrite each section fully or partially based on the
+     * maxRewriteSize threshold and whether the section contains defaultCompaction files.
+     *
+     * <p>Within threshold: read all metas, sort and rewrite the entire section. Exceeds threshold
+     * but contains defaultCompaction files: only rewrite sub-segments around those files. Exceeds
+     * threshold with no defaultCompaction files: skip (keep as-is).
+     *
+     * @return the list of result manifest files (both rewritten and kept-as-is)
+     */
+    private static List<ManifestFileMeta> rewriteSections(
+            List<Section> sections,
+            Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
+            ManifestFile manifestFile,
+            int sortFieldIndex,
+            DataType sortFieldType,
+            Set<FileEntry.Identifier> deleteEntries,
+            long suggestedMetaSize,
+            long maxRewriteSize,
+            long openFileCost,
+            List<ManifestFileMeta> sortNewFiles,
+            @Nullable Integer manifestReadParallelism)
+            throws Exception {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        long processedSize = 0;
+
+        boolean reachedLimit = false;
+        long totalRewriteSubSegmentsMs = 0;
+
+        for (int i = 0; i < sections.size(); i++) {
+            Section section = sections.get(i);
+            // Single-file section without defaultCompaction: already sorted, skip rewrite.
+            if (section.files.size() == 1) {
+                if (!section.hasDefaultCompactMeta || deleteEntries.isEmpty()) {
+                    result.addAll(section.files);
+                } else {
+                    long t0 = System.currentTimeMillis();
+                    List<ManifestFileMeta> merged =
+                            sortAndRewriteSection(
+                                    section.files,
+                                    manifestFile,
+                                    sortFieldIndex,
+                                    sortFieldType,
+                                    deleteEntries,
+                                    manifestReadParallelism);
+                    sortNewFiles.addAll(merged);
+                    result.addAll(merged);
+                    totalRewriteSubSegmentsMs += System.currentTimeMillis() - t0;
+                }
+                continue;
+            }
+            long sectionSize = section.totalSizeWithCost;
+            boolean exceedsThreshold = processedSize + sectionSize > maxRewriteSize;
+
+            if (!exceedsThreshold) {
+                processedSize += sectionSize;
+                List<ManifestFileMeta> merged =
+                        sortAndRewriteSection(
+                                section.files,
+                                manifestFile,
+                                sortFieldIndex,
+                                sortFieldType,
+                                deleteEntries,
+                                manifestReadParallelism);
+                sortNewFiles.addAll(merged);
+                result.addAll(merged);
+            } else if (!reachedLimit) {
+                // First time exceeding threshold without defaultCompaction:
+                // partial rewrite within remaining budget.
+                long remaining = maxRewriteSize - processedSize;
+                processedSize += sectionSize;
+                // Split section into two parts: files within budget and remaining files
+                List<ManifestFileMeta> toRewrite = new ArrayList<>();
+                List<ManifestFileMeta> remainingFiles = new ArrayList<>();
+                long rewriteSize = 0;
+                long remainingSize = 0;
+                long remainingSizeWithCost = 0;
+                boolean remainingHasDefault = false;
+
+                for (ManifestFileMeta file : section.files) {
+                    long fileCost = Math.max(file.fileSize(), openFileCost);
+                    if (rewriteSize + fileCost <= remaining) {
+                        toRewrite.add(file);
+                        rewriteSize += fileCost;
+                    } else {
+                        remainingFiles.add(file);
+                        remainingSize += file.fileSize();
+                        remainingSizeWithCost += fileCost;
+                        if (defaultCompactionMap.containsKey(file)) {
+                            remainingHasDefault = true;
+                        }
+                    }
+                }
+
+                if (toRewrite.size() > 1) {
+                    List<ManifestFileMeta> merged =
+                            sortAndRewriteSection(
+                                    toRewrite,
+                                    manifestFile,
+                                    sortFieldIndex,
+                                    sortFieldType,
+                                    deleteEntries,
+                                    manifestReadParallelism);
+                    sortNewFiles.addAll(merged);
+                    result.addAll(merged);
+                } else if (toRewrite.size() == 1) {
+                    sortNewFiles.addAll(toRewrite);
+                    result.addAll(toRewrite);
+                }
+
+                // Create new section for remaining files and append to sections list
+                if (!remainingFiles.isEmpty()) {
+                    Section remainingSection =
+                            new Section(
+                                    remainingFiles,
+                                    remainingSize,
+                                    remainingSizeWithCost,
+                                    remainingHasDefault);
+                    // Append remaining section to the end of sections list
+                    sections.add(remainingSection);
+                }
+                reachedLimit = true;
+            } else if (section.hasDefaultCompactMeta) {
+                long t0 = System.currentTimeMillis();
+                rewriteSubSegments(
+                        section.files,
+                        defaultCompactionMap,
+                        manifestFile,
+                        sortFieldIndex,
+                        sortFieldType,
+                        deleteEntries,
+                        suggestedMetaSize,
+                        sortNewFiles,
+                        result,
+                        manifestReadParallelism);
+                totalRewriteSubSegmentsMs += System.currentTimeMillis() - t0;
+            } else {
+                result.addAll(section.files);
+            }
+        }
+        System.out.println(
+                "[rewriteSections] rewriteSubSegments total took "
+                        + totalRewriteSubSegmentsMs
+                        + " ms");
+        return result;
+    }
+
+    /**
+     * Rewrite sub-segments within a section that exceeds the rewrite threshold. Only sub-segments
+     * containing defaultCompaction files are rewritten; other files are kept as-is.
+     */
+    private static void rewriteSubSegments(
+            List<ManifestFileMeta> section,
+            Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
+            ManifestFile manifestFile,
+            int sortFieldIndex,
+            DataType sortFieldType,
+            @Nullable Set<FileEntry.Identifier> deleteEntries,
+            long manifestTargetSize,
+            List<ManifestFileMeta> sortNewFiles,
+            List<ManifestFileMeta> result,
+            @Nullable Integer manifestReadParallelism)
+            throws Exception {
+        List<ManifestFileMeta> subSegment = new ArrayList<>();
+        long subSegmentSize = 0;
+        long totalSmallCount = 0;
+        int rewriteCount = 0;
+        for (ManifestFileMeta m : section) {
+            subSegmentSize += m.fileSize();
+            subSegment.add(m);
+
+            if (subSegmentSize >= manifestTargetSize) {
+                if (subSegment.size() == 1
+                        && (!defaultCompactionMap.containsKey(m)
+                                || !defaultCompactionMap.get(m)[1])) result.add(m);
+                else {
+                    List<ManifestFileMeta> merged =
+                            sortAndRewriteSection(
+                                    subSegment,
+                                    manifestFile,
+                                    sortFieldIndex,
+                                    sortFieldType,
+                                    deleteEntries,
+                                    manifestReadParallelism);
+                    long smallCount = 0;
+                    for (ManifestFileMeta f : merged) {
+                        if (f.fileSize() < manifestTargetSize) {
+                            smallCount++;
+                        }
+                    }
+                    rewriteCount++;
+                    totalSmallCount += smallCount;
+                    System.out.println(
+                            "[rewriteSubSegments] merged "
+                                    + subSegment.size()
+                                    + " -> "
+                                    + merged.size()
+                                    + " files, small files(<"
+                                    + manifestTargetSize
+                                    + "): "
+                                    + smallCount);
+                    sortNewFiles.addAll(merged);
+                    result.addAll(merged);
+                }
+                subSegment.clear();
+                subSegmentSize = 0;
+            }
+        }
+        // Flush remaining sub-segment
+        if (!subSegment.isEmpty()) {
+            List<ManifestFileMeta> merged =
+                    sortAndRewriteSection(
+                            subSegment,
+                            manifestFile,
+                            sortFieldIndex,
+                            sortFieldType,
+                            deleteEntries,
+                            manifestReadParallelism);
+            long smallCount = 0;
+            for (ManifestFileMeta f : merged) {
+                if (f.fileSize() < manifestTargetSize) {
+                    smallCount++;
+                }
+            }
+            rewriteCount++;
+            totalSmallCount += smallCount;
+            System.out.println(
+                    "[rewriteSubSegments-flush] merged "
+                            + subSegment.size()
+                            + " -> "
+                            + merged.size()
+                            + " files, small files(<"
+                            + manifestTargetSize
+                            + "): "
+                            + smallCount);
+            sortNewFiles.addAll(merged);
+            result.addAll(merged);
+        }
+        System.out.println(
+                "[rewriteSubSegments] sortAndRewriteSection called "
+                        + rewriteCount
+                        + " times, total small files: "
+                        + totalSmallCount
+                        + ", result size: "
+                        + result.size());
+    }
 
     /**
      * Read all entries from a section's manifest files, sort them in memory by the specified
@@ -850,6 +798,25 @@ public class ManifestFileSorter {
     }
 
     /**
+     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, fileName)}.
+     * {@code fileName} is used as the tie-breaker so that all entries sharing the same sort-field
+     * value AND the same data file are emitted contiguously.
+     */
+    static int compareSortKey(
+            ManifestEntry a, ManifestEntry b, int sortFieldIndex, DataType sortFieldType) {
+        int c = compareField(a.partition(), b.partition(), sortFieldIndex, sortFieldType);
+        if (c != 0) {
+            return c;
+        }
+        // ADD before DELETE, so that mergeEntries can correctly cancel pairs
+        int kindCmp = a.kind().compareTo(b.kind());
+        if (kindCmp != 0) {
+            return kindCmp;
+        }
+        return a.file().fileName().compareTo(b.file().fileName());
+    }
+
+    /**
      * Compares the value at field {@code k} of two {@link BinaryRow}s according to {@code type}.
      */
     static int compareField(BinaryRow a, BinaryRow b, int k, DataType type) {
@@ -891,25 +858,6 @@ public class ManifestFileSorter {
                 LOG.error(errorMsg);
                 throw new UnsupportedOperationException(errorMsg);
         }
-    }
-
-    /**
-     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, fileName)}.
-     * {@code fileName} is used as the tie-breaker so that all entries sharing the same sort-field
-     * value AND the same data file are emitted contiguously.
-     */
-    static int compareSortKey(
-            ManifestEntry a, ManifestEntry b, int sortFieldIndex, DataType sortFieldType) {
-        int c = compareField(a.partition(), b.partition(), sortFieldIndex, sortFieldType);
-        if (c != 0) {
-            return c;
-        }
-        // ADD before DELETE, so that mergeEntries can correctly cancel pairs
-        int kindCmp = a.kind().compareTo(b.kind());
-        if (kindCmp != 0) {
-            return kindCmp;
-        }
-        return a.file().fileName().compareTo(b.file().fileName());
     }
 
     /**
