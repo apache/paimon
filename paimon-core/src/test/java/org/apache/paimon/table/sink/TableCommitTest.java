@@ -22,8 +22,11 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -536,6 +539,188 @@ public class TableCommitTest {
         commit1Ow2.close();
         write2.close();
         commit2.close();
+    }
+
+    @Test
+    public void testStrictModeForDvOnlyOverwrite() throws Exception {
+        // Regression test for the partition-overlap check on DV-only OVERWRITE
+        // snapshots: such snapshots have no data-file delta, so the check must
+        // also look at index-manifest delta.
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "k");
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+        BinaryRow pt2 = partitionRow(2);
+
+        // user1 writes pt=1 and pt=2 -> snapshot 1 (APPEND)
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.write(GenericRow.of(2, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        // user2 with strict mode, last-safe-snapshot=2 (skip its own snapshot 2)
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+        write2.write(GenericRow.of(1, 1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // user1 DV-only OVERWRITE on pt=2 -> snapshot 3 (OVERWRITE, no data-file delta)
+        commitDvOnly(table, user1, pt2, 2);
+
+        // user2 COMPACT on pt=1: DV-only on pt=2 does not overlap -> no error
+        write2.write(GenericRow.of(1, 5, 5L));
+        write2.compact(pt1, 0, true);
+        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(true, 2)))
+                .doesNotThrowAnyException();
+
+        // user1 DV-only OVERWRITE on pt=1 -> snapshot 5 (OVERWRITE, no data-file delta)
+        commitDvOnly(table, user1, pt1, 3);
+
+        // user2 COMPACT on pt=1: DV-only on pt=1 overlaps -> must throw
+        write2.write(GenericRow.of(1, 7, 7L));
+        write2.compact(pt1, 0, true);
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testStrictModeShortCircuitsWhenIndexManifestUnchanged() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "k");
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt3 = partitionRow(3);
+
+        // user1 writes pt=1 and pt=3 -> snapshot 1 (APPEND)
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.write(GenericRow.of(3, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        // user1 commits a DV on pt=3 -> snapshot 2 (OVERWRITE, dv-only).
+        // indexManifest now records pt=3.
+        commitDvOnly(table, user1, pt3, 2);
+
+        // user1 OVERWRITE on pt=1 -> snapshot 3 (OVERWRITE).
+        // pt=1 has no DV, so writeIndexFiles produces no new index file and
+        // snapshot 3 reuses snapshot 2's indexManifest file name.
+        TableCommitImpl commit1Ow = table.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 9, 9L));
+        commit1Ow.commit(3, write1.prepareCommit(false, 3));
+
+        // user2 with last-safe=2 writes pt=3 -> APPEND.
+        // Snapshot 3 is OVERWRITE on pt=1, its data delta does not touch pt=3,
+        // and although its indexManifest still contains pt=3 (inherited from
+        // snapshot 2), the short-circuit must skip the full-set intersection
+        // and avoid throwing.
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+        write2.write(GenericRow.of(3, 1, 1L));
+        assertThatCode(() -> commit2.commit(1, write2.prepareCommit(false, 1)))
+                .doesNotThrowAnyException();
+
+        write1.close();
+        commit1.close();
+        commit1Ow.close();
+        write2.close();
+        commit2.close();
+    }
+
+    private void commitDvOnly(FileStoreTable table, String user, BinaryRow partition, long commitId)
+            throws Exception {
+        // Pick a real data file in the partition; ConflictDetection requires the
+        // DV to reference an existing data file name.
+        String dataFileName =
+                table.store().newScan().withPartitionFilter(Collections.singletonList(partition))
+                        .plan().files().stream()
+                        .findFirst()
+                        .map(e -> e.file().fileName())
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "No data file in partition for DV commit"));
+        IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+        BucketedDvMaintainer dvMaintainer =
+                BucketedDvMaintainer.factory(indexFileHandler)
+                        .create(partition, 0, Collections.emptyList());
+        dvMaintainer.notifyNewDeletion(dataFileName, 0);
+        IndexFileMeta dvIndex = dvMaintainer.writeDeletionVectorsIndex().get();
+        try (TableCommitImpl commit = table.newCommit(user)) {
+            commit.commit(
+                    commitId,
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    partition,
+                                    0,
+                                    1,
+                                    DataIncrement.indexIncrement(
+                                            Collections.singletonList(dvIndex)),
+                                    CompactIncrement.emptyIncrement())));
+        }
     }
 
     @Test
