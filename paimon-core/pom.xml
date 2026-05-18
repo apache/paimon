@@ -37,21 +37,6 @@ under the License.
 
     <dependencies>
         <dependency>
-            <groupId>com.aliyun.jindodata</groupId>
-            <artifactId>jindo-core-macos-11_0-aarch64</artifactId>
-            <version>6.9.1</version>
-        </dependency>
-<!--        <dependency>-->
-<!--            <groupId>com.aliyun.jindodata</groupId>-->
-<!--            <artifactId>jindo-core-linux-el6-x86_64</artifactId>-->
-<!--            <version>6.8.3</version>-->
-<!--        </dependency>-->
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-ali-jindo</artifactId>
-            <version>1.4-ali-SNAPSHOT</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
