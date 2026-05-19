@@ -102,16 +102,6 @@ class BranchManager:
         """
         raise NotImplementedError("Subclasses must implement branches")
 
-    def branch_create_time(self, branch_name: str) -> Optional[int]:
-        """Return the branch's creation time in epoch milliseconds.
-
-        The default returns ``None`` for managers that have no native
-        answer (e.g. ``CatalogBranchManager`` until the REST API exposes
-        it). Implementations backed by the file system override this to
-        report the branch directory's modification time.
-        """
-        return None
-
     def branch_exists(self, branch_name: str) -> bool:
         """
         Check if a branch exists.

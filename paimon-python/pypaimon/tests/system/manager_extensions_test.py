@@ -17,17 +17,14 @@
 
 """Tests for the manager-level helpers that back system tables.
 
-The snapshots / schemas / branches system tables need bulk-listing and
-mtime accessors that the corresponding managers had not surfaced.
-This file pins down their contracts:
+The snapshots / schemas system tables need bulk-listing helpers that
+the corresponding managers had not surfaced. This file pins down
+their contracts:
 
 * :meth:`SnapshotManager.list_snapshots` — enumerate persisted
   snapshots in ID order, skipping IDs whose files have been expired.
 * :meth:`SchemaManager.list_all` — return every committed table
   schema in ID order.
-* :meth:`BranchManager.branch_create_time` — millisecond timestamp
-  of when a branch was created (filesystem implementation only;
-  remote-backed managers fall back to ``None``).
 """
 
 import os
@@ -37,8 +34,6 @@ import time
 import unittest
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.branch.branch_manager import BranchManager
-from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import DataField
@@ -139,58 +134,6 @@ class SchemaManagerListAllTest(unittest.TestCase):
         # Cache shouldn't return stale objects across calls.
         again = self.manager.list_all()
         self.assertEqual([0, 1, 2, 3], [s.id for s in again])
-
-
-class BranchCreateTimeTest(unittest.TestCase):
-
-    def setUp(self):
-        self.tmp, self.warehouse = _new_warehouse()
-        self.catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        self.catalog.create_database("db", False)
-        fields = [DataField.from_dict({"id": 0, "name": "v", "type": "INT"})]
-        self.catalog.create_table("db.t", Schema(fields=fields), False)
-        self.table = self.catalog.get_table("db.t")
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def _make_branch(self, name: str):
-        # Write a snapshot first so create_branch (which requires one)
-        # can proceed.
-        snapshot_dir = "{}/snapshot".format(self.table.table_path)
-        self.table.file_io.mkdirs(snapshot_dir)
-        _write_snapshot(self.table.file_io, snapshot_dir, 1)
-        self.table.file_io.try_to_write_atomic(
-            "{}/LATEST".format(snapshot_dir), "1")
-        self.table.file_io.try_to_write_atomic(
-            "{}/EARLIEST".format(snapshot_dir), "1")
-        branch_mgr = self.table.branch_manager()
-        branch_mgr.create_branch(name)
-        return branch_mgr
-
-    def test_filesystem_branch_returns_ms_timestamp(self):
-        before_ms = int(time.time() * 1000)
-        mgr = self._make_branch("dev")
-        after_ms = int(time.time() * 1000)
-
-        self.assertIsInstance(mgr, FileSystemBranchManager)
-        ts = mgr.branch_create_time("dev")
-        self.assertIsNotNone(ts)
-        # Allow a small skew on slower filesystems.
-        self.assertGreaterEqual(ts, before_ms - 5000)
-        self.assertLessEqual(ts, after_ms + 5000)
-
-    def test_filesystem_branch_returns_none_for_missing_branch(self):
-        mgr = self._make_branch("dev")
-        self.assertIsNone(mgr.branch_create_time("does_not_exist"))
-
-    def test_base_class_default_is_none(self):
-        # Any BranchManager subclass that has no native answer must
-        # return None rather than raise — system tables rely on this
-        # to render a placeholder cell.
-        self.assertIsNone(
-            BranchManager.branch_create_time(BranchManager(), "x")
-        )
 
 
 if __name__ == "__main__":

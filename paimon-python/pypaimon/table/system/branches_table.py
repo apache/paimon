@@ -17,10 +17,11 @@
 
 """The ``$branches`` system table — every named branch and its mtime."""
 
-from typing import List
+from typing import List, Optional
 
 import pyarrow
 
+from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.schema.data_types import AtomicType, DataField, RowType
 from pypaimon.table.system.system_table import SystemTable
 
@@ -51,15 +52,45 @@ class BranchesTable(SystemTable):
         names = list(branch_manager.branches())
         create_times: List[int] = []
         for name in names:
-            ms = branch_manager.branch_create_time(name)
+            branch_path = BranchManager.branch_path(
+                self.base_table.table_path, name)
+            ms = _read_mtime_ms(self.base_table.file_io, branch_path)
             # Java declares create_time NOT NULL. When the backing store
-            # cannot provide an mtime (some remote object stores via
-            # PyArrowFileIO, REST-managed branches until the server side
-            # surfaces it) fall back to epoch 0 so the schema contract
-            # holds. TODO: revisit once REST exposes branch creation
-            # timestamps.
+            # cannot return an mtime (some remote object stores via
+            # PyArrowFileIO) fall back to epoch 0 so the schema contract
+            # holds.
             create_times.append(0 if ms is None else int(ms))
         return pyarrow.table({
             "branch_name": pyarrow.array(names, type=pyarrow.string()),
             "create_time": pyarrow.array(create_times, type=_TIMESTAMP_TYPE),
         })
+
+
+def _read_mtime_ms(file_io, path: str) -> Optional[int]:
+    """Read the modification time of ``path`` as epoch milliseconds.
+
+    Returns ``None`` when the path is missing or the file-status object
+    does not carry a usable timestamp. Handles both
+    ``mtime_ns`` (PyArrow's ``FileInfo``) and ``mtime`` (LocalFileStatus's
+    seconds-since-epoch float or a ``datetime``).
+    """
+    try:
+        if not file_io.exists(path):
+            return None
+        file_status = file_io.get_file_status(path)
+    except Exception:
+        return None
+
+    mtime_ns = getattr(file_status, "mtime_ns", None)
+    if mtime_ns is not None:
+        return int(mtime_ns // 1_000_000)
+    mtime = getattr(file_status, "mtime", None)
+    if mtime is None:
+        return None
+    try:
+        return int(mtime.timestamp() * 1000)
+    except AttributeError:
+        try:
+            return int(float(mtime) * 1000)
+        except (TypeError, ValueError):
+            return None
