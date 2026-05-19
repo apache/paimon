@@ -51,8 +51,7 @@ class PartitionsTable(SystemTable):
     The filesystem flow aggregates from manifest entries; catalog-owned
     columns (``created_at``, ``created_by``, ``updated_by``, ``options``,
     ``done``) are filled with placeholders because the filesystem
-    catalog does not track them. REST-managed deployments populate
-    those fields via the catalog API — covered in a later phase.
+    catalog does not track them.
     """
 
     def system_table_name(self) -> str:

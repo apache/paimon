@@ -22,8 +22,7 @@ that PyPaimon supports natively. Implementation classes are referenced
 by dotted path and imported lazily, so adding a new table is a single
 registry entry plus the new module.
 
-The following Java-side names are intentionally *not* registered yet
-and are deferred to a later phase:
+The following Java-side names are not registered here yet:
 
   audit_log, binlog, read_optimized, consumers, statistics,
   aggregation_fields, buckets, file_key_ranges, table_indexes,

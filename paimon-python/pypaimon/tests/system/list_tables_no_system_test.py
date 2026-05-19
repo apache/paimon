@@ -57,9 +57,8 @@ class ListTablesNoSystemTest(unittest.TestCase):
 
     def test_get_table_still_works_for_every_registered_system_table(self):
         # Each registered system table should be retrievable by full
-        # identifier even though list_tables hid them. Loaders for the
-        # 8 phase-1 names already exist; this proves the contract is
-        # consistent end-to-end.
+        # identifier even though list_tables hid them; this proves the
+        # contract is consistent end-to-end.
         for name in system_table_loader.SYSTEM_TABLES:
             sys_table = self.catalog.get_table("db.t${}".format(name))
             self.assertIsInstance(

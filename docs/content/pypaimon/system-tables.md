@@ -29,11 +29,11 @@ under the License.
 
 PyPaimon exposes the same `table$<name>` system tables as the JVM
 runtime, addressable through the existing catalog and read-builder
-APIs. The first phase covers eight metadata views: `snapshots`,
-`schemas`, `options`, `manifests`, `files`, `partitions`, `tags`, and
-`branches`. Global tables under the `sys` database
-(`sys.all_tables`, `sys.catalog_options`, ...) and the streaming
-`audit_log` / `binlog` family are scheduled for a later phase.
+APIs. The supported tables are: `snapshots`, `schemas`, `options`,
+`manifests`, `files`, `partitions`, `tags`, and `branches`. Global
+tables under the `sys` database (`sys.all_tables`,
+`sys.catalog_options`, ...) and the streaming `audit_log` / `binlog`
+family are not exposed yet.
 
 ## Basic Usage
 
@@ -213,14 +213,14 @@ Every named branch with the branch directory's modification time.
   real time.
 * **`partitions.created_at / created_by / updated_by / options / done`**
   are filled with placeholders for the filesystem path. REST-managed
-  catalogs that expose those fields will be wired in a later phase.
+  catalogs that expose those fields will be wired in a follow-up.
 * **`list_tables` does not enumerate system tables.** Mirrors Java's
   `AbstractCatalog.listTablesImpl`; system tables remain accessible
   through `get_table('db.t$name')`.
 
 ## Supported via Catalogs
 
-* `FilesystemCatalog` — fully supported in this phase.
-* `RESTCatalog` — fully supported in this phase; columns that depend
-  on catalog metadata (such as `$partitions.created_by`) are populated
-  via the REST API where the server exposes them.
+* `FilesystemCatalog` — fully supported.
+* `RESTCatalog` — fully supported; columns that depend on catalog
+  metadata (such as `$partitions.created_by`) are populated via the
+  REST API where the server exposes them.

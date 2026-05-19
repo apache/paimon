@@ -32,10 +32,9 @@ _EXPECTED_SYSTEM_TABLES = (
     "branches",
 )
 
-# Names tracked in Java's SystemTableLoader that PyPaimon does NOT
-# expose in phase 1. The loader must not silently register any of these
-# — they're explicitly deferred and require their own design work.
-_DEFERRED_NAMES = {
+# Names tracked in Java's SystemTableLoader that PyPaimon does not
+# expose yet. The loader must not silently register any of these.
+_UNREGISTERED_NAMES = {
     "audit_log",
     "binlog",
     "read_optimized",
@@ -55,18 +54,18 @@ _DEFERRED_NAMES = {
 
 class SystemTableLoaderTest(unittest.TestCase):
 
-    def test_system_tables_tuple_lists_phase_one_names_in_order(self):
+    def test_system_tables_tuple_lists_expected_names_in_order(self):
         self.assertEqual(_EXPECTED_SYSTEM_TABLES, loader.SYSTEM_TABLES)
 
     def test_registry_keys_match_system_tables_tuple(self):
         self.assertEqual(set(_EXPECTED_SYSTEM_TABLES),
                          set(loader.SYSTEM_TABLE_LOADERS.keys()))
 
-    def test_deferred_names_are_not_registered(self):
+    def test_unregistered_names_stay_out_of_registry(self):
         registered = set(loader.SYSTEM_TABLE_LOADERS.keys())
-        intersection = registered & _DEFERRED_NAMES
+        intersection = registered & _UNREGISTERED_NAMES
         self.assertEqual(set(), intersection,
-                         "phase-2 names must stay out of the registry: "
+                         "unregistered names must stay out of the registry: "
                          + str(sorted(intersection)))
 
     def test_load_returns_none_for_unknown_name(self):

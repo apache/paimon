@@ -84,7 +84,7 @@ class FilesystemCatalogSystemTableDispatchTest(unittest.TestCase):
         self.assertFalse(table.identifier.is_system_table())
 
     def test_get_system_table_routes_through_loader(self):
-        marker = "phase1-dispatch-marker"
+        marker = "fs-dispatch-marker"
         previous = _install_fake_factory("snapshots", marker)
         try:
             sys_table = self.catalog.get_table("db.t$snapshots")
@@ -154,7 +154,7 @@ class RestCatalogSystemTableDispatchTest(unittest.TestCase):
 
     def test_get_system_table_routes_through_loader(self):
         catalog, loaded = self._build_catalog()
-        marker = "phase1-rest-dispatch-marker"
+        marker = "rest-dispatch-marker"
         previous = _install_fake_factory("snapshots", marker)
         try:
             sys_table = catalog.get_table("db.t$snapshots")
@@ -170,7 +170,7 @@ class RestCatalogSystemTableDispatchTest(unittest.TestCase):
 
     def test_get_system_table_preserves_branch_segment(self):
         catalog, loaded = self._build_catalog()
-        marker = "phase1-rest-dispatch-branched"
+        marker = "rest-dispatch-branched-marker"
         previous = _install_fake_factory("snapshots", marker)
         try:
             sys_table = catalog.get_table("db.t$branch_dev$snapshots")

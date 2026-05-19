@@ -35,7 +35,7 @@ class _DummySystemTable(SystemTable):
     """Concrete SystemTable used only by these unit tests.
 
     Subclasses are normally per-system-table (snapshots, schemas, ...).
-    Here we exercise the abstract base contract independently of any
+    This stub exercises the abstract base contract independently of any
     real metadata source.
     """
 
