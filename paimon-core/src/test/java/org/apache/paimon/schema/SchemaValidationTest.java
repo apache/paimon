@@ -487,16 +487,16 @@ class SchemaValidationTest {
     }
 
     @Test
-    void testManifestSortEnableOnNonPartitionTable() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
-        options.put(BUCKET.key(), String.valueOf(-1));
-
+    void testManifestSortValidation() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()));
 
+        // Test 1: manifest-sort.enabled on non-partition table should fail
+        Map<String, String> options1 = new HashMap<>();
+        options1.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options1.put(BUCKET.key(), String.valueOf(-1));
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
@@ -506,23 +506,15 @@ class SchemaValidationTest {
                                                 10,
                                                 emptyList(),
                                                 emptyList(),
-                                                options,
+                                                options1,
                                                 "")))
                 .hasMessageContaining(
                         "Cannot enable 'manifest-sort.enabled' for non-partition table.");
-    }
 
-    @Test
-    void testManifestSortPartitionFieldNotInPartitionKeys() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f1");
-        options.put(BUCKET.key(), String.valueOf(-1));
-
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.INT()));
-
+        // Test 2: manifest-sort-partition-field not in partition keys should fail
+        Map<String, String> options2 = new HashMap<>();
+        options2.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f1");
+        options2.put(BUCKET.key(), String.valueOf(-1));
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
@@ -532,23 +524,15 @@ class SchemaValidationTest {
                                                 10,
                                                 singletonList("f0"),
                                                 emptyList(),
-                                                options,
+                                                options2,
                                                 "")))
                 .hasMessageContaining("is not a partition field");
-    }
 
-    @Test
-    void testManifestSortValidConfig() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
-        options.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f0");
-        options.put(BUCKET.key(), String.valueOf(-1));
-
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.INT()));
-
+        // Test 3: valid manifest-sort config should pass
+        Map<String, String> options3 = new HashMap<>();
+        options3.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options3.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f0");
+        options3.put(BUCKET.key(), String.valueOf(-1));
         assertThatNoException()
                 .isThrownBy(
                         () ->
@@ -559,7 +543,7 @@ class SchemaValidationTest {
                                                 10,
                                                 singletonList("f0"),
                                                 emptyList(),
-                                                options,
+                                                options3,
                                                 "")));
     }
 }

@@ -416,8 +416,8 @@ public class ManifestFileSorter {
      * <ul>
      *   <li>1. Single-file section: pass through (rewrite only if it has delete entries).
      *   <li>2. Within budget: sort and rewrite the entire section.
-     *   <li>3. First time exceeding budget: partial rewrite within remaining budget, remaining files
-     *       form a new section appended for later processing.
+     *   <li>3. First time exceeding budget: partial rewrite within remaining budget, remaining
+     *       files form a new section appended for later processing.
      *   <li>4. After budget exhausted with defaultCompaction files: rewrite sub-segments only.
      *   <li>5. After budget exhausted without defaultCompaction files: keep as-is.
      * </ul>
@@ -592,8 +592,7 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Skip rewrite for single file not in delete-range.
-        if (section.size() == 1
-                && !defaultCompactionMap.getOrDefault(section.get(0), false)) {
+        if (section.size() == 1 && !defaultCompactionMap.getOrDefault(section.get(0), false)) {
             result.add(section.get(0));
             return;
         }
