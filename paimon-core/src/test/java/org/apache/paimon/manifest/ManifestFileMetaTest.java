@@ -1063,6 +1063,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             }
         }
     }
+
     /**
      * Test manifest sort with a multi-field partition type.
      *
