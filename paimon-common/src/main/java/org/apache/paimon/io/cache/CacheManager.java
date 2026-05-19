@@ -98,7 +98,7 @@ public class CacheManager {
                                 throw new RuntimeException(e);
                             }
                         });
-        return checkNotNull(value, String.format("Cache result for key(%s) is null", key)).segment;
+        return checkNotNull(value, "Cache result for key(%s) is null", key).segment;
     }
 
     public void invalidPage(CacheKey key) {
