@@ -27,10 +27,12 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.RepeatedTest;
@@ -959,7 +961,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .isGreaterThanOrEqualTo(prevPartition);
             }
         }
-
     }
 
     /**
