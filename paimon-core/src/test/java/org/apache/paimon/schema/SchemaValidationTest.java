@@ -449,13 +449,23 @@ class SchemaValidationTest {
     public void testSnapshotSequenceOrderingHappyPath() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
         assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsNonWriteOnly() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(CoreOptions.WRITE_ONLY.key());
     }
 
     @Test
     public void testSnapshotSequenceOrderingRejectsSequenceField() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
         options.put(CoreOptions.SEQUENCE_FIELD.key(), "f2");
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining("sequence.field");

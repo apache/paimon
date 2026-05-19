@@ -977,7 +977,11 @@ public class CoreOptions implements Serializable {
                                     + "as a secondary tiebreaker. Designed for multi-writer "
                                     + "scenarios on the same primary-key table where wall-clock "
                                     + "sequence numbers cannot be globally ordered. Mutually "
-                                    + "exclusive with sequence.field. Requires a primary-key table.");
+                                    + "exclusive with sequence.field. Requires a primary-key table "
+                                    + "with write-only=true. Inline compaction is not allowed "
+                                    + "because snapshot ids are assigned only after commit. To "
+                                    + "compact such tables, run a dedicated compaction job/action "
+                                    + "with write-only=false.");
 
     @Immutable
     public static final ConfigOption<Boolean> AGGREGATION_REMOVE_RECORD_ON_DELETE =

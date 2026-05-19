@@ -104,6 +104,10 @@ public class SchemaValidation {
      * @param schema the schema to be validated
      */
     public static void validateTableSchema(TableSchema schema) {
+        validateTableSchema(schema, Collections.emptySet());
+    }
+
+    public static void validateTableSchema(TableSchema schema, Set<String> dynamicOptionKeys) {
         CoreOptions options = new CoreOptions(schema.options());
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
@@ -284,7 +288,7 @@ public class SchemaValidation {
         }
 
         if (options.snapshotSequenceOrdering()) {
-            validateSnapshotSequenceOrdering(schema, options);
+            validateSnapshotSequenceOrdering(schema, options, dynamicOptionKeys);
         }
 
         // vector field names must point to vector type
@@ -611,7 +615,8 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateSnapshotSequenceOrdering(TableSchema schema, CoreOptions options) {
+    private static void validateSnapshotSequenceOrdering(
+            TableSchema schema, CoreOptions options, Set<String> dynamicOptionKeys) {
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
                 "%s = true requires a primary-key table; append-only tables cannot use "
@@ -622,6 +627,18 @@ public class SchemaValidation {
                 "%s = true is mutually exclusive with %s; the snapshot id is the sole tiebreaker.",
                 CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
                 CoreOptions.SEQUENCE_FIELD.key());
+        // Skip writeOnly check when write-only is dynamically overridden (e.g. by dedicated
+        // compact jobs that override write-only=false at runtime).
+        if (!dynamicOptionKeys.contains(CoreOptions.WRITE_ONLY.key())) {
+            checkArgument(
+                    options.writeOnly(),
+                    "%s = true requires %s = true. Snapshot ordering relies on snapshot id to "
+                            + "determine record order, but inline compaction happens before "
+                            + "snapshot creation — files have not been stamped with the correct "
+                            + "snapshot id yet. Use dedicated compaction job instead.",
+                    CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
+                    CoreOptions.WRITE_ONLY.key());
+        }
     }
 
     private static void validateForDeletionVectors(CoreOptions options) {
