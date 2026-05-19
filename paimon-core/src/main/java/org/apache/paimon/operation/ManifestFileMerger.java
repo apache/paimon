@@ -18,6 +18,8 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
@@ -34,13 +36,17 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -152,6 +158,276 @@ public class ManifestFileMerger {
             List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
             result.addAll(merged);
             newMetas.addAll(merged);
+        }
+    }
+
+    public static Optional<List<ManifestFileMeta>> trySortCompaction(
+            List<ManifestFileMeta> input,
+            List<ManifestFileMeta> newFilesForAbort,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            int rewriteManifestCount,
+            @Nullable Integer manifestReadParallelism)
+            throws Exception {
+        checkArgument(
+                rewriteManifestCount > 0,
+                "Manifest sort rewrite manifest count must be greater than 0.");
+
+        if (partitionType.getFieldCount() == 0 || input.size() <= 1) {
+            return Optional.empty();
+        }
+
+        // Sort compaction may move a rewritten group before non-rewritten manifests. Even though
+        // rewriteGroups keeps the input order inside each group, it cannot preserve ordering
+        // dependencies between a DELETE entry and an ADD entry in manifests outside the group.
+        for (ManifestFileMeta file : input) {
+            if (file.numDeletedFiles() > 0) {
+                return Optional.empty();
+            }
+        }
+
+        RecordComparator partitionComparator =
+                CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
+        List<ManifestFileMeta> compactCandidates = compactCandidates(input, partitionComparator);
+        if (compactCandidates.size() <= 1) {
+            return Optional.empty();
+        }
+
+        List<ManifestSortedRun> runs = partitionSortedRuns(compactCandidates, partitionComparator);
+        if (runs.size() <= 1) {
+            return Optional.empty();
+        }
+
+        List<ManifestSortedRun> pickedRuns = pickRuns(runs, rewriteManifestCount);
+        if (pickedRuns.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<ManifestFileMeta> pickedFiles = new ArrayList<>();
+        for (ManifestSortedRun run : pickedRuns) {
+            pickedFiles.addAll(run.files);
+        }
+        List<List<ManifestFileMeta>> rewriteGroups =
+                rewriteGroups(pickedFiles, input, partitionComparator);
+        LinkedHashSet<String> rewriteFileNames = new LinkedHashSet<>();
+        for (List<ManifestFileMeta> rewriteGroup : rewriteGroups) {
+            addFileNames(rewriteGroup, rewriteFileNames);
+        }
+        if (rewriteFileNames.size() <= 1) {
+            return Optional.empty();
+        }
+
+        LOG.info(
+                "Start Manifest File Sort Compaction: sortedRuns: {}, pickedRuns: {}, pickedFiles: {}",
+                runs.size(),
+                pickedRuns.size(),
+                pickedFiles.size());
+
+        int insertPos = -1;
+        for (int i = 0; i < input.size(); i++) {
+            ManifestFileMeta file = input.get(i);
+            if (rewriteFileNames.contains(file.fileName())) {
+                insertPos = i;
+                break;
+            }
+        }
+
+        List<ManifestFileMeta> rewritten = new ArrayList<>();
+        for (List<ManifestFileMeta> rewriteGroup : rewriteGroups) {
+            Map<FileEntry.Identifier, ManifestEntry> map = new LinkedHashMap<>();
+            FileEntry.mergeEntries(manifestFile, rewriteGroup, map, manifestReadParallelism);
+            List<ManifestEntry> entries = new ArrayList<>(map.values());
+            sortEntriesByPartition(entries, partitionComparator);
+            if (!entries.isEmpty()) {
+                List<ManifestFileMeta> groupRewritten = manifestFile.write(entries);
+                rewritten.addAll(groupRewritten);
+                newFilesForAbort.addAll(groupRewritten);
+            }
+        }
+
+        List<ManifestFileMeta> result = new ArrayList<>();
+        for (int i = 0; i < input.size(); i++) {
+            if (i == insertPos) {
+                result.addAll(rewritten);
+            }
+            ManifestFileMeta file = input.get(i);
+            if (!rewriteFileNames.contains(file.fileName())) {
+                result.add(file);
+            }
+        }
+        return Optional.of(result);
+    }
+
+    private static List<ManifestFileMeta> compactCandidates(
+            List<ManifestFileMeta> input, RecordComparator partitionComparator) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        for (ManifestFileMeta file : input) {
+            if (hasMultiplePartitions(file, partitionComparator)) {
+                result.add(file);
+            }
+        }
+        return result;
+    }
+
+    private static List<ManifestSortedRun> partitionSortedRuns(
+            List<ManifestFileMeta> input, RecordComparator partitionComparator) {
+        List<ManifestFileMeta> files = new ArrayList<>(input);
+        files.sort(
+                (left, right) -> {
+                    int result =
+                            partitionComparator.compare(minPartition(left), minPartition(right));
+                    return result == 0
+                            ? partitionComparator.compare(maxPartition(left), maxPartition(right))
+                            : result;
+                });
+
+        PriorityQueue<ManifestSortedRunBuilder> queue =
+                new PriorityQueue<>(
+                        (left, right) ->
+                                partitionComparator.compare(
+                                        maxPartition(left.last()), maxPartition(right.last())));
+        for (ManifestFileMeta file : files) {
+            ManifestSortedRunBuilder run = queue.poll();
+            if (run == null) {
+                queue.add(new ManifestSortedRunBuilder(file));
+            } else if (partitionComparator.compare(minPartition(file), maxPartition(run.last()))
+                    > 0) {
+                run.add(file);
+                queue.add(run);
+            } else {
+                queue.add(new ManifestSortedRunBuilder(file));
+                queue.add(run);
+            }
+        }
+
+        List<ManifestSortedRun> runs = new ArrayList<>();
+        for (ManifestSortedRunBuilder builder : queue) {
+            runs.add(builder.toRun());
+        }
+        runs.sort(
+                (left, right) ->
+                        partitionComparator.compare(
+                                minPartition(left.files.get(0)), minPartition(right.files.get(0))));
+        return runs;
+    }
+
+    private static List<ManifestSortedRun> pickRuns(
+            List<ManifestSortedRun> runs, int rewriteManifestCount) {
+        List<ManifestSortedRun> sortedRuns = new ArrayList<>(runs);
+        sortedRuns.sort(
+                Comparator.comparingLong(ManifestSortedRun::totalFileSize)
+                        .thenComparingInt(ManifestSortedRun::fileCount));
+
+        ManifestSortedRun firstRun = sortedRuns.get(0);
+        if (firstRun.fileCount() > rewriteManifestCount) {
+            return Collections.emptyList();
+        }
+
+        List<ManifestSortedRun> result = new ArrayList<>();
+        result.add(firstRun);
+        long candidateSize = firstRun.totalFileSize();
+        int candidateFileCount = firstRun.fileCount();
+        for (int i = 1; i < sortedRuns.size(); i++) {
+            ManifestSortedRun next = sortedRuns.get(i);
+            if (candidateSize < next.totalFileSize()
+                    || candidateFileCount + next.fileCount() > rewriteManifestCount) {
+                break;
+            }
+            result.add(next);
+            candidateSize += next.totalFileSize();
+            candidateFileCount += next.fileCount();
+        }
+        return result.size() > 1 ? result : Collections.emptyList();
+    }
+
+    private static List<List<ManifestFileMeta>> rewriteGroups(
+            List<ManifestFileMeta> rewriteFiles,
+            List<ManifestFileMeta> input,
+            RecordComparator partitionComparator) {
+        rewriteFiles = new ArrayList<>(rewriteFiles);
+        rewriteFiles.sort(
+                (left, right) -> {
+                    int result =
+                            partitionComparator.compare(minPartition(left), minPartition(right));
+                    return result == 0
+                            ? partitionComparator.compare(maxPartition(left), maxPartition(right))
+                            : result;
+                });
+
+        List<Set<String>> groupNames = new ArrayList<>();
+        LinkedHashSet<String> currentNames = new LinkedHashSet<>();
+        BinaryRow currentMax = null;
+        for (ManifestFileMeta file : rewriteFiles) {
+            if (!currentNames.isEmpty()
+                    && partitionComparator.compare(minPartition(file), currentMax) > 0) {
+                groupNames.add(currentNames);
+                currentNames = new LinkedHashSet<>();
+                currentMax = null;
+            }
+            currentNames.add(file.fileName());
+            if (currentMax == null
+                    || partitionComparator.compare(maxPartition(file), currentMax) > 0) {
+                currentMax = maxPartition(file);
+            }
+        }
+        if (!currentNames.isEmpty()) {
+            groupNames.add(currentNames);
+        }
+
+        List<List<ManifestFileMeta>> result = new ArrayList<>();
+        for (Set<String> names : groupNames) {
+            List<ManifestFileMeta> group = new ArrayList<>();
+            for (ManifestFileMeta file : input) {
+                if (names.contains(file.fileName())) {
+                    group.add(file);
+                }
+            }
+            if (group.size() > 1) {
+                result.add(group);
+            }
+        }
+        return result;
+    }
+
+    private static void sortEntriesByPartition(
+            List<ManifestEntry> entries, RecordComparator partitionComparator) {
+        entries.sort(
+                (left, right) -> {
+                    int result = partitionComparator.compare(left.partition(), right.partition());
+                    if (result != 0) {
+                        return result;
+                    }
+
+                    result = Integer.compare(left.bucket(), right.bucket());
+                    if (result != 0) {
+                        return result;
+                    }
+
+                    result = Integer.compare(left.level(), right.level());
+                    if (result != 0) {
+                        return result;
+                    }
+
+                    return left.fileName().compareTo(right.fileName());
+                });
+    }
+
+    private static boolean hasMultiplePartitions(
+            ManifestFileMeta file, RecordComparator partitionComparator) {
+        return partitionComparator.compare(minPartition(file), maxPartition(file)) < 0;
+    }
+
+    private static BinaryRow minPartition(ManifestFileMeta file) {
+        return file.partitionStats().minValues();
+    }
+
+    private static BinaryRow maxPartition(ManifestFileMeta file) {
+        return file.partitionStats().maxValues();
+    }
+
+    private static void addFileNames(List<ManifestFileMeta> files, Set<String> names) {
+        for (ManifestFileMeta file : files) {
+            names.add(file.fileName());
         }
     }
 
@@ -314,6 +590,51 @@ public class ManifestFileMerger {
             this.file = file;
             this.requireChange = requireChange;
             this.entries = entries;
+        }
+    }
+
+    private static class ManifestSortedRun {
+
+        private final List<ManifestFileMeta> files;
+        private final long totalFileSize;
+
+        private ManifestSortedRun(List<ManifestFileMeta> files) {
+            this.files = files;
+            long totalFileSize = 0;
+            for (ManifestFileMeta file : files) {
+                totalFileSize += file.fileSize();
+            }
+            this.totalFileSize = totalFileSize;
+        }
+
+        private int fileCount() {
+            return files.size();
+        }
+
+        private long totalFileSize() {
+            return totalFileSize;
+        }
+    }
+
+    private static class ManifestSortedRunBuilder {
+
+        private final List<ManifestFileMeta> files;
+
+        private ManifestSortedRunBuilder(ManifestFileMeta file) {
+            this.files = new ArrayList<>();
+            this.files.add(file);
+        }
+
+        private void add(ManifestFileMeta file) {
+            files.add(file);
+        }
+
+        private ManifestFileMeta last() {
+            return files.get(files.size() - 1);
+        }
+
+        private ManifestSortedRun toRun() {
+            return new ManifestSortedRun(files);
         }
     }
 }

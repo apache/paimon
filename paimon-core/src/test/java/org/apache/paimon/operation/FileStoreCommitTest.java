@@ -27,6 +27,9 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
@@ -42,6 +45,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.RetryCommitResult;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -981,6 +985,54 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testManifestSortCompactionInCommit() throws Exception {
+        TestFileStore store = createStore(false);
+        store.options()
+                .toConfiguration()
+                .set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.parse("1 gb"));
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
+        store.options()
+                .toConfiguration()
+                .set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.parse("1 gb"));
+        store.options().toConfiguration().set(CoreOptions.FILE_COMPRESSION, "null");
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_COMPRESSION, "null");
+
+        List<KeyValue> expected = new ArrayList<>();
+        int[] minHrs = new int[] {0, 3, 0, 3};
+        for (int fileId = 0; fileId < minHrs.length; fileId++) {
+            List<KeyValue> kvs = partitionRangeData(minHrs[fileId], fileId % 2);
+            expected.addAll(kvs);
+            store.commitData(kvs, gen::getPartition, kv -> 0);
+        }
+
+        Snapshot beforeSort = store.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> beforeSortManifests =
+                store.manifestListFactory().create().readDataManifests(beforeSort);
+        assertThat(beforeSortManifests).hasSize(4);
+        List<String> beforeSortManifestNames =
+                beforeSortManifests.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toList());
+
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_SORT_REWRITE_MANIFEST_COUNT, 4);
+
+        List<KeyValue> finalKvs = partitionRangeData(6, 4);
+        expected.addAll(finalKvs);
+        Snapshot sorted = store.commitData(finalKvs, gen::getPartition, kv -> 0).get(0);
+        List<ManifestFileMeta> sortedManifests =
+                store.manifestListFactory().create().readDataManifests(sorted);
+
+        assertThat(sortedManifests).hasSize(3);
+        assertThat(sortedManifests.stream().map(ManifestFileMeta::fileName))
+                .doesNotContainAnyElementsOf(beforeSortManifestNames);
+        assertThat(sortedManifests.stream().map(this::partitionRange).collect(Collectors.toList()))
+                .containsExactly("20211110:0-1", "20211110:3-4", "20211110:6-7");
+        assertThat(store.toKvMap(store.readKvsFromSnapshot(sorted.id())))
+                .isEqualTo(store.toKvMap(expected));
+    }
+
+    @Test
     public void testCommitManifestWithProperties() throws Exception {
         TestFileStore store = createStore(false);
 
@@ -1207,6 +1259,43 @@ public class FileStoreCommitTest {
         return generateData(numRecords).values().stream()
                 .flatMap(Collection::stream)
                 .collect(Collectors.toList());
+    }
+
+    private List<KeyValue> partitionRangeData(int minHr, int fileId) {
+        return Arrays.asList(
+                sortCompactionKv(minHr, fileId, 0), sortCompactionKv(minHr + 1, fileId, 1));
+    }
+
+    private KeyValue sortCompactionKv(int hr, int fileId, int rowId) {
+        int shopId = 1;
+        long orderId = 1_000_000L + fileId * 10L + rowId;
+        long itemId = 2_000_000L + fileId * 10L + rowId;
+        return new KeyValue()
+                .replace(
+                        TestKeyValueGenerator.KEY_SERIALIZER
+                                .toBinaryRow(GenericRow.of(shopId, orderId))
+                                .copy(),
+                        orderId,
+                        RowKind.INSERT,
+                        TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER
+                                .toBinaryRow(
+                                        GenericRow.of(
+                                                BinaryString.fromString("20211110"),
+                                                hr,
+                                                shopId,
+                                                orderId,
+                                                itemId,
+                                                new GenericArray(new int[] {1, 1}),
+                                                BinaryString.fromString(
+                                                        "manifest-sort-compaction")))
+                                .copy());
+    }
+
+    private String partitionRange(ManifestFileMeta manifest) {
+        BinaryRow min = manifest.partitionStats().minValues();
+        BinaryRow max = manifest.partitionStats().maxValues();
+        assertThat(min.getString(0)).isEqualTo(max.getString(0));
+        return min.getString(0) + ":" + min.getInt(1) + "-" + max.getInt(1);
     }
 
     private Map<BinaryRow, List<KeyValue>> generateData(int numRecords) {
