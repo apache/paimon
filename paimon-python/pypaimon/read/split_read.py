@@ -697,7 +697,8 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
-        if CoreOptions.blob_descriptor_fields(self.table.options):
+        if (not CoreOptions.blob_as_descriptor(self.table.options)
+                and CoreOptions.blob_descriptor_fields(self.table.options)):
             reader = BlobDescriptorConvertReader(reader, self.table)
 
         return reader

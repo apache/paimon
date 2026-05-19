@@ -1107,11 +1107,14 @@ class DataBlobWriterTest(unittest.TestCase):
             f"✅ End-to-end blob write/read test passed: wrote and read back {len(blob_data)} blob records correctly")  # noqa: E501
 
     def test_blob_write_read_end_to_end_with_descriptor(self):
-        """Test that blob-as-descriptor stores descriptors but read always resolves to actual data."""
+        """Test end-to-end blob functionality using blob descriptors."""
         import random
         from pypaimon import Schema
-        from pypaimon.table.row.blob import BlobDescriptor
+        from pypaimon.table.row.blob import BlobDescriptor, Blob
+        from pypaimon.common.uri_reader import UriReaderFactory
+        from pypaimon.common.options.config import CatalogOptions
 
+        # Create schema with blob column
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -1127,47 +1130,81 @@ class DataBlobWriterTest(unittest.TestCase):
             }
         )
 
+        # Create table
         self.catalog.create_table('test_db.blob_descriptor_test', schema, False)
         table: FileStoreTable = self.catalog.get_table('test_db.blob_descriptor_test')
 
+        # Create test blob data (1MB)
         blob_data = bytearray(1024 * 1024)
-        random.seed(42)
+        random.seed(42)  # For reproducible tests
         for i in range(len(blob_data)):
             blob_data[i] = random.randint(0, 255)
         blob_data = bytes(blob_data)
 
+        # Create external blob file
         external_blob_path = os.path.join(self.temp_dir, 'external_blob')
         with open(external_blob_path, 'wb') as f:
             f.write(blob_data)
 
+        # Create blob descriptor pointing to external file
         blob_descriptor = BlobDescriptor(external_blob_path, 0, len(blob_data))
 
+        # Create test data with blob descriptor
         test_data = pa.Table.from_pydict({
             'id': [1],
             'name': ['paimon'],
             'picture': [blob_descriptor.serialize()]
         }, schema=pa_schema)
 
+        # Write data using table API
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
         writer.write_arrow(test_data)
+
+        # Commit the data
         commit_messages = writer.prepare_commit()
         commit = write_builder.new_commit()
         commit.commit(commit_messages)
 
+        # Read data back
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         result = table_read.to_arrow(table_scan.plan().splits())
 
-        self.assertEqual(result.num_rows, 1)
-        self.assertEqual(result.column('id').to_pylist(), [1])
-        self.assertEqual(result.column('name').to_pylist(), ['paimon'])
+        # Verify the data was written and read correctly
+        self.assertEqual(result.num_rows, 1, "Should have 1 row")
+        self.assertEqual(result.column('id').to_pylist(), [1], "ID should match")
+        self.assertEqual(result.column('name').to_pylist(), ['paimon'], "Name should match")
 
-        # Read always resolves descriptor to actual blob data (aligned with Java getBlob)
+        # Get the blob descriptor bytes from the result
         picture_bytes = result.column('picture').to_pylist()[0]
-        self.assertIsInstance(picture_bytes, bytes)
-        self.assertEqual(picture_bytes, blob_data)
+        self.assertIsInstance(picture_bytes, bytes, "Picture should be bytes")
+
+        # Deserialize the blob descriptor
+        new_blob_descriptor = BlobDescriptor.deserialize(picture_bytes)
+
+        # The URI might be different if the blob was stored in the table's data directory
+        # Let's verify the descriptor properties and try to read the data
+        # Note: offset might be non-zero due to blob file format overhead
+        self.assertGreaterEqual(new_blob_descriptor.offset, 0, "Offset should be non-negative")
+        self.assertEqual(new_blob_descriptor.length, len(blob_data), "Length should match")
+
+        # Create URI reader factory and read the blob data
+        catalog_options = {CatalogOptions.WAREHOUSE.key(): self.warehouse}
+        uri_reader_factory = UriReaderFactory(catalog_options)
+        uri_reader = uri_reader_factory.create(new_blob_descriptor.uri)
+        blob = Blob.from_descriptor(uri_reader, new_blob_descriptor)
+
+        blob_descriptor_from_blob = blob.to_descriptor()
+        self.assertEqual(
+            blob_descriptor_from_blob.uri,
+            new_blob_descriptor.uri,
+            f"URI should be preserved. Expected: {new_blob_descriptor.uri}, Got: {blob_descriptor_from_blob.uri}"
+        )
+
+        # Verify the blob data matches the original
+        self.assertEqual(blob.to_data(), blob_data, "Blob data should match original")
 
         print("✅ Blob descriptor end-to-end test passed:")
         print("   - Created external blob file and descriptor")

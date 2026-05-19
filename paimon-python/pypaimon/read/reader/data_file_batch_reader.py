@@ -60,16 +60,11 @@ class DataFileBatchReader(RecordBatchReader):
             for field in fields
             if hasattr(field.type, 'type') and field.type.type == 'BLOB'
         }
-        if self.blob_as_descriptor:
-            # blob-as-descriptor=true means ALL blob fields store descriptors in parquet
-            self.descriptor_blob_fields = self.blob_field_names.copy()
-        else:
-            # Only specific fields listed in blob-descriptor-field store descriptors
-            self.descriptor_blob_fields = {
-                field_name
-                for field_name in self.blob_descriptor_fields
-                if field_name in self.blob_field_names
-            }
+        self.descriptor_blob_fields = {
+            field_name
+            for field_name in self.blob_descriptor_fields
+            if field_name in self.blob_field_names
+        }
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -159,7 +154,10 @@ class DataFileBatchReader(RecordBatchReader):
             field_idx = record_batch.schema.get_field_index(field_name)
             values = record_batch.column(field_idx).to_pylist()
 
-            converted = [self._blob_cell_to_data(v) for v in values]
+            if self.blob_as_descriptor:
+                converted = [self._normalize_blob_cell(v) for v in values]
+            else:
+                converted = [self._blob_cell_to_data(v) for v in values]
             arrays[field_idx] = pa.array(converted, type=pa.large_binary())
 
         return pa.RecordBatch.from_arrays(arrays, schema=record_batch.schema)
