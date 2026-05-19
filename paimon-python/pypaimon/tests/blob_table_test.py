@@ -1015,13 +1015,6 @@ class DataBlobWriterTest(unittest.TestCase):
             f"✅ End-to-end blob write/read test passed: wrote and read back {len(blob_data)} blob records correctly")  # noqa: E501
 
     def test_null_blob(self):
-        """Reproduce: writing NULL into an inline blob column via the public
-        write API (write_arrow) currently raises in BlobFileWriter._to_blob,
-        even though BlobFormatWriter.add_element / FormatBlobReader already
-        handle the NULL marker (-1) correctly. This test asserts the desired
-        behaviour: NULL blob values must round-trip through the standard
-        write -> commit -> read path.
-        """
         from pypaimon import Schema
 
         pa_schema = pa.schema([
