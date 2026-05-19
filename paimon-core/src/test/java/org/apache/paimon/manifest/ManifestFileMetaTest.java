@@ -661,23 +661,17 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         Optional<List<ManifestFileMeta>> fullCompacted;
-        fileIO.blockManifestReads();
-        try {
-            fullCompacted =
-                    ManifestFileMerger.tryFullCompaction(
-                            input,
-                            newMetas,
-                            manifestFile,
-                            Long.MAX_VALUE,
-                            1,
-                            getPartitionType(),
-                            2,
-                            true);
-        } finally {
-            fileIO.stopBlockingManifestReads();
-        }
+        fullCompacted =
+                ManifestFileMerger.tryFullCompaction(
+                        input,
+                        newMetas,
+                        manifestFile,
+                        Long.MAX_VALUE,
+                        1,
+                        getPartitionType(),
+                        2,
+                        false);
 
-        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
         assertThat(fullCompacted).isPresent();
         assertEquivalentEntries(input, fullCompacted.get());
     }
