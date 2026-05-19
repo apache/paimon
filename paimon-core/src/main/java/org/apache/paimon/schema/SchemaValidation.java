@@ -283,6 +283,10 @@ public class SchemaValidation {
             validateForDeletionVectors(options);
         }
 
+        if (options.snapshotSequenceOrdering()) {
+            validateSnapshotSequenceOrdering(schema, options);
+        }
+
         // vector field names must point to vector type
         Set<String> fieldNamesSpecifiedAsVector = options.vectorField();
         schema.fields()
@@ -605,6 +609,19 @@ public class SchemaValidation {
                         keyType);
             }
         }
+    }
+
+    private static void validateSnapshotSequenceOrdering(TableSchema schema, CoreOptions options) {
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "%s = true requires a primary-key table; append-only tables cannot use "
+                        + "snapshot-based sequence ordering.",
+                CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key());
+        checkArgument(
+                options.sequenceField().isEmpty(),
+                "%s = true is mutually exclusive with %s; the snapshot id is the sole tiebreaker.",
+                CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
+                CoreOptions.SEQUENCE_FIELD.key());
     }
 
     private static void validateForDeletionVectors(CoreOptions options) {
