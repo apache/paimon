@@ -32,8 +32,8 @@ _EXPECTED_SYSTEM_TABLES = (
     "branches",
 )
 
-# Names tracked in Java's SystemTableLoader that PyPaimon does not
-# expose yet. The loader must not silently register any of these.
+# Short names recognised by the Paimon catalog that this loader does
+# not register yet. The loader must not silently surface any of these.
 _UNREGISTERED_NAMES = {
     "audit_log",
     "binlog",

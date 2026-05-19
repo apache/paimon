@@ -61,7 +61,7 @@ class SchemasTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$schemas")
         self.assertIsInstance(table, SchemasTable)
 
-    def test_schema_matches_java_schemas_table(self):
+    def test_schema_column_layout(self):
         table = self.catalog.get_table("db.t$schemas")
         row_type = table.row_type()
         self.assertEqual(

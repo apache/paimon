@@ -67,7 +67,7 @@ class ManifestsTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$manifests")
         self.assertIsInstance(table, ManifestsTable)
 
-    def test_schema_matches_java_manifests_table(self):
+    def test_schema_column_layout(self):
         table = self.catalog.get_table("db.t$manifests")
         row_type = table.row_type()
         expected = [

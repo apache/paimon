@@ -47,7 +47,7 @@ _TIMESTAMP_TYPE = pyarrow.timestamp("ms")
 
 
 class SnapshotsTable(SystemTable):
-    """Mirrors Java ``SnapshotsTable``."""
+    """The ``$snapshots`` system table."""
 
     def system_table_name(self) -> str:
         return "snapshots"

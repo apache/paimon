@@ -56,7 +56,7 @@ class OptionsTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$options")
         self.assertIsInstance(table, OptionsTable)
 
-    def test_schema_matches_java_options_table(self):
+    def test_schema_column_layout(self):
         table = self.catalog.get_table("db.t$options")
         row_type = table.row_type()
         self.assertEqual(["key", "value"], [f.name for f in row_type.fields])

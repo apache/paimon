@@ -36,7 +36,7 @@ _TIMESTAMP_TYPE = pyarrow.timestamp("ms")
 
 
 class BranchesTable(SystemTable):
-    """Mirrors Java ``BranchesTable``."""
+    """The ``$branches`` system table."""
 
     def system_table_name(self) -> str:
         return "branches"
@@ -55,10 +55,10 @@ class BranchesTable(SystemTable):
             branch_path = BranchManager.branch_path(
                 self.base_table.table_path, name)
             ms = _read_mtime_ms(self.base_table.file_io, branch_path)
-            # Java declares create_time NOT NULL. When the backing store
-            # cannot return an mtime (some remote object stores via
-            # PyArrowFileIO) fall back to epoch 0 so the schema contract
-            # holds.
+            # ``create_time`` is declared NOT NULL. When the backing
+            # store cannot return an mtime (some remote object stores
+            # via PyArrowFileIO) fall back to epoch 0 so the schema
+            # contract holds.
             create_times.append(0 if ms is None else int(ms))
         return pyarrow.table({
             "branch_name": pyarrow.array(names, type=pyarrow.string()),

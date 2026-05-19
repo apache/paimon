@@ -76,7 +76,7 @@ class PartitionsTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$partitions")
         self.assertIsInstance(table, PartitionsTable)
 
-    def test_schema_matches_java_partitions_table(self):
+    def test_schema_column_layout(self):
         self._create_partitioned_table()
         table = self.catalog.get_table("db.t$partitions")
         row_type = table.row_type()

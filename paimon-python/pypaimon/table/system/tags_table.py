@@ -40,7 +40,7 @@ _TIMESTAMP_TYPE = pyarrow.timestamp("ms")
 
 
 class TagsTable(SystemTable):
-    """Mirrors Java ``TagsTable``."""
+    """The ``$tags`` system table."""
 
     def system_table_name(self) -> str:
         return "tags"
@@ -73,9 +73,8 @@ class TagsTable(SystemTable):
             record_counts.append(
                 None if tag.total_record_count is None
                 else int(tag.total_record_count))
-            # TODO: surface create_time and time_retained once pypaimon's
-            # Tag dataclass carries them (Java reads tag.createTime() and
-            # tag.timeRetained() directly).
+            # TODO: surface create_time and time_retained once the Tag
+            # dataclass carries them.
             create_times.append(None)
             time_retained.append(None)
 

@@ -40,7 +40,7 @@ TABLE_TYPE = RowType(False, [
 
 
 class ManifestsTable(SystemTable):
-    """Mirrors Java ``ManifestsTable`` (the latest snapshot's manifests)."""
+    """The ``$manifests`` system table for the latest snapshot."""
 
     def system_table_name(self) -> str:
         return "manifests"
@@ -75,8 +75,8 @@ class ManifestsTable(SystemTable):
             num_added.append(int(meta.num_added_files))
             num_deleted.append(int(meta.num_deleted_files))
             schema_ids.append(int(meta.schema_id))
-            # TODO: render min/max_partition_stats as the same partition
-            # cast-to-string that Java's ManifestsTable applies. pypaimon
+            # TODO: render min/max_partition_stats by casting partition
+            # rows to their string form. pypaimon
             # has SimpleStats but no shared partition-row-to-string
             # helper yet; emit NULL to preserve the column shape.
             min_partition_stats.append(None)

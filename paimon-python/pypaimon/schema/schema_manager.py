@@ -262,8 +262,8 @@ class SchemaManager:
     def list_all(self) -> List['TableSchema']:
         """Return every committed schema in ascending ID order.
 
-        Mirrors Java ``SchemaManager.listAll``. Missing IDs (deleted on
-        disk after expiry, for instance) are skipped.
+        Missing IDs (deleted on disk after expiry, for instance) are
+        skipped.
         """
         ids = sorted(self._list_versioned_files())
         schemas: List['TableSchema'] = []

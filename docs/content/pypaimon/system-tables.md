@@ -27,13 +27,12 @@ under the License.
 
 # System Tables
 
-PyPaimon exposes the same `table$<name>` system tables as the JVM
-runtime, addressable through the existing catalog and read-builder
-APIs. The supported tables are: `snapshots`, `schemas`, `options`,
-`manifests`, `files`, `partitions`, `tags`, and `branches`. Global
-tables under the `sys` database (`sys.all_tables`,
-`sys.catalog_options`, ...) and the streaming `audit_log` / `binlog`
-family are not exposed yet.
+PyPaimon exposes `table$<name>` system tables through the existing
+catalog and read-builder APIs. The supported short names are:
+`snapshots`, `schemas`, `options`, `manifests`, `files`, `partitions`,
+`tags`, and `branches`. Global tables under the `sys` database
+(`sys.all_tables`, `sys.catalog_options`, ...) and the streaming
+`audit_log` / `binlog` family are not exposed yet.
 
 ## Basic Usage
 
@@ -70,8 +69,8 @@ read builder works with `to_pandas`, `to_arrow`, `to_iterator`,
 
 ## Available Tables
 
-Every system table mirrors the Java implementation column for column
-and inherits its primary-key choice. Tables are listed in the order
+Each system table is listed below with its column layout (including
+nullability) and primary-key choice. Tables are listed in the order
 they appear in `SystemTableLoader`.
 
 ### `$snapshots`
@@ -139,7 +138,7 @@ Manifest list for the latest snapshot.
 
 One row per ADD entry surviving the latest snapshot. Stats columns are
 compact JSON dictionaries keyed by column name. The wire name
-`deleteRowCount` is intentionally camelCase to match Java.
+`deleteRowCount` is intentionally camelCase.
 
 | Column                  | Type                | Notes                       |
 |-------------------------|---------------------|-----------------------------|
@@ -159,7 +158,7 @@ compact JSON dictionaries keyed by column name. The wire name
 | `min_sequence_number`   | BIGINT              |                             |
 | `max_sequence_number`   | BIGINT              |                             |
 | `creation_time`         | TIMESTAMP(3)        |                             |
-| `deleteRowCount`        | BIGINT              | camelCase per Java          |
+| `deleteRowCount`        | BIGINT              | camelCase wire name         |
 | `file_source`           | STRING              |                             |
 | `first_row_id`          | BIGINT              |                             |
 | `write_cols`            | ARRAY<STRING>       |                             |
@@ -213,8 +212,8 @@ Every named branch with the branch directory's modification time.
   predicate. Filter the resulting Arrow table / DataFrame on the
   client side instead.
 * **`min_partition_stats` / `max_partition_stats` in `$manifests`**
-  are emitted as `NULL`. The shared cast-to-string helper that Java
-  applies to partition rows has no Python counterpart yet.
+  are emitted as `NULL`. PyPaimon does not yet ship a helper that casts
+  a partition row to its string form.
 * **`tag.time_retained` and `tag.create_time` are `NULL`.** PyPaimon's
   `Tag` dataclass does not yet carry these fields — matching
   `FileSystemCatalog.get_tag`'s current behaviour.
@@ -225,9 +224,8 @@ Every named branch with the branch directory's modification time.
 * **`partitions.created_at / created_by / updated_by / options / done`**
   are filled with placeholders for the filesystem path. REST-managed
   catalogs that expose those fields will be wired in a follow-up.
-* **`list_tables` does not enumerate system tables.** Mirrors Java's
-  `AbstractCatalog.listTablesImpl`; system tables remain accessible
-  through `get_table('db.t$name')`.
+* **`list_tables` does not enumerate system tables.** System tables
+  remain accessible through `get_table('db.t$name')`.
 
 ## Supported via Catalogs
 

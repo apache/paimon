@@ -104,7 +104,7 @@ class SnapshotsTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$snapshots")
         self.assertIsInstance(table, SnapshotsTable)
 
-    def test_schema_matches_java_snapshots_table(self):
+    def test_schema_column_layout(self):
         table = self.catalog.get_table("db.t$snapshots")
         row_type = table.row_type()
         expected = [

@@ -46,7 +46,7 @@ _TIMESTAMP_TYPE = pyarrow.timestamp("ms")
 
 
 class PartitionsTable(SystemTable):
-    """Mirrors Java ``PartitionsTable``.
+    """The ``$partitions`` system table.
 
     The filesystem flow aggregates from manifest entries; catalog-owned
     columns (``created_at``, ``created_by``, ``updated_by``, ``options``,

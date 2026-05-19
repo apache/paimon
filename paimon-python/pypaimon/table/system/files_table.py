@@ -46,8 +46,8 @@ TABLE_TYPE = RowType(False, [
     DataField(13, "min_sequence_number", AtomicType("BIGINT", nullable=True)),
     DataField(14, "max_sequence_number", AtomicType("BIGINT", nullable=True)),
     DataField(15, "creation_time", AtomicType("TIMESTAMP(3)", nullable=True)),
-    # Java's column is intentionally camelCase ("deleteRowCount") — keep
-    # the wire name byte-for-byte equal.
+    # ``deleteRowCount`` is intentionally camelCase to keep the on-wire
+    # column name stable.
     DataField(16, "deleteRowCount", AtomicType("BIGINT", nullable=True)),
     DataField(17, "file_source", AtomicType("STRING", nullable=True)),
     DataField(18, "first_row_id", AtomicType("BIGINT", nullable=True)),
@@ -145,7 +145,7 @@ def _render_null_counts(null_counts: Optional[List[int]],
 
 
 class FilesTable(SystemTable):
-    """Mirrors Java ``FilesTable``."""
+    """The ``$files`` system table."""
 
     def system_table_name(self) -> str:
         return "files"

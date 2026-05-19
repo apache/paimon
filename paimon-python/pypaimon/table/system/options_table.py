@@ -32,7 +32,7 @@ TABLE_TYPE = RowType(False, [
 
 
 class OptionsTable(SystemTable):
-    """Mirrors Java ``OptionsTable``: each row is one (key, value) pair."""
+    """The ``$options`` system table: one (key, value) row per option."""
 
     def system_table_name(self) -> str:
         return "options"

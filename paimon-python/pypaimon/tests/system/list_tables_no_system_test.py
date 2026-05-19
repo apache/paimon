@@ -18,9 +18,8 @@
 """Regression: list_tables must not surface table-level system tables.
 
 System tables are accessible by name via ``get_table('db.t$<name>')``
-but they don't belong in directory listings (Java's
-``AbstractCatalog.listTablesImpl`` matches the same contract). The
-test below pins both halves of that behaviour for FilesystemCatalog.
+but they don't belong in directory listings. The test below pins both
+halves of that behaviour for FilesystemCatalog.
 """
 
 import os

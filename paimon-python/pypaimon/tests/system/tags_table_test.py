@@ -81,7 +81,7 @@ class TagsTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$tags")
         self.assertIsInstance(table, TagsTable)
 
-    def test_schema_matches_java_tags_table(self):
+    def test_schema_column_layout(self):
         table = self.catalog.get_table("db.t$tags")
         row_type = table.row_type()
         self.assertEqual(

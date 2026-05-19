@@ -79,7 +79,7 @@ class BranchesTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$branches")
         self.assertIsInstance(table, BranchesTable)
 
-    def test_schema_matches_java_branches_table(self):
+    def test_schema_column_layout(self):
         table = self.catalog.get_table("db.t$branches")
         row_type = table.row_type()
         self.assertEqual(["branch_name", "create_time"],

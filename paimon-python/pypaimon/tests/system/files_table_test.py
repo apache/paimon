@@ -77,7 +77,7 @@ class FilesTableTest(unittest.TestCase):
         table = self.catalog.get_table("db.t$files")
         self.assertIsInstance(table, FilesTable)
 
-    def test_schema_matches_java_files_table(self):
+    def test_schema_column_layout(self):
         self._create_partitioned_table()
         table = self.catalog.get_table("db.t$files")
         row_type = table.row_type()

@@ -17,12 +17,11 @@
 
 """Registry that maps a system-table short name to its implementation.
 
-Mirrors the subset of Java's ``SystemTableLoader.SYSTEM_TABLE_LOADERS``
-that PyPaimon supports natively. Implementation classes are referenced
-by dotted path and imported lazily, so adding a new table is a single
-registry entry plus the new module.
+Implementation classes are referenced by dotted path and imported
+lazily, so adding a new table is a single registry entry plus the
+new module.
 
-The following Java-side names are not registered here yet:
+The following short names are intentionally not registered here yet:
 
   audit_log, binlog, read_optimized, consumers, statistics,
   aggregation_fields, buckets, file_key_ranges, table_indexes,

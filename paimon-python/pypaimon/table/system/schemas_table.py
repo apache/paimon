@@ -41,18 +41,18 @@ _TIMESTAMP_TYPE = pyarrow.timestamp("ms")
 
 
 def _to_json(value: Any) -> str:
-    """Compact JSON encoding aligned with Java JsonSerdeUtil.toFlatJson.
+    """Compact JSON encoding for the four serialised columns.
 
-    Field ordering depends on the source object (insertion order for
-    dicts and lists is preserved by ``json.dumps``). Bit-exact equality
-    with the Java encoder is not promised — callers compare decoded
+    Field ordering follows the source object (insertion order for dicts
+    and lists is preserved by ``json.dumps``); bit-exact equality with
+    any external encoder is not promised — callers compare decoded
     structures, not raw strings.
     """
     return json.dumps(value, separators=(',', ':'), ensure_ascii=False)
 
 
 class SchemasTable(SystemTable):
-    """Mirrors Java ``SchemasTable``."""
+    """The ``$schemas`` system table."""
 
     def system_table_name(self) -> str:
         return "schemas"
