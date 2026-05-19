@@ -20,16 +20,24 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -44,6 +52,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -878,19 +887,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     /**
      * Test manifest sort with overlapping partition ranges. Each manifest contains entries spanning
      * multiple partitions, creating overlapping intervals that require sort rewrite to resolve.
-     *
-     * <p>Input manifests (deliberately unordered and overlapping):
-     *
-     * <pre>
-     *   manifest-A: partitions [5, 13]  (entries in partition 5,6,7,8,9)
-     *   manifest-B: partitions [0, 9]  (entries in partition 0,1,2,3,4)
-     *   manifest-C: partitions [3, 7]  (entries in partition 3,4,5,6,7) -- overlaps A and B
-     *   manifest-D: partitions [8, 12] (entries in partition 8,9,10,11,12) -- overlaps A
-     *   manifest-E: partitions [1, 6]  (entries in partition 1,2,3) -- overlaps B and C
-     *   manifest-F: partitions [4, 14](entries in partition 10,11,12,13,14) -- overlaps D
-     * </pre>
-     *
-     * <p>After sort rewrite, all surviving ADD entries should be sorted by partition field.
+     * After sort rewrite, all surviving ADD entries should be sorted by partition field.
      */
     @Test
     public void testManifestSortWithOverlappingPartitions() {
@@ -1065,5 +1062,233 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .isGreaterThanOrEqualTo(prevPartition);
             }
         }
+    }
+    /**
+     * Test manifest sort with a multi-field partition type.
+     *
+     * <p>Setup: partition=(region INT, dt INT, hour INT), sort by dt (field index=1). 9 manifest
+     * files form 6 overlapping sorted runs by dt range:
+     *
+     * <pre>
+     *   Run1: 3 files, dt=[0,15],[3,5],[6,8]
+     *   Run2: 2 files, dt=[1,8],[5,7]
+     *   Run3: 1 file,  dt=[0,9]
+     *   Run4: 1 file,  dt=[5,14]
+     *   Run5: 1 file,  dt=[8,15]
+     *   Run6: 1 file,  dt=[4,12]
+     * </pre>
+     *
+     * <p>Verifies: 1) no data loss after sort-rewrite, 2) entries within each output manifest are
+     * sorted by dt.
+     */
+    @Test
+    public void testManifestSortWithMultiplePartitions() {
+        // Use a 3-field partition type: (region INT, dt INT, hour INT)
+        RowType multiPartitionType = RowType.of(new IntType(), new IntType(), new IntType());
+
+        // Create a dedicated ManifestFile for the 3-field partition type
+        Path path = new Path(tempDir.toString());
+        FileIO fileIO = FileIOFinder.find(path);
+        ManifestFile multiPartManifestFile =
+                new ManifestFile.Factory(
+                                fileIO,
+                                new SchemaManager(fileIO, path),
+                                multiPartitionType,
+                                avro,
+                                "zstd",
+                                new FileStorePathFactory(
+                                        path,
+                                        multiPartitionType,
+                                        "default",
+                                        CoreOptions.FILE_FORMAT.defaultValue(),
+                                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                        null,
+                                        null,
+                                        CoreOptions.ExternalPathStrategy.NONE,
+                                        null,
+                                        false,
+                                        null),
+                                Long.MAX_VALUE,
+                                null)
+                        .create();
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // Run1
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r1a-p0", 10, 0, 1),
+                                        makeMultiPartEntry(true, "r1a-p1", 20, 1, 2),
+                                        makeMultiPartEntry(true, "r1a-p2", 30, 15, 3)))
+                        .get(0));
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r1b-p3", 10, 3, 4),
+                                        makeMultiPartEntry(true, "r1b-p4", 20, 4, 5),
+                                        makeMultiPartEntry(true, "r1b-p5", 30, 5, 6)))
+                        .get(0));
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r1c-p6", 10, 6, 7),
+                                        makeMultiPartEntry(true, "r1c-p7", 20, 7, 8),
+                                        makeMultiPartEntry(true, "r1c-p8", 30, 8, 9)))
+                        .get(0));
+
+        // Run2
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r2a-p1", 5, 1, 10),
+                                        makeMultiPartEntry(true, "r2a-p2", 15, 2, 11),
+                                        makeMultiPartEntry(true, "r2a-p3", 25, 3, 12),
+                                        makeMultiPartEntry(true, "r2a-p4", 35, 8, 13)))
+                        .get(0));
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r2b-p5", 5, 5, 14),
+                                        makeMultiPartEntry(true, "r2b-p6", 15, 6, 15),
+                                        makeMultiPartEntry(true, "r2b-p7", 25, 7, 16)))
+                        .get(0));
+
+        // Run3
+        List<ManifestEntry> run3Entries = new ArrayList<>();
+        for (int p = 0; p <= 9; p++) {
+            run3Entries.add(makeMultiPartEntry(true, String.format("r3-p%d", p), 99, p, p + 20));
+        }
+        input.add(multiPartManifestFile.write(run3Entries).get(0));
+
+        // Run4
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r4a-p10", 10, 5, 30),
+                                        makeMultiPartEntry(true, "r4a-p11", 20, 11, 31),
+                                        makeMultiPartEntry(true, "r4a-p12", 30, 12, 32),
+                                        makeMultiPartEntry(true, "r4a-p13", 40, 13, 33),
+                                        makeMultiPartEntry(true, "r4a-p14", 50, 14, 34)))
+                        .get(0));
+
+        // Run5
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r5a-p11", 11, 8, 40),
+                                        makeMultiPartEntry(true, "r5a-p12", 21, 12, 41),
+                                        makeMultiPartEntry(true, "r5a-p13", 31, 13, 42),
+                                        makeMultiPartEntry(true, "r5a-p14", 41, 14, 43),
+                                        makeMultiPartEntry(true, "r5a-p15", 51, 15, 44)))
+                        .get(0));
+
+        // Run6
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartEntry(true, "r6a-p7", 7, 4, 50),
+                                        makeMultiPartEntry(true, "r6a-p8", 17, 8, 51),
+                                        makeMultiPartEntry(true, "r6a-p9", 27, 9, 52),
+                                        makeMultiPartEntry(true, "r6a-p10", 37, 10, 53),
+                                        makeMultiPartEntry(true, "r6a-p11", 47, 11, 54),
+                                        makeMultiPartEntry(true, "r6a-p12", 57, 12, 55)))
+                        .get(0));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        // Sort by the second partition field "f1" (dt)
+        testOptions.set("manifest-sort.partition-field", "f1");
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        multiPartManifestFile,
+                        multiPartitionType,
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Verify no data loss
+        List<ManifestEntry> inputEntries =
+                input.stream()
+                        .flatMap(
+                                f ->
+                                        multiPartManifestFile.read(f.fileName(), f.fileSize())
+                                                .stream())
+                        .collect(Collectors.toList());
+        List<String> entryBeforeMerge =
+                FileEntry.mergeEntries(inputEntries).stream()
+                        .filter(entry -> entry.kind() == FileKind.ADD)
+                        .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                        .collect(Collectors.toList());
+        List<String> entryAfterMerge = new ArrayList<>();
+        for (ManifestFileMeta meta : merged) {
+            for (ManifestEntry entry :
+                    multiPartManifestFile.read(meta.fileName(), meta.fileSize())) {
+                entryAfterMerge.add(entry.kind() + "-" + entry.file().fileName());
+            }
+        }
+        assertThat(entryBeforeMerge).hasSameElementsAs(entryAfterMerge);
+
+        // Verify entries within each output manifest are sorted by the second field (dt)
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries =
+                    multiPartManifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevDt = entries.get(i - 1).partition().getInt(1);
+                int currDt = entries.get(i).partition().getInt(1);
+                assertThat(currDt)
+                        .as("Entries within manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevDt);
+            }
+        }
+    }
+
+    /** Create a ManifestEntry with a 3-field partition row (region, dt, hour). */
+    private ManifestEntry makeMultiPartEntry(
+            boolean isAdd, String fileName, int region, int dt, int hour) {
+        BinaryRow binaryRow = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, region);
+        writer.writeInt(1, dt);
+        writer.writeInt(2, hour);
+        writer.complete();
+
+        return ManifestEntry.create(
+                isAdd ? FileKind.ADD : FileKind.DELETE,
+                binaryRow,
+                0,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        0,
+                        binaryRow,
+                        binaryRow,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        null));
     }
 }
