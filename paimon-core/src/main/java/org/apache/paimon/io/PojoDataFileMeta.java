@@ -380,7 +380,7 @@ public class PojoDataFileMeta implements DataFileMeta {
     }
 
     @Override
-    public PojoDataFileMeta clearFirstRowId() {
+    public PojoDataFileMeta newFirstRowId(@Nullable Long newFirstRowId) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -400,7 +400,7 @@ public class PojoDataFileMeta implements DataFileMeta {
                 fileSource,
                 valueStatsCols,
                 externalPath,
-                null,
+                newFirstRowId,
                 writeCols);
     }
 

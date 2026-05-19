@@ -108,7 +108,7 @@ public class DefaultBranchMergeHandler implements BranchMergeHandler {
         if (rowTrackingEnabled && file.firstRowId() != null) {
             // Source files already have row ids assigned in their branch. Clear them so the
             // target branch commit path assigns fresh, non-overlapping row ids.
-            return file.clearFirstRowId();
+            return file.newFirstRowId(null);
         }
         return file;
     }

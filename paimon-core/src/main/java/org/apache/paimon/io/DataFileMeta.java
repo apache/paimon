@@ -329,7 +329,7 @@ public interface DataFileMeta {
 
     DataFileMeta assignFirstRowId(long firstRowId);
 
-    DataFileMeta clearFirstRowId();
+    DataFileMeta newFirstRowId(@Nullable Long newFirstRowId);
 
     default List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();
