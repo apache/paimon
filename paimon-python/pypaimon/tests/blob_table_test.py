@@ -1015,13 +1015,6 @@ class DataBlobWriterTest(unittest.TestCase):
             f"✅ End-to-end blob write/read test passed: wrote and read back {len(blob_data)} blob records correctly")  # noqa: E501
 
     def test_blob_write_read_end_to_end_with_null_values(self):
-        """Reproduce: writing NULL into an inline blob column via the public
-        write API (write_arrow) currently raises in BlobFileWriter._to_blob,
-        even though BlobFormatWriter.add_element / FormatBlobReader already
-        handle the NULL marker (-1) correctly. This test asserts the desired
-        behaviour: NULL blob values must round-trip through the standard
-        write -> commit -> read path.
-        """
         from pypaimon import Schema
 
         pa_schema = pa.schema([
@@ -1040,8 +1033,6 @@ class DataBlobWriterTest(unittest.TestCase):
         self.catalog.create_table('test_db.blob_write_read_e2e_null', schema, False)
         table = self.catalog.get_table('test_db.blob_write_read_e2e_null')
 
-        # Mix non-null and null blob values across the batch:
-        # rows 0/2/4 have payloads, rows 1/3 are NULL.
         test_data = pa.Table.from_pydict({
             'id':   [1, 2, 3, 4, 5],
             'name': ['a', 'b', 'c', 'd', 'e'],
@@ -1056,7 +1047,6 @@ class DataBlobWriterTest(unittest.TestCase):
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
-        # NOTE: this is where the bug currently manifests; _to_blob rejects None.
         writer.write_arrow(test_data)
 
         commit_messages = writer.prepare_commit()
