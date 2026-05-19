@@ -38,9 +38,10 @@ import java.util.List;
  */
 public class ManifestPickStrategy {
 
+    public static final int MAX_LEVEL = 4;
+
     private final int sizeAmpThreshold;
     private final int sizeRatioThreshold;
-    private static final int MAX_LEVEL = 4;
 
     public ManifestPickStrategy(int sizeAmpThreshold, int sizeRatioThreshold) {
         Preconditions.checkArgument(sizeAmpThreshold > 0, "sizeAmpThreshold must be positive");
