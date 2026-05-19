@@ -88,7 +88,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 mfFactory,
                 mergeSorter,
                 produceChangelog,
-                dvMaintainer != null);
+                dvMaintainer != null,
+                options.snapshotSequenceOrdering());
         this.dvMaintainer = dvMaintainer;
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
@@ -189,14 +190,17 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         @Nullable private final RecordEqualiser valueEqualiser;
         private final LookupStrategy lookupStrategy;
         @Nullable private final UserDefinedSeqComparator userDefinedSeqComparator;
+        private final boolean snapshotSequenceOrdering;
 
         public LookupMergeFunctionWrapperFactory(
                 @Nullable RecordEqualiser valueEqualiser,
                 LookupStrategy lookupStrategy,
-                @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
+                @Nullable UserDefinedSeqComparator userDefinedSeqComparator,
+                boolean snapshotSequenceOrdering) {
             this.valueEqualiser = valueEqualiser;
             this.lookupStrategy = lookupStrategy;
             this.userDefinedSeqComparator = userDefinedSeqComparator;
+            this.snapshotSequenceOrdering = snapshotSequenceOrdering;
         }
 
         @Override
@@ -217,7 +221,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                     valueEqualiser,
                     lookupStrategy,
                     deletionVectorsMaintainer,
-                    userDefinedSeqComparator);
+                    userDefinedSeqComparator,
+                    snapshotSequenceOrdering);
         }
     }
 

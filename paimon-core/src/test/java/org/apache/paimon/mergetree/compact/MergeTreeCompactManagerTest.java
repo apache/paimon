@@ -385,7 +385,8 @@ public class MergeTreeCompactManagerTest {
                         keyComparator,
                         null,
                         DeduplicateMergeFunction.factory(),
-                        mergeSorter);
+                        mergeSorter,
+                        false);
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         MergeTreeCompactManager manager =

@@ -121,7 +121,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
             reused = new KeyValue();
         }
         RowKind rowKind = currentDeleteRow ? RowKind.DELETE : RowKind.INSERT;
-        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), rowKind, row);
+        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), rowKind, row)
+                .setSnapshotId(latestKv.snapshotId());
     }
 
     @Override

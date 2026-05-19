@@ -206,7 +206,8 @@ public interface KeyValueBuffer {
             RowType valueType,
             @Nullable IOManager ioManager) {
         KeyValueWithLevelNoReusingSerializer kvSerializer =
-                new KeyValueWithLevelNoReusingSerializer(keyType, valueType);
+                new KeyValueWithLevelNoReusingSerializer(
+                        keyType, valueType, options.snapshotSequenceOrdering());
         MemorySegmentPool pool =
                 ioManager == null
                         ? new UnlimitedSegmentPool(options.pageSize())
