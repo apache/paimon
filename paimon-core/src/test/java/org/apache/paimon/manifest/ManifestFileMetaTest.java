@@ -1023,6 +1023,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "10B");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
