@@ -131,6 +131,11 @@ class FileSystemCatalog(Catalog):
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        if identifier.is_system_table():
+            return self._load_system_table(identifier)
+        return self._load_data_table(identifier)
+
+    def _load_data_table(self, identifier: Identifier) -> FileStoreTable:
         if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
@@ -146,6 +151,22 @@ class FileSystemCatalog(Catalog):
         )
 
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
+
+    def _load_system_table(self, identifier: Identifier) -> Table:
+        from pypaimon.table.system import system_table_loader
+
+        base_identifier = Identifier.create(
+            identifier.get_database_name(),
+            identifier.get_table_name(),
+            branch=identifier.get_branch_name(),
+        )
+        base_table = self._load_data_table(base_identifier)
+        sys_table = system_table_loader.load(
+            identifier.get_system_table_name(), base_table
+        )
+        if sys_table is None:
+            raise TableNotExistException(identifier)
+        return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
