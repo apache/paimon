@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -160,34 +159,30 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
         }
         for (long id = cachedSnapshot.id() + 1; id <= latestSnapshot.id(); id++) {
             deltaProbeCount++;
-            Snapshot snapshot;
             try {
-                snapshot = snapshotManager.tryGetSnapshot(id);
-            } catch (FileNotFoundException e) {
-                // Snapshot may have been expired between retries. Fall back to a full scan
-                // of the latest snapshot, which is guaranteed to exist.
-                return false;
-            }
-
-            if (snapshot.commitKind() == CommitKind.OVERWRITE) {
-                // OVERWRITE snapshots (e.g. produced by replaceManifestList /
-                // RemoveUnexistingManifestsAction) may rewrite base manifests with an empty delta,
-                // so the DELTA probe cannot prove that target partitions are unchanged.
-                return false;
-            }
-
-            FileStoreScan scan =
-                    newScan()
-                            .withSnapshot(snapshot)
-                            .withPartitionFilter(partitionFilter)
-                            .withKind(ScanMode.DELTA);
-            Iterator<ManifestEntry> iterator = scan.readFileIterator();
-            if (iterator.hasNext()) {
-                LOG.info(
-                        "Cannot advance cache from {} to {} because snapshot {} has changed target partitions.",
-                        cachedSnapshot.id(),
-                        latestSnapshot.id(),
-                        id);
+                Snapshot snapshot = snapshotManager.tryGetSnapshot(id);
+                if (snapshot.commitKind() == CommitKind.OVERWRITE) {
+                    // OVERWRITE snapshots (e.g. produced by replaceManifestList /
+                    // RemoveUnexistingManifestsAction) may rewrite base manifests with an empty
+                    // delta, so the DELTA probe cannot prove that target partitions are unchanged.
+                    return false;
+                }
+                FileStoreScan scan =
+                        newScan()
+                                .withSnapshot(snapshot)
+                                .withPartitionFilter(partitionFilter)
+                                .withKind(ScanMode.DELTA);
+                Iterator<ManifestEntry> iterator = scan.readFileIterator();
+                if (iterator.hasNext()) {
+                    LOG.info(
+                            "Cannot advance cache from {} to {} because snapshot {} has changed target partitions.",
+                            cachedSnapshot.id(),
+                            latestSnapshot.id(),
+                            id);
+                    return false;
+                }
+            } catch (Exception e) {
+                // For example, the snapshot is being expired. Using full scan is safe.
                 return false;
             }
         }
