@@ -172,12 +172,11 @@ public class ManifestFileSorter {
     /**
      * Classify manifest files into default-compaction group and LSM group.
      *
-     * <p>When full compaction is triggered (totalDeltaFileSize >= threshold), files that must
-     * change or overlap with delete partitions go into defaultCompactionManifests; the rest stay as
-     * lsmFiles.
+     * <p>Full compaction: small files and files overlapping delete partitions go into
+     * defaultCompactionManifests; the rest stay as lsmFiles.
      *
-     * <p>When full compaction is NOT triggered, adjacent small manifests whose cumulative size
-     * reaches suggestedMetaSize are grouped into defaultCompactionManifests (minor-style pick).
+     * <p>Non-full compaction: delete-overlapping files go to result, small files go to
+     * defaultCompactionManifests for minor-style merge.
      */
     private static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
@@ -187,6 +186,7 @@ public class ManifestFileSorter {
             RowType partitionType,
             long sizeTrigger,
             @Nullable Integer manifestReadParallelism) {
+        // Calculate total size of files that need compaction to determine full-compaction trigger
         Filter<ManifestFileMeta> mustChange =
                 file -> file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize;
         long totalDeltaFileSize = 0;
@@ -197,11 +197,13 @@ public class ManifestFileSorter {
         }
         boolean removeAllDelete = totalDeltaFileSize >= sizeTrigger;
 
+        // Initialize classification containers and read delete entries
         Map<ManifestFileMeta, Boolean> defaultCompactionManifests = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
         Set<FileEntry.Identifier> deleteEntries =
                 FileEntry.readDeletedEntries(manifestFile, input, manifestReadParallelism);
 
+        // Build partition predicate from delete entries for overlap detection
         PartitionPredicate predicate;
         if (deleteEntries.isEmpty()) {
             predicate = PartitionPredicate.ALWAYS_FALSE;
@@ -215,6 +217,7 @@ public class ManifestFileSorter {
             }
         }
 
+        // Classify each file based on size and delete-partition overlap
         Iterator<ManifestFileMeta> iterator = lsmFiles.iterator();
         while (iterator.hasNext()) {
             ManifestFileMeta file = iterator.next();
@@ -227,11 +230,13 @@ public class ManifestFileSorter {
                                     file.partitionStats().maxValues(),
                                     file.partitionStats().nullCounts());
             if (removeAllDelete) {
+                // Full compaction: collect small or delete-overlapping files
                 if (small || inDeleteRange) {
                     iterator.remove();
                     defaultCompactionManifests.put(file, inDeleteRange);
                 }
             } else {
+                // Non-full: separate delete-overlapping into result, small into compaction group
                 if (inDeleteRange) {
                     iterator.remove();
                     result.add(file);
@@ -309,7 +314,7 @@ public class ManifestFileSorter {
         // Step 4: Sort by totalSize and assign levels
         result.sort(Comparator.comparingLong(ManifestSortedRun::totalSize));
         int n = result.size();
-        int maxLevel = 4;
+        int maxLevel = ManifestPickStrategy.MAX_LEVEL;
         for (int i = 0; i < n; i++) {
             if (i >= n - maxLevel) {
                 result.get(i).setLevel(i - (n - maxLevel) + 1);
@@ -406,12 +411,16 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Iterate over sections, decide whether to rewrite each section fully or partially based on the
-     * maxRewriteSize threshold and whether the section contains defaultCompaction files.
+     * Rewrite sections with a budget-controlled strategy.
      *
-     * <p>Within threshold: read all metas, sort and rewrite the entire section. Exceeds threshold
-     * but contains defaultCompaction files: only rewrite sub-segments around those files. Exceeds
-     * threshold with no defaultCompaction files: skip (keep as-is).
+     * <ul>
+     *   <li>1. Single-file section: pass through (rewrite only if it has delete entries).
+     *   <li>2. Within budget: sort and rewrite the entire section.
+     *   <li>3. First time exceeding budget: partial rewrite within remaining budget, remaining files
+     *       form a new section appended for later processing.
+     *   <li>4. After budget exhausted with defaultCompaction files: rewrite sub-segments only.
+     *   <li>5. After budget exhausted without defaultCompaction files: keep as-is.
+     * </ul>
      */
     private static void rewriteSections(
             List<Section> sections,
@@ -456,11 +465,9 @@ public class ManifestFileSorter {
                         sortNewFiles,
                         manifestReadParallelism);
             } else if (!reachedLimit) {
-                // First time exceeding threshold without defaultCompaction:
-                // partial rewrite within remaining budget.
+                // Partial rewrite: split section at the budget boundary.
                 long rewriteTotalSize = maxRewriteSize - processedSize;
                 processedSize += section.totalSize;
-                // Split section into two parts: files within budget and remaining files
                 List<ManifestFileMeta> rewriteFiles = new ArrayList<>();
                 List<ManifestFileMeta> remainingFiles = new ArrayList<>();
                 long rewriteSize = 0;
@@ -490,11 +497,10 @@ public class ManifestFileSorter {
                         sortNewFiles,
                         manifestReadParallelism);
 
-                // Create new section for remaining files and append to sections list
+                // Append remaining files as a new section for later processing.
                 if (!remainingFiles.isEmpty()) {
                     Section remainingSection =
                             new Section(remainingFiles, remainingSize, remainingHasDefault);
-                    // Append remaining section to the end of sections list
                     sections.add(remainingSection);
                 }
                 reachedLimit = true;
@@ -516,7 +522,11 @@ public class ManifestFileSorter {
         }
     }
 
-    /** Rewrite sub-segments within a section that exceeds the rewrite threshold. */
+    /**
+     * Batch-rewrite files in a section by splitting them into sub-segments of {@code
+     * manifestTargetSize}. Tail sub-segment is only rewritten if it has delete entries or meets
+     * {@code suggestedMinMetaCount}.
+     */
     private static void rewriteSubSegments(
             List<ManifestFileMeta> section,
             Map<ManifestFileMeta, Boolean> defaultCompactionMap,
@@ -549,7 +559,7 @@ public class ManifestFileSorter {
                 subSegmentSize = 0;
             }
         }
-        // Flush remaining sub-segment only if there are enough files to justify rewrite
+        // Flush tail only if delete entries exist or file count >= minCount.
         if (!subSegment.isEmpty()) {
             if (!deleteEntries.isEmpty() || subSegment.size() >= suggestedMinMetaCount) {
                 sortAndRewriteSection(
@@ -568,14 +578,8 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Read all entries from a section's manifest files, sort them in memory by the specified
-     * partition field, filter out DELETE entries and cancelled ADD entries, then write surviving
-     * entries to new manifest files via the rolling writer.
-     *
-     * <p>All files participate in sorting, enabling full sort across the entire section.
-     *
-     * <p>Reading is parallelized via {@code sequentialBatchedExecute} following the same pattern as
-     * {@link ManifestFileMerger#tryFullCompaction}.
+     * Read entries from a section's manifest files, sort by partition field, and write to new
+     * manifests. Single non-delete-range files are passed through without rewrite.
      */
     private static void sortAndRewriteSection(
             List<ManifestFileMeta> section,
@@ -587,13 +591,13 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> sortNewFiles,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
+        // Skip rewrite for single file not in delete-range.
         if (section.size() == 1
-                && (!defaultCompactionMap.containsKey(section.get(0))
-                        || !defaultCompactionMap.get(section.get(0)))) {
+                && !defaultCompactionMap.getOrDefault(section.get(0), false)) {
             result.add(section.get(0));
             return;
         }
-        // Parallel read: each meta is read independently
+        // Read all entries in parallel.
         Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
                 meta -> singletonList(readForSortRewrite(meta, manifestFile, deleteEntries));
 
@@ -604,6 +608,7 @@ public class ManifestFileSorter {
         }
 
         if (!entriesToRewrite.isEmpty()) {
+            // Sort and write to new manifest files.
             entriesToRewrite.sort((a, b) -> compareSortKey(a, b, fieldComparator));
 
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
