@@ -978,6 +978,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaFiles = assigned.assignedEntries;
             }
 
+            if (options.snapshotSequenceOrdering()) {
+                deltaFiles = stampSequenceWithSnapshotId(newSnapshotId, commitKind, deltaFiles);
+            }
+
             // the added records subtract the deleted records from
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
@@ -1253,5 +1257,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         IOUtils.closeAllQuietly(commitPreCallbacks);
         IOUtils.closeAllQuietly(commitCallbacks);
         IOUtils.closeQuietly(snapshotCommit);
+    }
+
+    /**
+     * When {@code sequence.snapshot-ordering} is enabled, we stamp the commit snapshot id into
+     * {@link DataFileMeta#minSequenceNumber()} and {@link DataFileMeta#maxSequenceNumber()} at file
+     * level. This avoids adding a new field to DataFileMeta and follows the same pattern used by
+     * row-tracking tables (see {@link RowTrackingCommitUtils#assignRowTracking}). At read time,
+     * {@code KeyValueFileReaderFactory} extracts the snapshot id from {@code minSequenceNumber} and
+     * stamps it onto each {@code KeyValue}, where the sort-merge readers use it as the primary
+     * tiebreaker.
+     *
+     * <p>The per-record sequence numbers stored inside data files (the {@code _SEQUENCE_NUMBER}
+     * column in the key-value format) are unaffected for APPEND commits and still serve as a
+     * secondary tiebreaker within the same snapshot.
+     *
+     * <p>For {@link CommitKind#COMPACT} commits, the compaction rewriter has already written each
+     * record's snapshotId into the per-record {@code _SEQUENCE_NUMBER} column, so the file-level
+     * min/maxSequenceNumber (tracked by the writer from per-record values) already reflects the
+     * correct snapshot id range. We return the files unchanged.
+     */
+    private static List<ManifestEntry> stampSequenceWithSnapshotId(
+            long snapshotId, CommitKind commitKind, List<ManifestEntry> files) {
+        if (commitKind == CommitKind.COMPACT) {
+            return files;
+        }
+        List<ManifestEntry> result = new ArrayList<>(files.size());
+        for (ManifestEntry entry : files) {
+            if (entry.kind() == FileKind.ADD) {
+                result.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            } else {
+                result.add(entry);
+            }
+        }
+        return result;
     }
 }

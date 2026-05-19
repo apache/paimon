@@ -30,6 +30,7 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
@@ -68,6 +69,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final long asyncThreshold;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
+    private final boolean snapshotSequenceOrdering;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
@@ -93,6 +95,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.asyncThreshold = coreOptions.fileReaderAsyncThreshold().getBytes();
         this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
+        this.snapshotSequenceOrdering = coreOptions.snapshotSequenceOrdering();
         this.partition = partition;
         this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
@@ -168,7 +171,24 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
 
-        return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, file.level());
+        // When snapshot-ordering is enabled, minSequenceNumber carries the commit snapshot id
+        // (stamped by FileStoreCommitImpl.stampSequenceWithSnapshotId at commit time).
+        // For compaction output files, each record's sequenceNumber already contains its
+        // snapshotId, so we recover per-record snapshotId from sequenceNumber instead of
+        // using a uniform file-level stamp.
+        boolean recoverSnapshotIdFromSequence =
+                snapshotSequenceOrdering
+                        && file.fileSource().isPresent()
+                        && file.fileSource().get() == FileSource.COMPACT;
+        long snapshotId =
+                snapshotSequenceOrdering ? file.minSequenceNumber() : KeyValue.UNKNOWN_SNAPSHOT_ID;
+        return new KeyValueDataFileRecordReader(
+                fileRecordReader,
+                keyType,
+                valueType,
+                file.level(),
+                snapshotId,
+                recoverSnapshotIdFromSequence);
     }
 
     public static Builder builder(
