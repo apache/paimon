@@ -101,7 +101,6 @@ class SystemTableTest(unittest.TestCase):
                 "new_stream_write_builder",
                 "new_full_text_search_builder",
                 "new_vector_search_builder",
-                "new_read_builder",
         ):
             with self.assertRaises(NotImplementedError) as ctx:
                 getattr(sys_table, method_name)()

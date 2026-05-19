@@ -25,16 +25,20 @@ raises :class:`NotImplementedError` to signal the read-only contract.
 """
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from pypaimon.common.identifier import Identifier
-from pypaimon.schema.data_types import RowType
+from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.schema.data_types import DataField, RowType
 from pypaimon.table.table import Table
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     import pyarrow
 
     from pypaimon.table.file_store_table import FileStoreTable
+    from pypaimon.table.system.system_table_read import SystemTableRead
+    from pypaimon.table.system.system_table_scan import SystemTableScan
 
 
 _READ_ONLY_MESSAGE = "System table is read-only"
@@ -80,12 +84,8 @@ class SystemTable(Table):
     def _build_arrow_table(self) -> "pyarrow.Table":
         """Return the entire table contents as a PyArrow Table."""
 
-    def new_read_builder(self):
-        # Read pipeline lives in system_table_scan.py and is wired in a
-        # later change; until then keep the contract uniform so callers
-        # see a single "read-only" message regardless of which builder
-        # they reach for.
-        raise NotImplementedError(_READ_ONLY_MESSAGE)
+    def new_read_builder(self) -> "SystemReadBuilder":
+        return SystemReadBuilder(self)
 
     def new_stream_read_builder(self):
         raise NotImplementedError(_READ_ONLY_MESSAGE)
@@ -101,3 +101,57 @@ class SystemTable(Table):
 
     def new_vector_search_builder(self):
         raise NotImplementedError(_READ_ONLY_MESSAGE)
+
+
+class SystemReadBuilder:
+    """ReadBuilder-shaped facade exposing the system table's data.
+
+    Mirrors :class:`pypaimon.read.read_builder.ReadBuilder` enough that
+    callers can reach for ``with_filter``, ``with_projection``,
+    ``with_limit``, ``new_predicate_builder``, ``read_type``,
+    ``new_scan`` and ``new_read`` without knowing they are talking to a
+    system table.
+    """
+
+    def __init__(self, system_table: SystemTable):
+        self.system_table = system_table
+        self._predicate: Optional[Predicate] = None
+        self._projection: Optional[List[str]] = None
+        self._limit: Optional[int] = None
+
+    def with_filter(self, predicate: Predicate) -> "SystemReadBuilder":
+        self._predicate = predicate
+        return self
+
+    def with_projection(self, projection: List[str]) -> "SystemReadBuilder":
+        self._projection = list(projection)
+        return self
+
+    def with_limit(self, limit: int) -> "SystemReadBuilder":
+        self._limit = limit
+        return self
+
+    def new_predicate_builder(self) -> PredicateBuilder:
+        return PredicateBuilder(self.read_type())
+
+    def read_type(self) -> List[DataField]:
+        all_fields = self.system_table.row_type().fields
+        if not self._projection:
+            return list(all_fields)
+        field_map = {f.name: f for f in all_fields}
+        # Silently skip unknown names to match ReadBuilder.with_projection.
+        return [field_map[name] for name in self._projection
+                if name in field_map]
+
+    def new_scan(self) -> "SystemTableScan":
+        from pypaimon.table.system.system_table_scan import SystemTableScan
+        return SystemTableScan(self.system_table)
+
+    def new_read(self) -> "SystemTableRead":
+        from pypaimon.table.system.system_table_read import SystemTableRead
+        return SystemTableRead(
+            system_table=self.system_table,
+            read_type=self.read_type(),
+            predicate=self._predicate,
+            limit=self._limit,
+        )
