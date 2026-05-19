@@ -436,13 +436,35 @@ public class SparkCatalog extends SparkBaseCatalog
 
         try {
             catalog.replaceTable(tableIdent, targetSchema, false);
+            return new RollbackStagedTable(loadTable(ident), () -> {});
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        } catch (UnsupportedOperationException e) {
+            // Catalog cannot replace in-place; fall back to drop+create, losing snapshot history.
+            LOG.warn(
+                    "Catalog {} does not support replaceTable, falling back to drop+create for {}.",
+                    catalog.getClass().getName(),
+                    tableIdent.getFullName(),
+                    e);
+            return stageReplaceByDropAndCreate(ident, tableIdent, targetSchema);
+        }
+    }
+
+    private StagedTable stageReplaceByDropAndCreate(
+            Identifier ident, org.apache.paimon.catalog.Identifier tableIdent, Schema targetSchema)
+            throws NoSuchTableException, NoSuchNamespaceException {
+        try {
+            catalog.dropTable(tableIdent, false);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
-
-        // For FileStore tables this is not an atomic replacement: it changes Spark's drop+create
-        // replace path to truncating the current table and committing a new schema, so snapshot
-        // history is preserved. Other table-type changes fall back to drop+create in the catalog.
+        try {
+            catalog.createTable(tableIdent, targetSchema, false);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new RuntimeException(e);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(ident.namespace());
+        }
         return new RollbackStagedTable(loadTable(ident), () -> {});
     }
 
