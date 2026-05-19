@@ -492,17 +492,13 @@ class TableWriteTest(unittest.TestCase):
         table_write.write_arrow(data1)
         table_commit.commit(table_write.prepare_commit(0), 0)
 
-        table_write.with_write_type(['user_id', 'dt', 'item_id'])
-        partial_schema = pa.schema([
-            pa.field('user_id', pa.int32(), nullable=False),
-            pa.field('dt', pa.string(), nullable=False),
-            ('item_id', pa.int64()),
-        ])
+        # User passes full-width data with null for missing columns
         data2 = pa.Table.from_pydict({
             'user_id': [1, 2],
-            'dt': ['p1', 'p1'],
             'item_id': [9001, 9002],
-        }, schema=partial_schema)
+            'behavior': [None, None],
+            'dt': ['p1', 'p1'],
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data2)
         table_commit.commit(table_write.prepare_commit(1), 1)
         table_write.close()

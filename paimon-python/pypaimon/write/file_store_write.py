@@ -78,8 +78,7 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=max_seq_number(),
-                options=options,
-                write_cols=self.write_cols)
+                options=options)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
