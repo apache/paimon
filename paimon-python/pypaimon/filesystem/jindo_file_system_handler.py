@@ -24,15 +24,75 @@ from pyarrow.fs import FileInfo, FileSelector, FileType
 
 try:
     import pyjindo.fs as jfs
+    import pyjindo.ossfs as jossfs
     import pyjindo.util as jutil
     JINDO_AVAILABLE = True
 except ImportError:
     JINDO_AVAILABLE = False
     jfs = None
+    jossfs = None
     jutil = None
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+
+
+def build_jindo_config(catalog_options: Options):
+    """Build a pyjindo ``Config`` from OSS catalog options.
+
+    Shared by ``JindoFileSystemHandler`` (the PyArrow FileIO path) and
+    ``create_jindo_oss_filesystem`` (the PVFS fsspec path) so both jindo entry
+    points consume exactly the same credential / endpoint options.
+    """
+    if not JINDO_AVAILABLE:
+        raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
+
+    config = jutil.Config()
+
+    access_key_id = catalog_options.get(OssOptions.OSS_ACCESS_KEY_ID)
+    access_key_secret = catalog_options.get(OssOptions.OSS_ACCESS_KEY_SECRET)
+    security_token = catalog_options.get(OssOptions.OSS_SECURITY_TOKEN)
+    endpoint = catalog_options.get(OssOptions.OSS_ENDPOINT)
+    region = catalog_options.get(OssOptions.OSS_REGION)
+
+    if access_key_id:
+        config.set("fs.oss.accessKeyId", access_key_id)
+    if access_key_secret:
+        config.set("fs.oss.accessKeySecret", access_key_secret)
+    if security_token:
+        config.set("fs.oss.securityToken", security_token)
+    if endpoint:
+        endpoint_clean = endpoint.replace('http://', '').replace('https://', '')
+        config.set("fs.oss.endpoint", endpoint_clean)
+    if region:
+        config.set("fs.oss.region", region)
+    config.set("fs.oss.user.agent.features", "pypaimon")
+    return config
+
+
+def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
+    """Create an fsspec-compatible ``JindoOssFileSystem`` for an OSS bucket.
+
+    ``PaimonVirtualFileSystem`` uses this to back OSS reads/writes with the
+    native JindoSDK instead of ``ossfs``. JindoSDK writes objects via
+    PutObject / multipart upload, so it never issues OSS ``AppendObject`` --
+    the call that fails with ``PositionNotEqualToLength`` (409) on the OSS
+    data-acceleration endpoint when ``ossfs`` flushes a multi-chunk write.
+
+    ``root_uri`` is the bucket root, e.g. ``oss://my-bucket/``; it must carry
+    the bucket so ``JindoOssFileSystem`` can re-attach the ``oss://`` scheme to
+    the bucket-relative paths that ``PaimonVirtualFileSystem`` passes in.
+    """
+    if not JINDO_AVAILABLE:
+        raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
+
+    return jossfs.JindoOssFileSystem(
+        uri=root_uri,
+        config=build_jindo_config(catalog_options),
+        # PaimonVirtualFileSystem owns directory semantics for the virtual FS;
+        # the backing object-store fs must not auto-create dir-marker objects.
+        auto_mkdir=False,
+    )
 
 
 class JindoInputFile:
@@ -129,28 +189,7 @@ class JindoFileSystemHandler(FileSystemHandler):
         self.root_path = root_path
         self.properties = catalog_options
 
-        # Build jindo config from catalog_options
-        config = jutil.Config()
-
-        access_key_id = catalog_options.get(OssOptions.OSS_ACCESS_KEY_ID)
-        access_key_secret = catalog_options.get(OssOptions.OSS_ACCESS_KEY_SECRET)
-        security_token = catalog_options.get(OssOptions.OSS_SECURITY_TOKEN)
-        endpoint = catalog_options.get(OssOptions.OSS_ENDPOINT)
-        region = catalog_options.get(OssOptions.OSS_REGION)
-
-        if access_key_id:
-            config.set("fs.oss.accessKeyId", access_key_id)
-        if access_key_secret:
-            config.set("fs.oss.accessKeySecret", access_key_secret)
-        if security_token:
-            config.set("fs.oss.securityToken", security_token)
-        if endpoint:
-            endpoint_clean = endpoint.replace('http://', '').replace('https://', '')
-            config.set("fs.oss.endpoint", endpoint_clean)
-        if region:
-            config.set("fs.oss.region", region)
-        config.set("fs.oss.user.agent.features", "pypaimon")
-
+        config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
 
     def __eq__(self, other):

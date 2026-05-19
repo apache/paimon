@@ -17,6 +17,7 @@
 
 import datetime
 import importlib
+import logging
 import time
 from abc import ABC
 from dataclasses import dataclass
@@ -35,7 +36,13 @@ from pypaimon.api.rest_api import RESTApi
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptions
 from pypaimon.common.identifier import Identifier
+from pypaimon.filesystem.jindo_file_system_handler import (
+    JINDO_AVAILABLE,
+    create_jindo_oss_filesystem,
+)
 from pypaimon.schema.schema import Schema
+
+logger = logging.getLogger(__name__)
 
 PROTOCOL_NAME = "pvfs"
 
@@ -622,15 +629,19 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def __converse_ts_to_datatime(ts: int):
         return datetime.datetime.fromtimestamp(ts / 1000, tz=datetime.timezone.utc)
 
-    @staticmethod
-    def _strip_storage_protocol(storage_type: StorageType, path: str):
+    def _strip_storage_protocol(self, storage_type: StorageType, path: str):
         if storage_type == StorageType.LOCAL:
             return path[len("{}:".format(StorageType.LOCAL.value)):]
 
-        # OSS has different behavior than S3 and GCS, if we do not remove the
-        # protocol, it will always return an empty array.
+        # The two OSS backends want opposite path forms. The legacy ossfs
+        # backend mishandles an oss://-prefixed path (older versions return an
+        # empty array from ls), so the scheme is stripped for it. The jindo
+        # backend (pyjindo) requires the oss:// scheme and crashes without it,
+        # so the path is passed through unchanged.
         if storage_type == StorageType.OSS:
             if path.startswith("{}://".format(StorageType.OSS.value)):
+                if self._use_jindo_oss_backend():
+                    return path
                 return path[len("{}://".format(StorageType.OSS.value)):]
             return path
 
@@ -827,10 +838,15 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 fs = LocalFileSystem()
             elif storage_type == StorageType.OSS:
                 rest_api = self.__rest_api(pvfs_table_identifier)
-                load_token_response: GetTableTokenResponse = rest_api.load_table_token(
-                    Identifier.create(pvfs_table_identifier.database, pvfs_table_identifier.table))
+                table_identifier = Identifier.create(
+                    pvfs_table_identifier.database, pvfs_table_identifier.table)
+                load_token_response: GetTableTokenResponse = rest_api.load_table_token(table_identifier)
                 merged_token = self._merge_token_with_catalog_options(load_token_response.token)
-                fs = self._get_oss_filesystem(Options(merged_token))
+                # Resolve the table's OSS storage location directly via the REST API.
+                # _get_table_store() re-acquires _table_cache_lock, which is already
+                # held in this critical section, and would self-deadlock.
+                table_path = rest_api.get_table(table_identifier).path
+                fs = self._get_oss_filesystem(Options(merged_token), table_path)
                 paimon_real_storage = PaimonRealStorage(
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
@@ -863,8 +879,58 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             "Storage type doesn't support now. Path:{}".format(path)
         )
 
+    def _get_oss_filesystem(self, options: Options, storage_location: str) -> AbstractFileSystem:
+        """Build the fsspec filesystem backing OSS reads/writes.
+
+        Honors ``fs.oss.impl`` (the same option PyArrowFileIO uses): ``jindo``
+        backs OSS with the native JindoSDK (PutObject / multipart upload),
+        ``legacy`` backs it with ``ossfs``. ``jindo`` is the default; when
+        pyjindosdk is not installed it falls back to ``ossfs`` -- consistent
+        with PyArrowFileIO.
+
+        ``ossfs`` writes every object through OSS ``AppendObject``, which can
+        fail with ``PositionNotEqualToLength`` (409) on the OSS data-acceleration
+        endpoint for multi-chunk writes; the jindo backend avoids that path.
+        """
+        oss_impl = self.options.get(OssOptions.OSS_IMPL)
+        if oss_impl not in ("jindo", "legacy"):
+            raise Exception(
+                "Unsupported fs.oss.impl value: '{}'. "
+                "Supported values are 'jindo' and 'legacy'.".format(oss_impl)
+            )
+        if self._use_jindo_oss_backend():
+            bucket = PaimonVirtualFileSystem._extract_oss_bucket(storage_location)
+            return create_jindo_oss_filesystem("oss://{}/".format(bucket), options)
+        if oss_impl == "jindo":
+            logger.warning(
+                "fs.oss.impl is 'jindo' but pyjindosdk is not installed. "
+                "Falling back to the ossfs (OSS AppendObject) implementation. "
+                "Install pyjindosdk for native multipart upload: pip install pyjindosdk"
+            )
+        return PaimonVirtualFileSystem._get_ossfs_filesystem(options)
+
+    def _use_jindo_oss_backend(self) -> bool:
+        """Whether OSS access uses the native jindo backend rather than ossfs.
+
+        Decided per filesystem instance from ``fs.oss.impl`` plus pyjindosdk
+        availability -- the single condition both ``_get_oss_filesystem`` and
+        ``_strip_storage_protocol`` rely on, so the backend choice and the path
+        form handed to it cannot drift apart.
+        """
+        return self.options.get(OssOptions.OSS_IMPL) == "jindo" and JINDO_AVAILABLE
+
     @staticmethod
-    def _get_oss_filesystem(options: Options) -> AbstractFileSystem:
+    def _extract_oss_bucket(oss_path: str) -> str:
+        scheme = "{}://".format(StorageType.OSS.value)
+        if not oss_path.startswith(scheme):
+            raise Exception("Invalid OSS path: {}".format(oss_path))
+        bucket = oss_path[len(scheme):].split("/", 1)[0]
+        if not bucket:
+            raise Exception("Invalid OSS path without bucket: {}".format(oss_path))
+        return bucket
+
+    @staticmethod
+    def _get_ossfs_filesystem(options: Options) -> AbstractFileSystem:
         access_key_id = options.get(OssOptions.OSS_ACCESS_KEY_ID)
         if access_key_id is None:
             raise Exception(
