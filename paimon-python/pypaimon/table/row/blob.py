@@ -277,18 +277,17 @@ class Blob(ABC):
         return BlobRef(uri_reader, descriptor)
 
     @staticmethod
-    def from_bytes(data: bytes, file_io=None) -> 'Blob':
+    def from_bytes(data: Optional[bytes], file_io=None) -> 'Blob':
         if data is None:
             return BlobData(b'')
         if not isinstance(data, (bytes, bytearray)):
             raise TypeError(f"Blob.from_bytes expects bytes, got {type(data)}")
         data = bytes(data)
         if BlobDescriptor.is_blob_descriptor(data):
+            if file_io is None:
+                raise ValueError("file_io is required to resolve BlobDescriptor bytes")
             descriptor = BlobDescriptor.deserialize(data)
-            if file_io is not None:
-                uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
-            else:
-                uri_reader = FileUriReader(None)
+            uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
             return BlobRef(uri_reader, descriptor)
         return BlobData(data)
 
