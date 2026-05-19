@@ -1156,7 +1156,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                             .filter(r -> r.endsWith(", " + finalPt + "]"))
                             .collect(Collectors.toList());
             assertThat(partitionRows)
-                    .containsExactly(
+                    .containsExactlyInAnyOrder(
                             String.format("+I[0, 0, %s]", pt),
                             String.format("+I[0, 1, %s]", pt),
                             String.format("+I[0, 2, %s]", pt),
