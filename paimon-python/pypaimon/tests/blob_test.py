@@ -141,9 +141,7 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(blob.to_data(), raw)
 
     def test_from_bytes_with_none(self):
-        blob = Blob.from_bytes(None)
-        self.assertIsInstance(blob, BlobData)
-        self.assertEqual(blob.to_data(), b'')
+        self.assertIsNone(Blob.from_bytes(None))
 
     def test_from_bytes_with_descriptor(self):
         import tempfile, os
