@@ -686,3 +686,76 @@ class SimpleTableTest(unittest.TestCase):
             table.rollback_to("no-such-tag")
         self.assertIn("no-such-tag", str(context.exception))
         self.assertIn("doesn't exist", str(context.exception))
+
+    def test_table_rollback_to_timestamp(self):
+        """Test table-level rollback to a timestamp."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_rollback_ts', schema, False)
+        table = self.catalog.get_table('default.test_rollback_ts')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write 5 commits
+        for i in range(5):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'pt': [1],
+                'k': [i],
+                'v': [i * 100]
+            }, schema=self.pk_pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        snapshot_mgr = table.snapshot_manager()
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
+
+        # Get the timestamp of snapshot 3 and rollback to it
+        snap3 = snapshot_mgr.get_snapshot_by_id(3)
+        table.rollback_to_timestamp(snap3.time_millis)
+
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
+        self.assertIsNone(snapshot_mgr.get_snapshot_by_id(4))
+        self.assertIsNone(snapshot_mgr.get_snapshot_by_id(5))
+
+    def test_table_rollback_to_timestamp_no_match(self):
+        """Test rollback_to_timestamp raises ValueError when no snapshot exists."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_rollback_ts_nomatch', schema, False)
+        table = self.catalog.get_table('default.test_rollback_ts_nomatch')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write 1 commit
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'pt': [1],
+            'k': [0],
+            'v': [100]
+        }, schema=self.pk_pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Use a timestamp before the first snapshot
+        snapshot_mgr = table.snapshot_manager()
+        earliest = snapshot_mgr.try_get_earliest_snapshot()
+        before_earliest = earliest.time_millis - 1
+
+        with self.assertRaises(ValueError) as context:
+            table.rollback_to_timestamp(before_earliest)
+        self.assertIn("No snapshot found", str(context.exception))
