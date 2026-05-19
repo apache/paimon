@@ -183,6 +183,31 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
 
+    def create_tag_from_timestamp(self, tag_name: str, timestamp_millis: int,
+                                  ignore_if_exists: bool = False) -> None:
+        """
+        Create a tag from the latest snapshot at or before the given timestamp.
+
+        Args:
+            tag_name: Name for the tag
+            timestamp_millis: The timestamp in milliseconds. The tag will be
+                created from the latest snapshot with commit time <= this value.
+            ignore_if_exists: If True, don't raise error if tag already exists
+
+        Raises:
+            ValueError: If no snapshot exists at or before the given timestamp,
+                or tag already exists (when ignore_if_exists=False)
+        """
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
+        if snapshot is None:
+            raise ValueError(
+                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+            )
+
+        tag_mgr = self.tag_manager()
+        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
+
     def delete_tag(self, tag_name: str) -> bool:
         """
         Delete a tag.
