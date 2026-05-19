@@ -63,7 +63,6 @@ class BlobFileWriter:
     def _to_blob(self, col_data) -> Optional[Blob]:
         if hasattr(col_data, 'as_py'):
             col_data = col_data.as_py()
-        # add_element encodes None as a -1 length marker.
         if col_data is None:
             return None
         if isinstance(col_data, str):
