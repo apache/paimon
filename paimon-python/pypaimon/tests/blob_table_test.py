@@ -1014,6 +1014,65 @@ class DataBlobWriterTest(unittest.TestCase):
         print(
             f"✅ End-to-end blob write/read test passed: wrote and read back {len(blob_data)} blob records correctly")  # noqa: E501
 
+    def test_blob_write_read_end_to_end_with_null_values(self):
+        """Reproduce: writing NULL into an inline blob column via the public
+        write API (write_arrow) currently raises in BlobFileWriter._to_blob,
+        even though BlobFormatWriter.add_element / FormatBlobReader already
+        handle the NULL marker (-1) correctly. This test asserts the desired
+        behaviour: NULL blob values must round-trip through the standard
+        write -> commit -> read path.
+        """
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_write_read_e2e_null', schema, False)
+        table = self.catalog.get_table('test_db.blob_write_read_e2e_null')
+
+        # Mix non-null and null blob values across the batch:
+        # rows 0/2/4 have payloads, rows 1/3 are NULL.
+        test_data = pa.Table.from_pydict({
+            'id':   [1, 2, 3, 4, 5],
+            'name': ['a', 'b', 'c', 'd', 'e'],
+            'blob_data': [
+                b'first_blob',
+                None,
+                b'third_blob',
+                None,
+                b'fifth_blob',
+            ],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        # NOTE: this is where the bug currently manifests; _to_blob rejects None.
+        writer.write_arrow(test_data)
+
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4, 5])
+        self.assertEqual(result.column('name').to_pylist(), ['a', 'b', 'c', 'd', 'e'])
+        self.assertEqual(
+            result.column('blob_data').to_pylist(),
+            [b'first_blob', None, b'third_blob', None, b'fifth_blob'],
+        )
+
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
         from pypaimon import Schema
