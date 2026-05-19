@@ -18,17 +18,59 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ArrayColumnVector;
+import org.apache.paimon.data.columnar.BooleanColumnVector;
+import org.apache.paimon.data.columnar.ByteColumnVector;
+import org.apache.paimon.data.columnar.BytesColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.DecimalColumnVector;
+import org.apache.paimon.data.columnar.DoubleColumnVector;
+import org.apache.paimon.data.columnar.FloatColumnVector;
+import org.apache.paimon.data.columnar.IntColumnVector;
+import org.apache.paimon.data.columnar.LongColumnVector;
+import org.apache.paimon.data.columnar.MapColumnVector;
+import org.apache.paimon.data.columnar.RowColumnVector;
+import org.apache.paimon.data.columnar.ShortColumnVector;
+import org.apache.paimon.data.columnar.TimestampColumnVector;
 import org.apache.paimon.data.columnar.heap.AbstractArrayBasedVector;
 import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
+import org.apache.paimon.data.columnar.heap.HeapArrayVector;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
+import org.apache.paimon.data.columnar.heap.HeapMapVector;
+import org.apache.paimon.data.columnar.heap.HeapRowVector;
+import org.apache.paimon.data.columnar.writable.WritableBooleanVector;
+import org.apache.paimon.data.columnar.writable.WritableByteVector;
+import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.columnar.writable.WritableDoubleVector;
+import org.apache.paimon.data.columnar.writable.WritableFloatVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
+import org.apache.paimon.data.columnar.writable.WritableLongVector;
+import org.apache.paimon.data.columnar.writable.WritableShortVector;
+import org.apache.paimon.data.columnar.writable.WritableTimestampVector;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.data.variant.VariantSchema;
+import org.apache.paimon.format.parquet.type.MapShreddingField;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -97,6 +139,28 @@ public class ParquetColumnVector {
                     PaimonShreddingUtils.getFieldsToExtract(column.getType(), variantSchema);
             repetitionLevels = contentVector.repetitionLevels;
             definitionLevels = contentVector.definitionLevels;
+        } else if (column instanceof MapShreddingField) {
+            MapShreddingField mapField = (MapShreddingField) column;
+            WritableColumnVector residualMap =
+                    ParquetReaderUtil.createWritableColumnVector(capacity, column.getType());
+            ParquetColumnVector residualVector =
+                    new ParquetColumnVector(
+                            mapField.residualMapField(),
+                            residualMap,
+                            capacity,
+                            missingColumns,
+                            false);
+            children.add(residualVector);
+            for (ParquetField sidecarField : mapField.sidecarFields()) {
+                WritableColumnVector sidecar =
+                        ParquetReaderUtil.createWritableColumnVector(
+                                capacity, sidecarField.getType());
+                children.add(
+                        new ParquetColumnVector(
+                                sidecarField, sidecar, capacity, missingColumns, true));
+            }
+            repetitionLevels = residualVector.repetitionLevels;
+            definitionLevels = residualVector.definitionLevels;
         } else if (isPrimitive) {
             if (column.getRepetitionLevel() > 0) {
                 repetitionLevels = new HeapIntVector(capacity);
@@ -181,6 +245,11 @@ public class ParquetColumnVector {
                 PaimonShreddingUtils.assembleVariantStructBatch(
                         fileContent, vector, variantSchema, fieldsToExtract, column.getType());
             }
+            return;
+        }
+
+        if (column instanceof MapShreddingField) {
+            assembleMapShredding((MapShreddingField) column);
             return;
         }
 
@@ -354,6 +423,413 @@ public class ParquetColumnVector {
             }
         }
         vector.addElementsAppended(rowId);
+    }
+
+    private void assembleMapShredding(MapShreddingField mapField) {
+        for (ParquetColumnVector child : children) {
+            child.assemble();
+        }
+
+        HeapMapVector residualMapVector = (HeapMapVector) children.get(0).getValueVector();
+        HeapMapVector targetMapVector = (HeapMapVector) vector;
+        HeapBytesVector targetKeys = (HeapBytesVector) targetMapVector.getKeys();
+        WritableColumnVector targetValues = (WritableColumnVector) targetMapVector.getValues();
+        MapType mapType = (MapType) mapField.getType();
+
+        int rowCount = residualMapVector.getElementsAppended();
+        for (int rowId = 0; rowId < rowCount; rowId++) {
+            InternalMap residualMap = residualMapVector.getMap(rowId);
+            int sidecarValueCount = sidecarValueCount(rowId);
+            if (residualMapVector.isNullAt(rowId) && sidecarValueCount == 0) {
+                targetMapVector.appendNull();
+                continue;
+            }
+
+            int residualSize = residualMapVector.isNullAt(rowId) ? 0 : residualMap.size();
+            targetMapVector.appendArray(residualSize + sidecarValueCount);
+            if (residualSize > 0) {
+                appendResidualMap(residualMap, mapType, targetKeys, targetValues);
+            }
+            appendSidecars(rowId, mapField, mapType, targetKeys, targetValues);
+        }
+    }
+
+    private int sidecarValueCount(int rowId) {
+        int count = 0;
+        for (int i = 1; i < children.size(); i++) {
+            if (!children.get(i).getValueVector().isNullAt(rowId)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void appendResidualMap(
+            InternalMap residualMap,
+            MapType mapType,
+            HeapBytesVector targetKeys,
+            WritableColumnVector targetValues) {
+        InternalArray keyArray = residualMap.keyArray();
+        InternalArray valueArray = residualMap.valueArray();
+        for (int i = 0; i < residualMap.size(); i++) {
+            appendString(targetKeys, keyArray.getString(i));
+            appendInternalArrayValue(valueArray, i, mapType.getValueType(), targetValues);
+        }
+    }
+
+    private void appendSidecars(
+            int rowId,
+            MapShreddingField mapField,
+            MapType mapType,
+            HeapBytesVector targetKeys,
+            WritableColumnVector targetValues) {
+        for (int i = 1; i < children.size(); i++) {
+            WritableColumnVector sidecarVector = children.get(i).getValueVector();
+            if (!sidecarVector.isNullAt(rowId)) {
+                appendString(targetKeys, mapField.sidecarKeys().get(i - 1));
+                appendColumnVectorValue(sidecarVector, rowId, mapType.getValueType(), targetValues);
+            }
+        }
+    }
+
+    private static void appendString(HeapBytesVector vector, BinaryString value) {
+        byte[] bytes = value.toBytes();
+        vector.appendByteArray(bytes, 0, bytes.length);
+    }
+
+    private static void appendColumnVectorValue(
+            ColumnVector source, int sourcePos, DataType type, WritableColumnVector target) {
+        if (source.isNullAt(sourcePos)) {
+            target.appendNull();
+            return;
+        }
+
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+                ((WritableBooleanVector) target)
+                        .appendBoolean(((BooleanColumnVector) source).getBoolean(sourcePos));
+                return;
+            case TINYINT:
+                ((WritableByteVector) target)
+                        .appendByte(((ByteColumnVector) source).getByte(sourcePos));
+                return;
+            case SMALLINT:
+                ((WritableShortVector) target)
+                        .appendShort(((ShortColumnVector) source).getShort(sourcePos));
+                return;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                ((WritableIntVector) target)
+                        .appendInt(((IntColumnVector) source).getInt(sourcePos));
+                return;
+            case BIGINT:
+                ((WritableLongVector) target)
+                        .appendLong(((LongColumnVector) source).getLong(sourcePos));
+                return;
+            case FLOAT:
+                ((WritableFloatVector) target)
+                        .appendFloat(((FloatColumnVector) source).getFloat(sourcePos));
+                return;
+            case DOUBLE:
+                ((WritableDoubleVector) target)
+                        .appendDouble(((DoubleColumnVector) source).getDouble(sourcePos));
+                return;
+            case CHAR:
+            case VARCHAR:
+            case BINARY:
+            case VARBINARY:
+            case BLOB:
+                BytesColumnVector.Bytes bytes = ((BytesColumnVector) source).getBytes(sourcePos);
+                ((WritableBytesVector) target).appendByteArray(bytes.data, bytes.offset, bytes.len);
+                return;
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                if (source instanceof DecimalColumnVector) {
+                    appendDecimal(
+                            ((DecimalColumnVector) source)
+                                    .getDecimal(
+                                            sourcePos,
+                                            decimalType.getPrecision(),
+                                            decimalType.getScale()),
+                            decimalType,
+                            target);
+                } else if (decimalType.getPrecision() <= 9) {
+                    ((WritableIntVector) target)
+                            .appendInt(((IntColumnVector) source).getInt(sourcePos));
+                } else if (decimalType.getPrecision() <= 18) {
+                    ((WritableLongVector) target)
+                            .appendLong(((LongColumnVector) source).getLong(sourcePos));
+                } else {
+                    BytesColumnVector.Bytes decimalBytes =
+                            ((BytesColumnVector) source).getBytes(sourcePos);
+                    ((WritableBytesVector) target)
+                            .appendByteArray(
+                                    decimalBytes.data, decimalBytes.offset, decimalBytes.len);
+                }
+                return;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                int precision = DataTypeChecks.getPrecision(type);
+                if (source instanceof TimestampColumnVector) {
+                    appendTimestamp(
+                            type,
+                            ((TimestampColumnVector) source).getTimestamp(sourcePos, precision),
+                            target);
+                } else if (precision <= 6 && source instanceof LongColumnVector) {
+                    ((WritableLongVector) target)
+                            .appendLong(((LongColumnVector) source).getLong(sourcePos));
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Unsupported timestamp vector for map shredding: " + source);
+                }
+                return;
+            case ARRAY:
+                appendInternalValue(((ArrayColumnVector) source).getArray(sourcePos), type, target);
+                return;
+            case MAP:
+            case MULTISET:
+                appendInternalValue(((MapColumnVector) source).getMap(sourcePos), type, target);
+                return;
+            case ROW:
+                appendInternalValue(((RowColumnVector) source).getRow(sourcePos), type, target);
+                return;
+            case VARIANT:
+                InternalRow variantRow = ((RowColumnVector) source).getRow(sourcePos);
+                appendInternalValue(
+                        new GenericVariant(variantRow.getBinary(0), variantRow.getBinary(1)),
+                        type,
+                        target);
+                return;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported map shredding value type: " + type);
+        }
+    }
+
+    private static void appendInternalArrayValue(
+            InternalArray array, int sourcePos, DataType type, WritableColumnVector target) {
+        if (array.isNullAt(sourcePos)) {
+            target.appendNull();
+            return;
+        }
+
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+                ((WritableBooleanVector) target).appendBoolean(array.getBoolean(sourcePos));
+                return;
+            case TINYINT:
+                ((WritableByteVector) target).appendByte(array.getByte(sourcePos));
+                return;
+            case SMALLINT:
+                ((WritableShortVector) target).appendShort(array.getShort(sourcePos));
+                return;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                ((WritableIntVector) target).appendInt(array.getInt(sourcePos));
+                return;
+            case BIGINT:
+                ((WritableLongVector) target).appendLong(array.getLong(sourcePos));
+                return;
+            case FLOAT:
+                ((WritableFloatVector) target).appendFloat(array.getFloat(sourcePos));
+                return;
+            case DOUBLE:
+                ((WritableDoubleVector) target).appendDouble(array.getDouble(sourcePos));
+                return;
+            case CHAR:
+            case VARCHAR:
+                appendString((HeapBytesVector) target, array.getString(sourcePos));
+                return;
+            case BINARY:
+            case VARBINARY:
+            case BLOB:
+                byte[] bytes = array.getBinary(sourcePos);
+                ((WritableBytesVector) target).appendByteArray(bytes, 0, bytes.length);
+                return;
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                appendDecimal(
+                        array.getDecimal(
+                                sourcePos, decimalType.getPrecision(), decimalType.getScale()),
+                        decimalType,
+                        target);
+                return;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                appendTimestamp(
+                        type,
+                        array.getTimestamp(sourcePos, DataTypeChecks.getPrecision(type)),
+                        target);
+                return;
+            case ARRAY:
+                appendInternalValue(array.getArray(sourcePos), type, target);
+                return;
+            case MAP:
+            case MULTISET:
+                appendInternalValue(array.getMap(sourcePos), type, target);
+                return;
+            case ROW:
+                appendInternalValue(
+                        array.getRow(sourcePos, ((RowType) type).getFieldCount()), type, target);
+                return;
+            case VARIANT:
+                appendInternalValue(array.getVariant(sourcePos), type, target);
+                return;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported map shredding value type: " + type);
+        }
+    }
+
+    private static void appendInternalValue(
+            Object value, DataType type, WritableColumnVector target) {
+        if (value == null) {
+            target.appendNull();
+            return;
+        }
+
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+                ((WritableBooleanVector) target).appendBoolean((boolean) value);
+                return;
+            case TINYINT:
+                ((WritableByteVector) target).appendByte((byte) value);
+                return;
+            case SMALLINT:
+                ((WritableShortVector) target).appendShort((short) value);
+                return;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                ((WritableIntVector) target).appendInt((int) value);
+                return;
+            case BIGINT:
+                ((WritableLongVector) target).appendLong((long) value);
+                return;
+            case FLOAT:
+                ((WritableFloatVector) target).appendFloat((float) value);
+                return;
+            case DOUBLE:
+                ((WritableDoubleVector) target).appendDouble((double) value);
+                return;
+            case CHAR:
+            case VARCHAR:
+                appendString((HeapBytesVector) target, (BinaryString) value);
+                return;
+            case BINARY:
+            case VARBINARY:
+            case BLOB:
+                byte[] bytes = (byte[]) value;
+                ((WritableBytesVector) target).appendByteArray(bytes, 0, bytes.length);
+                return;
+            case DECIMAL:
+                appendDecimal((Decimal) value, (DecimalType) type, target);
+                return;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                appendTimestamp(type, (Timestamp) value, target);
+                return;
+            case ARRAY:
+                appendInternalArray(
+                        (InternalArray) value, (ArrayType) type, (HeapArrayVector) target);
+                return;
+            case MAP:
+                appendInternalMap((InternalMap) value, (MapType) type, (HeapMapVector) target);
+                return;
+            case MULTISET:
+                appendInternalMap(
+                        (InternalMap) value,
+                        new MapType(((MultisetType) type).getElementType(), new IntType(false)),
+                        (HeapMapVector) target);
+                return;
+            case ROW:
+                appendInternalRow((InternalRow) value, (RowType) type, (HeapRowVector) target);
+                return;
+            case VARIANT:
+                appendVariant((Variant) value, (HeapRowVector) target);
+                return;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported map shredding value type: " + type);
+        }
+    }
+
+    private static void appendInternalArray(
+            InternalArray array, ArrayType type, HeapArrayVector target) {
+        WritableColumnVector child = (WritableColumnVector) target.getChildren()[0];
+        target.appendArray(array.size());
+        for (int i = 0; i < array.size(); i++) {
+            appendInternalArrayValue(array, i, type.getElementType(), child);
+        }
+    }
+
+    private static void appendInternalMap(InternalMap map, MapType type, HeapMapVector target) {
+        InternalArray keyArray = map.keyArray();
+        InternalArray valueArray = map.valueArray();
+        WritableColumnVector keyVector = (WritableColumnVector) target.getKeys();
+        WritableColumnVector valueVector = (WritableColumnVector) target.getValues();
+        target.appendArray(map.size());
+        for (int i = 0; i < map.size(); i++) {
+            appendInternalArrayValue(keyArray, i, type.getKeyType(), keyVector);
+            appendInternalArrayValue(valueArray, i, type.getValueType(), valueVector);
+        }
+    }
+
+    private static void appendInternalRow(InternalRow row, RowType type, HeapRowVector target) {
+        target.appendRow();
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            WritableColumnVector child = (WritableColumnVector) target.getChildren()[i];
+            DataType fieldType = type.getTypeAt(i);
+            if (row.isNullAt(i)) {
+                child.appendNull();
+            } else {
+                appendInternalValue(
+                        InternalRow.createFieldGetter(fieldType, i).getFieldOrNull(row),
+                        fieldType,
+                        child);
+            }
+        }
+    }
+
+    private static void appendVariant(Variant variant, HeapRowVector target) {
+        target.appendRow();
+        byte[] value = variant.value();
+        byte[] metadata = variant.metadata();
+        ((WritableBytesVector) target.getChildren()[0]).appendByteArray(value, 0, value.length);
+        ((WritableBytesVector) target.getChildren()[1])
+                .appendByteArray(metadata, 0, metadata.length);
+    }
+
+    private static void appendDecimal(
+            Decimal decimal, DecimalType type, WritableColumnVector target) {
+        if (decimal == null) {
+            target.appendNull();
+        } else if (type.getPrecision() <= 9) {
+            ((WritableIntVector) target).appendInt((int) decimal.toUnscaledLong());
+        } else if (type.getPrecision() <= 18) {
+            ((WritableLongVector) target).appendLong(decimal.toUnscaledLong());
+        } else {
+            byte[] bytes = decimal.toUnscaledBytes();
+            ((WritableBytesVector) target).appendByteArray(bytes, 0, bytes.length);
+        }
+    }
+
+    private static void appendTimestamp(
+            DataType type, Timestamp timestamp, WritableColumnVector target) {
+        if (timestamp == null) {
+            target.appendNull();
+        } else if (target instanceof WritableTimestampVector) {
+            ((WritableTimestampVector) target).appendTimestamp(timestamp);
+        } else if (DataTypeChecks.getPrecision(type) <= 3) {
+            ((WritableLongVector) target).appendLong(timestamp.getMillisecond());
+        } else if (DataTypeChecks.getPrecision(type) <= 6) {
+            ((WritableLongVector) target).appendLong(timestamp.toMicros());
+        } else {
+            throw new UnsupportedOperationException(
+                    "Unsupported timestamp vector for map shredding: " + target);
+        }
     }
 
     /**

@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.parquet.MapShreddingUtils;
 import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.types.RowType;
 
@@ -31,7 +32,10 @@ import org.apache.parquet.schema.MessageType;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToParquetMessageType;
 
@@ -40,13 +44,23 @@ public class ParquetRowDataBuilder
         extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
+    private final Map<String, List<String>> dynamicMapKeys;
     @Nullable private final RowType shreddingSchemas;
 
     public ParquetRowDataBuilder(
             OutputFile path, RowType rowType, @Nullable RowType shreddingSchemas) {
+        this(path, rowType, shreddingSchemas, Collections.emptyMap());
+    }
+
+    public ParquetRowDataBuilder(
+            OutputFile path,
+            RowType rowType,
+            @Nullable RowType shreddingSchemas,
+            Map<String, List<String>> dynamicMapKeys) {
         super(path);
         this.rowType = rowType;
         this.shreddingSchemas = shreddingSchemas;
+        this.dynamicMapKeys = dynamicMapKeys;
     }
 
     @Override
@@ -70,19 +84,27 @@ public class ParquetRowDataBuilder
             this.conf = conf;
             this.schema =
                     convertToParquetMessageType(
-                            VariantUtils.replaceWithShreddingType(rowType, shreddingSchemas));
+                            VariantUtils.replaceWithShreddingType(rowType, shreddingSchemas),
+                            dynamicMapKeys);
         }
 
         @Override
         public WriteContext init(Configuration configuration) {
-            return new WriteContext(schema, new HashMap<>());
+            Map<String, String> metadata = new HashMap<>();
+            metadata.putAll(MapShreddingUtils.toFooterMetadata(dynamicMapKeys));
+            return new WriteContext(schema, metadata);
         }
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
             this.writer =
                     new ParquetRowDataWriter(
-                            recordConsumer, rowType, schema, conf, shreddingSchemas);
+                            recordConsumer,
+                            rowType,
+                            schema,
+                            conf,
+                            shreddingSchemas,
+                            dynamicMapKeys);
         }
 
         @Override

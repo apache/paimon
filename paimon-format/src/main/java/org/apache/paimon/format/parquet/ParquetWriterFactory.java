@@ -52,11 +52,15 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
 
     @Override
     public FormatWriter create(PositionOutputStream stream, String compression) throws IOException {
-        final OutputFile out = new StreamOutputFile(stream);
         if (HadoopCompressionType.NONE.value().equals(compression)) {
             compression = null;
         }
 
+        if (writerBuilder instanceof RowDataParquetBuilder) {
+            return ((RowDataParquetBuilder) writerBuilder).createFormatWriter(stream, compression);
+        }
+
+        final OutputFile out = new StreamOutputFile(stream);
         final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out, compression);
         return new ParquetBulkWriter(writer);
     }
@@ -65,7 +69,6 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
     public FormatWriter createWithShreddingSchema(
             PositionOutputStream stream, String compression, RowType inferredShreddingSchema)
             throws IOException {
-        final OutputFile out = new StreamOutputFile(stream);
         if (HadoopCompressionType.NONE.value().equals(compression)) {
             compression = null;
         }
@@ -73,6 +76,11 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
         ParquetBuilder<InternalRow> newBuilder =
                 ((RowDataParquetBuilder) writerBuilder)
                         .withShreddingSchemas(inferredShreddingSchema);
+        if (newBuilder instanceof RowDataParquetBuilder) {
+            return ((RowDataParquetBuilder) newBuilder).createFormatWriter(stream, compression);
+        }
+
+        final OutputFile out = new StreamOutputFile(stream);
         final ParquetWriter<InternalRow> writer = newBuilder.createWriter(out, compression);
         return new ParquetBulkWriter(writer);
     }

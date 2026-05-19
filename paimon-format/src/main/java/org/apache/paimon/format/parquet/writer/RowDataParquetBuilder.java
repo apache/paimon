@@ -19,8 +19,12 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.parquet.ColumnConfigParser;
+import org.apache.paimon.format.parquet.MapShreddingKeyExtractor;
+import org.apache.paimon.format.parquet.MapShreddingUtils;
 import org.apache.paimon.format.parquet.VariantUtils;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
@@ -34,17 +38,26 @@ import org.apache.parquet.io.OutputFile;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     private final RowType rowType;
     private final Configuration conf;
+    private final Options mapShreddingOptions;
     @Nullable private RowType shreddingSchemas;
 
     public RowDataParquetBuilder(RowType rowType, Options options) {
+        this(rowType, options, options);
+    }
+
+    public RowDataParquetBuilder(RowType rowType, Options options, Options mapShreddingOptions) {
         this.rowType = rowType;
         this.conf = new Configuration(false);
+        this.mapShreddingOptions = mapShreddingOptions;
         this.shreddingSchemas = VariantUtils.shreddingSchemasFromOptions(options);
         options.toMap().forEach(conf::set);
     }
@@ -57,8 +70,23 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
+        return createWriter(out, compression, Collections.emptyMap());
+    }
+
+    public FormatWriter createFormatWriter(PositionOutputStream stream, String compression)
+            throws IOException {
+        if (MapShreddingUtils.isMapShreddingEnabled(mapShreddingOptions)) {
+            return new MapShreddingFormatWriter(stream, compression);
+        }
+        OutputFile out = new StreamOutputFile(stream);
+        return new ParquetBulkWriter(createWriter(out, compression));
+    }
+
+    private ParquetWriter<InternalRow> createWriter(
+            OutputFile out, String compression, Map<String, List<String>> dynamicMapKeys)
+            throws IOException {
         ParquetRowDataBuilder builder =
-                new ParquetRowDataBuilder(out, rowType, shreddingSchemas)
+                new ParquetRowDataBuilder(out, rowType, shreddingSchemas, dynamicMapKeys)
                         .withConf(conf)
                         .withCompressionCodec(
                                 CompressionCodecName.fromConf(getCompression(compression)))
@@ -120,5 +148,65 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     public String getCompression(String compression) {
         return conf.get("parquet.compression", compression);
+    }
+
+    private class MapShreddingFormatWriter implements FormatWriter {
+
+        private final PositionOutputStream stream;
+        private final String compression;
+        private final MapShreddingKeyExtractor extractor;
+        private FormatWriter delegate;
+
+        private MapShreddingFormatWriter(PositionOutputStream stream, String compression) {
+            this.stream = stream;
+            this.compression = compression;
+            this.extractor = new MapShreddingKeyExtractor(rowType, mapShreddingOptions);
+        }
+
+        @Override
+        public void addElement(InternalRow row) throws IOException {
+            if (delegate != null) {
+                delegate.addElement(row);
+                return;
+            }
+
+            if (!extractor.finished()) {
+                extractor.add(row);
+            }
+            if (extractor.finished()) {
+                initializeDelegate();
+            }
+        }
+
+        @Override
+        public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+            if (delegate != null) {
+                return delegate.reachTargetSize(suggestedCheck, targetSize);
+            }
+            return suggestedCheck && stream.getPos() >= targetSize;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (delegate == null) {
+                initializeDelegate();
+            }
+            delegate.close();
+        }
+
+        @Nullable
+        @Override
+        public Object writerMetadata() {
+            return delegate == null ? null : delegate.writerMetadata();
+        }
+
+        private void initializeDelegate() throws IOException {
+            Map<String, List<String>> dynamicKeys = extractor.finish();
+            OutputFile out = new StreamOutputFile(stream);
+            delegate = new ParquetBulkWriter(createWriter(out, compression, dynamicKeys));
+            for (InternalRow bufferedRow : extractor.bufferedRows()) {
+                delegate.addElement(bufferedRow);
+            }
+        }
     }
 }
