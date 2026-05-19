@@ -257,6 +257,56 @@ class SnapshotManager:
                 snapshots.append(snapshot)
         return snapshots
 
+    def later_or_equal_watermark(self, watermark: int) -> Optional[Snapshot]:
+        """
+        Find the first snapshot with watermark >= the given value.
+
+        Args:
+            watermark: The watermark value to compare against
+
+        Returns:
+            The first snapshot with watermark >= the given value, or None if
+            no such snapshot exists
+        """
+        earliest_snap = self.try_get_earliest_snapshot()
+        latest_snap = self.get_latest_snapshot()
+
+        if earliest_snap is None or latest_snap is None:
+            return None
+
+        earliest = earliest_snap.id
+        latest = latest_snap.id
+        result = None
+
+        while earliest <= latest:
+            mid = earliest + (latest - earliest) // 2
+            snapshot = self.get_snapshot_by_id(mid)
+
+            if snapshot is None:
+                found = False
+                for i in range(mid + 1, latest + 1):
+                    snapshot = self.get_snapshot_by_id(i)
+                    if snapshot is not None:
+                        mid = i
+                        found = True
+                        break
+                if not found:
+                    latest = mid - 1
+                    continue
+
+            snap_watermark = snapshot.watermark
+            if snap_watermark is None:
+                earliest = mid + 1
+                continue
+
+            if snap_watermark >= watermark:
+                result = snapshot
+                latest = mid - 1
+            else:
+                earliest = mid + 1
+
+        return result
+
     def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
         """
         Get a snapshot by its ID.
