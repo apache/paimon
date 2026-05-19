@@ -29,7 +29,7 @@ from pypaimon import CatalogFactory
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
-from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
@@ -1262,6 +1262,79 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertIsNone(batch.column(0)[1].as_py())
         desc2 = BlobDescriptor.deserialize(batch.column(0)[2].as_py())
         self.assertEqual(desc2.uri, blob_file_path)
+        reader.close()
+
+    def test_placeholder_blob_write_read(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "placeholder_blob.blob")
+
+        output = open(blob_file_path, 'wb')
+        writer = BlobFormatWriter(output)
+        fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
+        writer.add_element(GenericRow([BlobData(b"hello")], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([Blob.PLACE_HOLDER], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([BlobData(b"world")], fields, RowKind.INSERT))
+        self.assertEqual(
+            writer.lengths[1:3],
+            [BlobFormatWriter.PLACE_HOLDER_LENGTH, BlobFormatWriter.NULL_LENGTH])
+        writer.close()
+
+        with open(blob_file_path, 'rb') as blob_file:
+            blob_file.seek(-1, os.SEEK_END)
+            self.assertEqual(blob_file.read(1), struct.pack('<B', BlobFormatWriter.VERSION))
+
+        blob_field_name = "blob_field"
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=[blob_field_name],
+            full_fields=read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False
+        )
+
+        self.assertEqual(reader.blob_lengths[1], BlobFormatWriter.PLACE_HOLDER_LENGTH)
+        iterator = BlobRecordIterator(
+            file_io, blob_file_path, reader.blob_lengths, reader.blob_offsets, blob_field_name)
+        self.assertEqual(next(iterator).values[0].to_data(), b"hello")
+        self.assertIs(next(iterator).values[0], Blob.PLACE_HOLDER)
+        self.assertIsNone(next(iterator).values[0])
+        self.assertEqual(next(iterator).values[0].to_data(), b"world")
+
+        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+            reader.read_arrow_batch()
+        reader.close()
+
+    def test_placeholder_blob_read_as_descriptor(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_file_path = os.path.join(self.temp_dir, "placeholder_desc.blob")
+
+        output = open(blob_file_path, 'wb')
+        writer = BlobFormatWriter(output)
+        fields = [DataField(0, "blob_field", AtomicType("BLOB"))]
+        writer.add_element(GenericRow([Blob.PLACE_HOLDER], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([BlobData(b"world")], fields, RowKind.INSERT))
+        writer.close()
+
+        blob_field_name = "blob_field"
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=blob_file_path,
+            read_fields=[blob_field_name],
+            full_fields=read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=True
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
+            reader.read_arrow_batch()
         reader.close()
 
 
