@@ -189,7 +189,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
      * only one blob file with row range [20, 80], then the rows with row id [0, 19] and [81, 100]
      * will be emitted as placeholder rows.
      *
-     * <p> This reader should always be fully consumed, or the internal states may be broken.
+     * <p>This reader should always be fully consumed, or the internal states may be broken.
      */
     public static class BlobSequenceGroupRecordReader implements RecordReader<InternalRow> {
 
