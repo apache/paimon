@@ -61,8 +61,7 @@ public class ManifestFileSorter {
 
     /**
      * Try to sort-rewrite the merged manifest list by a configured partition field. If the sort
-     * field cannot be resolved or the delta file size is below the full compaction threshold, the
-     * input is returned as-is.
+     * field cannot be resolved, the input is returned as-is.
      */
     static Optional<List<ManifestFileMeta>> trySortRewrite(
             List<ManifestFileMeta> input,
@@ -379,7 +378,7 @@ public class ManifestFileSorter {
 
     /**
      * Merge small adjacent sections to avoid producing too many small rewrite batches. If either
-     * the pending section or the current section total size is smaller than half of {@code
+     * the pending section or the current section total size is smaller than {@code
      * suggestedMetaSize}, they are combined into a single section.
      */
     private static List<Section> mergeSmallAdjacentSections(
