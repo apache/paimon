@@ -236,6 +236,9 @@ public class ManifestFileSorter {
                 if (inDeleteRange) {
                     iterator.remove();
                     result.add(file);
+                } else if (small) {
+                    iterator.remove();
+                    defaultCompactionManifests.put(file, false);
                 }
             }
         }
@@ -520,7 +523,7 @@ public class ManifestFileSorter {
             Map<ManifestFileMeta, Boolean> defaultCompactionMap,
             ManifestFile manifestFile,
             RecordComparator fieldComparator,
-            @Nullable Set<FileEntry.Identifier> deleteEntries,
+            Set<FileEntry.Identifier> deleteEntries,
             long manifestTargetSize,
             int suggestedMinMetaCount,
             List<ManifestFileMeta> result,
@@ -579,7 +582,7 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> section,
             ManifestFile manifestFile,
             RecordComparator fieldComparator,
-            Set<FileEntry.Identifier> deletedIdentifiers,
+            Set<FileEntry.Identifier> deleteEntries,
             Map<ManifestFileMeta, Boolean> defaultCompactionMap,
             List<ManifestFileMeta> result,
             List<ManifestFileMeta> sortNewFiles,
@@ -593,7 +596,7 @@ public class ManifestFileSorter {
         }
         // Parallel read: each meta is read independently
         Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
-                meta -> singletonList(readForSortRewrite(meta, manifestFile, deletedIdentifiers));
+                meta -> singletonList(readForSortRewrite(meta, manifestFile, deleteEntries));
 
         List<ManifestEntry> entriesToRewrite = new ArrayList<>();
         for (FullCompactionReadResult readResult :
