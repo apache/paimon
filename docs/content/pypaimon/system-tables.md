@@ -37,23 +37,34 @@ family are not exposed yet.
 
 ## Basic Usage
 
+Reuse a single read builder for both the scan and the read so that any
+projection or limit set on it is honoured by both sides:
+
 ```python
 from pypaimon import CatalogFactory
 
 catalog = CatalogFactory.create({'warehouse': '/path/to/warehouse'})
-
 snapshots = catalog.get_table('default.my_table$snapshots')
-arrow_table = (
-    snapshots
-    .new_read_builder()
-    .new_read()
-    .to_arrow(snapshots.new_read_builder().new_scan().plan().splits())
+
+read_builder = snapshots.new_read_builder()
+splits = read_builder.new_scan().plan().splits()
+print(read_builder.new_read().to_pandas(splits))
+```
+
+`with_projection` and `with_limit` chain on the same builder:
+
+```python
+read_builder = (
+    snapshots.new_read_builder()
+    .with_projection(['snapshot_id', 'commit_user', 'commit_time'])
+    .with_limit(10)
 )
-print(arrow_table.to_pandas())
+splits = read_builder.new_scan().plan().splits()
+arrow_table = read_builder.new_read().to_arrow(splits)
 ```
 
 The returned object exposes the regular `Table` surface, so the same
-read builder works with `to_pandas`, `to_iterator`,
+read builder works with `to_pandas`, `to_arrow`, `to_iterator`,
 `to_record_batch_iterator`, and `to_duckdb`. Writes raise
 `NotImplementedError` — system tables are read-only.
 
