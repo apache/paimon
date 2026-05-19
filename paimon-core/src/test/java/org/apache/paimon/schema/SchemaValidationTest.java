@@ -444,4 +444,45 @@ class SchemaValidationTest {
         validateTableSchema(
                 new TableSchema(1, fields, 10, emptyList(), singletonList("f1"), options, ""));
     }
+
+    @Test
+    public void testFileFormatPerLevelRejectsIncompatibleSchema() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(1, "v", DataTypes.TIMESTAMP(9)));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(-1));
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:avro");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("k"),
+                                                options,
+                                                "")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("file.format.per.level")
+                .hasMessageContaining("0:avro")
+                .hasMessageContaining("TIMESTAMP");
+    }
+
+    @Test
+    public void testFileFormatPerLevelAcceptsCompatibleSchema() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(1, "v", DataTypes.TIMESTAMP(9)));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(-1));
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:parquet");
+
+        validateTableSchema(
+                new TableSchema(1, fields, 10, emptyList(), singletonList("k"), options, ""));
+    }
 }
