@@ -329,6 +329,37 @@ class FileSystemBranchManager(BranchManager):
         if self.branch_exists(branch_name):
             raise ValueError(f"Branch name '{branch_name}' already exists.")
 
+    def branch_create_time(self, branch_name: str) -> Optional[int]:
+        """Return the branch directory's modification time in epoch ms.
+
+        Returns ``None`` when the branch does not exist or the file
+        system layer can't supply an mtime (some remote stores via
+        ``PyArrowFileIO`` return zero/unset values).
+        """
+        branch_dir = self.branch_path(branch_name)
+        if not self._file_exists(branch_dir):
+            return None
+        try:
+            file_status = self.file_io.get_file_status(branch_dir)
+        except Exception:
+            return None
+        mtime_ns = getattr(file_status, "mtime_ns", None)
+        if mtime_ns:
+            return int(mtime_ns // 1_000_000)
+        mtime = getattr(file_status, "mtime", None)
+        if mtime is None:
+            return None
+        # File status implementations expose mtime either as a datetime
+        # (PyArrow's FileInfo) or as a float seconds-since-epoch
+        # (LocalFileStatus). Handle both.
+        try:
+            return int(mtime.timestamp() * 1000)
+        except AttributeError:
+            try:
+                return int(float(mtime) * 1000)
+            except (TypeError, ValueError):
+                return None
+
     def branches(self) -> List[str]:
         """
         List all branches.
