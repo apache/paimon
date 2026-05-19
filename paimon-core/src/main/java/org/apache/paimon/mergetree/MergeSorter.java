@@ -65,6 +65,7 @@ public class MergeSorter {
     private final SortEngine sortEngine;
     private final int spillThreshold;
     private final CompressOptions compression;
+    private final boolean snapshotSequenceOrdering;
 
     private final CachelessSegmentPool memoryPool;
 
@@ -77,6 +78,7 @@ public class MergeSorter {
             @Nullable IOManager ioManager) {
         this.sortEngine = options.sortEngine();
         this.spillThreshold = options.sortSpillThreshold();
+        this.snapshotSequenceOrdering = options.snapshotSequenceOrdering();
         this.compression = options.spillCompressOptions();
         this.keyType = keyType;
         this.valueType = valueType;
@@ -142,7 +144,12 @@ public class MergeSorter {
         }
 
         return SortMergeReader.createSortMergeReader(
-                readers, keyComparator, userDefinedSeqComparator, mergeFunction, sortEngine);
+                readers,
+                keyComparator,
+                userDefinedSeqComparator,
+                mergeFunction,
+                sortEngine,
+                snapshotSequenceOrdering);
     }
 
     private <T> RecordReader<T> spillMergeSort(
@@ -170,7 +177,8 @@ public class MergeSorter {
 
         FileIOChannel.ID channel = ioManager.createChannel();
         KeyValueWithLevelNoReusingSerializer serializer =
-                new KeyValueWithLevelNoReusingSerializer(keyType, valueType);
+                new KeyValueWithLevelNoReusingSerializer(
+                        keyType, valueType, snapshotSequenceOrdering);
         BlockCompressionFactory compressFactory = BlockCompressionFactory.create(compression);
         int compressBlock = (int) MemorySize.parse("64 kb").getBytes();
 

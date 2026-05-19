@@ -26,35 +26,53 @@ import org.apache.paimon.types.RowType;
 
 import static org.apache.paimon.data.JoinedRow.join;
 
-/** Serializer for {@link KeyValue} with Level. */
+/** Serializer for {@link KeyValue} with Level and optional snapshotId. */
 public class KeyValueWithLevelNoReusingSerializer extends ObjectSerializer<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
     private final int keyArity;
     private final int valueArity;
+    private final boolean includeSnapshotId;
 
     public KeyValueWithLevelNoReusingSerializer(RowType keyType, RowType valueType) {
-        super(KeyValue.schemaWithLevel(keyType, valueType));
+        this(keyType, valueType, false);
+    }
 
+    public KeyValueWithLevelNoReusingSerializer(
+            RowType keyType, RowType valueType, boolean includeSnapshotId) {
+        super(
+                includeSnapshotId
+                        ? KeyValue.schemaWithLevelAndSnapshotId(keyType, valueType)
+                        : KeyValue.schemaWithLevel(keyType, valueType));
         this.keyArity = keyType.getFieldCount();
         this.valueArity = valueType.getFieldCount();
+        this.includeSnapshotId = includeSnapshotId;
     }
 
     @Override
     public InternalRow toRow(KeyValue kv) {
         GenericRow meta = GenericRow.of(kv.sequenceNumber(), kv.valueKind().toByteValue());
-        return join(join(join(kv.key(), meta), kv.value()), GenericRow.of(kv.level()));
+        InternalRow base = join(join(join(kv.key(), meta), kv.value()), GenericRow.of(kv.level()));
+        if (includeSnapshotId) {
+            return join(base, GenericRow.of(kv.snapshotId()));
+        }
+        return base;
     }
 
     @Override
     public KeyValue fromRow(InternalRow row) {
-        return new KeyValue()
-                .replace(
-                        new OffsetRow(keyArity, 0).replace(row),
-                        row.getLong(keyArity),
-                        RowKind.fromByteValue(row.getByte(keyArity + 1)),
-                        new OffsetRow(valueArity, keyArity + 2).replace(row))
-                .setLevel(row.getInt(keyArity + 2 + valueArity));
+        KeyValue kv =
+                new KeyValue()
+                        .replace(
+                                new OffsetRow(keyArity, 0).replace(row),
+                                row.getLong(keyArity),
+                                RowKind.fromByteValue(row.getByte(keyArity + 1)),
+                                new OffsetRow(valueArity, keyArity + 2).replace(row))
+                        .setLevel(row.getInt(keyArity + 2 + valueArity));
+        if (includeSnapshotId) {
+            kv.setSnapshotId(row.getLong(keyArity + 2 + valueArity + 1));
+        }
+        return kv;
     }
 }
