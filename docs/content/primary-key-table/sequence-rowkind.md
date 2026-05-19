@@ -64,3 +64,36 @@ By default, the primary key table determines the row kind according to the input
 `'rowkind.field'` to use a field to extract row kind.
 
 The valid row kind string should be `'+I'`, `'-U'`, `'+U'` or `'-D'`.
+
+## Snapshot Ordering
+
+In multi-writer scenarios where wall-clock sequence numbers cannot be globally ordered across writers,
+you can enable `'sequence.snapshot-ordering'` to use the commit snapshot id as the primary ordering
+key when merging records with the same primary key. Records from later snapshots are considered newer,
+regardless of their per-record sequence number. The existing sequence number is used as a secondary
+tiebreaker within the same snapshot.
+
+{{< tabs "sequence.snapshot-ordering" >}}
+{{< tab "Flink" >}}
+```sql
+CREATE TABLE my_table (
+    pk BIGINT PRIMARY KEY NOT ENFORCED,
+    v1 DOUBLE,
+    v2 BIGINT
+) WITH (
+    'sequence.snapshot-ordering' = 'true',
+    'write-only' = 'true'
+);
+```
+{{< /tab >}}
+{{< /tabs >}}
+
+{{< hint warning >}}
+This option requires `'write-only' = 'true'`. Compaction must be performed by a separate dedicated
+compact job. This ensures that compaction correctly preserves the snapshot id of each record.
+{{< /hint >}}
+
+{{< hint info >}}
+`'sequence.snapshot-ordering'` is mutually exclusive with `'sequence.field'`. You cannot enable both
+on the same table.
+{{< /hint >}}
