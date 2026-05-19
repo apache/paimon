@@ -18,6 +18,7 @@
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.write.writer.data_writer import DataWriter
 
 
@@ -33,7 +34,11 @@ class KeyValueDataWriter(DataWriter):
         return self._sort_by_primary_key(combined)
 
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
+        """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND.
+
+        When write_cols is set (partial column write), missing value columns
+        are filled with null arrays so the output KV file has the full schema.
+        """
         num_rows = data.num_rows
 
         new_arrays = []
@@ -55,9 +60,20 @@ class KeyValueDataWriter(DataWriter):
         new_arrays.append(value_kind_column)
         new_fields.append(pa.field('_VALUE_KIND', pa.int8(), nullable=False))
 
-        for i in range(data.num_columns):
-            new_arrays.append(data.column(i))
-            new_fields.append(data.schema.field(i))
+        if self.write_cols is not None:
+            data_col_names = set(data.schema.names)
+            for field in self.table.fields:
+                if field.name in data_col_names:
+                    new_arrays.append(data.column(field.name))
+                    new_fields.append(data.schema.field(field.name))
+                else:
+                    pa_type = PyarrowFieldParser.from_paimon_type(field.type)
+                    new_arrays.append(pa.nulls(num_rows, type=pa_type))
+                    new_fields.append(pa.field(field.name, pa_type, nullable=True))
+        else:
+            for i in range(data.num_columns):
+                new_arrays.append(data.column(i))
+                new_fields.append(data.schema.field(i))
 
         return pa.RecordBatch.from_arrays(new_arrays, schema=pa.schema(new_fields))
 

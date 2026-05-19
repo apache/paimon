@@ -66,9 +66,25 @@ class TableWrite:
         for col in write_cols:
             if col not in self.table_pyarrow_schema.names:
                 raise ValueError(f"Column {col} is not in table schema.")
+        # Partition keys are always needed for routing
+        missing_partitions = [pk for pk in self.table.partition_keys if pk not in write_cols]
+        if missing_partitions:
+            raise ValueError(
+                f"Partition key columns {missing_partitions} must be included in write_cols."
+            )
+        if self.table.is_primary_key_table:
+            missing_pks = [pk for pk in self.table.trimmed_primary_keys if pk not in write_cols]
+            if missing_pks:
+                raise ValueError(
+                    f"Primary key columns {missing_pks} must be included in write_cols "
+                    f"for partial column write on PK tables."
+                )
         if len(write_cols) == len(self.table_pyarrow_schema.names):
             write_cols = None
         self.file_store_write.write_cols = write_cols
+        # Propagate to existing writers so partial-column logic takes effect
+        for writer in self.file_store_write.data_writers.values():
+            writer.write_cols = write_cols
         return self
 
     def write_ray(

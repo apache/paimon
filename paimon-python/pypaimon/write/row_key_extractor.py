@@ -83,24 +83,17 @@ class RowKeyExtractor(ABC):
 
     def __init__(self, table_schema: TableSchema):
         self.table_schema = table_schema
-        self.partition_indices = self._get_field_indices(table_schema.partition_keys)
 
     def extract_partition_bucket_batch(self, data: pa.RecordBatch) -> Tuple[List[Tuple], List[int]]:
         partitions = self._extract_partitions_batch(data)
         buckets = self._extract_buckets_batch(data)
         return partitions, buckets
 
-    def _get_field_indices(self, field_names: List[str]) -> List[int]:
-        if not field_names:
-            return []
-        field_map = {field.name: i for i, field in enumerate(self.table_schema.fields)}
-        return [field_map[name] for name in field_names if name in field_map]
-
     def _extract_partitions_batch(self, data: pa.RecordBatch) -> List[Tuple]:
-        if not self.partition_indices:
+        if not self.table_schema.partition_keys:
             return [() for _ in range(data.num_rows)]
 
-        partition_columns = [data.column(i) for i in self.partition_indices]
+        partition_columns = [data.column(name) for name in self.table_schema.partition_keys]
 
         partitions = []
         for row_idx in range(data.num_rows):
@@ -124,15 +117,11 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
         if self.num_buckets <= 0:
             raise ValueError(f"Fixed bucket mode requires bucket > 0, got {self.num_buckets}")
 
-        # Bucket-key resolution lives on TableSchema (mirrors Java
-        # ``TableSchema.bucketKeys()`` / ``logicalBucketKeyType()``); reuse
-        # it so any reader path that walks the same logic stays in sync.
         self.bucket_keys = table_schema.bucket_keys
-        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
         self._bucket_key_fields = table_schema.logical_bucket_key_fields
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
-        columns = [data.column(i) for i in self.bucket_key_indices]
+        columns = [data.column(name) for name in self.bucket_keys]
         return [
             _bucket_from_hash(
                 self._binary_row_hash_code(tuple(col[row_idx].as_py() for col in columns)),
@@ -287,7 +276,6 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 pk for pk in table_schema.primary_keys
                 if pk not in table_schema.partition_keys
             ]
-        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
         field_map = {f.name: f for f in table_schema.fields}
         self._bucket_key_fields = [
             field_map[name] for name in self.bucket_keys if name in field_map
@@ -295,7 +283,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         partitions = self._extract_partitions_batch(data)
-        columns = [data.column(i) for i in self.bucket_key_indices]
+        columns = [data.column(name) for name in self.bucket_keys]
         buckets = []
         for row_idx in range(data.num_rows):
             key_hash = _hash_bytes_by_words(
