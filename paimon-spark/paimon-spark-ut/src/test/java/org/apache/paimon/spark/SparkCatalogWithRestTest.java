@@ -276,7 +276,11 @@ public class SparkCatalogWithRestTest {
 
         assertThat(spark.sql("SELECT secret FROM t_column_masking").collectAsList().toString())
                 .isEqualTo("[[****], [****]]");
-        assertThat(spark.sql("SELECT id FROM t_column_masking").collectAsList().toString())
+        assertThat(
+                        spark.sql("SELECT id FROM t_column_masking").collectAsList().stream()
+                                .sorted(Comparator.comparingInt(r -> r.getInt(0)))
+                                .collect(Collectors.toList())
+                                .toString())
                 .isEqualTo("[[1], [2]]");
 
         // Test multiple columns masking
