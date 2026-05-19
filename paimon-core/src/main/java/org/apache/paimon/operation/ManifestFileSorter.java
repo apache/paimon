@@ -19,6 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
@@ -27,8 +29,6 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.ManifestFileMerger.FullCompactionReadResult;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 
@@ -81,7 +81,9 @@ public class ManifestFileSorter {
                     "Cannot resolve sort field for manifest sort rewrite.");
         }
         int sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
-        DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
+        RecordComparator fieldComparator =
+                CodeGenUtils.newRecordComparator(
+                        partitionType.getFieldTypes(), new int[] {sortFieldIndex});
 
         // Step 2: Classify manifests into defaultCompaction and LSM.
         ClassifyResult classified =
@@ -100,7 +102,7 @@ public class ManifestFileSorter {
         List<ManifestSortedRun> levelRuns =
                 lsmFiles.isEmpty()
                         ? new ArrayList<>()
-                        : buildLevelSortedRuns(lsmFiles, sortFieldIndex, sortFieldType);
+                        : buildLevelSortedRuns(lsmFiles, fieldComparator);
 
         // Step 4: Pick runs to compact.
         ManifestPickStrategy pickStrategy =
@@ -139,15 +141,14 @@ public class ManifestFileSorter {
         pickedFiles.addAll(defaultCompactionMap.keySet());
 
         List<Section> sections =
-                splitIntoSections(pickedFiles, sortFieldIndex, sortFieldType, defaultCompactionMap);
+                splitIntoSections(pickedFiles, fieldComparator, defaultCompactionMap);
         sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
 
         rewriteSections(
                 sections,
                 defaultCompactionMap,
                 manifestFile,
-                sortFieldIndex,
-                sortFieldType,
+                fieldComparator,
                 deleteEntries,
                 suggestedMetaSize,
                 options.manifestSortMaxRewriteSize(),
@@ -222,24 +223,18 @@ public class ManifestFileSorter {
      * largest to level 1~4, rest to level 0).
      */
     static List<ManifestSortedRun> buildLevelSortedRuns(
-            List<ManifestFileMeta> input, int sortFieldIndex, DataType sortFieldType) {
+            List<ManifestFileMeta> input, RecordComparator fieldComparator) {
         // Step 1: Sort by min value (if equal, then by max value)
         input.sort(
                 (a, b) -> {
                     int cmp =
-                            compareField(
-                                    a.partitionStats().minValues(),
-                                    b.partitionStats().minValues(),
-                                    sortFieldIndex,
-                                    sortFieldType);
+                            fieldComparator.compare(
+                                    a.partitionStats().minValues(), b.partitionStats().minValues());
                     if (cmp != 0) {
                         return cmp;
                     }
-                    return compareField(
-                            a.partitionStats().maxValues(),
-                            b.partitionStats().maxValues(),
-                            sortFieldIndex,
-                            sortFieldType);
+                    return fieldComparator.compare(
+                            a.partitionStats().maxValues(), b.partitionStats().maxValues());
                 });
 
         // Step 2: Interval graph coloring algorithm - assign files to runs
@@ -249,37 +244,28 @@ public class ManifestFileSorter {
                         (r1, r2) -> {
                             ManifestFileMeta last1 = r1.get(r1.size() - 1);
                             ManifestFileMeta last2 = r2.get(r2.size() - 1);
-                            return compareField(
+                            return fieldComparator.compare(
                                     last1.partitionStats().maxValues(),
-                                    last2.partitionStats().maxValues(),
-                                    sortFieldIndex,
-                                    sortFieldType);
+                                    last2.partitionStats().maxValues());
                         });
 
         for (ManifestFileMeta file : input) {
-            boolean addedToExisting = false;
-
-            // Try to find a run where current file's min >= run's max
-            if (!runs.isEmpty()) {
-                List<ManifestFileMeta> earliestRun = runs.peek();
-                ManifestFileMeta last = earliestRun.get(earliestRun.size() - 1);
-
-                if (compareField(
-                                file.partitionStats().minValues(),
-                                last.partitionStats().maxValues(),
-                                sortFieldIndex,
-                                sortFieldType)
-                        >= 0) {
-                    // Current file can be added to this run
-                    runs.poll();
-                    earliestRun.add(file);
-                    runs.offer(earliestRun);
-                    addedToExisting = true;
-                }
-            }
-
-            if (!addedToExisting) {
-                // Create a new run
+            List<ManifestFileMeta> earliestRun = runs.poll();
+            if (earliestRun == null) {
+                // No existing runs, create a new one
+                List<ManifestFileMeta> newRun = new ArrayList<>();
+                newRun.add(file);
+                runs.offer(newRun);
+            } else if (fieldComparator.compare(
+                            file.partitionStats().minValues(),
+                            earliestRun.get(earliestRun.size() - 1).partitionStats().maxValues())
+                    >= 0) {
+                // Current file's min >= run's max, append to this run
+                earliestRun.add(file);
+                runs.offer(earliestRun);
+            } else {
+                // Overlap detected, put the run back and create a new one
+                runs.offer(earliestRun);
                 List<ManifestFileMeta> newRun = new ArrayList<>();
                 newRun.add(file);
                 runs.offer(newRun);
@@ -312,25 +298,18 @@ public class ManifestFileSorter {
      */
     static List<Section> splitIntoSections(
             List<ManifestFileMeta> pickedFiles,
-            int sortFieldIndex,
-            DataType sortFieldType,
+            RecordComparator fieldComparator,
             Map<ManifestFileMeta, boolean[]> defaultCompactionMap) {
         pickedFiles.sort(
                 (a, b) -> {
                     int cmp =
-                            compareField(
-                                    a.partitionStats().minValues(),
-                                    b.partitionStats().minValues(),
-                                    sortFieldIndex,
-                                    sortFieldType);
+                            fieldComparator.compare(
+                                    a.partitionStats().minValues(), b.partitionStats().minValues());
                     if (cmp != 0) {
                         return cmp;
                     }
-                    return compareField(
-                            a.partitionStats().maxValues(),
-                            b.partitionStats().maxValues(),
-                            sortFieldIndex,
-                            sortFieldType);
+                    return fieldComparator.compare(
+                            a.partitionStats().maxValues(), b.partitionStats().maxValues());
                 });
 
         List<Section> sections = new ArrayList<>();
@@ -345,12 +324,7 @@ public class ManifestFileSorter {
 
         for (int i = 1; i < pickedFiles.size(); i++) {
             ManifestFileMeta file = pickedFiles.get(i);
-            if (compareField(
-                            file.partitionStats().minValues(),
-                            sectionMaxBound,
-                            sortFieldIndex,
-                            sortFieldType)
-                    >= 0) {
+            if (fieldComparator.compare(file.partitionStats().minValues(), sectionMaxBound) >= 0) {
                 sections.add(new Section(currentFiles, currentTotalSize, currentHasDefault));
                 currentFiles = new ArrayList<>();
                 currentTotalSize = 0;
@@ -364,11 +338,7 @@ public class ManifestFileSorter {
                 if (!currentHasDefault && defaultCompactionMap.containsKey(file)) {
                     currentHasDefault = true;
                 }
-                if (compareField(
-                                file.partitionStats().maxValues(),
-                                sectionMaxBound,
-                                sortFieldIndex,
-                                sortFieldType)
+                if (fieldComparator.compare(file.partitionStats().maxValues(), sectionMaxBound)
                         > 0) {
                     sectionMaxBound = file.partitionStats().maxValues();
                 }
@@ -419,8 +389,7 @@ public class ManifestFileSorter {
             List<Section> sections,
             Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
             ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
+            RecordComparator fieldComparator,
             Set<FileEntry.Identifier> deleteEntries,
             long suggestedMetaSize,
             long maxRewriteSize,
@@ -437,8 +406,7 @@ public class ManifestFileSorter {
                 sortAndRewriteSection(
                         section.files,
                         manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
+                        fieldComparator,
                         deleteEntries,
                         defaultCompactionMap,
                         result,
@@ -452,8 +420,7 @@ public class ManifestFileSorter {
                 sortAndRewriteSection(
                         section.files,
                         manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
+                        fieldComparator,
                         deleteEntries,
                         defaultCompactionMap,
                         result,
@@ -487,8 +454,7 @@ public class ManifestFileSorter {
                 sortAndRewriteSection(
                         rewriteFiles,
                         manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
+                        fieldComparator,
                         deleteEntries,
                         defaultCompactionMap,
                         result,
@@ -508,8 +474,7 @@ public class ManifestFileSorter {
                         section.files,
                         defaultCompactionMap,
                         manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
+                        fieldComparator,
                         deleteEntries,
                         suggestedMetaSize,
                         result,
@@ -526,8 +491,7 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> section,
             Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
             ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
+            RecordComparator fieldComparator,
             @Nullable Set<FileEntry.Identifier> deleteEntries,
             long manifestTargetSize,
             List<ManifestFileMeta> result,
@@ -544,8 +508,7 @@ public class ManifestFileSorter {
                 sortAndRewriteSection(
                         subSegment,
                         manifestFile,
-                        sortFieldIndex,
-                        sortFieldType,
+                        fieldComparator,
                         deleteEntries,
                         defaultCompactionMap,
                         result,
@@ -560,8 +523,7 @@ public class ManifestFileSorter {
             sortAndRewriteSection(
                     subSegment,
                     manifestFile,
-                    sortFieldIndex,
-                    sortFieldType,
+                    fieldComparator,
                     deleteEntries,
                     defaultCompactionMap,
                     result,
@@ -583,8 +545,7 @@ public class ManifestFileSorter {
     private static void sortAndRewriteSection(
             List<ManifestFileMeta> section,
             ManifestFile manifestFile,
-            int sortFieldIndex,
-            DataType sortFieldType,
+            RecordComparator fieldComparator,
             Set<FileEntry.Identifier> deletedIdentifiers,
             Map<ManifestFileMeta, boolean[]> defaultCompactionMap,
             List<ManifestFileMeta> result,
@@ -608,7 +569,7 @@ public class ManifestFileSorter {
         }
 
         if (!entriesToRewrite.isEmpty()) {
-            entriesToRewrite.sort((a, b) -> compareSortKey(a, b, sortFieldIndex, sortFieldType));
+            entriesToRewrite.sort((a, b) -> compareSortKey(a, b, fieldComparator));
 
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                     manifestFile.createRollingWriter();
@@ -631,13 +592,12 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, fileName)}.
+     * Compare two {@link ManifestEntry}s by the composite key {@code (sort-field, kind, fileName)}.
      * {@code fileName} is used as the tie-breaker so that all entries sharing the same sort-field
      * value AND the same data file are emitted contiguously.
      */
-    static int compareSortKey(
-            ManifestEntry a, ManifestEntry b, int sortFieldIndex, DataType sortFieldType) {
-        int c = compareField(a.partition(), b.partition(), sortFieldIndex, sortFieldType);
+    static int compareSortKey(ManifestEntry a, ManifestEntry b, RecordComparator fieldComparator) {
+        int c = fieldComparator.compare(a.partition(), b.partition());
         if (c != 0) {
             return c;
         }
@@ -647,50 +607,6 @@ public class ManifestFileSorter {
             return kindCmp;
         }
         return a.file().fileName().compareTo(b.file().fileName());
-    }
-
-    /**
-     * Compares the value at field {@code k} of two {@link BinaryRow}s according to {@code type}.
-     */
-    static int compareField(BinaryRow a, BinaryRow b, int k, DataType type) {
-        switch (type.getTypeRoot()) {
-            case INTEGER:
-            case DATE:
-                return Integer.compare(a.getInt(k), b.getInt(k));
-            case BIGINT:
-                return Long.compare(a.getLong(k), b.getLong(k));
-            case SMALLINT:
-                return Short.compare(a.getShort(k), b.getShort(k));
-            case TINYINT:
-                return Byte.compare(a.getByte(k), b.getByte(k));
-            case FLOAT:
-                return Float.compare(a.getFloat(k), b.getFloat(k));
-            case DOUBLE:
-                return Double.compare(a.getDouble(k), b.getDouble(k));
-            case BOOLEAN:
-                return Boolean.compare(a.getBoolean(k), b.getBoolean(k));
-            case VARCHAR:
-            case CHAR:
-                return a.getString(k).compareTo(b.getString(k));
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return a.getTimestamp(k, type.defaultSize())
-                        .compareTo(b.getTimestamp(k, type.defaultSize()));
-            case DECIMAL:
-                DecimalType dt = (DecimalType) type;
-                return a.getDecimal(k, dt.getPrecision(), dt.getScale())
-                        .compareTo(b.getDecimal(k, dt.getPrecision(), dt.getScale()));
-            default:
-                String errorMsg =
-                        String.format(
-                                "Unsupported partition field type '%s' for manifest sort rewrite. "
-                                        + "Supported types: TINYINT, SMALLINT, INTEGER, BIGINT, "
-                                        + "FLOAT, DOUBLE, BOOLEAN, CHAR, VARCHAR, DATE, TIMESTAMP, "
-                                        + "DECIMAL.",
-                                type.getTypeRoot());
-                LOG.error(errorMsg);
-                throw new UnsupportedOperationException(errorMsg);
-        }
     }
 
     /**
