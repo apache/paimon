@@ -108,5 +108,87 @@ class FilesystemCatalogSystemTableDispatchTest(unittest.TestCase):
             self.catalog.get_table("db.does_not_exist$snapshots")
 
 
+class RestCatalogSystemTableDispatchTest(unittest.TestCase):
+    """Tests that RESTCatalog.get_table dispatches identically to FileSystem.
+
+    Uses a hand-rolled lightweight stand-in instead of a live REST server:
+    the dispatch logic is pure Python and the network-bound code path
+    (``_load_data_table``) is already covered by RESTCatalog's own tests.
+    Stubbing it lets these tests stay fast and focused on the new branch.
+    """
+
+    def _build_catalog(self):
+        from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+        catalog = RESTCatalog.__new__(RESTCatalog)
+
+        loaded_identifiers = []
+
+        def fake_load_data_table(identifier):
+            loaded_identifiers.append(identifier)
+            # The system-table loader only needs an object that quacks like
+            # a base table; the production factories will exercise the real
+            # FileStoreTable surface.
+            from pypaimon.common.identifier import Identifier as _Ident
+            assert isinstance(identifier, _Ident)
+            assert not identifier.is_system_table(), (
+                "dispatch must strip the $-suffix before reaching "
+                "_load_data_table; got: " + identifier.get_object_name())
+
+            class _FakeBaseTable:
+                pass
+
+            base = _FakeBaseTable()
+            base.identifier = identifier
+            return base
+
+        catalog._load_data_table = fake_load_data_table
+        return catalog, loaded_identifiers
+
+    def test_regular_get_table_calls_load_data_table_unchanged(self):
+        catalog, loaded = self._build_catalog()
+        result = catalog.get_table("db.t")
+        self.assertIsNotNone(result)
+        self.assertEqual(1, len(loaded))
+        self.assertFalse(loaded[0].is_system_table())
+        self.assertEqual("t", loaded[0].get_table_name())
+
+    def test_get_system_table_routes_through_loader(self):
+        catalog, loaded = self._build_catalog()
+        marker = "phase1-rest-dispatch-marker"
+        previous = _install_fake_factory("snapshots", marker)
+        try:
+            sys_table = catalog.get_table("db.t$snapshots")
+        finally:
+            _restore_factory("snapshots", previous)
+
+        self.assertIsInstance(sys_table, _FakeSystemTable)
+        self.assertEqual(marker, sys_table.marker)
+        # _load_data_table received the BASE identifier (no system suffix).
+        self.assertEqual(1, len(loaded))
+        self.assertFalse(loaded[0].is_system_table())
+        self.assertEqual("t", loaded[0].get_table_name())
+
+    def test_get_system_table_preserves_branch_segment(self):
+        catalog, loaded = self._build_catalog()
+        marker = "phase1-rest-dispatch-branched"
+        previous = _install_fake_factory("snapshots", marker)
+        try:
+            sys_table = catalog.get_table("db.t$branch_dev$snapshots")
+        finally:
+            _restore_factory("snapshots", previous)
+
+        self.assertIsInstance(sys_table, _FakeSystemTable)
+        # The base identifier carries the branch but not the system suffix.
+        self.assertEqual(1, len(loaded))
+        self.assertFalse(loaded[0].is_system_table())
+        self.assertEqual("t", loaded[0].get_table_name())
+        self.assertEqual("dev", loaded[0].get_branch_name())
+
+    def test_unknown_system_table_raises_table_not_exist(self):
+        catalog, _ = self._build_catalog()
+        with self.assertRaises(TableNotExistException):
+            catalog.get_table("db.t$definitely_not_a_system_table")
+
+
 if __name__ == "__main__":
     unittest.main()
