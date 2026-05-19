@@ -230,7 +230,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             || isVectorStoreFile(file.fileName()),
                                     "Only blob/vector-store files need to call this method.");
                             return schemaFetcher.apply(file.schemaId()).logicalRowType();
-                        });
+                        },
+                        rowRanges != null);
 
         long rowCount = fieldsFiles.get(0).rowCount();
         long firstRowId = fieldsFiles.get(0).files().get(0).nonNullFirstRowId();
@@ -480,7 +481,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 int fieldId = rowType.getField(file.writeCols().get(0)).id();
                 final long expectedRowCount = rowCount;
                 blobBunchMap
-                        .computeIfAbsent(fieldId, key -> new BlobFileBunch(expectedRowCount))
+                        .computeIfAbsent(
+                                fieldId, key -> new BlobFileBunch(expectedRowCount, rowIdPushDown))
                         .add(file);
             } else if (isVectorStoreFile(file.fileName())) {
                 RowType rowType = fileToRowType.apply(file);
@@ -542,11 +544,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         final List<DataFileMeta> files;
         final List<Range> ranges;
         final long expectedRowCount;
+        final boolean rowIdPushdown;
 
-        BlobFileBunch(long expectedRowCount) {
+        BlobFileBunch(long expectedRowCount, boolean rowIdPushdown) {
             this.files = new ArrayList<>();
             this.expectedRowCount = expectedRowCount;
             this.ranges = new ArrayList<>();
+            this.rowIdPushdown = rowIdPushdown;
         }
 
         void add(DataFileMeta file) {
@@ -566,16 +570,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         @Override
         public long rowCount() {
             List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
-            Preconditions.checkState(
-                    merged.size() == 1,
-                    "Blob file bunch should always contain a contiguous row range.");
+            if (!rowIdPushdown) {
+                Preconditions.checkState(
+                        merged.size() == 1,
+                        "Blob file bunch should always contain a contiguous row range.");
 
-            long rowCount = merged.get(0).count();
-            Preconditions.checkState(
-                    rowCount == expectedRowCount,
-                    "The merged rowCount of blob file bunch should be aligned with normal files.");
+                long rowCount = merged.get(0).count();
+                Preconditions.checkState(
+                        rowCount == expectedRowCount,
+                        "The merged rowCount %s of blob file bunch should be aligned with normal files %s.",
+                        rowCount,
+                        expectedRowCount);
+            }
 
-            return rowCount;
+            return expectedRowCount;
         }
 
         @Override

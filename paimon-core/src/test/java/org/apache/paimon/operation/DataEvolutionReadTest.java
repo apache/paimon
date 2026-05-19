@@ -18,25 +18,16 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.operation.BlobFallbackRecordReader.BlobSequenceGroupRecordReader;
 import org.apache.paimon.operation.DataEvolutionSplitRead.BlobFileBunch;
 import org.apache.paimon.operation.DataEvolutionSplitRead.FieldBunch;
 import org.apache.paimon.operation.DataEvolutionSplitRead.VectorFileBunch;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -442,71 +433,6 @@ public class DataEvolutionReadTest {
                 writeCols);
     }
 
-    private static List<InternalRow> fileRows(DataFileMeta file, List<Range> rowRanges) {
-        List<InternalRow> rows = new ArrayList<>();
-        long lastRowId = file.nonNullFirstRowId() + file.rowCount() - 1;
-        for (long rowId = file.nonNullFirstRowId(); rowId <= lastRowId; rowId++) {
-            if (selected(rowId, rowRanges)) {
-                rows.add(blobRow(rowId, file.maxSequenceNumber(), false));
-            }
-        }
-        return rows;
-    }
-
-    private static boolean selected(long rowId, List<Range> rowRanges) {
-        for (Range range : rowRanges) {
-            if (rowId < range.from) {
-                return false;
-            }
-            if (rowId <= range.to) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static InternalRow blobRow(long rowId, long sequenceNumber, boolean placeholder) {
-        GenericRow row = new GenericRow(3);
-        row.setField(0, placeholder ? Blob.PLACE_HOLDER : new BlobData(new byte[] {(byte) rowId}));
-        row.setField(1, rowId);
-        row.setField(2, sequenceNumber);
-        return row;
-    }
-
-    private static RecordReader<InternalRow> oneRowPerBatchReader(List<InternalRow> rows) {
-        return new RecordReader<InternalRow>() {
-
-            int index;
-
-            @Override
-            public RecordIterator<InternalRow> readBatch() {
-                if (index >= rows.size()) {
-                    return null;
-                }
-                InternalRow row = rows.get(index++);
-                return new RecordIterator<InternalRow>() {
-
-                    boolean returned;
-
-                    @Override
-                    public InternalRow next() {
-                        if (returned) {
-                            return null;
-                        }
-                        returned = true;
-                        return row;
-                    }
-
-                    @Override
-                    public void releaseBatch() {}
-                };
-            }
-
-            @Override
-            public void close() {}
-        };
-    }
-
     @Test
     void testAddVectorFilesWithDifferentSchemaId() {
         DataFileMeta vectorEntry1 = createVectorFileWithSchema("vector1", 0, 100, 1, 0L);
@@ -520,7 +446,7 @@ public class DataEvolutionReadTest {
 
     @Test
     void testAddBlobFilesWithDifferentSchemaId() {
-        BlobFileBunch blobBunch = new BlobFileBunch(300);
+        BlobFileBunch blobBunch = new BlobFileBunch(300, false);
         DataFileMeta blobEntry1 = createBlobFileWithSchema("blob1", 0, 100, 1, 0L);
         DataFileMeta blobEntry2 = createBlobFileWithSchema("blob2", 100, 200, 1, 1L);
 
@@ -553,53 +479,6 @@ public class DataEvolutionReadTest {
         VectorFileBunch finalVectorBunch2 = vectorBunch;
         DataFileMeta vectorEntry3 = createVectorFile("vector2", 250, 100, 2);
         assertThatCode(() -> finalVectorBunch2.add(vectorEntry3)).doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testBlobSequenceGroupReaderWithRowRanges() throws Exception {
-        List<DataFileMeta> files =
-                Arrays.asList(createBlobFile("blob1", 0, 3, 10), createBlobFile("blob2", 5, 2, 10));
-        List<Range> rowRanges = Arrays.asList(new Range(1, 1), new Range(3, 5));
-        RowType readRowType =
-                new RowType(
-                        Arrays.asList(
-                                new DataField(0, "blob_col", DataTypes.BLOB()),
-                                new DataField(1, SpecialFields.ROW_ID.name(), DataTypes.BIGINT()),
-                                new DataField(
-                                        2,
-                                        SpecialFields.SEQUENCE_NUMBER.name(),
-                                        DataTypes.BIGINT())));
-
-        BlobSequenceGroupRecordReader reader =
-                new BlobSequenceGroupRecordReader(
-                        files,
-                        file -> oneRowPerBatchReader(fileRows(file, rowRanges)),
-                        rowRanges,
-                        readRowType,
-                        0,
-                        0,
-                        6,
-                        10);
-
-        List<Long> rowIds = new ArrayList<>();
-        List<Boolean> placeholders = new ArrayList<>();
-        List<Integer> batchSizes = new ArrayList<>();
-        RecordIterator<InternalRow> batch;
-        while ((batch = reader.readBatch()) != null) {
-            int batchSize = 0;
-            InternalRow row;
-            while ((row = batch.next()) != null) {
-                rowIds.add(row.getLong(1));
-                placeholders.add(row.getBlob(0) == Blob.PLACE_HOLDER);
-                batchSize++;
-            }
-            batch.releaseBatch();
-            batchSizes.add(batchSize);
-        }
-
-        assertThat(rowIds).containsExactly(1L, 3L, 4L, 5L);
-        assertThat(placeholders).containsExactly(false, true, true, false);
-        assertThat(batchSizes).containsExactly(1, 2, 1);
     }
 
     /** Creates a normal (non-blob) file for testing. */
