@@ -156,6 +156,67 @@ Output:
   5     Eve   32  Hangzhou
 ```
 
+### Table Explain
+
+Show the scan plan of a query without reading any data: the target snapshot, the pushed-down predicate / projection / limit, the partition / bucket / file-stats pruning funnel, and split-level signals (raw-convertible ratio, deletion-vector ratio, level histogram, files-per-split and split-size distribution). Useful for previewing the pruning effect of a predicate before actually running the read.
+
+```shell
+paimon table explain mydb.events
+```
+
+**Options:**
+
+- `--select, -s`: Project specific columns (comma-separated)
+- `--where, -w`: Filter condition in SQL-like syntax (same operators as `table read`)
+- `--limit, -l`: Row limit to push down
+- `--verbose, -v`: List every split with its files
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# Whole-table scan plan
+paimon table explain mydb.events
+
+# Push filter and projection through the planner
+paimon table explain mydb.events --where "dt = '2026-05-16' AND id = 7" -s dt,id,val
+
+# List every split (and its files) instead of just the aggregates
+paimon table explain mydb.events -w "dt = '2026-05-16'" --verbose
+
+# Machine-readable output for scripting (level_histogram keys are JSON strings)
+paimon table explain mydb.events --format json
+```
+
+Output:
+```
+== PyPaimon Scan Plan ==
+Table:              mydb.events (PK, HASH_FIXED)
+Snapshot:           5  (schema 0)
+Predicate:          (dt = '2026-05-16') AND (id = 7)
+Projection:         [dt, id, val]
+Limit:              <none>
+
+Partition pruning:  20 -> 4  (pruned 16)
+Bucket pruning:     4 -> 1  (pruned 3)
+File skipping:      1 -> 1  (pruned 0)
+
+Splits:             1
+  raw-convertible:  1 / 1
+  with DV:          0 / 1
+  all-above-L0:     0 / 1
+  files/split:      min=1  max=1  avg=1.00
+  size/split:       min=2.6 KiB  p50=2.6 KiB  p95=2.6 KiB  max=2.6 KiB
+
+Files:              1
+Total size:         2.6 KiB
+Estimated rows:     10   (merged: 10)
+Level histogram:    L0=1
+Deletion files:     0
+```
+
+`explain` reads the manifest list and manifest files but never opens any data files, so it is dramatically cheaper than a real read on large tables.
+
 ### Table Get
 
 Get and display table schema information in JSON format. The output format is the same as the schema JSON format used

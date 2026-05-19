@@ -101,9 +101,6 @@ class ReadBuilder:
     def new_predicate_builder(self) -> PredicateBuilder:
         return PredicateBuilder(self.read_type())
 
-    # TODO: surface this through pypaimon's CLI (alongside cli_sql /
-    # cli_table) so users can run `pypaimon explain ...` against a table
-    # without writing any Python.
     def explain(self, verbose: bool = False) -> ExplainResult:
         """Produce a structured scan plan for this builder.
 

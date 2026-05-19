@@ -660,6 +660,27 @@ What the fields tell you:
 
 `ExplainResult` is a plain dataclass — alongside the human-readable `__str__` shown above, every field (`partition_pruning`, `bucket_pruning`, `file_skipping`, `split_count`, `splits_raw_convertible`, `level_histogram`, `splits`, ...) is addressable in Python for programmatic use.
 
+#### CLI
+
+The same scan plan is available from the `paimon` command line — useful for previewing pruning effects of a predicate without writing any Python:
+
+```bash
+# Whole-table scan
+paimon -c paimon.yaml table explain default.events
+
+# Push down filter / projection / limit and list every split
+paimon -c paimon.yaml table explain default.events \
+    --where "dt = '2026-05-16' AND id = 7" \
+    --select dt,id,val \
+    --limit 100 \
+    --verbose
+
+# Machine-readable output (level_histogram keys are JSON strings)
+paimon -c paimon.yaml table explain default.events --format json
+```
+
+`--where` accepts the same SQL-like syntax as `paimon table read`. With `--format json`, the result is a structured dump of `ExplainResult` suitable for piping into `jq` or further processing.
+
 ## Rollback
 
 Paimon supports rolling back a table to a previous snapshot or tag. This is useful for undoing unwanted changes or

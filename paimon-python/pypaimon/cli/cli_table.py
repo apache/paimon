@@ -22,6 +22,8 @@ This module provides table-related commands for the CLI.
 """
 
 import sys
+from dataclasses import asdict
+
 from pypaimon.common.json_util import JSON
 
 
@@ -145,6 +147,98 @@ def cmd_table_read(args):
         print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
     else:
         print(df.to_string(index=False))
+
+
+def cmd_table_explain(args):
+    """
+    Execute the 'table explain' command.
+
+    Prints the scan plan (snapshot, pushed-down predicate / projection /
+    limit, partition / bucket / file-stats pruning funnel and split-
+    level signals) without reading any data files.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config = load_catalog_config(args.config)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    database_name, table_name = parts
+
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    read_builder = table.new_read_builder()
+    available_fields = set(field.name for field in table.table_schema.fields)
+
+    select_columns = getattr(args, 'select', None)
+    if select_columns:
+        user_columns = [col.strip() for col in select_columns.split(',')]
+        invalid_columns = [col for col in user_columns if col not in available_fields]
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.",
+                  file=sys.stderr)
+            sys.exit(1)
+        read_builder = read_builder.with_projection(user_columns)
+
+    where_clause = getattr(args, 'where', None)
+    if where_clause:
+        from pypaimon.cli.where_parser import parse_where_clause
+        try:
+            predicate = parse_where_clause(where_clause, table.table_schema.fields)
+            if predicate:
+                read_builder = read_builder.with_filter(predicate)
+        except ValueError as e:
+            print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Unlike `table read`, explain always pushes the limit down — the
+    # whole point of explain is to show what the planner will see,
+    # including limit pushdown.
+    limit = getattr(args, 'limit', None)
+    if limit is not None:
+        read_builder = read_builder.with_limit(limit)
+
+    verbose = getattr(args, 'verbose', False)
+    try:
+        result = read_builder.explain(verbose=verbose)
+    except Exception as e:
+        print(f"Error: Failed to explain table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(_explain_result_to_json_dict(result), indent=2, ensure_ascii=False))
+    else:
+        print(str(result))
+
+
+def _explain_result_to_json_dict(result):
+    """Serialize an ``ExplainResult`` to a JSON-friendly dict.
+
+    ``level_histogram`` has ``int`` keys, both at the top level and
+    inside each split. ``json.dumps`` would coerce them to strings
+    silently; we do it up front so the output is explicit and stable.
+    """
+    payload = asdict(result)
+    payload['level_histogram'] = {
+        str(level): count for level, count in payload.get('level_histogram', {}).items()
+    }
+    if payload.get('splits') is not None:
+        for split in payload['splits']:
+            split['level_histogram'] = {
+                str(level): count for level, count in split.get('level_histogram', {}).items()
+            }
+    return payload
 
 
 def cmd_table_full_text_search(args):
@@ -827,7 +921,50 @@ def add_table_subcommands(table_parser):
         help='Output format: table (default) or json'
     )
     read_parser.set_defaults(func=cmd_table_read)
-    
+
+    # table explain command
+    explain_parser = table_subparsers.add_parser(
+        'explain',
+        help='Show the scan plan (snapshot, pushdown, pruning funnel, split shape) '
+             'without reading data'
+    )
+    explain_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    explain_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Project specific columns (comma-separated, e.g., "id,name,age")'
+    )
+    explain_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help='Filter condition in SQL-like syntax '
+             '(e.g., "age > 18", "dt = \'2026-01-01\' AND id IN (1,2,3)")'
+    )
+    explain_parser.add_argument(
+        '--limit', '-l',
+        type=int,
+        default=None,
+        help='Row limit to push down'
+    )
+    explain_parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='List every split with its files'
+    )
+    explain_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    explain_parser.set_defaults(func=cmd_table_explain)
+
     # table get command
     get_parser = table_subparsers.add_parser('get', help='Get table schema information')
     get_parser.add_argument(
