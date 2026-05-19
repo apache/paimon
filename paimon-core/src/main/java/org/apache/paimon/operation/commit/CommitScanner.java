@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -45,15 +46,18 @@ public class CommitScanner {
 
     private final FileStoreScan scan;
     private final Supplier<FileStoreScan> scanSupplier;
+    private final SnapshotManager snapshotManager;
     private final IndexManifestFile indexManifestFile;
     private final boolean dropStats;
 
     public CommitScanner(
             Supplier<FileStoreScan> scanSupplier,
+            SnapshotManager snapshotManager,
             IndexManifestFile indexManifestFile,
             CoreOptions options) {
         this.scanSupplier = scanSupplier;
         this.scan = scanSupplier.get();
+        this.snapshotManager = snapshotManager;
         this.indexManifestFile = indexManifestFile;
         // Stats in DELETE Manifest Entries is useless
         this.dropStats = options.manifestDeleteFileDropStats();
@@ -138,6 +142,7 @@ public class CommitScanner {
             @Nullable PartitionPredicate partitionFilter) {
         return new OverwriteChangesProvider(
                 scanSupplier,
+                snapshotManager,
                 indexManifestFile,
                 dropStats,
                 numBucket,

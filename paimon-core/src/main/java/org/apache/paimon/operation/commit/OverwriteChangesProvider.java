@@ -19,6 +19,7 @@
 package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -28,12 +29,14 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -53,6 +56,7 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
     private static final Logger LOG = LoggerFactory.getLogger(OverwriteChangesProvider.class);
 
     private final Supplier<FileStoreScan> scanSupplier;
+    private final SnapshotManager snapshotManager;
     private final IndexManifestFile indexManifestFile;
     private final boolean dropStats;
     private final int numBucket;
@@ -70,6 +74,7 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
 
     public OverwriteChangesProvider(
             Supplier<FileStoreScan> scanSupplier,
+            SnapshotManager snapshotManager,
             IndexManifestFile indexManifestFile,
             boolean dropStats,
             int numBucket,
@@ -77,6 +82,7 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
             List<IndexManifestEntry> newIndexFiles,
             @Nullable PartitionPredicate partitionFilter) {
         this.scanSupplier = scanSupplier;
+        this.snapshotManager = snapshotManager;
         this.indexManifestFile = indexManifestFile;
         this.dropStats = dropStats;
         this.numBucket = numBucket;
@@ -154,9 +160,25 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
         }
         for (long id = cachedSnapshot.id() + 1; id <= latestSnapshot.id(); id++) {
             deltaProbeCount++;
+            Snapshot snapshot;
+            try {
+                snapshot = snapshotManager.tryGetSnapshot(id);
+            } catch (FileNotFoundException e) {
+                // Snapshot may have been expired between retries. Fall back to a full scan
+                // of the latest snapshot, which is guaranteed to exist.
+                return false;
+            }
+
+            if (snapshot.commitKind() == CommitKind.OVERWRITE) {
+                // OVERWRITE snapshots (e.g. produced by replaceManifestList /
+                // RemoveUnexistingManifestsAction) may rewrite base manifests with an empty delta,
+                // so the DELTA probe cannot prove that target partitions are unchanged.
+                return false;
+            }
+
             FileStoreScan scan =
                     newScan()
-                            .withSnapshot(id)
+                            .withSnapshot(snapshot)
                             .withPartitionFilter(partitionFilter)
                             .withKind(ScanMode.DELTA);
             Iterator<ManifestEntry> iterator = scan.readFileIterator();

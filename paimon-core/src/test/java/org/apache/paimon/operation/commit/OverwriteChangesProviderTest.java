@@ -45,6 +45,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -65,10 +66,10 @@ public class OverwriteChangesProviderTest {
     @Test
     public void testManifestEntriesCache() throws Exception {
         TestFileStore store = createStore(1, Collections.emptyMap());
-        KeyValue targetRecord = record("2026-05-01", 8);
+        KeyValue targetRecord = record("20260501", 8);
         BinaryRow targetPartition = gen.getPartition(targetRecord);
         store.commitData(
-                Arrays.asList(targetRecord, record("2026-05-02", 8)), gen::getPartition, kv -> 0);
+                Arrays.asList(targetRecord, record("20260502", 8)), gen::getPartition, kv -> 0);
 
         Snapshot snapshot1 = store.snapshotManager().latestSnapshot();
         PartitionPredicate partitionFilter = partitionFilter(store, targetPartition);
@@ -80,7 +81,7 @@ public class OverwriteChangesProviderTest {
         assertThat(provider.deltaProbeCount).isZero();
 
         store.commitData(
-                Collections.singletonList(record("2026-05-02", 8)), gen::getPartition, kv -> 0);
+                Collections.singletonList(record("20260502", 8)), gen::getPartition, kv -> 0);
         Snapshot snapshot2 = store.snapshotManager().latestSnapshot();
         CommitChanges afterUnrelatedAppend = provider.provide(snapshot2);
 
@@ -90,7 +91,7 @@ public class OverwriteChangesProviderTest {
                 .containsExactlyInAnyOrderElementsOf(identifiers(first.tableFiles));
 
         store.commitData(
-                Collections.singletonList(record("2026-05-01", 8)), gen::getPartition, kv -> 0);
+                Collections.singletonList(record("20260501", 8)), gen::getPartition, kv -> 0);
         Snapshot snapshot3 = store.snapshotManager().latestSnapshot();
         CommitChanges afterTargetAppend = provider.provide(snapshot3);
 
@@ -107,7 +108,7 @@ public class OverwriteChangesProviderTest {
         TestFileStore store = createStore(2, Collections.emptyMap());
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
 
-        KeyValue targetRecord = record("2026-05-01", 8);
+        KeyValue targetRecord = record("20260501", 8);
         BinaryRow targetPartition = gen.getPartition(targetRecord);
         store.commitDataIndex(
                 targetRecord,
@@ -126,7 +127,7 @@ public class OverwriteChangesProviderTest {
         assertThat(first.indexFiles.get(0).kind()).isEqualTo(FileKind.DELETE);
         assertThat(first.indexFiles.get(0).partition()).isEqualTo(targetPartition);
 
-        KeyValue unrelatedRecordWithIndex = record("2026-05-02", 8);
+        KeyValue unrelatedRecordWithIndex = record("20260502", 8);
         BinaryRow unrelatedPartition = gen.getPartition(unrelatedRecordWithIndex);
         store.commitDataIndex(
                 unrelatedRecordWithIndex,
@@ -144,7 +145,7 @@ public class OverwriteChangesProviderTest {
                 .containsExactlyInAnyOrderElementsOf(first.indexFiles);
 
         store.commitData(
-                Collections.singletonList(record("2026-05-02", 8)), gen::getPartition, kv -> 0);
+                Collections.singletonList(record("20260502", 8)), gen::getPartition, kv -> 0);
         Snapshot snapshot3 = store.snapshotManager().latestSnapshot();
 
         assertThat(snapshot3.indexManifest()).isEqualTo(snapshot2.indexManifest());
@@ -156,12 +157,105 @@ public class OverwriteChangesProviderTest {
                 .containsExactlyInAnyOrderElementsOf(first.indexFiles);
     }
 
+    @Test
+    public void testFullTableOverwriteSkipsDeltaProbe() throws Exception {
+        TestFileStore store = createStore(1, Collections.emptyMap());
+        store.commitData(
+                Collections.singletonList(record("20260501", 8)), gen::getPartition, kv -> 0);
+        Snapshot snapshot1 = store.snapshotManager().latestSnapshot();
+
+        // partitionFilter == null means overwrite the whole table
+        OverwriteChangesProvider provider = provider(store, null, Collections.emptyList());
+        provider.provide(snapshot1);
+        assertThat(provider.fullScanManifestCount).isEqualTo(1);
+        assertThat(provider.deltaProbeCount).isZero();
+
+        store.commitData(
+                Collections.singletonList(record("20260502", 8)), gen::getPartition, kv -> 0);
+        Snapshot snapshot2 = store.snapshotManager().latestSnapshot();
+        provider.provide(snapshot2);
+
+        // partitionFilter == null short-circuits delta probe and forces fullScan
+        assertThat(provider.fullScanManifestCount).isEqualTo(2);
+        assertThat(provider.deltaProbeCount).isZero();
+    }
+
+    @Test
+    public void testExpiredSnapshotFallbacksToFullScan() throws Exception {
+        TestFileStore store = createStore(1, Collections.emptyMap());
+        KeyValue targetRecord = record("20260501", 8);
+        BinaryRow targetPartition = gen.getPartition(targetRecord);
+        store.commitData(
+                Arrays.asList(targetRecord, record("20260502", 8)), gen::getPartition, kv -> 0);
+        Snapshot snapshot1 = store.snapshotManager().latestSnapshot();
+
+        PartitionPredicate partitionFilter = partitionFilter(store, targetPartition);
+        OverwriteChangesProvider provider =
+                provider(store, partitionFilter, Collections.emptyList());
+        CommitChanges first = provider.provide(snapshot1);
+        assertThat(provider.fullScanManifestCount).isEqualTo(1);
+
+        store.commitData(
+                Collections.singletonList(record("20260502", 8)), gen::getPartition, kv -> 0);
+        Snapshot snapshot2 = store.snapshotManager().latestSnapshot();
+        store.commitData(
+                Collections.singletonList(record("20260502", 8)), gen::getPartition, kv -> 0);
+        Snapshot snapshot3 = store.snapshotManager().latestSnapshot();
+
+        // Simulate snapshot expiration of the middle snapshot.
+        store.snapshotManager().deleteSnapshot(snapshot2.id());
+
+        CommitChanges afterExpired = provider.provide(snapshot3);
+
+        // Missing middle snapshot should not fail the commit; fall back to a full scan.
+        assertThat(provider.fullScanManifestCount).isEqualTo(2);
+        assertThat(identifiers(afterExpired.tableFiles))
+                .containsExactlyInAnyOrderElementsOf(identifiers(first.tableFiles));
+    }
+
+    @Test
+    public void testOverwriteSnapshotInvalidatesCache() throws Exception {
+        TestFileStore store = createStore(1, Collections.emptyMap());
+        KeyValue targetRecord = record("20260501", 8);
+        BinaryRow targetPartition = gen.getPartition(targetRecord);
+        store.commitData(
+                Arrays.asList(targetRecord, record("20260502", 8)), gen::getPartition, kv -> 0);
+        Snapshot snapshot1 = store.snapshotManager().latestSnapshot();
+
+        PartitionPredicate partitionFilter = partitionFilter(store, targetPartition);
+        OverwriteChangesProvider provider =
+                provider(store, partitionFilter, Collections.emptyList());
+        CommitChanges first = provider.provide(snapshot1);
+        assertThat(provider.fullScanManifestCount).isEqualTo(1);
+
+        // Overwrite an unrelated partition. The DELTA does not touch the target partition,
+        // so only the commitKind == OVERWRITE check can invalidate the cache.
+        Map<String, String> unrelated = new HashMap<>();
+        unrelated.put("dt", "20260502");
+        unrelated.put("hr", "8");
+        store.overwriteData(
+                Collections.singletonList(record("20260502", 8)),
+                gen::getPartition,
+                kv -> 0,
+                unrelated);
+        Snapshot snapshot2 = store.snapshotManager().latestSnapshot();
+        assertThat(snapshot2.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+
+        CommitChanges afterOverwrite = provider.provide(snapshot2);
+
+        assertThat(provider.fullScanManifestCount).isEqualTo(2);
+        assertThat(provider.deltaProbeCount).isEqualTo(1);
+        assertThat(identifiers(afterOverwrite.tableFiles))
+                .containsExactlyInAnyOrderElementsOf(identifiers(first.tableFiles));
+    }
+
     private OverwriteChangesProvider provider(
             TestFileStore store,
             PartitionPredicate partitionFilter,
             List<ManifestEntry> newChanges) {
         return new OverwriteChangesProvider(
                 store::newScan,
+                store.snapshotManager(),
                 store.indexManifestFileFactory().create(),
                 store.options().manifestDeleteFileDropStats(),
                 store.options().bucket(),
