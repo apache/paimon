@@ -483,7 +483,6 @@ class TableWriteTest(unittest.TestCase):
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
 
-        # First write: full columns
         data1 = pa.Table.from_pydict({
             'user_id': [1, 2, 3],
             'item_id': [1001, 1002, 1003],
@@ -493,7 +492,6 @@ class TableWriteTest(unittest.TestCase):
         table_write.write_arrow(data1)
         table_commit.commit(table_write.prepare_commit(0), 0)
 
-        # Second write: partial columns (only update item_id)
         table_write.with_write_type(['user_id', 'dt', 'item_id'])
         partial_schema = pa.schema([
             pa.field('user_id', pa.int32(), nullable=False),
@@ -510,17 +508,14 @@ class TableWriteTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        # Read back — PK merge-on-read deduplicates by key (last-write-wins)
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(actual.num_rows, 3)
-        # user_id=1,2 overwritten by partial write: item_id updated, behavior=null
         row1 = actual.filter(pa.compute.equal(actual['user_id'], 1))
         self.assertEqual(row1.column('item_id').to_pylist(), [9001])
         self.assertEqual(row1.column('behavior').to_pylist(), [None])
-        # user_id=3 unchanged
         row3 = actual.filter(pa.compute.equal(actual['user_id'], 3))
         self.assertEqual(row3.column('item_id').to_pylist(), [1003])
         self.assertEqual(row3.column('behavior').to_pylist(), ['c'])

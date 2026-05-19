@@ -34,11 +34,7 @@ class KeyValueDataWriter(DataWriter):
         return self._sort_by_primary_key(combined)
 
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND.
-
-        When write_cols is set (partial column write), missing value columns
-        are filled with null arrays so the output KV file has the full schema.
-        """
+        """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
         num_rows = data.num_rows
 
         new_arrays = []
