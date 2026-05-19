@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
@@ -83,6 +84,19 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             // within each group, sort by first row id
             List<DataFileMeta> groupFiles = entry.getValue();
             groupFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
+
+            DataFileMeta current, next;
+            for (int i = 0; i < groupFiles.size() - 1; i++) {
+                current = groupFiles.get(i);
+                next = groupFiles.get(i + 1);
+
+                Preconditions.checkState(
+                        !current.nonNullRowIdRange().hasIntersection(next.nonNullRowIdRange()),
+                        "Blob files within a same max_seq_num should not overlap. Find: %s, %s",
+                        current,
+                        next);
+            }
+
             groupReaders.add(
                     new ForceSingleBatchReader(
                             new BlobSequenceGroupRecordReader(
@@ -104,6 +118,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
         }
         returned = true;
 
+        // all readers are forced returning single batch
         RecordIterator<InternalRow>[] iterators = new RecordIterator[groupReaders.size()];
         for (int i = 0; i < groupReaders.size(); i++) {
             RecordIterator<InternalRow> iterator = groupReaders.get(i).readBatch();
@@ -173,6 +188,8 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
      * placeholder rows for row id gaps. For example, if the full row range is [0, 100], but there's
      * only one blob file with row range [20, 80], then the rows with row id [0, 19] and [81, 100]
      * will be emitted as placeholder rows.
+     *
+     * <p> This reader should always be fully consumed, or the internal states may be broken.
      */
     public static class BlobSequenceGroupRecordReader implements RecordReader<InternalRow> {
 
