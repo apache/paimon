@@ -25,7 +25,7 @@ from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.blob import Blob, BlobDescriptor
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 
 

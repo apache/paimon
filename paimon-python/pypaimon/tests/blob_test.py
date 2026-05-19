@@ -144,7 +144,8 @@ class BlobTest(unittest.TestCase):
         self.assertIsNone(Blob.from_bytes(None))
 
     def test_from_bytes_with_descriptor(self):
-        import tempfile, os
+        import tempfile
+        import os
         data = b"actual blob content"
         tmp = tempfile.NamedTemporaryFile(delete=False)
         tmp.write(data)
