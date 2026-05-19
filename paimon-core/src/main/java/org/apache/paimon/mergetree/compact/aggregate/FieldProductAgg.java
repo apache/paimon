@@ -57,16 +57,16 @@ public class FieldProductAgg extends FieldAggregator {
                 product = fromBigDecimal(mul, mergeFieldDD.precision(), mergeFieldDD.scale());
                 break;
             case TINYINT:
-                product = (byte) ((byte) accumulator * (byte) inputField);
+                product = toExactByte((byte) accumulator * (byte) inputField);
                 break;
             case SMALLINT:
-                product = (short) ((short) accumulator * (short) inputField);
+                product = toExactShort((short) accumulator * (short) inputField);
                 break;
             case INTEGER:
-                product = (int) accumulator * (int) inputField;
+                product = Math.multiplyExact((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                product = (long) accumulator * (long) inputField;
+                product = Math.multiplyExact((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 product = (float) accumulator * (float) inputField;
@@ -82,6 +82,20 @@ public class FieldProductAgg extends FieldAggregator {
                 throw new IllegalArgumentException(msg);
         }
         return product;
+    }
+
+    private static byte toExactByte(int value) {
+        if (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE) {
+            throw new ArithmeticException("byte overflow");
+        }
+        return (byte) value;
+    }
+
+    private static short toExactShort(int value) {
+        if (value > Short.MAX_VALUE || value < Short.MIN_VALUE) {
+            throw new ArithmeticException("short overflow");
+        }
+        return (short) value;
     }
 
     @Override
