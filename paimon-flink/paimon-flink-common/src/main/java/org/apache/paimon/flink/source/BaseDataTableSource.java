@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
@@ -206,7 +207,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                                 .env(env)
                                 .build(),
                 tableIdentifier.asSummaryString(),
-                table);
+                table,
+                options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
     }
 
     private ScanRuntimeProvider createPushedAggregateScan() {
