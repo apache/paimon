@@ -99,6 +99,7 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
         Object[] minValues = new Object[fieldCount];
         Object[] maxValues = new Object[fieldCount];
         long[] nullCounts = new long[fieldCount];
+        Set<Integer> seenColumns = new HashSet<>();
 
         for (int rg = 0; rg < numRowGroups; rg++) {
             List<ColumnStatistics> stats = statsProvider.getRowGroupStatistics(rg);
@@ -108,6 +109,7 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
                     continue;
                 }
 
+                seenColumns.add(colIdx);
                 nullCounts[colIdx] += stat.getNullCount();
 
                 if (stat.hasMinMax()) {
@@ -136,10 +138,11 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
             }
         }
 
+        Set<Integer> trackedColumns = statsFieldIndices != null ? statsFieldIndices : seenColumns;
         SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         SimpleColStats[] result = new SimpleColStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            if (statsFieldIndices != null && !statsFieldIndices.contains(i)) {
+            if (!trackedColumns.contains(i)) {
                 result[i] = collectors[i].convert(new SimpleColStats(null, null, null));
             } else {
                 SimpleColStats fieldStats =

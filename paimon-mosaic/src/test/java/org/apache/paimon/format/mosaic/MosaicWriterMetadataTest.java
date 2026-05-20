@@ -278,6 +278,53 @@ class MosaicWriterMetadataTest {
     }
 
     @Test
+    void testPartialStatsColumnsFromFile() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .field("f_double", DataTypes.DOUBLE())
+                        .build();
+        Path path = newPath();
+        String statsColumns = "f_string";
+
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
+        writer.addElement(GenericRow.of(1, BinaryString.fromString("banana"), 1.0));
+        writer.addElement(GenericRow.of(2, BinaryString.fromString("apple"), 2.0));
+        writer.addElement(GenericRow.of(3, null, 3.0));
+        writer.close();
+
+        // Extract from file (no writer metadata), simulating fallback path
+        MosaicFileFormat format = createFormat(statsColumns);
+        int fieldCount = rowType.getFieldCount();
+        SimpleColStatsCollector.Factory[] collectors =
+                IntStream.range(0, fieldCount)
+                        .mapToObj(i -> SimpleColStatsCollector.from("full"))
+                        .toArray(SimpleColStatsCollector.Factory[]::new);
+
+        SimpleStatsExtractor extractor = format.createStatsExtractor(rowType, collectors).get();
+        LocalFileIO fileIO = new LocalFileIO();
+        long fileSize = fileIO.getFileSize(path);
+
+        SimpleColStats[] fromFile = extractor.extract(fileIO, path, fileSize);
+
+        // f_int has no stats in file
+        assertThat(fromFile[0].min()).isNull();
+        assertThat(fromFile[0].max()).isNull();
+        assertThat(fromFile[0].nullCount()).isNull();
+
+        // f_string has stats
+        assertThat(fromFile[1].min()).isEqualTo(BinaryString.fromString("apple"));
+        assertThat(fromFile[1].max()).isEqualTo(BinaryString.fromString("banana"));
+        assertThat(fromFile[1].nullCount()).isEqualTo(1L);
+
+        // f_double has no stats in file
+        assertThat(fromFile[2].min()).isNull();
+        assertThat(fromFile[2].max()).isNull();
+        assertThat(fromFile[2].nullCount()).isNull();
+    }
+
+    @Test
     void testFallbackToFileWhenMetadataIsNull() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
         Path path = newPath();
