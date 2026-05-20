@@ -20,7 +20,8 @@ package org.apache.paimon.arrow;
 
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.io.ProjectableBundleRecords;
+import org.apache.paimon.io.ReplayableBundleRecords;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -28,7 +29,7 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import java.util.Iterator;
 
 /** Batch records for vector schema root. */
-public class ArrowBundleRecords implements BundleRecords {
+public class ArrowBundleRecords implements ProjectableBundleRecords {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final RowType rowType;
@@ -54,5 +55,10 @@ public class ArrowBundleRecords implements BundleRecords {
     public Iterator<InternalRow> iterator() {
         ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, caseSensitive);
         return arrowBatchReader.readBatch(vectorSchemaRoot).iterator();
+    }
+
+    @Override
+    public ReplayableBundleRecords project(int[] projection) {
+        return new ArrowBundleRecords(vectorSchemaRoot, rowType.project(projection), caseSensitive);
     }
 }

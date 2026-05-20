@@ -29,6 +29,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
@@ -47,6 +48,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
@@ -170,6 +172,20 @@ public class DedicatedFormatRollingFileWriterVectorTest {
 
         // Verify total record count
         assertThat(writer.recordCount()).isEqualTo(rowNum);
+    }
+
+    @Test
+    public void testBundleWriting() throws Exception {
+        List<InternalRow> rows = makeRows(8, 10);
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+        List<DataFileMeta> metasResult = writer.result();
+
+        assertThat(writer.recordCount()).isEqualTo(rows.size());
+        assertThat(metasResult).hasSize(3);
+        assertThat(metasResult.get(0).rowCount()).isEqualTo(rows.size());
+        assertThat(metasResult.get(1).rowCount()).isEqualTo(rows.size());
+        assertThat(metasResult.get(2).rowCount()).isEqualTo(rows.size());
     }
 
     @Test
@@ -309,5 +325,29 @@ public class DedicatedFormatRollingFileWriterVectorTest {
                             label));
         }
         return rows;
+    }
+
+    private static class SingleUseBundleRecords implements BundleRecords {
+
+        private final List<InternalRow> rows;
+        private boolean iterated;
+
+        private SingleUseBundleRecords(List<InternalRow> rows) {
+            this.rows = rows;
+        }
+
+        @Override
+        public Iterator<InternalRow> iterator() {
+            if (iterated) {
+                throw new IllegalStateException("Bundle should only be consumed once.");
+            }
+            iterated = true;
+            return rows.iterator();
+        }
+
+        @Override
+        public long rowCount() {
+            return rows.size();
+        }
     }
 }

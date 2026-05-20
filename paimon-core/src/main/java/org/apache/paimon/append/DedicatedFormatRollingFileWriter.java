@@ -26,10 +26,8 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FileWriterAbortExecutor;
+import org.apache.paimon.io.ReplayableBundleRecords;
 import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.io.RollingFileWriterImpl;
-import org.apache.paimon.io.RowDataFileWriter;
-import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -103,13 +101,12 @@ public class DedicatedFormatRollingFileWriter
     private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
 
     // Core components
-    private final Supplier<
-                    ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+    private final RowType writeSchema;
+    private final Supplier<ProjectedFileWriter<BundleAwareRowDataFileWriter, DataFileMeta>>
             writerFactory;
     private final @Nullable Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final @Nullable Supplier<
-                    ProjectedFileWriter<
-                            RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
+                    ProjectedFileWriter<BundleAwareRowDataRollingFileWriter, List<DataFileMeta>>>
             vectorStoreWriterFactory;
     private final long targetFileSize;
     private final @Nullable ExternalStorageBlobWriter externalStorageBlobWriter;
@@ -118,11 +115,9 @@ public class DedicatedFormatRollingFileWriter
     private final List<FileWriterAbortExecutor> closedWriters;
     private final List<DataFileMeta> results;
 
-    private ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>
-            currentWriter;
+    private ProjectedFileWriter<BundleAwareRowDataFileWriter, DataFileMeta> currentWriter;
     private MultipleBlobFileWriter blobWriter;
-    private ProjectedFileWriter<
-                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+    private ProjectedFileWriter<BundleAwareRowDataRollingFileWriter, List<DataFileMeta>>
             vectorStoreWriter;
     private long recordCount = 0;
     private boolean closed = false;
@@ -145,6 +140,7 @@ public class DedicatedFormatRollingFileWriter
             boolean statsDenseStore,
             @Nullable BlobFileContext context) {
         // Initialize basic fields
+        this.writeSchema = writeSchema;
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
@@ -249,8 +245,7 @@ public class DedicatedFormatRollingFileWriter
     }
 
     /** Creates a factory for normal data writers. */
-    private static Supplier<
-                    ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+    private static Supplier<ProjectedFileWriter<BundleAwareRowDataFileWriter, DataFileMeta>>
             createNormalWriterFactory(
                     FileIO fileIO,
                     long schemaId,
@@ -270,8 +265,8 @@ public class DedicatedFormatRollingFileWriter
         int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
 
         return () -> {
-            RowDataFileWriter rowDataFileWriter =
-                    new RowDataFileWriter(
+            BundleAwareRowDataFileWriter rowDataFileWriter =
+                    new BundleAwareRowDataFileWriter(
                             fileIO,
                             RollingFileWriter.createFileWriterContext(
                                     fileFormat,
@@ -293,8 +288,7 @@ public class DedicatedFormatRollingFileWriter
     }
 
     /** Creates a vector-store writer for handling vector-store data. */
-    private static ProjectedFileWriter<
-                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+    private static ProjectedFileWriter<BundleAwareRowDataRollingFileWriter, List<DataFileMeta>>
             createVectorStoreWriter(
                     FileIO fileIO,
                     long schemaId,
@@ -313,10 +307,13 @@ public class DedicatedFormatRollingFileWriter
         List<String> vectorStoreColumnNames = vectorStoreRowType.getFieldNames();
         int[] vectorStoreProjection = writeSchema.projectIndexes(vectorStoreColumnNames);
         String vectorFormat = vectorFileFormat.getFormatIdentifier();
+        final boolean supportsBundlePassThrough =
+                BundleAwareRowDataRollingFileWriter.supportsBundlePassThrough(
+                        vectorFileFormat, vectorStoreRowType, statsCollectors);
         return new ProjectedFileWriter<>(
-                new RollingFileWriterImpl<>(
+                new BundleAwareRowDataRollingFileWriter(
                         () ->
-                                new RowDataFileWriter(
+                                new BundleAwareRowDataFileWriter(
                                         fileIO,
                                         RollingFileWriter.createFileWriterContext(
                                                 vectorFileFormat,
@@ -333,6 +330,7 @@ public class DedicatedFormatRollingFileWriter
                                         statsDenseStore,
                                         pathFactory.isExternalPath(),
                                         vectorStoreColumnNames),
+                        supportsBundlePassThrough,
                         targetFileSize),
                 vectorStoreProjection);
     }
@@ -353,15 +351,7 @@ public class DedicatedFormatRollingFileWriter
                             ? externalStorageBlobWriter.transformRow(row)
                             : row;
 
-            if (currentWriter == null) {
-                currentWriter = writerFactory.get();
-            }
-            if ((blobWriter == null) && (blobWriterFactory != null)) {
-                blobWriter = blobWriterFactory.get();
-            }
-            if ((vectorStoreWriter == null) && (vectorStoreWriterFactory != null)) {
-                vectorStoreWriter = vectorStoreWriterFactory.get();
-            }
+            openWritersIfNeeded();
             if (blobWriter != null) {
                 blobWriter.write(transformedRow);
             }
@@ -371,7 +361,7 @@ public class DedicatedFormatRollingFileWriter
             currentWriter.write(transformedRow);
             recordCount++;
 
-            if (rollingFile()) {
+            if (rollingFile(false)) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
@@ -388,16 +378,48 @@ public class DedicatedFormatRollingFileWriter
     }
 
     /**
-     * Writes a bundle of records by iterating through each row.
+     * Writes a bundle of records while preserving bundle semantics for dedicated child writers.
      *
      * @param bundle The bundle of records to write
      * @throws IOException if writing fails
      */
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
-        // TODO: support bundle projection
-        for (InternalRow row : bundle) {
-            write(row);
+        if (bundle.rowCount() == 0) {
+            return;
+        }
+
+        if (externalStorageBlobWriter != null) {
+            for (InternalRow row : bundle) {
+                write(row);
+            }
+            return;
+        }
+
+        // Dedicated fan-out reuses the same logical bundle for normal/blob/vector writers, but
+        // only explicitly replayable bundles can be forwarded safely without copying.
+        ReplayableBundleRecords replayableBundle =
+                bundle instanceof ReplayableBundleRecords
+                        ? (ReplayableBundleRecords) bundle
+                        : MaterializedBundleRecords.from(bundle, writeSchema);
+
+        try {
+            openWritersIfNeeded();
+            if (blobWriter != null) {
+                blobWriter.writeBundle(replayableBundle);
+            }
+            if (vectorStoreWriter != null) {
+                vectorStoreWriter.writeBundle(replayableBundle);
+            }
+            currentWriter.writeBundle(replayableBundle);
+            recordCount += replayableBundle.rowCount();
+
+            if (rollingFile(true)) {
+                closeCurrentWriter();
+            }
+        } catch (Throwable e) {
+            handleWriteException(e);
+            throw e;
         }
     }
 
@@ -438,10 +460,24 @@ public class DedicatedFormatRollingFileWriter
     }
 
     /** Checks if the current file should be rolled based on size and record count. */
-    private boolean rollingFile() throws IOException {
+    private void openWritersIfNeeded() {
+        if (currentWriter == null) {
+            currentWriter = writerFactory.get();
+        }
+        if ((blobWriter == null) && (blobWriterFactory != null)) {
+            blobWriter = blobWriterFactory.get();
+        }
+        if ((vectorStoreWriter == null) && (vectorStoreWriterFactory != null)) {
+            vectorStoreWriter = vectorStoreWriterFactory.get();
+        }
+    }
+
+    /** Checks if the current file should be rolled based on size and record count. */
+    private boolean rollingFile(boolean forceCheck) throws IOException {
         return currentWriter
                 .writer()
-                .reachTargetSize(recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+                .reachTargetSize(
+                        forceCheck || recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     /**

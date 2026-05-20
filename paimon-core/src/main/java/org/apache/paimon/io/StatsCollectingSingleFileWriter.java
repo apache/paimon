@@ -66,13 +66,21 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
-        if (statsRequirePerRecord) {
+        validateBundleWrite();
+        super.writeBundle(bundle);
+    }
+
+    protected final boolean supportsBundleWrite() {
+        return !statsRequirePerRecord;
+    }
+
+    protected final void validateBundleWrite() {
+        if (!supportsBundleWrite()) {
             throw new IllegalArgumentException(
                     String.format(
                             "Can't write bundle for %s, we may lose all the statistical information.",
                             statsProducer.getClass().getName()));
         }
-        super.writeBundle(bundle);
     }
 
     public SimpleColStats[] fieldStats(long fileSize) throws IOException {
