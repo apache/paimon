@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -214,7 +215,7 @@ public class OverwriteChangesProviderTest {
     }
 
     @Test
-    public void testOverwriteSnapshotInvalidatesCache() throws Exception {
+    public void testNonAppendSnapshotInvalidatesCache() throws Exception {
         TestFileStore store = createStore(1, Collections.emptyMap());
         KeyValue targetRecord = record("20260501", 8);
         BinaryRow targetPartition = gen.getPartition(targetRecord);
@@ -228,8 +229,7 @@ public class OverwriteChangesProviderTest {
         CommitChanges first = provider.provide(snapshot1);
         assertThat(provider.fullScanManifestCount).isEqualTo(1);
 
-        // Overwrite an unrelated partition. The DELTA does not touch the target partition,
-        // so only the commitKind == OVERWRITE check can invalidate the cache.
+        // Overwrite an unrelated partition — commitKind != APPEND must invalidate the cache.
         Map<String, String> unrelated = new HashMap<>();
         unrelated.put("dt", "20260502");
         unrelated.put("hr", "8");
@@ -239,13 +239,21 @@ public class OverwriteChangesProviderTest {
                 kv -> 0,
                 unrelated);
         Snapshot snapshot2 = store.snapshotManager().latestSnapshot();
-        assertThat(snapshot2.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
-
         CommitChanges afterOverwrite = provider.provide(snapshot2);
-
         assertThat(provider.fullScanManifestCount).isEqualTo(2);
         assertThat(provider.deltaProbeCount).isEqualTo(1);
         assertThat(identifiers(afterOverwrite.tableFiles))
+                .containsExactlyInAnyOrderElementsOf(identifiers(first.tableFiles));
+
+        // COMPACT snapshot also invalidates the cache.
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.compactManifest();
+        }
+        Snapshot snapshot3 = store.snapshotManager().latestSnapshot();
+        CommitChanges afterCompact = provider.provide(snapshot3);
+        assertThat(provider.fullScanManifestCount).isEqualTo(3);
+        assertThat(provider.deltaProbeCount).isEqualTo(2);
+        assertThat(identifiers(afterCompact.tableFiles))
                 .containsExactlyInAnyOrderElementsOf(identifiers(first.tableFiles));
     }
 

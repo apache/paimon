@@ -161,10 +161,10 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
             deltaProbeCount++;
             try {
                 Snapshot snapshot = snapshotManager.tryGetSnapshot(id);
-                if (snapshot.commitKind() == CommitKind.OVERWRITE) {
-                    // OVERWRITE snapshots (e.g. produced by replaceManifestList /
-                    // RemoveUnexistingManifestsAction) may rewrite base manifests with an empty
-                    // delta, so the DELTA probe cannot prove that target partitions are unchanged.
+                if (snapshot.commitKind() != CommitKind.APPEND) {
+                    // Only APPEND snapshots produce a reliable DELTA manifest for probing. For
+                    // example, OVERWRITE snapshot might rewrite or reorganize manifests in ways
+                    // that make the DELTA probe unreliable.
                     return false;
                 }
                 FileStoreScan scan =
