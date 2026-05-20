@@ -192,16 +192,7 @@ public class ManifestFileSorter {
             throws Exception {
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
 
-        // Step 1: Prepare compaction context
-        CompactionContext ctx =
-                prepareCompaction(input, manifestFile, partitionType, options, false);
-        Map<ManifestFileMeta, Boolean> defaultCompactionMap = ctx.defaultCompactionManifests;
-        List<ManifestSortedRun> levelRuns = ctx.levelRuns;
-        List<ManifestSortedRun> pickedRuns = ctx.pickedRuns;
-        RecordComparator fieldComparator = ctx.fieldComparator;
-        Set<FileEntry.Identifier> deleteEntries = ctx.deleteEntries;
-
-        // Step 2: Build fileName -> index mapping and initialize 2D result
+        // Step 1: Build fileName -> index mapping and initialize 2D result
         Map<String, Integer> fileNameToIndex = new HashMap<>();
         for (int i = 0; i < input.size(); i++) {
             fileNameToIndex.put(input.get(i).fileName(), i);
@@ -210,6 +201,15 @@ public class ManifestFileSorter {
         for (int i = 0; i < input.size(); i++) {
             result.add(new ArrayList<>());
         }
+
+        // Step 2: Prepare compaction context
+        CompactionContext ctx =
+                prepareCompaction(input, manifestFile, partitionType, options, false);
+        Map<ManifestFileMeta, Boolean> defaultCompactionMap = ctx.defaultCompactionManifests;
+        List<ManifestSortedRun> levelRuns = ctx.levelRuns;
+        List<ManifestSortedRun> pickedRuns = ctx.pickedRuns;
+        RecordComparator fieldComparator = ctx.fieldComparator;
+        Set<FileEntry.Identifier> deleteEntries = ctx.deleteEntries;
 
         if (pickedRuns.isEmpty() && defaultCompactionMap.isEmpty()) {
             LOG.debug(
@@ -990,7 +990,6 @@ public class ManifestFileSorter {
 
     /** Result of classifying manifest files into default-compaction and LSM groups. */
     private static class ClassifyResult {
-        /** key: ManifestFileMeta, value: boolean[]{isSmall, isInDeleteRange}. */
         final Map<ManifestFileMeta, Boolean> defaultCompactionManifests;
 
         final List<ManifestFileMeta> lsmFiles;
