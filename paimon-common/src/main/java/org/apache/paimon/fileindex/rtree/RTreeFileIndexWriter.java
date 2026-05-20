@@ -137,8 +137,9 @@ public class RTreeFileIndexWriter extends FileIndexWriter {
 
         // Write entries
         if (node.isLeaf()) {
-            for (Integer rowId : node.getLeafRowIds()) {
-                dos.writeInt(rowId);
+            for (LeafEntry entry : node.getLeafEntries()) {
+                dos.writeInt(entry.getRowId());
+                entry.getBbox().serialize(dos);
             }
         } else {
             for (RTreeNode child : node.getChildren()) {

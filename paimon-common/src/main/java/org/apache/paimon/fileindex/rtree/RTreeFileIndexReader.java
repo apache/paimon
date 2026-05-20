@@ -79,7 +79,8 @@ public class RTreeFileIndexReader extends FileIndexReader {
         if (isLeaf) {
             for (int i = 0; i < entryCount; i++) {
                 int rowId = dis.readInt();
-                node.addRowId(rowId);
+                BoundingBox entryBbox = BoundingBox.deserialize(dis, dimensions);
+                node.addLeafEntry(new LeafEntry(rowId, entryBbox));
             }
         } else {
             for (int i = 0; i < entryCount; i++) {

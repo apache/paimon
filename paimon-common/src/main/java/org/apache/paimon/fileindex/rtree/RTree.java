@@ -53,6 +53,14 @@ public class RTree {
         return root;
     }
 
+    public void setRoot(RTreeNode newRoot) {
+        this.root = newRoot;
+    }
+
+    public void setSize(int newSize) {
+        this.size = newSize;
+    }
+
     public int getSize() {
         return size;
     }
