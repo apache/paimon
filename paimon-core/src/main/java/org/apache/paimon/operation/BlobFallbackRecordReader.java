@@ -72,7 +72,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                 files.stream().mapToLong(DataFileMeta::nonNullFirstRowId).min().getAsLong();
         long lastRowId = firstRowId + rowCount - 1;
 
-        // sort descendent group readers in descending order
+        // sort group readers in descending order
         Map<Long, List<DataFileMeta>> sequenceGroups = new TreeMap<>(reverseOrder());
         for (DataFileMeta file : files) {
             sequenceGroups
