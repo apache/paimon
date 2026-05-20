@@ -538,6 +538,7 @@ class SchemaValidationTest {
 
         // Test 2: manifest-sort-partition-field not in partition keys should fail
         Map<String, String> options2 = new HashMap<>();
+        options2.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
         options2.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f1");
         options2.put(BUCKET.key(), String.valueOf(-1));
         assertThatThrownBy(
