@@ -76,6 +76,11 @@ public class BoundingBox {
         }
     }
 
+    public void clear() {
+        java.util.Arrays.fill(min, Double.POSITIVE_INFINITY);
+        java.util.Arrays.fill(max, Double.NEGATIVE_INFINITY);
+    }
+
     public double getArea() {
         double area = 1.0;
         for (int i = 0; i < dimensions; i++) {
