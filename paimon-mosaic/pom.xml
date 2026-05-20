@@ -28,13 +28,13 @@ under the License.
         <version>1.5-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-mosaic-format</artifactId>
+    <artifactId>paimon-mosaic</artifactId>
     <name>Paimon : Mosaic Format</name>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.paimon.mosaic</groupId>
-            <artifactId>mosaic-writer</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>mosaic</artifactId>
             <version>0.1.0-SNAPSHOT</version>
         </dependency>
 

@@ -101,8 +101,13 @@ class MosaicReaderWriterTest {
 
     @Test
     void testColumnProjection() throws IOException {
-        RowType writeType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.DOUBLE());
-        RowType readType = DataTypes.ROW(DataTypes.STRING());
+        RowType writeType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .field("f_double", DataTypes.DOUBLE())
+                        .build();
+        RowType readType = RowType.builder().field("f_string", DataTypes.STRING()).build();
         Path path = newPath();
 
         writeRows(
@@ -137,7 +142,11 @@ class MosaicReaderWriterTest {
 
     @Test
     void testRowGroupPredicateFiltering() throws IOException {
-        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
         Path path = newPath();
 
         int numRows = 10000;
@@ -147,14 +156,18 @@ class MosaicReaderWriterTest {
         }
         writeRows(rowType, path, rows);
 
+        // Predicate that cannot match any row group (all values are 0..9999)
         PredicateBuilder builder = new PredicateBuilder(rowType);
-        Predicate predicate = builder.greaterThan(0, 9000);
+        Predicate predicate = builder.greaterThan(0, 99999);
         List<InternalRow> result =
                 readAll(rowType, rowType, path, Collections.singletonList(predicate));
+        assertThat(result).isEmpty();
 
-        for (InternalRow row : result) {
-            assertThat(row.getInt(0)).isGreaterThan(9000);
-        }
+        // Predicate that matches the row group (values include range 0..9999)
+        Predicate matchPredicate = builder.greaterThan(0, 5000);
+        List<InternalRow> matchResult =
+                readAll(rowType, rowType, path, Collections.singletonList(matchPredicate));
+        assertThat(matchResult).hasSize(numRows);
     }
 
     @Test

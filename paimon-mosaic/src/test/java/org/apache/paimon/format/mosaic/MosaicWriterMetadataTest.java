@@ -25,12 +25,14 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.format.SimpleStatsExtractor.FileInfo;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -140,6 +142,40 @@ class MosaicWriterMetadataTest {
         assertThat(fromMetadata).isNotNull();
         assertThat(fromMetadata[0].nullCount()).isEqualTo(1L);
         assertThat(fromMetadata[1].nullCount()).isEqualTo(1L);
+    }
+
+    @Test
+    void testExtractWithFileInfoRowCount() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
+        Path path = newPath();
+
+        int numRows = 500;
+        FormatWriter writer = createWriter(rowType, path);
+        for (int i = 0; i < numRows; i++) {
+            writer.addElement(GenericRow.of(i, BinaryString.fromString("row_" + i)));
+        }
+        writer.close();
+
+        MosaicFileFormat format = createFormat();
+        int fieldCount = rowType.getFieldCount();
+        SimpleColStatsCollector.Factory[] collectors =
+                IntStream.range(0, fieldCount)
+                        .mapToObj(i -> SimpleColStatsCollector.from("full"))
+                        .toArray(SimpleColStatsCollector.Factory[]::new);
+
+        SimpleStatsExtractor extractor = format.createStatsExtractor(rowType, collectors).get();
+        LocalFileIO fileIO = new LocalFileIO();
+        long fileSize = fileIO.getFileSize(path);
+
+        Pair<SimpleColStats[], FileInfo> result =
+                extractor.extractWithFileInfo(fileIO, path, fileSize);
+        assertThat(result.getRight().getRowCount()).isEqualTo(numRows);
+        assertThat(result.getLeft()).isNotNull();
+        assertThat(result.getLeft()).hasSize(fieldCount);
     }
 
     @Test

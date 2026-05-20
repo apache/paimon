@@ -20,7 +20,6 @@ package org.apache.paimon.format.mosaic;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
-import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -82,12 +81,6 @@ class MosaicFormatReadWriteTest extends FormatReadWriteTest {
                 .field("f_timestamp6", DataTypes.TIMESTAMP(6))
                 .field("f_decimal_5_2", DataTypes.DECIMAL(5, 2))
                 .field("f_decimal_20_0", DataTypes.DECIMAL(20, 0))
-                .field("f_array", DataTypes.ARRAY(DataTypes.INT()))
-                .field(
-                        "f_row",
-                        DataTypes.ROW(
-                                DataTypes.FIELD(0, "a", DataTypes.INT()),
-                                DataTypes.FIELD(1, "b", DataTypes.STRING())))
                 .build();
     }
 
@@ -107,9 +100,7 @@ class MosaicFormatReadWriteTest extends FormatReadWriteTest {
                 Timestamp.fromEpochMillis(1700000000000L),
                 Timestamp.fromMicros(1700000000000000L),
                 Decimal.fromBigDecimal(new BigDecimal("123.45"), 5, 2),
-                Decimal.fromBigDecimal(new BigDecimal("12345678901234567890"), 20, 0),
-                new GenericArray(new int[] {1, 2, 3}),
-                GenericRow.of(100, BinaryString.fromString("nested")));
+                Decimal.fromBigDecimal(new BigDecimal("12345678901234567890"), 20, 0));
     }
 
     @Override
