@@ -60,6 +60,28 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>compact_database</td>
+      <td>
+         To compact all tables across one or more databases. Arguments:
+            <li>including_databases: regular expression to match databases to compact. Left empty to match all databases (i.e. '.*').</li>
+            <li>including_tables: regular expression to match table identifiers (in 'db.table' form) to compact. Left empty to match all tables (i.e. '.*').</li>
+            <li>excluding_tables: regular expression to match table identifiers to exclude from compaction.</li>
+            <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
+      </td>
+      <td>
+         -- compact all databases<br/>
+         CALL sys.compact_database()<br/><br/>
+         -- compact some databases (accept regular expression)<br/>
+         CALL sys.compact_database(including_databases => 'db1|db2')<br/><br/>
+         -- compact some tables (accept regular expression)<br/>
+         CALL sys.compact_database(including_databases => 'db1', including_tables => 'db1.table1|db1.table2')<br/><br/>
+         -- exclude some tables (accept regular expression)<br/>
+         CALL sys.compact_database(including_databases => 'db1', including_tables => '.*', excluding_tables => '.*ignore_table')<br/><br/>
+         -- set table options<br/>
+         CALL sys.compact_database(including_databases => 'db1', options => 'target-file-size=128m')
+      </td>
+    </tr>
+    <tr>
       <td>expire_snapshots</td>
       <td>
          To expire snapshots. Argument:
@@ -474,6 +496,36 @@ This section introduce all available spark procedures about paimon.
       <td>
          CALL sys.rewrite_file_index(table => "t")<br/>
          CALL sys.rewrite_file_index(table => "t", where => "day = '2025-08-17'")<br/>
+      </td>
+   </tr>
+   <tr>
+      <td>create_global_index</td>
+      <td>
+         To create global index files for a given column. The table must have <code>row-tracking.enabled=true</code>. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>index_column: the name of the column to index. Cannot be empty.</li>
+            <li>index_type: type of the index to build, e.g. 'btree' or 'bitmap'. Cannot be empty.</li>
+            <li>partitions: partition filter to limit the partitions on which to build the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+            <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
+      </td>
+      <td>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'bitmap')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1;pt=p2')
+      </td>
+   </tr>
+   <tr>
+      <td>drop_global_index</td>
+      <td>
+         To drop global index files for a given column. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>index_column: the name of the indexed column. Cannot be empty.</li>
+            <li>index_type: type of the index to drop, e.g. 'btree' or 'bitmap'. Cannot be empty.</li>
+            <li>partitions: partition filter to limit the partitions from which to drop the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'bitmap')<br/><br/>
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'bitmap', partitions => 'pt=p1')
       </td>
    </tr>
    <tr>
