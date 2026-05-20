@@ -22,16 +22,26 @@ from pyarrow import PythonFile
 from pyarrow._fs import FileSystemHandler
 from pyarrow.fs import FileInfo, FileSelector, FileType
 
+# `JindoFileSystemHandler` (the PyArrow FileIO path) only needs `pyjindo.fs`
+# and `pyjindo.util`. The PVFS jindo backend (`create_jindo_oss_filesystem`)
+# additionally needs `pyjindo.ossfs`. Track the two surfaces independently so
+# that a pyjindosdk build without `pyjindo.ossfs` does not silently disable
+# the previously-working PyArrow path.
 try:
     import pyjindo.fs as jfs
-    import pyjindo.ossfs as jossfs
     import pyjindo.util as jutil
     JINDO_AVAILABLE = True
 except ImportError:
     JINDO_AVAILABLE = False
     jfs = None
-    jossfs = None
     jutil = None
+
+try:
+    import pyjindo.ossfs as jossfs
+    JINDO_OSSFS_AVAILABLE = True
+except ImportError:
+    jossfs = None
+    JINDO_OSSFS_AVAILABLE = False
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
@@ -83,8 +93,10 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
     the bucket so ``JindoOssFileSystem`` can re-attach the ``oss://`` scheme to
     the bucket-relative paths that ``PaimonVirtualFileSystem`` passes in.
     """
-    if not JINDO_AVAILABLE:
-        raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
+    if not (JINDO_AVAILABLE and JINDO_OSSFS_AVAILABLE):
+        raise ImportError(
+            "pyjindo.ossfs is not available. Please install pyjindosdk>=6.10.4."
+        )
 
     return jossfs.JindoOssFileSystem(
         uri=root_uri,

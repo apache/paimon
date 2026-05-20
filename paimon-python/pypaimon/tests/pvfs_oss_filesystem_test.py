@@ -81,7 +81,7 @@ class GetOssFilesystemDispatchTest(unittest.TestCase):
             OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
         })
 
-    def _dispatch(self, oss_impl, jindo_available):
+    def _dispatch(self, oss_impl, jindo_ossfs_available):
         extra = {OssOptions.OSS_IMPL.key(): oss_impl} if oss_impl is not None else None
         pvfs = _make_pvfs(extra)
         ossfs_sentinel = object()
@@ -91,7 +91,13 @@ class GetOssFilesystemDispatchTest(unittest.TestCase):
             jindo_calls.append((root_uri, options))
             return "JINDO_FS"
 
-        with mock.patch.object(pvfs_module, "JINDO_AVAILABLE", jindo_available), \
+        # Patch both surfaces. JINDO_AVAILABLE is held True so the test
+        # behaves the same whether or not pyjindosdk is installed in the
+        # CI image; backend selection is then driven solely by
+        # JINDO_OSSFS_AVAILABLE -- the surface the PVFS jindo backend
+        # actually needs.
+        with mock.patch.object(pvfs_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(pvfs_module, "JINDO_OSSFS_AVAILABLE", jindo_ossfs_available), \
              mock.patch.object(pvfs_module, "create_jindo_oss_filesystem", fake_create_jindo), \
              mock.patch.object(PaimonVirtualFileSystem, "_get_ossfs_filesystem",
                                staticmethod(lambda options: ossfs_sentinel)):
@@ -99,12 +105,12 @@ class GetOssFilesystemDispatchTest(unittest.TestCase):
         return fs, ossfs_sentinel, jindo_calls
 
     def test_legacy_uses_ossfs(self):
-        fs, ossfs_sentinel, jindo_calls = self._dispatch("legacy", jindo_available=True)
+        fs, ossfs_sentinel, jindo_calls = self._dispatch("legacy", jindo_ossfs_available=True)
         self.assertIs(fs, ossfs_sentinel)
         self.assertEqual(jindo_calls, [])
 
     def test_jindo_uses_jindo_when_available(self):
-        fs, _, jindo_calls = self._dispatch("jindo", jindo_available=True)
+        fs, _, jindo_calls = self._dispatch("jindo", jindo_ossfs_available=True)
         self.assertEqual(fs, "JINDO_FS")
         self.assertEqual(len(jindo_calls), 1)
         root_uri, options = jindo_calls[0]
@@ -113,18 +119,21 @@ class GetOssFilesystemDispatchTest(unittest.TestCase):
 
     def test_default_impl_is_jindo(self):
         # No fs.oss.impl set -> OssOptions.OSS_IMPL default value ("jindo").
-        fs, _, jindo_calls = self._dispatch(None, jindo_available=True)
+        fs, _, jindo_calls = self._dispatch(None, jindo_ossfs_available=True)
         self.assertEqual(fs, "JINDO_FS")
         self.assertEqual(len(jindo_calls), 1)
 
-    def test_jindo_falls_back_to_ossfs_when_unavailable(self):
-        fs, ossfs_sentinel, jindo_calls = self._dispatch("jindo", jindo_available=False)
+    def test_jindo_falls_back_to_ossfs_when_pyjindo_ossfs_missing(self):
+        # fs.oss.impl=jindo but pyjindo.ossfs not importable (e.g. an older
+        # pyjindosdk build that ships only fs/util). PyArrow jindo path stays
+        # available; PVFS jindo backend falls back to ossfs.
+        fs, ossfs_sentinel, jindo_calls = self._dispatch("jindo", jindo_ossfs_available=False)
         self.assertIs(fs, ossfs_sentinel)
         self.assertEqual(jindo_calls, [])
 
     def test_invalid_impl_raises(self):
         with self.assertRaises(Exception) as ctx:
-            self._dispatch("garbage", jindo_available=True)
+            self._dispatch("garbage", jindo_ossfs_available=True)
         self.assertIn("Unsupported fs.oss.impl", str(ctx.exception))
 
 
@@ -178,9 +187,10 @@ class GetFilesystemOssWiringTest(unittest.TestCase):
 class StripStorageProtocolTest(unittest.TestCase):
     """OSS path form depends on the backend: jindo keeps oss://, ossfs strips it."""
 
-    def _strip(self, oss_impl, jindo_available, path):
+    def _strip(self, oss_impl, jindo_ossfs_available, path):
         pvfs = _make_pvfs({OssOptions.OSS_IMPL.key(): oss_impl})
-        with mock.patch.object(pvfs_module, "JINDO_AVAILABLE", jindo_available):
+        with mock.patch.object(pvfs_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(pvfs_module, "JINDO_OSSFS_AVAILABLE", jindo_ossfs_available):
             return pvfs._strip_storage_protocol(StorageType.OSS, path)
 
     def test_jindo_backend_keeps_oss_scheme(self):
@@ -194,7 +204,7 @@ class StripStorageProtocolTest(unittest.TestCase):
             "b/db/tbl/f.bin")
 
     def test_jindo_unavailable_falls_back_to_stripping(self):
-        # fs.oss.impl=jindo but pyjindosdk missing -> ossfs backend -> strip.
+        # fs.oss.impl=jindo but pyjindo.ossfs missing -> ossfs backend -> strip.
         self.assertEqual(
             self._strip("jindo", False, "oss://b/db/tbl/f.bin"),
             "b/db/tbl/f.bin")

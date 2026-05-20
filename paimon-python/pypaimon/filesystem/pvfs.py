@@ -38,6 +38,7 @@ from pypaimon.common.options.config import CatalogOptions, OssOptions, PVFSOptio
 from pypaimon.common.identifier import Identifier
 from pypaimon.filesystem.jindo_file_system_handler import (
     JINDO_AVAILABLE,
+    JINDO_OSSFS_AVAILABLE,
     create_jindo_oss_filesystem,
 )
 from pypaimon.schema.schema import Schema
@@ -919,12 +920,19 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
     def _use_jindo_oss_backend(self) -> bool:
         """Whether OSS access uses the native jindo backend rather than ossfs.
 
-        Decided per filesystem instance from ``fs.oss.impl`` plus pyjindosdk
-        availability -- the single condition both ``_get_oss_filesystem`` and
-        ``_strip_storage_protocol`` rely on, so the backend choice and the path
-        form handed to it cannot drift apart.
+        Decided per filesystem instance from ``fs.oss.impl`` plus the
+        availability of the two pyjindosdk surfaces this path requires
+        (``pyjindo.fs``/``pyjindo.util`` for credential config and
+        ``pyjindo.ossfs`` for the fsspec backend). This is the single
+        condition both ``_get_oss_filesystem`` and ``_strip_storage_protocol``
+        rely on, so the backend choice and the path form handed to it cannot
+        drift apart.
         """
-        return self.options.get(OssOptions.OSS_IMPL) == "jindo" and JINDO_AVAILABLE
+        return (
+            self.options.get(OssOptions.OSS_IMPL) == "jindo"
+            and JINDO_AVAILABLE
+            and JINDO_OSSFS_AVAILABLE
+        )
 
     @staticmethod
     def _close_filesystem_quietly(fs) -> None:
