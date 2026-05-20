@@ -154,7 +154,7 @@ class MosaicReaderWriterTest {
         for (int i = 0; i < numRows; i++) {
             rows[i] = GenericRow.of(i, BinaryString.fromString("v" + i));
         }
-        writeRows(rowType, path, rows);
+        writeRows(rowType, path, "f_int", rows);
 
         // Predicate that cannot match any row group (all values are 0..9999)
         PredicateBuilder builder = new PredicateBuilder(rowType);
@@ -230,7 +230,12 @@ class MosaicReaderWriterTest {
     }
 
     private void writeRows(RowType rowType, Path path, GenericRow... rows) throws IOException {
-        MosaicFileFormat format = createFormat();
+        writeRows(rowType, path, "", rows);
+    }
+
+    private void writeRows(RowType rowType, Path path, String statsColumns, GenericRow... rows)
+            throws IOException {
+        MosaicFileFormat format = createFormat(statsColumns);
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         LocalFileIO fileIO = new LocalFileIO();
         FormatWriter writer = writerFactory.create(fileIO.newOutputStream(path, false), "zstd");
@@ -259,7 +264,15 @@ class MosaicReaderWriterTest {
     }
 
     private static MosaicFileFormat createFormat() {
-        return new MosaicFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        return createFormat("");
+    }
+
+    private static MosaicFileFormat createFormat(String statsColumns) {
+        Options options = new Options();
+        if (!statsColumns.isEmpty()) {
+            options.set(MosaicFileFormat.STATS_COLUMNS, statsColumns);
+        }
+        return new MosaicFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
     }
 
     private static boolean isNativeAvailable() {

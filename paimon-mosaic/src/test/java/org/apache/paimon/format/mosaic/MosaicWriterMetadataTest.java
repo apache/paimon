@@ -60,7 +60,7 @@ class MosaicWriterMetadataTest {
         RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
         Path path = newPath();
 
-        FormatWriter writer = createWriter(rowType, path);
+        FormatWriter writer = createWriter(rowType, path, "f0,f1");
         writer.addElement(GenericRow.of(1, BinaryString.fromString("hello")));
         writer.addElement(GenericRow.of(2, BinaryString.fromString("world")));
         writer.close();
@@ -83,8 +83,9 @@ class MosaicWriterMetadataTest {
                         .field("f_double", DataTypes.DOUBLE())
                         .build();
         Path path = newPath();
+        String statsColumns = "f_int,f_bigint,f_string,f_double";
 
-        FormatWriter writer = createWriter(rowType, path);
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
         for (int i = 0; i < 1000; i++) {
             writer.addElement(
                     GenericRow.of(i, (long) i * 100, BinaryString.fromString("val_" + i), i * 1.1));
@@ -94,7 +95,7 @@ class MosaicWriterMetadataTest {
         Object metadata = writer.writerMetadata();
         assertThat(metadata).isNotNull();
 
-        MosaicFileFormat format = createFormat();
+        MosaicFileFormat format = createFormat(statsColumns);
         int fieldCount = rowType.getFieldCount();
         SimpleColStatsCollector.Factory[] collectors =
                 IntStream.range(0, fieldCount)
@@ -119,15 +120,16 @@ class MosaicWriterMetadataTest {
                         .field("f_string", DataTypes.STRING())
                         .build();
         Path path = newPath();
+        String statsColumns = "f_int,f_string";
 
-        FormatWriter writer = createWriter(rowType, path);
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
         writer.addElement(GenericRow.of(1, null));
         writer.addElement(GenericRow.of(null, BinaryString.fromString("a")));
         writer.addElement(GenericRow.of(3, BinaryString.fromString("b")));
         writer.close();
 
         Object metadata = writer.writerMetadata();
-        MosaicFileFormat format = createFormat();
+        MosaicFileFormat format = createFormat(statsColumns);
         int fieldCount = rowType.getFieldCount();
         SimpleColStatsCollector.Factory[] collectors =
                 IntStream.range(0, fieldCount)
@@ -152,15 +154,16 @@ class MosaicWriterMetadataTest {
                         .field("f_string", DataTypes.STRING())
                         .build();
         Path path = newPath();
+        String statsColumns = "f_int,f_string";
 
         int numRows = 500;
-        FormatWriter writer = createWriter(rowType, path);
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
         for (int i = 0; i < numRows; i++) {
             writer.addElement(GenericRow.of(i, BinaryString.fromString("row_" + i)));
         }
         writer.close();
 
-        MosaicFileFormat format = createFormat();
+        MosaicFileFormat format = createFormat(statsColumns);
         int fieldCount = rowType.getFieldCount();
         SimpleColStatsCollector.Factory[] collectors =
                 IntStream.range(0, fieldCount)
@@ -179,15 +182,112 @@ class MosaicWriterMetadataTest {
     }
 
     @Test
+    void testPartialStatsColumnsFromMetadata() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .field("f_double", DataTypes.DOUBLE())
+                        .build();
+        Path path = newPath();
+        String statsColumns = "f_int";
+
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
+        writer.addElement(GenericRow.of(1, BinaryString.fromString("a"), 1.0));
+        writer.addElement(GenericRow.of(null, BinaryString.fromString("b"), 2.0));
+        writer.addElement(GenericRow.of(3, null, null));
+        writer.close();
+
+        Object metadata = writer.writerMetadata();
+        assertThat(metadata).isInstanceOf(MosaicWriterMetadata.class);
+        MosaicWriterMetadata mosaicMeta = (MosaicWriterMetadata) metadata;
+        assertThat(mosaicMeta.statsColumnNames()).containsExactly("f_int");
+
+        MosaicFileFormat format = createFormat(statsColumns);
+        int fieldCount = rowType.getFieldCount();
+        SimpleColStatsCollector.Factory[] collectors =
+                IntStream.range(0, fieldCount)
+                        .mapToObj(i -> SimpleColStatsCollector.from("full"))
+                        .toArray(SimpleColStatsCollector.Factory[]::new);
+
+        SimpleStatsExtractor extractor = format.createStatsExtractor(rowType, collectors).get();
+        LocalFileIO fileIO = new LocalFileIO();
+        long fileSize = fileIO.getFileSize(path);
+
+        SimpleColStats[] fromMetadata = extractor.extract(fileIO, path, fileSize, metadata);
+
+        // f_int has stats: min=1, max=3, nullCount=1
+        assertThat(fromMetadata[0].min()).isEqualTo(1);
+        assertThat(fromMetadata[0].max()).isEqualTo(3);
+        assertThat(fromMetadata[0].nullCount()).isEqualTo(1L);
+
+        // f_string and f_double have no stats (not in statsColumns)
+        assertThat(fromMetadata[1].min()).isNull();
+        assertThat(fromMetadata[1].max()).isNull();
+        assertThat(fromMetadata[1].nullCount()).isNull();
+        assertThat(fromMetadata[2].min()).isNull();
+        assertThat(fromMetadata[2].max()).isNull();
+        assertThat(fromMetadata[2].nullCount()).isNull();
+    }
+
+    @Test
+    void testStatsOnMiddleColumn() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .field("f_double", DataTypes.DOUBLE())
+                        .build();
+        Path path = newPath();
+        String statsColumns = "f_string";
+
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
+        writer.addElement(GenericRow.of(1, BinaryString.fromString("banana"), 1.0));
+        writer.addElement(GenericRow.of(2, BinaryString.fromString("apple"), 2.0));
+        writer.addElement(GenericRow.of(3, null, 3.0));
+        writer.close();
+
+        Object metadata = writer.writerMetadata();
+        MosaicFileFormat format = createFormat(statsColumns);
+        int fieldCount = rowType.getFieldCount();
+        SimpleColStatsCollector.Factory[] collectors =
+                IntStream.range(0, fieldCount)
+                        .mapToObj(i -> SimpleColStatsCollector.from("full"))
+                        .toArray(SimpleColStatsCollector.Factory[]::new);
+
+        SimpleStatsExtractor extractor = format.createStatsExtractor(rowType, collectors).get();
+        LocalFileIO fileIO = new LocalFileIO();
+        long fileSize = fileIO.getFileSize(path);
+
+        SimpleColStats[] fromMetadata = extractor.extract(fileIO, path, fileSize, metadata);
+
+        // f_int has no stats
+        assertThat(fromMetadata[0].min()).isNull();
+        assertThat(fromMetadata[0].max()).isNull();
+        assertThat(fromMetadata[0].nullCount()).isNull();
+
+        // f_string has stats: min="apple", max="banana", nullCount=1
+        assertThat(fromMetadata[1].min()).isEqualTo(BinaryString.fromString("apple"));
+        assertThat(fromMetadata[1].max()).isEqualTo(BinaryString.fromString("banana"));
+        assertThat(fromMetadata[1].nullCount()).isEqualTo(1L);
+
+        // f_double has no stats
+        assertThat(fromMetadata[2].min()).isNull();
+        assertThat(fromMetadata[2].max()).isNull();
+        assertThat(fromMetadata[2].nullCount()).isNull();
+    }
+
+    @Test
     void testFallbackToFileWhenMetadataIsNull() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
         Path path = newPath();
+        String statsColumns = "f0,f1";
 
-        FormatWriter writer = createWriter(rowType, path);
+        FormatWriter writer = createWriter(rowType, path, statsColumns);
         writer.addElement(GenericRow.of(10, BinaryString.fromString("test")));
         writer.close();
 
-        MosaicFileFormat format = createFormat();
+        MosaicFileFormat format = createFormat(statsColumns);
         int fieldCount = rowType.getFieldCount();
         SimpleColStatsCollector.Factory[] collectors =
                 IntStream.range(0, fieldCount)
@@ -208,15 +308,24 @@ class MosaicWriterMetadataTest {
         return new Path(tempDir.toUri().toString(), UUID.randomUUID() + ".mosaic");
     }
 
-    private FormatWriter createWriter(RowType rowType, Path path) throws IOException {
-        MosaicFileFormat format = createFormat();
+    private FormatWriter createWriter(RowType rowType, Path path, String statsColumns)
+            throws IOException {
+        MosaicFileFormat format = createFormat(statsColumns);
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         LocalFileIO fileIO = new LocalFileIO();
         return writerFactory.create(fileIO.newOutputStream(path, false), "zstd");
     }
 
     private static MosaicFileFormat createFormat() {
-        return new MosaicFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        return createFormat("");
+    }
+
+    private static MosaicFileFormat createFormat(String statsColumns) {
+        Options options = new Options();
+        if (!statsColumns.isEmpty()) {
+            options.set(MosaicFileFormat.STATS_COLUMNS, statsColumns);
+        }
+        return new MosaicFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
     }
 
     private static boolean isNativeAvailable() {

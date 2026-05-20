@@ -25,20 +25,35 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** A factory to create Mosaic {@link FormatWriter}. */
 public class MosaicWriterFactory implements FormatWriterFactory {
 
     private final RowType rowType;
     private final FileFormatFactory.FormatContext formatContext;
+    private final List<String> statsColumnNames;
 
     public MosaicWriterFactory(RowType rowType, FileFormatFactory.FormatContext formatContext) {
         this.rowType = rowType;
         this.formatContext = formatContext;
+        String statsColumnsValue = formatContext.options().get(MosaicFileFormat.STATS_COLUMNS);
+        if (statsColumnsValue == null || statsColumnsValue.trim().isEmpty()) {
+            this.statsColumnNames = new ArrayList<>();
+        } else {
+            this.statsColumnNames =
+                    Arrays.stream(statsColumnsValue.split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isEmpty())
+                            .collect(Collectors.toList());
+        }
     }
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        return new MosaicRecordsWriter(out, rowType, formatContext);
+        return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames);
     }
 }

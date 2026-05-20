@@ -34,7 +34,9 @@ import org.apache.arrow.memory.RootAllocator;
 
 import javax.annotation.Nullable;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
 
@@ -55,7 +57,7 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
         MosaicInputFileAdapter inputFile = new MosaicInputFileAdapter(fileIO, path);
         try (BufferAllocator allocator = new RootAllocator();
                 MosaicReader reader = MosaicReader.open(inputFile, length, allocator)) {
-            return extractFromStats(reader.numRowGroups(), reader::getRowGroupStatistics);
+            return extractFromStats(reader.numRowGroups(), reader::getRowGroupStatistics, null);
         }
     }
 
@@ -64,7 +66,9 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
             FileIO fileIO, Path path, long length, @Nullable Object writerMetadata) {
         if (writerMetadata instanceof MosaicWriterMetadata) {
             MosaicWriterMetadata meta = (MosaicWriterMetadata) writerMetadata;
-            return extractFromStats(meta.numRowGroups(), meta::getRowGroupStatistics);
+            Set<Integer> statsFieldIndices = resolveStatsFieldIndices(meta.statsColumnNames());
+            return extractFromStats(
+                    meta.numRowGroups(), meta::getRowGroupStatistics, statsFieldIndices);
         }
         return extract(fileIO, path, length);
     }
@@ -76,7 +80,8 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
         try (BufferAllocator allocator = new RootAllocator();
                 MosaicReader reader = MosaicReader.open(inputFile, length, allocator)) {
             int numRowGroups = reader.numRowGroups();
-            SimpleColStats[] stats = extractFromStats(numRowGroups, reader::getRowGroupStatistics);
+            SimpleColStats[] stats =
+                    extractFromStats(numRowGroups, reader::getRowGroupStatistics, null);
             long rowCount = 0;
             for (int rg = 0; rg < numRowGroups; rg++) {
                 rowCount += reader.rowGroupNumRows(rg);
@@ -87,7 +92,9 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
 
     @SuppressWarnings("unchecked")
     private SimpleColStats[] extractFromStats(
-            int numRowGroups, RowGroupStatsProvider statsProvider) {
+            int numRowGroups,
+            RowGroupStatsProvider statsProvider,
+            @Nullable Set<Integer> statsFieldIndices) {
         int fieldCount = rowType.getFieldCount();
         Object[] minValues = new Object[fieldCount];
         Object[] maxValues = new Object[fieldCount];
@@ -132,11 +139,27 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
         SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         SimpleColStats[] result = new SimpleColStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            SimpleColStats fieldStats =
-                    new SimpleColStats(minValues[i], maxValues[i], nullCounts[i]);
-            result[i] = collectors[i].convert(fieldStats);
+            if (statsFieldIndices != null && !statsFieldIndices.contains(i)) {
+                result[i] = collectors[i].convert(new SimpleColStats(null, null, null));
+            } else {
+                SimpleColStats fieldStats =
+                        new SimpleColStats(minValues[i], maxValues[i], nullCounts[i]);
+                result[i] = collectors[i].convert(fieldStats);
+            }
         }
         return result;
+    }
+
+    private Set<Integer> resolveStatsFieldIndices(List<String> statsColumnNames) {
+        Set<Integer> indices = new HashSet<>();
+        List<String> fieldNames = rowType.getFieldNames();
+        for (String name : statsColumnNames) {
+            int idx = fieldNames.indexOf(name);
+            if (idx >= 0) {
+                indices.add(idx);
+            }
+        }
+        return indices;
     }
 
     @FunctionalInterface

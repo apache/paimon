@@ -39,7 +39,12 @@ class MosaicSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
 
     @Override
     protected FileFormat createFormat() {
-        return new MosaicFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        Options options = new Options();
+        options.set(
+                MosaicFileFormat.STATS_COLUMNS,
+                "f_boolean,f_tinyint,f_smallint,f_int,f_bigint,f_float,"
+                        + "f_double,f_string,f_decimal_5_2,f_date,f_timestamp3,f_timestamp6");
+        return new MosaicFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
     }
 
     @Override

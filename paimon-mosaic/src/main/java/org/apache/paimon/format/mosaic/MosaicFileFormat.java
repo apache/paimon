@@ -23,6 +23,8 @@ import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
@@ -58,6 +60,14 @@ import java.util.Optional;
 
 /** Mosaic {@link FileFormat}. */
 public class MosaicFileFormat extends FileFormat {
+
+    public static final ConfigOption<String> STATS_COLUMNS =
+            ConfigOptions.key("mosaic.stats-columns")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription(
+                            "Comma-separated list of column names to collect statistics for. "
+                                    + "Empty means no statistics collection.");
 
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
