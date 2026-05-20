@@ -55,10 +55,10 @@ import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
-import org.apache.paimon.utils.DefaultBranchMergeHandler;
 import org.apache.paimon.utils.FileSystemBranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
@@ -760,7 +760,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 tagManager(),
                 schemaManager(),
-                new DefaultBranchMergeHandler(this::switchToBranch));
+                new BranchMergeHandler(this::switchToBranch));
     }
 
     @Override

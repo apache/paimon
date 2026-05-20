@@ -110,11 +110,7 @@ public class CatalogBranchManager implements BranchManager {
 
     @Override
     public void mergeBranch(String sourceBranch, String targetBranch) {
-        executePost(
-                catalog -> {
-                    BranchManager.mergeValidate(sourceBranch, targetBranch);
-                    catalog.mergeBranch(identifier, sourceBranch, targetBranch);
-                });
+        throw new UnsupportedOperationException("Branch merge is not supported via catalog.");
     }
 
     @Override

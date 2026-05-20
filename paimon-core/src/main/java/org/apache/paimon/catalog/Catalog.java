@@ -921,19 +921,6 @@ public interface Catalog extends AutoCloseable {
     void fastForward(Identifier identifier, String branch) throws BranchNotExistException;
 
     /**
-     * Merge source branch into target branch.
-     *
-     * @param identifier path of the table, cannot be system or branch name.
-     * @param sourceBranch the source branch name
-     * @param targetBranch the target branch name
-     * @throws BranchNotExistException if the source or target branch doesn't exist
-     * @throws UnsupportedOperationException if the catalog does not {@link
-     *     #supportsVersionManagement()}
-     */
-    void mergeBranch(Identifier identifier, String sourceBranch, String targetBranch)
-            throws BranchNotExistException;
-
-    /**
      * List all branches of the table.
      *
      * @param identifier path of the table, cannot be system or branch name.

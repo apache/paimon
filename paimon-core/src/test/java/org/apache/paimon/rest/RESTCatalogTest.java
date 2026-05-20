@@ -374,9 +374,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.fastForward(identifier, "test_branch"));
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> restCatalog.mergeBranch(identifier, "test_branch", "main"));
         assertThrows(ForbiddenException.class, () -> restCatalog.api().loadTableToken(identifier));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
@@ -2138,17 +2135,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testMergeBranchUnsupported() throws Exception {
-        Identifier tableIdentifier = Identifier.create("merge_db", "merge_table");
-        Map<String, String> options = Maps.newHashMap();
-        createTable(tableIdentifier, options, Collections.emptyList());
-
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> restCatalog.mergeBranch(tableIdentifier, "branch1", "main"));
-    }
-
-    @Test
     void testBranches() throws Exception {
         String databaseName = "testBranchTable";
         catalog.dropDatabase(databaseName, true, true);
@@ -2201,9 +2187,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.BranchNotExistException.class,
                 () -> restCatalog.fastForward(identifier, "no_exist_branch"));
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> restCatalog.mergeBranch(identifier, "no_exist_branch", "main"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
     }
 

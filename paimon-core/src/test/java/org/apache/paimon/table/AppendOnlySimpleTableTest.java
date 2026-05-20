@@ -76,7 +76,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.DefaultBranchMergeHandler;
+import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -1827,7 +1827,7 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(1, write.prepareCommit(false, 2));
         }
 
-        DefaultBranchMergeHandler handler = new DefaultBranchMergeHandler(table::switchToBranch);
+        BranchMergeHandler handler = new BranchMergeHandler(table::switchToBranch);
         Map<org.apache.paimon.manifest.FileEntry.Identifier, ManifestEntry> sourceFiles =
                 handler.readBranchFiles(BRANCH_NAME);
         Map<org.apache.paimon.manifest.FileEntry.Identifier, ManifestEntry> targetFiles =
