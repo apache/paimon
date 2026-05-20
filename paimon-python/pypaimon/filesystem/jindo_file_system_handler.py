@@ -92,6 +92,12 @@ def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
         # PaimonVirtualFileSystem owns directory semantics for the virtual FS;
         # the backing object-store fs must not auto-create dir-marker objects.
         auto_mkdir=False,
+        # Bypass fsspec's _Cached metaclass instance cache, so the only
+        # reference to this filesystem -- and to its underlying native jindo
+        # connection -- is the PaimonRealStorage cache in PVFS. On token
+        # refresh PVFS replaces that entry and the native resources can be
+        # released, instead of being pinned forever by fsspec's global cache.
+        skip_instance_cache=True,
     )
 
 

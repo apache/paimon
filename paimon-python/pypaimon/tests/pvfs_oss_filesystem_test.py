@@ -31,6 +31,7 @@ from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem import pvfs as pvfs_module
 from pypaimon.filesystem.pvfs import (
+    PaimonRealStorage,
     PaimonVirtualFileSystem,
     PVFSTableIdentifier,
     StorageType,
@@ -41,7 +42,9 @@ def _make_pvfs(extra_options=None):
     options = {OssOptions.OSS_ACCESS_KEY_ID.key(): "ak"}
     if extra_options:
         options.update(extra_options)
-    return PaimonVirtualFileSystem(options)
+    # skip_instance_cache so each test gets a fresh PVFS (fsspec's _Cached
+    # metaclass would otherwise share _fs_cache state across tests).
+    return PaimonVirtualFileSystem(options, skip_instance_cache=True)
 
 
 class ExtractOssBucketTest(unittest.TestCase):
@@ -205,6 +208,82 @@ class StripStorageProtocolTest(unittest.TestCase):
         self.assertEqual(
             self._strip("jindo", False, "oss://b/db/tbl/f.bin"),
             "b/db/tbl/f.bin")
+
+
+class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
+    """When _get_filesystem rebuilds a cached fs (token near expiry), the old
+    filesystem must be released. For the jindo backend this is the only way
+    the underlying native JindoSDK connection gets reclaimed."""
+
+    @staticmethod
+    def _stub_oss_rebuild(close_log):
+        identifier = PVFSTableIdentifier(
+            catalog="cat", endpoint="http://rest", database="db", table="tbl")
+
+        class FakeTokenResponse:
+            token = {
+                OssOptions.OSS_ACCESS_KEY_ID.key(): "tk-ak",
+                OssOptions.OSS_ACCESS_KEY_SECRET.key(): "tk-sk",
+                OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
+            }
+            expires_at_millis = None
+
+        class FakeTable:
+            path = "oss://b/wh/db/tbl"
+
+        class FakeRestApi:
+            def load_table_token(self, ident):
+                return FakeTokenResponse()
+
+            def get_table(self, ident):
+                return FakeTable()
+
+        return identifier, mock.patch.object(
+            PaimonVirtualFileSystem,
+            "_PaimonVirtualFileSystem__rest_api",
+            lambda self, ident: FakeRestApi(),
+        ), mock.patch.object(
+            PaimonVirtualFileSystem,
+            "_get_oss_filesystem",
+            lambda self, opts, loc: "NEW_FS",
+        )
+
+    def test_old_filesystem_close_called_when_token_expires(self):
+        pvfs = _make_pvfs()
+        identifier, patch_rest, patch_build = self._stub_oss_rebuild([])
+
+        close_log = []
+
+        class StaleFs:
+            def close(self_inner):
+                close_log.append("closed")
+
+        # expires_at_millis=0 -> need_refresh() is True -> _get_filesystem rebuilds.
+        pvfs._fs_cache[identifier] = PaimonRealStorage(
+            token={}, expires_at_millis=0, file_system=StaleFs())
+
+        with patch_rest, patch_build:
+            new_fs = pvfs._get_filesystem(identifier, StorageType.OSS)
+
+        self.assertEqual(new_fs, "NEW_FS")
+        self.assertEqual(close_log, ["closed"],
+                         "stale filesystem must be closed on token refresh")
+
+    def test_first_build_does_not_invoke_close(self):
+        pvfs = _make_pvfs()
+        identifier, patch_rest, patch_build = self._stub_oss_rebuild([])
+
+        with patch_rest, patch_build:
+            new_fs = pvfs._get_filesystem(identifier, StorageType.OSS)
+
+        # No prior cache entry -> nothing to close, must not raise.
+        self.assertEqual(new_fs, "NEW_FS")
+
+    def test_close_without_close_method_is_no_op(self):
+        # _close_filesystem_quietly must tolerate filesystems that don't
+        # implement close() (e.g. pyjindo 6.10.2's JindoOssFileSystem).
+        PaimonVirtualFileSystem._close_filesystem_quietly(object())
+        PaimonVirtualFileSystem._close_filesystem_quietly(None)
 
 
 if __name__ == "__main__":

@@ -853,6 +853,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     file_system=fs
                 )
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
+                # Release the previous filesystem's resources -- particularly
+                # important for the jindo backend, where each instance holds a
+                # native JindoSDK connection that is not released by GC alone.
+                if cache_value is not None:
+                    PaimonVirtualFileSystem._close_filesystem_quietly(cache_value.file_system)
             else:
                 raise Exception(
                     "Storage type: `{}` doesn't support now.".format(storage_type)
@@ -918,6 +923,20 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         form handed to it cannot drift apart.
         """
         return self.options.get(OssOptions.OSS_IMPL) == "jindo" and JINDO_AVAILABLE
+
+    @staticmethod
+    def _close_filesystem_quietly(fs) -> None:
+        """Best-effort release of a filesystem that is being evicted from cache."""
+        close = getattr(fs, "close", None)
+        if not callable(close):
+            return
+        try:
+            close()
+        except Exception:
+            logger.warning(
+                "ignoring error while closing stale OSS filesystem",
+                exc_info=True,
+            )
 
     @staticmethod
     def _extract_oss_bucket(oss_path: str) -> str:
