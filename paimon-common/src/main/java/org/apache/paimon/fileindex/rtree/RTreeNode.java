@@ -26,13 +26,16 @@ public class RTreeNode {
     private final BoundingBox boundingBox;
     private final List<RTreeNode> children;
     private final List<Integer> leafRowIds;
+    private final List<LeafEntry> leafEntries;
     private final boolean isLeaf;
     private final int maxEntries;
+    private RTreeNode parent;
 
     public RTreeNode(int dimensions, int maxEntries, boolean isLeaf) {
         this.boundingBox = new BoundingBox(dimensions);
         this.children = new ArrayList<>();
         this.leafRowIds = new ArrayList<>();
+        this.leafEntries = new ArrayList<>();
         this.isLeaf = isLeaf;
         this.maxEntries = maxEntries;
     }
@@ -59,11 +62,30 @@ public class RTreeNode {
 
     public void addChild(RTreeNode child) {
         children.add(child);
+        child.setParent(this);
         boundingBox.expand(child.getBoundingBox());
     }
 
     public void addRowId(int rowId) {
         leafRowIds.add(rowId);
+    }
+
+    public void addLeafEntry(LeafEntry entry) {
+        leafEntries.add(entry);
+        leafRowIds.add(entry.getRowId());
+        boundingBox.expand(entry.getBbox());
+    }
+
+    public List<LeafEntry> getLeafEntries() {
+        return leafEntries;
+    }
+
+    public RTreeNode getParent() {
+        return parent;
+    }
+
+    public void setParent(RTreeNode parent) {
+        this.parent = parent;
     }
 
     public int getEntryCount() {

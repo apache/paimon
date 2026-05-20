@@ -65,8 +65,7 @@ public class RTree {
 
     private void insert(BoundingBox bbox, int rowId, RTreeNode node) {
         if (node.isLeaf()) {
-            node.addRowId(rowId);
-            node.getBoundingBox().expand(bbox);
+            node.addLeafEntry(new LeafEntry(rowId, bbox));
 
             if (node.canSplit()) {
                 splitNode(node);
@@ -98,67 +97,82 @@ public class RTree {
             }
         }
 
+        if (best == null) {
+            throw new IllegalStateException("No child found in non-leaf node");
+        }
         return best;
     }
 
     private void splitNode(RTreeNode node) {
-        List<Integer> rowIds = new ArrayList<>(node.getLeafRowIds());
-        List<RTreeNode> children = new ArrayList<>(node.getChildren());
-
-        node.getLeafRowIds().clear();
-        node.getChildren().clear();
-
         if (node.isLeaf()) {
-            RTreeNode newNode = new RTreeNode(dimensions, maxEntries, true);
-            distributeLeafEntries(rowIds, node, newNode);
-
-            if (node == root) {
-                RTreeNode newRoot = new RTreeNode(dimensions, maxEntries, false);
-                newRoot.addChild(node);
-                newRoot.addChild(newNode);
-                root = newRoot;
-            } else {
-                adjustParent(node, newNode);
-            }
+            splitLeafNode(node);
         } else {
-            RTreeNode newNode = new RTreeNode(dimensions, maxEntries, false);
-            distributeInternalEntries(children, node, newNode);
-
-            if (node == root) {
-                RTreeNode newRoot = new RTreeNode(dimensions, maxEntries, false);
-                newRoot.addChild(node);
-                newRoot.addChild(newNode);
-                root = newRoot;
-            } else {
-                adjustParent(node, newNode);
-            }
+            splitInternalNode(node);
         }
     }
 
-    private void distributeLeafEntries(List<Integer> rowIds, RTreeNode node1, RTreeNode node2) {
-        int mid = rowIds.size() / 2;
+    private void splitLeafNode(RTreeNode node) {
+        List<LeafEntry> entries = new ArrayList<>(node.getLeafEntries());
+        node.getLeafRowIds().clear();
+        node.getLeafEntries().clear();
+        node.getBoundingBox().clear();
+
+        RTreeNode newNode = new RTreeNode(dimensions, maxEntries, true);
+
+        int mid = entries.size() / 2;
         for (int i = 0; i < mid; i++) {
-            node1.addRowId(rowIds.get(i));
+            node.addLeafEntry(entries.get(i));
         }
-        for (int i = mid; i < rowIds.size(); i++) {
-            node2.addRowId(rowIds.get(i));
+        for (int i = mid; i < entries.size(); i++) {
+            newNode.addLeafEntry(entries.get(i));
+        }
+
+        if (node == root) {
+            RTreeNode newRoot = new RTreeNode(dimensions, maxEntries, false);
+            newRoot.addChild(node);
+            newRoot.addChild(newNode);
+            root = newRoot;
+        } else {
+            adjustParent(node, newNode);
         }
     }
 
-    private void distributeInternalEntries(
-            List<RTreeNode> children, RTreeNode node1, RTreeNode node2) {
+    private void splitInternalNode(RTreeNode node) {
+        List<RTreeNode> children = new ArrayList<>(node.getChildren());
+        node.getChildren().clear();
+        node.getBoundingBox().clear();
+
+        RTreeNode newNode = new RTreeNode(dimensions, maxEntries, false);
+
         int mid = children.size() / 2;
         for (int i = 0; i < mid; i++) {
-            node1.addChild(children.get(i));
+            node.addChild(children.get(i));
         }
         for (int i = mid; i < children.size(); i++) {
-            node2.addChild(children.get(i));
+            newNode.addChild(children.get(i));
+        }
+
+        if (node == root) {
+            RTreeNode newRoot = new RTreeNode(dimensions, maxEntries, false);
+            newRoot.addChild(node);
+            newRoot.addChild(newNode);
+            root = newRoot;
+        } else {
+            adjustParent(node, newNode);
         }
     }
 
     private void adjustParent(RTreeNode node, RTreeNode newNode) {
-        // In a real implementation, we would find parent and adjust
-        // For now, this is a simplified version
+        RTreeNode parent = node.getParent();
+        if (parent == null) {
+            return;
+        }
+
+        parent.addChild(newNode);
+
+        if (parent.canSplit()) {
+            splitNode(parent);
+        }
     }
 
     public List<Integer> search(BoundingBox searchBox) {
