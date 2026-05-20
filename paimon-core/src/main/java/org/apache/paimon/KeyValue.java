@@ -33,6 +33,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.table.SpecialFields.LEVEL;
 import static org.apache.paimon.table.SpecialFields.SEQUENCE_NUMBER;
+import static org.apache.paimon.table.SpecialFields.SNAPSHOT_ID;
 import static org.apache.paimon.table.SpecialFields.VALUE_KIND;
 
 /**
@@ -43,6 +44,7 @@ public class KeyValue {
 
     public static final long UNKNOWN_SEQUENCE = -1;
     public static final int UNKNOWN_LEVEL = -1;
+    public static final long UNKNOWN_SNAPSHOT_ID = -1;
 
     private InternalRow key;
     // determined after written into memory table or read from file
@@ -51,6 +53,8 @@ public class KeyValue {
     private InternalRow value;
     // determined after read from file
     private int level;
+    // determined after read from file; UNKNOWN_SNAPSHOT_ID if snapshot-ordering is not enabled
+    private long snapshotId;
 
     public KeyValue replace(InternalRow key, RowKind valueKind, InternalRow value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
@@ -63,6 +67,7 @@ public class KeyValue {
         this.valueKind = valueKind;
         this.value = value;
         this.level = UNKNOWN_LEVEL;
+        this.snapshotId = UNKNOWN_SNAPSHOT_ID;
         return this;
     }
 
@@ -89,6 +94,11 @@ public class KeyValue {
         return sequenceNumber;
     }
 
+    public KeyValue setSequenceNumber(long sequenceNumber) {
+        this.sequenceNumber = sequenceNumber;
+        return this;
+    }
+
     public RowKind valueKind() {
         return valueKind;
     }
@@ -110,6 +120,21 @@ public class KeyValue {
         return this;
     }
 
+    public long snapshotId() {
+        return snapshotId;
+    }
+
+    public KeyValue setSnapshotId(long snapshotId) {
+        this.snapshotId = snapshotId;
+        return this;
+    }
+
+    public static int compareSnapshotId(KeyValue a, KeyValue b) {
+        long sa = a.snapshotId == UNKNOWN_SNAPSHOT_ID ? Long.MIN_VALUE : a.snapshotId;
+        long sb = b.snapshotId == UNKNOWN_SNAPSHOT_ID ? Long.MIN_VALUE : b.snapshotId;
+        return Long.compare(sa, sb);
+    }
+
     public static RowType schema(RowType keyType, RowType valueType) {
         return new RowType(false, createKeyValueFields(keyType.getFields(), valueType.getFields()));
     }
@@ -117,6 +142,13 @@ public class KeyValue {
     public static RowType schemaWithLevel(RowType keyType, RowType valueType) {
         List<DataField> fields = new ArrayList<>(schema(keyType, valueType).getFields());
         fields.add(LEVEL);
+        return new RowType(fields);
+    }
+
+    public static RowType schemaWithLevelAndSnapshotId(RowType keyType, RowType valueType) {
+        List<DataField> fields = new ArrayList<>(schema(keyType, valueType).getFields());
+        fields.add(LEVEL);
+        fields.add(SNAPSHOT_ID);
         return new RowType(fields);
     }
 
@@ -173,7 +205,8 @@ public class KeyValue {
                         sequenceNumber,
                         valueKind,
                         valueSerializer.copy(value))
-                .setLevel(level);
+                .setLevel(level)
+                .setSnapshotId(snapshotId);
     }
 
     @VisibleForTesting

@@ -277,8 +277,15 @@ public interface DataFileMeta {
 
     SimpleStats valueStats();
 
+    /**
+     * Minimum sequence number of records in this file. When {@code sequence.snapshot-ordering} is
+     * enabled for a primary-key table, this field is repurposed to carry the commit snapshot id
+     * instead of the per-record sequence number range (see {@code
+     * FileStoreCommitImpl.stampSequenceWithSnapshotId}).
+     */
     long minSequenceNumber();
 
+    /** @see #minSequenceNumber() */
     long maxSequenceNumber();
 
     long schemaId();

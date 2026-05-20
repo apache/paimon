@@ -95,6 +95,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     private boolean ignoreNumBucketCheck = false;
+    private final boolean compactOnly;
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
@@ -123,6 +124,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.tableName = tableName;
         this.writerNumberMax = options.writeMaxWritersToSpill();
         this.legacyPartitionName = options.legacyPartitionName();
+        this.compactOnly = options.snapshotSequenceOrdering() && !options.writeOnly();
         this.partitionTimestampValidator =
                 PartitionTimestampValidator.create(options, partitionType);
     }
@@ -167,6 +169,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
+        if (compactOnly) {
+            throw new IllegalStateException(
+                    CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key()
+                            + " is enabled with "
+                            + CoreOptions.WRITE_ONLY.key()
+                            + " = false. This writer only allows compaction, not data writes. "
+                            + "Inline compaction is not supported because snapshot ids are "
+                            + "assigned only after commit.");
+        }
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
         container.writer.write(data);
         if (container.dynamicBucketMaintainer != null) {

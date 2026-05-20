@@ -61,14 +61,16 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             boolean produceChangelog,
-            boolean forceDropDelete) {
+            boolean forceDropDelete,
+            boolean snapshotSequenceOrdering) {
         super(
                 readerFactory,
                 writerFactory,
                 keyComparator,
                 userDefinedSeqComparator,
                 mfFactory,
-                mergeSorter);
+                mergeSorter,
+                snapshotSequenceOrdering);
         this.maxLevel = maxLevel;
         this.mergeEngine = mergeEngine;
         this.produceChangelog = produceChangelog;
@@ -146,6 +148,9 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                 if (compactFileWriter != null
                         && keyValue != null
                         && (!dropDelete || keyValue.isAdd())) {
+                    if (snapshotSequenceOrdering) {
+                        keyValue.setSequenceNumber(keyValue.snapshotId());
+                    }
                     compactFileWriter.write(keyValue);
                 }
                 if (produceChangelog) {

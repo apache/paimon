@@ -106,6 +106,25 @@ public class KeyValueBufferTest {
     }
 
     @Test
+    public void testBinaryBufferPreservesSnapshotId() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+        options.set(CoreOptions.LOOKUP_MERGE_BUFFER_SIZE, MemorySize.ofMebiBytes(1L));
+
+        BinaryBuffer binaryBuffer =
+                KeyValueBuffer.createBinaryBuffer(
+                        new CoreOptions(options), keyType, valueType, ioManager);
+
+        KeyValue kv = keyValue(1, 2, 3L, 4, 5L);
+        binaryBuffer.put(kv);
+
+        try (CloseableIterator<KeyValue> iterator = binaryBuffer.iterator()) {
+            assertKeyValue(iterator.next(), kv);
+            assertThat(iterator.hasNext()).isFalse();
+        }
+    }
+
+    @Test
     public void testHybridBufferWithoutFallback() throws Exception {
         innerTestHybridBuffer(false);
     }
@@ -113,6 +132,29 @@ public class KeyValueBufferTest {
     @Test
     public void testHybridBufferWithFallback() throws Exception {
         innerTestHybridBuffer(true);
+    }
+
+    @Test
+    public void testHybridBufferSpillPreservesSnapshotId() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+        options.set(LOOKUP_MERGE_RECORDS_THRESHOLD, 1);
+
+        HybridBuffer buffer =
+                KeyValueBuffer.createHybridBuffer(
+                        new CoreOptions(options), keyType, valueType, ioManager);
+
+        KeyValue first = keyValue(1, 10, 100L, 1, 1000L);
+        KeyValue second = keyValue(2, 20, 200L, 2, 2000L);
+        buffer.put(first);
+        buffer.put(second);
+
+        assertThat(buffer.binaryBuffer()).isNotNull();
+        try (CloseableIterator<KeyValue> iterator = buffer.iterator()) {
+            assertKeyValue(iterator.next(), first);
+            assertKeyValue(iterator.next(), second);
+            assertThat(iterator.hasNext()).isFalse();
+        }
     }
 
     private void innerTestHybridBuffer(boolean fallbackToBinary) throws Exception {
@@ -185,5 +227,31 @@ public class KeyValueBufferTest {
             }
             assertThat(count).isEqualTo(testData.size());
         }
+    }
+
+    private KeyValue keyValue(int key, int value, long sequenceNumber, int level, long snapshotId) {
+        BinaryRow keyRow = new BinaryRow(1);
+        BinaryRowWriter keyWriter = new BinaryRowWriter(keyRow);
+        keyWriter.writeInt(0, key);
+        keyWriter.complete();
+
+        BinaryRow valueRow = new BinaryRow(1);
+        BinaryRowWriter valueWriter = new BinaryRowWriter(valueRow);
+        valueWriter.writeInt(0, value);
+        valueWriter.complete();
+
+        return new KeyValue()
+                .replace(keyRow, sequenceNumber, RowKind.INSERT, valueRow)
+                .setLevel(level)
+                .setSnapshotId(snapshotId);
+    }
+
+    private void assertKeyValue(KeyValue actual, KeyValue expected) {
+        assertThat(actual.key().getInt(0)).isEqualTo(expected.key().getInt(0));
+        assertThat(actual.value().getInt(0)).isEqualTo(expected.value().getInt(0));
+        assertThat(actual.sequenceNumber()).isEqualTo(expected.sequenceNumber());
+        assertThat(actual.level()).isEqualTo(expected.level());
+        assertThat(actual.snapshotId()).isEqualTo(expected.snapshotId());
+        assertThat(actual.valueKind()).isEqualTo(expected.valueKind());
     }
 }

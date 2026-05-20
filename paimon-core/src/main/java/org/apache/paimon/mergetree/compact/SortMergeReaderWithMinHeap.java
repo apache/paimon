@@ -46,7 +46,8 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
-            MergeFunctionWrapper<T> mergeFunctionWrapper) {
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
+            boolean snapshotSequenceOrdering) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
         this.mergeFunctionWrapper = mergeFunctionWrapper;
@@ -64,6 +65,13 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                                                 e1.kv.value(), e2.kv.value());
                                 if (result != 0) {
                                     return result;
+                                }
+                            } else {
+                                if (snapshotSequenceOrdering) {
+                                    int snapshotCmp = KeyValue.compareSnapshotId(e1.kv, e2.kv);
+                                    if (snapshotCmp != 0) {
+                                        return snapshotCmp;
+                                    }
                                 }
                             }
                             return Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());

@@ -72,7 +72,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
                         null,
-                        null);
+                        null,
+                        false);
 
         // Without level-0
         function.reset();
@@ -235,7 +236,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         logDedupEqualSupplier.get(),
                         LookupStrategy.from(false, true, false, false),
                         null,
-                        userDefinedSeqComparator);
+                        userDefinedSeqComparator,
+                        false);
 
         // With level-0 'insert' record, with level-x (x > 0) same record. Notice that the specified
         // ignored
@@ -298,7 +300,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
                         null,
-                        null);
+                        null,
+                        false);
 
         // Without level-0
         function.reset();
@@ -392,7 +395,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         null,
                         UserDefinedSeqComparator.create(
                                 RowType.builder().field("f0", DataTypes.INT()).build(),
-                                CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f0"))));
+                                CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f0"))),
+                        false);
 
         // Only level-0 record and find record of higher sequence.field value in high level.
         highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(3)).setLevel(3));
@@ -528,7 +532,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         null,
                         LookupStrategy.from(false, true, false, false),
                         null,
-                        null);
+                        null,
+                        false);
 
         // Without level-0
         function.reset();

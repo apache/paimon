@@ -53,7 +53,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
-            @Nullable RecordEqualiser valueEqualiser) {
+            @Nullable RecordEqualiser valueEqualiser,
+            boolean snapshotSequenceOrdering) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -64,7 +65,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 mfFactory,
                 mergeSorter,
                 true,
-                false);
+                false,
+                snapshotSequenceOrdering);
         this.valueEqualiser = valueEqualiser;
     }
 

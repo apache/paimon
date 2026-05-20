@@ -52,6 +52,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
+    protected final boolean snapshotSequenceOrdering;
     @Nullable private CompactionMetrics.Reporter metricsReporter;
 
     public MergeTreeCompactRewriter(
@@ -60,13 +61,15 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            MergeSorter mergeSorter) {
+            MergeSorter mergeSorter,
+            boolean snapshotSequenceOrdering) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
         this.userDefinedSeqComparator = userDefinedSeqComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter = mergeSorter;
+        this.snapshotSequenceOrdering = snapshotSequenceOrdering;
     }
 
     @Override
@@ -87,6 +90,9 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                             sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
             if (dropDelete) {
                 reader = new DropDeleteReader(reader);
+            }
+            if (snapshotSequenceOrdering) {
+                reader = stampSequenceWithSnapshotId(reader);
             }
             writer.write(new RecordReaderIterator<>(reader));
         } catch (Exception e) {
@@ -131,6 +137,15 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
     protected List<DataFileMeta> notifyRewriteCompactAfter(List<DataFileMeta> files) {
         return files;
+    }
+
+    protected static RecordReader<KeyValue> stampSequenceWithSnapshotId(
+            RecordReader<KeyValue> reader) {
+        return reader.transform(
+                kv -> {
+                    kv.setSequenceNumber(kv.snapshotId());
+                    return kv;
+                });
     }
 
     public void setMetricsReporter(@Nullable CompactionMetrics.Reporter reporter) {

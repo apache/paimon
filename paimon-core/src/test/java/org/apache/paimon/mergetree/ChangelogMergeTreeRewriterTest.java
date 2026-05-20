@@ -314,7 +314,8 @@ public class ChangelogMergeTreeRewriterTest {
                     DeduplicateMergeFunction.factory(),
                     mergeSorter,
                     true,
-                    true);
+                    true,
+                    false);
             this.rewriteChangelog = rewriteChangelog;
             this.closeWithException = closeWithException;
         }

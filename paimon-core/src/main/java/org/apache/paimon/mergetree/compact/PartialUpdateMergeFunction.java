@@ -77,6 +77,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private InternalRow currentKey;
     private long latestSequenceNumber;
+    private long latestSnapshotId;
     private GenericRow row;
     private KeyValue reused;
     private boolean currentDeleteRow;
@@ -115,6 +116,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         this.latestSequenceNumber = 0;
+        this.latestSnapshotId = KeyValue.UNKNOWN_SNAPSHOT_ID;
         fieldAggregators.forEach(w -> w.getValue().reset());
     }
 
@@ -137,6 +139,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
 
             latestSequenceNumber = kv.sequenceNumber();
+            latestSnapshotId = kv.snapshotId();
 
             if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);
@@ -165,6 +168,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
 
         latestSequenceNumber = kv.sequenceNumber();
+        latestSnapshotId = kv.snapshotId();
         if (fieldSeqComparators.isEmpty()) {
             updateNonNullFields(kv);
         } else {
@@ -358,7 +362,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
 
         RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;
-        return reused.replace(currentKey, latestSequenceNumber, rowKind, row);
+        return reused.replace(currentKey, latestSequenceNumber, rowKind, row)
+                .setSnapshotId(latestSnapshotId);
     }
 
     @Override

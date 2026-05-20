@@ -43,6 +43,8 @@ import java.util.stream.Stream;
  *       ID = 2147483645.
  *   <li><code>_LEVEL</code>: Which LSM tree level does this key-value stay in. ID = 2147483644.
  *   <li><code>rowkind</code>: THw rowkind field in audit-log system tables. ID = 2147483643.
+ *   <li><code>_SNAPSHOT_ID</code>: Commit snapshot id for snapshot-based merge ordering. ID =
+ *       2147483641.
  * </ul>
  *
  * <p><b>Structured type fields</b>:
@@ -93,13 +95,17 @@ public class SpecialFields {
     public static final DataField ROW_ID =
             new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT().notNull());
 
+    public static final DataField SNAPSHOT_ID =
+            new DataField(Integer.MAX_VALUE - 6, "_SNAPSHOT_ID", DataTypes.BIGINT());
+
     public static final Set<String> SYSTEM_FIELD_NAMES =
             Stream.of(
                             SEQUENCE_NUMBER.name(),
                             VALUE_KIND.name(),
                             LEVEL.name(),
                             ROW_KIND.name(),
-                            ROW_ID.name())
+                            ROW_ID.name(),
+                            SNAPSHOT_ID.name())
                     .collect(Collectors.toSet());
 
     public static boolean isSystemField(int fieldId) {
