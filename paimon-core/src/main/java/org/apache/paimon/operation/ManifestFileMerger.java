@@ -78,31 +78,29 @@ public class ManifestFileMerger {
             // If manifest-sort.enabled is enabled and there are partition fields, use
             // trySortRewrite
             if (options.manifestSortEnabled() && partitionType.getFieldCount() > 0) {
-                Optional<List<ManifestFileMeta>> sorted =
-                        ManifestFileSorter.trySortRewrite(
-                                input, newFilesForAbort, manifestFile, partitionType, options);
-                return sorted.orElse(input);
+                return ManifestFileSorter.trySortRewrite(
+                        input, newFilesForAbort, manifestFile, partitionType, options);
+            } else {
+                // Otherwise try full compaction first, then minor compaction if needed
+                Optional<List<ManifestFileMeta>> fullCompacted =
+                        tryFullCompaction(
+                                input,
+                                newFilesForAbort,
+                                manifestFile,
+                                suggestedMetaSize,
+                                manifestFullCompactionSize,
+                                partitionType,
+                                manifestReadParallelism);
+                return fullCompacted.orElseGet(
+                        () ->
+                                tryMinorCompaction(
+                                        input,
+                                        newFilesForAbort,
+                                        manifestFile,
+                                        suggestedMetaSize,
+                                        suggestedMinMetaCount,
+                                        manifestReadParallelism));
             }
-
-            // Otherwise try full compaction first, then minor compaction if needed
-            Optional<List<ManifestFileMeta>> fullCompacted =
-                    tryFullCompaction(
-                            input,
-                            newFilesForAbort,
-                            manifestFile,
-                            suggestedMetaSize,
-                            manifestFullCompactionSize,
-                            partitionType,
-                            manifestReadParallelism);
-            return fullCompacted.orElseGet(
-                    () ->
-                            tryMinorCompaction(
-                                    input,
-                                    newFilesForAbort,
-                                    manifestFile,
-                                    suggestedMetaSize,
-                                    suggestedMinMetaCount,
-                                    manifestReadParallelism));
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newFilesForAbort) {
