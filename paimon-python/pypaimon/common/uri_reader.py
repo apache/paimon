@@ -16,6 +16,7 @@
 # under the License.
 
 import io
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 from urllib.parse import urlparse, ParseResult
@@ -67,13 +68,122 @@ class FileUriReader(UriReader):
 class HttpUriReader(UriReader):
 
     def new_input_stream(self, uri: str):
+        return HttpRangeInputStream(uri)
+
+
+class HttpRangeInputStream(io.RawIOBase):
+
+    def __init__(self, uri: str):
+        super().__init__()
+        self._uri = uri
+        self._session = requests.Session()
+        self._pos = 0
+        self._length = None
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._pos
+
+    def readinto(self, b):
+        data = self.read(len(b))
+        n = len(data)
+        b[:n] = data
+        return n
+
+    def read(self, size=-1):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        if size is None:
+            size = -1
+        if size == 0:
+            return b''
+
+        end = None
+        if size >= 0:
+            end = self._pos + size - 1
+        range_end = "" if end is None else str(end)
+        headers = {"Range": f"bytes={self._pos}-{range_end}"}
+
         try:
-            response = requests.get(uri)
-            if response.status_code != 200:
-                raise RuntimeError(f"Failed to read HTTP URI {uri} status code {response.status_code}")
-            return io.BytesIO(response.content)
+            response = self._session.get(self._uri, headers=headers)
+            if response.status_code == 416:
+                return b''
+            if response.status_code == 206:
+                self._update_length(response.headers.get("Content-Range"))
+                data = response.content
+            elif response.status_code == 200 and self._pos == 0:
+                data = response.content if size < 0 else response.content[:size]
+                self._update_length_from_content_length(response.headers.get("Content-Length"))
+            else:
+                raise RuntimeError(
+                    f"HTTP server did not honor range request for {self._uri}: "
+                    f"status code {response.status_code}"
+                )
+            self._pos += len(data)
+            return data
         except Exception as e:
-            raise RuntimeError(f"Failed to read HTTP URI {uri}: {e}")
+            raise RuntimeError(f"Failed to read HTTP URI {self._uri}: {e}") from e
+
+    def seek(self, pos, whence=io.SEEK_SET):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        if whence == io.SEEK_SET:
+            target = pos
+        elif whence == io.SEEK_CUR:
+            target = self._pos + pos
+        elif whence == io.SEEK_END:
+            target = self._get_length() + pos
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+        if target < 0:
+            raise ValueError(f"Negative seek position: {target}")
+        self._pos = target
+        return self._pos
+
+    def close(self):
+        if not self.closed:
+            self._session.close()
+        super().close()
+
+    def _get_length(self) -> int:
+        if self._length is not None:
+            return self._length
+
+        try:
+            response = self._session.head(self._uri)
+            if response.status_code == 200:
+                self._update_length_from_content_length(response.headers.get("Content-Length"))
+                if self._length is not None:
+                    return self._length
+        except Exception:
+            pass
+
+        response = self._session.get(self._uri, headers={"Range": "bytes=0-0"})
+        if response.status_code == 206:
+            self._update_length(response.headers.get("Content-Range"))
+            if self._length is not None:
+                return self._length
+        if response.status_code == 200:
+            self._update_length_from_content_length(response.headers.get("Content-Length"))
+            if self._length is not None:
+                return self._length
+        raise RuntimeError(f"Failed to determine HTTP URI length: {self._uri}")
+
+    def _update_length(self, content_range: Optional[str]) -> None:
+        if not content_range:
+            return
+        match = re.match(r"bytes\s+\d+-\d+/(\d+)", content_range)
+        if match:
+            self._length = int(match.group(1))
+
+    def _update_length_from_content_length(self, content_length: Optional[str]) -> None:
+        if content_length:
+            self._length = int(content_length)
 
 
 class UriKey:

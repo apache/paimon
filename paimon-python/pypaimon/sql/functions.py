@@ -15,10 +15,30 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.function.function import Function, FunctionImpl  # noqa: F401
-from pypaimon.function.function_definition import (  # noqa: F401
-    FunctionDefinition, FunctionFileResource,
-    FileFunctionDefinition, SQLFunctionDefinition, LambdaFunctionDefinition,
-)
-from pypaimon.function.function_change import FunctionChange  # noqa: F401
-from pypaimon.function.builtins import make_first_frame, open_blob_descriptor_stream  # noqa: F401
+from typing import Optional
+
+import pyarrow as pa
+
+from pypaimon.function.builtins import make_first_frame
+from pypaimon_rust.datafusion import udf
+
+
+def register_first_frame(
+    ctx,
+    catalog_options: Optional[dict] = None,
+    name: str = "first_frame",
+    image_format: str = "JPEG",
+) -> None:
+    ctx.register_udf(
+        udf(
+            make_first_frame(catalog_options, image_format),
+            [pa.binary()],
+            pa.binary(),
+            "volatile",
+            name,
+        )
+    )
+
+
+def register_builtins(ctx, catalog_options: Optional[dict] = None) -> None:
+    register_first_frame(ctx, catalog_options)
