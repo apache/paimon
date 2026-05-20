@@ -22,12 +22,32 @@ import org.apache.spark.SparkConf
 
 class VariantTest extends VariantTestBase {
   override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.paimon.variant.inferShreddingSchema", "false")
+    super.sparkConf
+      .set("spark.paimon.variant.inferShreddingSchema", "false")
+      .set("spark.sql.variant.pushVariantIntoScan", "false")
   }
 }
 
 class VariantInferShreddingTest extends VariantTestBase {
   override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.paimon.variant.inferShreddingSchema", "true")
+    super.sparkConf
+      .set("spark.paimon.variant.inferShreddingSchema", "true")
+      .set("spark.sql.variant.pushVariantIntoScan", "false")
+  }
+}
+
+class VariantWithPushDownTest extends VariantTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.paimon.variant.inferShreddingSchema", "false")
+      .set("spark.sql.variant.pushVariantIntoScan", "true")
+  }
+}
+
+class VariantInferShreddingWithPushDownTest extends VariantTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set("spark.paimon.variant.inferShreddingSchema", "true")
+      .set("spark.sql.variant.pushVariantIntoScan", "true")
   }
 }

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.commands.BucketExpression.quote
+import org.apache.paimon.spark.read.VariantExtractionInfo
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
@@ -43,6 +44,7 @@ case class PaimonScan(
     override val pushedTopN: Option[TopN],
     override val pushedVectorSearch: Option[VectorSearch],
     override val pushedFullTextSearch: Option[FullTextSearch] = None,
+    override val pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty,
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning
