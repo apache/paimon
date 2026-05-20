@@ -22,7 +22,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
-import org.apache.spark.sql.types.{StructField, StructType, VariantType}
+import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 abstract class VariantTestBase extends PaimonSparkTestBase {
 
@@ -51,6 +51,9 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     field
   }
 
+  // Compare via `typeName` so `paimon-spark-ut` builds under Spark 3.x (no VariantType class).
+  private def isVariantType(t: DataType): Boolean = t.typeName == "variant"
+
   private def assertVariantStruct(field: StructField, expectedFieldCount: Int): Unit = {
     val s = field.dataType match {
       case s: StructType => s
@@ -61,7 +64,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       s.length == expectedFieldCount,
       s"${field.name} should expose $expectedFieldCount extracted field(s), got ${s.fields.toSeq}")
     assert(
-      !s.fields.exists(_.dataType == VariantType),
+      !s.fields.exists(f => isVariantType(f.dataType)),
       s"no extracted field on ${field.name} should still be of Variant type when pushdown succeeds")
   }
 
@@ -1033,7 +1036,8 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       sql("SELECT id, variant_get(v, '$.age', 'int'), variant_get(v, '$.city', 'string') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("v"))
     if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 2)
-    else assert(v.dataType == VariantType)
+    else assert(isVariantType(v.dataType))
+    checkAnswer(df, Seq(Row(1, 26, "Beijing")))
   }
 
   test("Paimon Variant pushdown: nested variant column inside a struct") {
@@ -1044,7 +1048,8 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     val df = sql("SELECT id, variant_get(nested.v, '$.age', 'int') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("nested", "v"))
     if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 1)
-    else assert(v.dataType == VariantType)
+    else assert(isVariantType(v.dataType))
+    checkAnswer(df, Seq(Row(1, 26)))
   }
 
   test("Paimon Variant pushdown: full variant access (SELECT v) blocks per-column pushdown") {
@@ -1057,7 +1062,8 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     // extractions must be rejected, regardless of the pushdown conf.
     val df = sql("SELECT v, variant_get(v, '$.age', 'int') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("v"))
-    assert(v.dataType == VariantType)
+    assert(isVariantType(v.dataType))
+    checkAnswer(df, sql("""SELECT parse_json('{"age":26}'), 26"""))
   }
 
   test("Paimon Variant pushdown: multiple variant columns rewrite independently") {
@@ -1074,9 +1080,10 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       assertVariantStruct(v1, expectedFieldCount = 1)
       assertVariantStruct(v2, expectedFieldCount = 2)
     } else {
-      assert(v1.dataType == VariantType)
-      assert(v2.dataType == VariantType)
+      assert(isVariantType(v1.dataType))
+      assert(isVariantType(v2.dataType))
     }
+    checkAnswer(df, Seq(Row(1, "hi", "bye")))
   }
 
   test("Paimon Variant pushdown: column pruning still applies for non-variant queries") {
@@ -1086,8 +1093,10 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
 
     // No variant_get → Spark's `pushDownVariants` rule does NOT short-circuit `pruneColumns`,
     // so the scan must report only the projected columns.
-    val readSchema = scanReadSchemaOf(sql("SELECT id, x FROM T"))
+    val df = sql("SELECT id, x FROM T")
+    val readSchema = scanReadSchemaOf(df)
     assert(readSchema.fieldNames.toSet == Set("id", "x"), s"got ${readSchema.fieldNames.toSeq}")
+    checkAnswer(df, Seq(Row(1, 10)))
   }
 
   test("Paimon Variant pushdown: scan description exposes PushedVariants only when active") {
