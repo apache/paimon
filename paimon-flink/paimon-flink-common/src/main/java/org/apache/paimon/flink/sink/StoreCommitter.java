@@ -48,6 +48,14 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
+        this(table, commit, context, null);
+    }
+
+    public StoreCommitter(
+            FileStoreTable table,
+            TableCommit commit,
+            Context context,
+            @Nullable Map<String, String> overwritePartition) {
         this.commit = (TableCommitImpl) commit;
 
         if (context.metricGroup() != null) {
@@ -58,7 +66,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         }
 
         try {
-            this.commitListeners = CommitListeners.create(context, table);
+            this.commitListeners =
+                    CommitListeners.create(context, table, this.commit, overwritePartition);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

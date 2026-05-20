@@ -401,6 +401,19 @@ public class DedicatedFormatRollingFileWriter
         }
     }
 
+    @Override
+    public void writeEmptyFile() throws IOException {
+        try {
+            if (currentWriter == null) {
+                currentWriter = writerFactory.get();
+            }
+            closeCurrentWriter();
+        } catch (Throwable e) {
+            handleWriteException(e);
+            throw e;
+        }
+    }
+
     /**
      * Returns the total number of records written.
      *

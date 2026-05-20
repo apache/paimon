@@ -22,14 +22,18 @@ import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.COMMIT_CUSTOM_LISTENERS;
@@ -70,7 +74,11 @@ public class CommitListeners implements Closeable {
         IOUtils.closeAllQuietly(listeners);
     }
 
-    public static CommitListeners create(Committer.Context context, FileStoreTable table)
+    public static CommitListeners create(
+            Committer.Context context,
+            FileStoreTable table,
+            BatchTableCommit commit,
+            @Nullable Map<String, String> overwritePartition)
             throws Exception {
         List<CommitListener> listeners = new ArrayList<>();
 
@@ -85,6 +93,9 @@ public class CommitListeners implements Closeable {
                         context.isRestored(),
                         context.stateStore(),
                         table)
+                .ifPresent(listeners::add);
+
+        EmptyPartitionWriteListener.create(table, commit, overwritePartition)
                 .ifPresent(listeners::add);
 
         // custom listeners

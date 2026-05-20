@@ -41,7 +41,7 @@ import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
 import org.apache.paimon.types.{RowKind, RowType}
-import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.{InternalRowPartitionComputer, SerializationUtils}
 
 import org.apache.spark.{Partitioner, TaskContext}
 import org.apache.spark.rdd.RDD
@@ -49,6 +49,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util.{Map => JMap}
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -56,7 +57,8 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Option[Long] = None)
+    batchId: Option[Long] = None,
+    staticOverwritePartition: JMap[String, String] = null)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -94,12 +96,12 @@ case class PaimonSparkWriter(
   }
 
   def writeOnly(): PaimonSparkWriter = {
-    PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
+    copy(table = table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
 
   def withRowTracking(): PaimonSparkWriter = {
     if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowTracking = true)
+      copy(writeRowTracking = true)
     } else {
       this
     }
@@ -108,6 +110,23 @@ case class PaimonSparkWriter(
   def write(data: DataFrame): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
+
+    val writeEmptyPartitionEnable = coreOptions.writeEmptyPartitionEnable()
+    val dynamicPartitionOverwriteMode = coreOptions.dynamicPartitionOverwrite()
+    val overwritePartition =
+      if (!dynamicPartitionOverwriteMode && isFullStaticOverwrite(staticOverwritePartition)) {
+        val partitionType = table.schema().logicalPartitionType()
+        InternalSerializers
+          .create(partitionType)
+          .toBinaryRow(
+            InternalRowPartitionComputer.convertSpecToInternalRow(
+              staticOverwritePartition,
+              partitionType,
+              coreOptions.partitionDefaultName()))
+          .copy()
+      } else {
+        null
+      }
 
     val withInitBucketCol = bucketMode match {
       case BUCKET_UNAWARE => data
@@ -173,6 +192,21 @@ case class PaimonSparkWriter(
               Iterator.apply(write.commit)
             } finally {
               write.close()
+            }
+          }
+      }
+    }
+
+    def emptyDataWrite(overwritePartition: BinaryRow, bucket: Int) = {
+      sparkSession.sparkContext.parallelize(Seq(0), 1).mapPartitions {
+        _ =>
+          {
+            val emptyWrite = newWrite()
+            try {
+              emptyWrite.write.writeEmptyFile(overwritePartition, bucket)
+              Iterator.apply(emptyWrite.commit)
+            } finally {
+              emptyWrite.close()
             }
           }
       }
@@ -343,7 +377,30 @@ case class PaimonSparkWriter(
         throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
     }
 
-    WriteTaskResult.merge(written.collect())
+    var res = WriteTaskResult.merge(written.collect())
+    if (
+      !dynamicPartitionOverwriteMode &&
+      writeEmptyPartitionEnable &&
+      overwritePartition != null &&
+      !hasNewFiles(res)
+    ) {
+      res ++= WriteTaskResult.merge(emptyDataWrite(overwritePartition, 0).collect())
+    }
+    res
+  }
+
+  private def isFullStaticOverwrite(partition: JMap[String, String]): Boolean = {
+    partition != null &&
+    !partition.isEmpty &&
+    table.schema().partitionKeys().asScala.forall(partition.containsKey)
+  }
+
+  def hasNewFiles(commitMessages: Seq[CommitMessage]): Boolean = {
+    commitMessages.exists {
+      case msg: CommitMessageImpl =>
+        msg.newFilesIncrement() != null && msg.newFilesIncrement().newFiles().asScala.nonEmpty
+      case _ => false
+    }
   }
 
   /**

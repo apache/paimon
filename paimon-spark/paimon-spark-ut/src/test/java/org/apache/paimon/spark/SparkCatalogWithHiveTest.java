@@ -23,6 +23,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.TestHiveMetastore;
 import org.apache.paimon.table.FileStoreTableFactory;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
@@ -153,6 +154,75 @@ public class SparkCatalogWithHiveTest {
                                                             "%s.db/%s",
                                                             "test_db", "external_table"))))
                     .doesNotThrowAnyException();
+        }
+    }
+
+    @Test
+    public void testOverwriteEmptyPartition() throws IOException {
+        try (SparkSession spark =
+                createSessionBuilder()
+                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
+                        .getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+            spark.sql("USE spark_catalog.my_db1");
+
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS append_test ("
+                            + "`t1` BIGINT COMMENT 't1', "
+                            + "`t2` BIGINT COMMENT 't2', "
+                            + "`t3` STRING COMMENT 't3', "
+                            + "`dt` STRING COMMENT 'dt') "
+                            + "USING paimon "
+                            + "PARTITIONED BY (`dt`) "
+                            + "TBLPROPERTIES ("
+                            + "'partition.timestamp-pattern' = '$dt', "
+                            + "'partition.timestamp-formatter' = 'yyyyMMdd', "
+                            + "'metastore.partitioned-table' = 'true')");
+
+            spark.sql("set spark.paimon.write.empty.partition.enable=true");
+            spark.sql(
+                    "insert overwrite table append_test partition (dt = '20251127') "
+                            + "select t1,t2,t3 from append_test where dt = '20251126'");
+
+            Dataset<Row> partitions = spark.sql("SELECT * FROM `append_test$partitions`");
+            assertThat(partitions.count()).isEqualTo(1);
+            long recordCount = partitions.first().getAs("record_count");
+            assertThat(recordCount).isEqualTo(0);
+
+            spark.sql("DROP TABLE IF EXISTS append_test");
+        }
+    }
+
+    @Test
+    public void testPartialStaticOverwriteDoesNotCreateEmptyPartition() throws IOException {
+        try (SparkSession spark =
+                createSessionBuilder()
+                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
+                        .getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+            spark.sql("USE spark_catalog.my_db1");
+
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS append_test_partial ("
+                            + "`t1` BIGINT COMMENT 't1', "
+                            + "`t2` BIGINT COMMENT 't2', "
+                            + "`t3` STRING COMMENT 't3', "
+                            + "`dt` STRING COMMENT 'dt', "
+                            + "`hh` STRING COMMENT 'hh') "
+                            + "USING paimon "
+                            + "PARTITIONED BY (`dt`, `hh`) "
+                            + "TBLPROPERTIES ('metastore.partitioned-table' = 'true')");
+
+            spark.sql("set spark.paimon.write.empty.partition.enable=true");
+            spark.sql(
+                    "insert overwrite table append_test_partial partition (dt = '20251127') "
+                            + "select t1,t2,t3,hh from append_test_partial "
+                            + "where dt = '20251126'");
+
+            Dataset<Row> partitions = spark.sql("SELECT * FROM `append_test_partial$partitions`");
+            assertThat(partitions.count()).isZero();
+
+            spark.sql("DROP TABLE IF EXISTS append_test_partial");
         }
     }
 

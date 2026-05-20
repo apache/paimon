@@ -235,6 +235,39 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testOverwriteEmptyPartition() {
+        batchSql(
+                "CREATE TABLE EMPTY_PARTITION_T (a INT, b INT, dt STRING) "
+                        + "PARTITIONED BY (dt) "
+                        + "WITH ('write.empty.partition.enable' = 'true')");
+
+        batchSql(
+                "INSERT OVERWRITE EMPTY_PARTITION_T PARTITION (dt = '20251127') "
+                        + "SELECT a, b FROM EMPTY_PARTITION_T WHERE dt = '20251126'");
+
+        assertThat(batchSql("SELECT * FROM EMPTY_PARTITION_T")).isEmpty();
+        assertThat(
+                        batchSql(
+                                "SELECT `partition`, record_count, file_count "
+                                        + "FROM `EMPTY_PARTITION_T$partitions`"))
+                .containsExactly(Row.of("dt=20251127", 0L, 1L));
+    }
+
+    @Test
+    public void testPartialStaticOverwriteDoesNotCreateEmptyPartition() {
+        batchSql(
+                "CREATE TABLE EMPTY_PARTITION_PARTIAL_T (a INT, b INT, dt STRING, hh STRING) "
+                        + "PARTITIONED BY (dt, hh) "
+                        + "WITH ('write.empty.partition.enable' = 'true')");
+
+        batchSql(
+                "INSERT OVERWRITE EMPTY_PARTITION_PARTIAL_T PARTITION (dt = '20251127') "
+                        + "SELECT a, b, hh FROM EMPTY_PARTITION_PARTIAL_T WHERE dt = '20251126'");
+
+        assertThat(batchSql("SELECT * FROM `EMPTY_PARTITION_PARTIAL_T$partitions`")).isEmpty();
+    }
+
+    @Test
     public void testTimeTravelRead() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();

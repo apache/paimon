@@ -44,6 +44,7 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
@@ -68,7 +69,7 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
+public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner, EmptyFileWriter {
 
     private final FileIO fileIO;
     private final long schemaId;
@@ -204,6 +205,14 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
         }
+    }
+
+    @Override
+    public void writeEmptyFile() throws Exception {
+        RollingFileWriter<InternalRow, DataFileMeta> writer = createRollingRowWriter();
+        writer.writeEmptyFile();
+        writer.close();
+        newFiles.addAll(writer.result());
     }
 
     @Override

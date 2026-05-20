@@ -39,6 +39,7 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.RecordWriter;
 
@@ -55,7 +56,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link CompactIncrement}. */
-public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
+public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner, EmptyFileWriter {
 
     private final boolean writeBufferSpillable;
     private final MemorySize maxDiskSize;
@@ -196,6 +197,20 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public long memoryOccupancy() {
         return writeBuffer.memoryOccupancy();
+    }
+
+    @Override
+    public void writeEmptyFile() throws Exception {
+        RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        dataWriter.writeEmptyFile();
+        dataWriter.close();
+        List<DataFileMeta> dataMetas = dataWriter.result();
+        if (dataMetas == null || dataMetas.size() != 1 || dataMetas.get(0) == null) {
+            throw new IllegalStateException(
+                    "Data writer should generate one and only one file, but got " + dataMetas);
+        }
+        newFiles.add(dataMetas.get(0));
     }
 
     @Override

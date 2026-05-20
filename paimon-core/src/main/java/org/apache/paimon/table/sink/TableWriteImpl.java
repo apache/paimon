@@ -230,6 +230,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     @Override
+    public void writeEmptyFile(BinaryRow partition, int bucket) throws Exception {
+        write.writeEmptyFile(partition, bucket);
+    }
+
+    @Override
     public TableWriteImpl<T> withMetricRegistry(MetricRegistry metricRegistry) {
         write.withMetricRegistry(metricRegistry);
         return this;
