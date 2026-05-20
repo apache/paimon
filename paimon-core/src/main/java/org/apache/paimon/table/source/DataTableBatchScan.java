@@ -29,11 +29,17 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
+import org.apache.paimon.tag.BatchReadTagCreator;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -53,6 +59,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private TopN topN;
 
     private final SchemaManager schemaManager;
+    @Nullable private String readProtectionTagName;
 
     public DataTableBatchScan(
             TableSchema schema,
@@ -103,15 +110,20 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         if (hasNext) {
             hasNext = false;
+            StartingScanner.Result result;
             Optional<StartingScanner.Result> pushed = applyPushDownLimit();
             if (pushed.isPresent()) {
-                return DataFilePlan.fromResult(pushed.get());
+                result = pushed.get();
+            } else {
+                pushed = applyPushDownTopN();
+                result = pushed.orElseGet(() -> startingScanner.scan(snapshotReader));
             }
-            pushed = applyPushDownTopN();
-            if (pushed.isPresent()) {
-                return DataFilePlan.fromResult(pushed.get());
+
+            if (result instanceof ScannedResult) {
+                maybeCreateReadProtectionTag(((ScannedResult) result).currentSnapshotId());
             }
-            return DataFilePlan.fromResult(startingScanner.scan(snapshotReader));
+
+            return DataFilePlan.fromResult(result);
         } else {
             throw new EndOfScanException();
         }
@@ -208,5 +220,22 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
         return this;
+    }
+
+    @Override
+    @Nullable
+    public String readProtectionTagName() {
+        return readProtectionTagName;
+    }
+
+    private void maybeCreateReadProtectionTag(long snapshotId) {
+        Duration timeRetained = options().scanPlanAutoTagTimeRetained();
+        if (timeRetained == null) {
+            return;
+        }
+        SnapshotManager sm = snapshotReader.snapshotManager();
+        TagManager tagMgr = new TagManager(sm.fileIO(), sm.tablePath(), sm.branch());
+        BatchReadTagCreator creator = new BatchReadTagCreator(tagMgr, sm, timeRetained);
+        this.readProtectionTagName = creator.createReadTag(snapshotId);
     }
 }
