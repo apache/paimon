@@ -1049,12 +1049,12 @@ public class ManifestFileSorter {
     private static class ClassifyResult {
         final Map<ManifestFileMeta, Boolean> defaultCompactionManifests;
         final List<ManifestFileMeta> lsmFiles;
-        @Nullable final Set<FileEntry.Identifier> deleteEntries;
+        final Set<FileEntry.Identifier> deleteEntries;
 
         ClassifyResult(
                 Map<ManifestFileMeta, Boolean> defaultCompactionManifests,
                 List<ManifestFileMeta> lsmFiles,
-                @Nullable Set<FileEntry.Identifier> deleteEntries) {
+                Set<FileEntry.Identifier> deleteEntries) {
             this.defaultCompactionManifests = defaultCompactionManifests;
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
