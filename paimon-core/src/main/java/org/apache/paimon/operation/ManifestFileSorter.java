@@ -225,7 +225,7 @@ public class ManifestFileSorter {
                 pickedRuns.size(),
                 defaultCompactionMap.size());
 
-        // Step 3: Collect reused files at their original index positions
+        // Step 3: Collect reused files at their original index positions and collect picked files
         Set<ManifestSortedRun> pickedSet = new HashSet<>(pickedRuns);
         for (ManifestSortedRun run : levelRuns) {
             if (!pickedSet.contains(run)) {
@@ -238,13 +238,13 @@ public class ManifestFileSorter {
             }
         }
 
-        // Step 4: Collect picked files and compute index range
         List<ManifestFileMeta> pickedFiles = new ArrayList<>();
         for (ManifestSortedRun run : pickedRuns) {
             pickedFiles.addAll(run.files());
         }
         pickedFiles.addAll(defaultCompactionMap.keySet());
 
+        // Step 4: Compute index range
         int minIdx = Integer.MAX_VALUE;
         int maxIdx = Integer.MIN_VALUE;
         for (ManifestFileMeta meta : pickedFiles) {
@@ -447,6 +447,9 @@ public class ManifestFileSorter {
                             earliestRun.get(earliestRun.size() - 1).partitionStats().maxValues())
                     >= 0) {
                 // Current file's min >= run's max, append to this run
+                // Note: When min == max (boundary equality), files are considered non-overlapping
+                // and can be placed in the same SortedRun. This allows building fewer SortedRuns,
+                // improving compaction efficiency while maintaining correct sort order.
                 earliestRun.add(file);
                 runs.offer(earliestRun);
             } else {
@@ -510,6 +513,10 @@ public class ManifestFileSorter {
 
         for (int i = 1; i < pickedFiles.size(); i++) {
             ManifestFileMeta file = pickedFiles.get(i);
+            // Note: Boundary equality (file.min == sectionMaxBound) results in separate sections.
+            // This avoids merge-sort overhead while maintaining partition filtering capability.
+            // Files with non-overlapping boundaries (including equal boundaries) can be processed
+            // independently without significantly impacting partition pruning efficiency.
             if (fieldComparator.compare(file.partitionStats().minValues(), sectionMaxBound) >= 0) {
                 sections.add(new Section(currentFiles, currentTotalSize, currentHasDefault));
                 currentFiles = new ArrayList<>();
