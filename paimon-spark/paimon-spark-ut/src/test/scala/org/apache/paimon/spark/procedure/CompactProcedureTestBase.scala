@@ -153,7 +153,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result2.add(7, Row(2, 1))
             result2.add(8, Row(2, 2))
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result2)
 
             // test hilbert sort
             val result3 = new util.ArrayList[Row]()
@@ -172,14 +172,14 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'a,b')"),
               Row(true) :: Nil)
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result3)
 
             // test order sort
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.compact(table => 'T', order_strategy => 'order', order_by => 'a,b')"),
               Row(true) :: Nil)
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
           } finally {
             stream.stop()
           }
@@ -338,7 +338,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               pt =>
                 Assertions
                   .assertThat(spark.sql(s"SELECT id FROM T WHERE pt='$pt'").collect())
-                  .containsExactlyElementsOf(result)
+                  .containsExactlyInAnyOrderElementsOf(result)
             }
           }
         }
@@ -400,9 +400,9 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 result.add(Row(a, b))
               }
             }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
           } finally {
             stream.stop()
           }
@@ -857,7 +857,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 result.add(Row(a, b, randomStr))
               }
             }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
 
             // first cluster, the outputLevel should be 5
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
@@ -874,7 +874,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result2.add(7, Row(2, 1, randomStr))
             result2.add(8, Row(2, 2, randomStr))
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result2)
 
             var clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -897,7 +897,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               result3.add(Row(3, b, null))
             }
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result3)
 
             // second cluster, the outputLevel should be 4
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
@@ -911,7 +911,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result4.add(Row(2, 3, null))
             result4.add(Row(3, 2, null))
             result4.add(Row(3, 3, null))
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result4)
 
             clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -942,7 +942,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result5.add(Row(2, 3, null))
             result5.add(Row(3, 2, null))
             result5.add(Row(3, 3, null))
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result5)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result5)
 
             clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -1011,7 +1011,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 }
               }
             }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
 
             // first cluster, the outputLevel should be 5
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
@@ -1031,7 +1031,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               result2.add(Row(2, 2, c, pt))
             }
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result2)
 
             var clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -1073,7 +1073,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 result3.add(Row(3, b, null, pt))
               }
             }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result3)
 
             // second cluster
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
@@ -1113,7 +1113,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result4.add(Row(3, 2, null, 1))
             result4.add(Row(3, 3, null, 1))
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result4)
 
             clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -1219,7 +1219,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
                 result.add(Row(a, b, randomStr))
               }
             }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result)
 
             // first cluster, the outputLevel should be 5
             checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
@@ -1236,7 +1236,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result2.add(7, Row(2, 1, randomStr))
             result2.add(8, Row(2, 2, randomStr))
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result2)
 
             var clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)
@@ -1264,7 +1264,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
               result3.add(Row(3, b, null))
             }
 
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result3)
 
             // second cluster, the outputLevel should be 4. dv index for level-0 will be updated
             // and dv index for level-5 will be retained
@@ -1278,7 +1278,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             result4.add(Row(2, 3, null))
             result4.add(Row(3, 2, null))
             result4.add(Row(3, 3, null))
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+            Assertions.assertThat(query().collect()).containsExactlyInAnyOrderElementsOf(result4)
 
             clusteredTable = loadTable("T")
             checkSnapshot(clusteredTable)

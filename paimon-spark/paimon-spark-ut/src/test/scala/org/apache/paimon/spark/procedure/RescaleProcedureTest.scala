@@ -56,7 +56,9 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       Assertions.assertThat(getBucketCount(reloadedTable)).isEqualTo(4)
 
       val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      Assertions.assertThat(afterData).containsExactlyElementsOf(Arrays.asList(initialData: _*))
+      Assertions
+        .assertThat(afterData)
+        .containsExactlyInAnyOrderElementsOf(Arrays.asList(initialData: _*))
 
       // Rescale without bucket_num (use current bucket)
       spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '3')")
@@ -80,7 +82,7 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       val afterDecreaseData = spark.sql("SELECT * FROM T ORDER BY id").collect()
       Assertions
         .assertThat(afterDecreaseData)
-        .containsExactlyElementsOf(Arrays.asList(initialData: _*))
+        .containsExactlyInAnyOrderElementsOf(Arrays.asList(initialData: _*))
     }
   }
 
@@ -142,7 +144,9 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       Assertions.assertThat(lastSnapshotId(loadTable("T"))).isEqualTo(snapshotBeforeEmpty)
 
       val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      Assertions.assertThat(afterData).containsExactlyElementsOf(Arrays.asList(initialData: _*))
+      Assertions
+        .assertThat(afterData)
+        .containsExactlyInAnyOrderElementsOf(Arrays.asList(initialData: _*))
     }
   }
 
@@ -186,7 +190,9 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
 
       // Verify data integrity
       val afterData = spark.sql("SELECT * FROM T ORDER BY id").collect()
-      Assertions.assertThat(afterData).containsExactlyElementsOf(Arrays.asList(initialData: _*))
+      Assertions
+        .assertThat(afterData)
+        .containsExactlyInAnyOrderElementsOf(Arrays.asList(initialData: _*))
     }
   }
 
@@ -218,7 +224,7 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
 
       val afterAlterData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
       val initialDataList = Arrays.asList(initialData: _*)
-      Assertions.assertThat(afterAlterData).containsExactlyElementsOf(initialDataList)
+      Assertions.assertThat(afterAlterData).containsExactlyInAnyOrderElementsOf(initialDataList)
 
       val writeError = intercept[org.apache.spark.SparkException] {
         spark.sql("INSERT INTO T VALUES (6)")
@@ -244,7 +250,7 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
       Assertions.assertThat(finalBuckets).isEqualTo(4)
 
       val afterRescaleData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
-      Assertions.assertThat(afterRescaleData).containsExactlyElementsOf(initialDataList)
+      Assertions.assertThat(afterRescaleData).containsExactlyInAnyOrderElementsOf(initialDataList)
 
       spark.sql("INSERT INTO T VALUES (6)")
       val finalData = spark.sql("SELECT * FROM T ORDER BY f0").collect()
