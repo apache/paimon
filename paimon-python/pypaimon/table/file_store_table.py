@@ -313,6 +313,28 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         tag_mgr.rename_tag(old_name, new_name)
 
+    def replace_tag(self, tag_name: str, snapshot_id: int = None) -> None:
+        """
+        Replace an existing tag with a new snapshot.
+
+        Args:
+            tag_name: Name of the tag to replace
+            snapshot_id: The snapshot id to associate with the tag.
+                        If None, uses the latest snapshot.
+
+        Raises:
+            ValueError: If tag doesn't exist, or snapshot doesn't exist
+        """
+        if snapshot_id is None:
+            snapshot = self.snapshot_manager().get_latest_snapshot()
+            if snapshot is None:
+                raise ValueError("Cannot replace tag because latest snapshot doesn't exist.")
+        else:
+            snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
+        self.tag_manager().replace_tag(snapshot, tag_name)
+
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
