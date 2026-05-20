@@ -73,14 +73,13 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
             FileIO fileIO, Path path, long length) {
         MosaicInputFileAdapter inputFile = new MosaicInputFileAdapter(fileIO, path);
-        long rowCount = 0;
         try (BufferAllocator allocator = new RootAllocator();
                 MosaicReader reader = MosaicReader.open(inputFile, length, allocator)) {
-            SimpleColStats[] stats =
-                    extractFromStats(reader.numRowGroups(), reader::getRowGroupStatistics);
             int numRowGroups = reader.numRowGroups();
+            SimpleColStats[] stats = extractFromStats(numRowGroups, reader::getRowGroupStatistics);
+            long rowCount = 0;
             for (int rg = 0; rg < numRowGroups; rg++) {
-                rowCount += reader.readRowGroup(rg, allocator).getRowCount();
+                rowCount += reader.rowGroupNumRows(rg);
             }
             return Pair.of(stats, new FileInfo(rowCount));
         }

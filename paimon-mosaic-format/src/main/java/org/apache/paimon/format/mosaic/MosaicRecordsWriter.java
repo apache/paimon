@@ -62,7 +62,13 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
                 new ArrowFormatWriter(rowType, writeBatchSize, true, allocator, writeBatchMemory);
 
         Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
-        WriterOptions options = new WriterOptions().zstdLevel(formatContext.zstdLevel());
+        int numFields = arrowSchema.getFields().size();
+        int[] allColumns = new int[numFields];
+        for (int i = 0; i < numFields; i++) {
+            allColumns[i] = i;
+        }
+        WriterOptions options =
+                new WriterOptions().zstdLevel(formatContext.zstdLevel()).statsColumns(allColumns);
 
         this.nativeWriter = new MosaicWriter(outputStream, arrowSchema, options, allocator);
     }
@@ -108,13 +114,13 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         }
 
         try {
-            collectMetadata();
+            nativeWriter.close();
         } catch (Throwable t) {
             throwable = addSuppressed(throwable, t);
         }
 
         try {
-            nativeWriter.close();
+            collectMetadata();
         } catch (Throwable t) {
             throwable = addSuppressed(throwable, t);
         }
