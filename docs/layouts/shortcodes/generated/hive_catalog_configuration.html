@@ -57,6 +57,12 @@ If not configured, try to load from 'HIVE_CONF_DIR' env.
 </td>
         </tr>
         <tr>
+            <td><h5>hive.skip-update-stats</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, sets DO_NOT_UPDATE_STATS in the Hive EnvironmentContext when altering tables, preventing Hive from updating table statistics.</td>
+        </tr>
+        <tr>
             <td><h5>location-in-properties</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
