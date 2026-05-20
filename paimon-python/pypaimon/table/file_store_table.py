@@ -395,6 +395,52 @@ class FileStoreTable(Table):
     def new_stream_write_builder(self) -> StreamWriteBuilder:
         return StreamWriteBuilder(self)
 
+    def statistics(self) -> 'Optional[Statistics]':
+        """Read existing statistics for this table from the latest snapshot.
+
+        Returns:
+            A Statistics instance, or None if no statistics exist.
+        """
+        from pypaimon.stats.stats_file_handler import StatsFileHandler
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.get_latest_snapshot()
+        if snapshot is None:
+            return None
+        handler = StatsFileHandler(self.file_io, self.table_path)
+        return handler.read_stats(snapshot)
+
+    def analyze(self, columns: 'Optional[List[str]]' = None) -> 'Statistics':
+        """Compute column-level statistics from manifest metadata.
+
+        This method scans manifest file entries to aggregate per-file statistics
+        (min, max, null_count) into table-level column statistics. It does NOT
+        scan actual data files, making it very fast.
+
+        Args:
+            columns: Optional list of column names to analyze. If None, all
+                     columns are analyzed.
+
+        Returns:
+            A Statistics instance with the computed stats.
+
+        Raises:
+            ValueError: If the table has no snapshots or specified columns
+                       do not exist.
+        """
+        from pypaimon.stats.statistics_collector import StatisticsCollector
+        from pypaimon.stats.stats_file_handler import StatsFileHandler
+
+        collector = StatisticsCollector(self)
+        stats = collector.collect(columns=columns)
+        if stats is None:
+            raise ValueError("Cannot analyze table: no snapshots exist.")
+
+        # Write statistics file
+        handler = StatsFileHandler(self.file_io, self.table_path)
+        handler.write_stats(stats)
+
+        return stats
+
     def new_full_text_search_builder(self) -> 'FullTextSearchBuilder':
         from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
         return FullTextSearchBuilderImpl(self)
@@ -472,6 +518,34 @@ class FileStoreTable(Table):
             return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())
         except Exception:
             return None
+
+    def expire_partitions(self, options: Optional[dict] = None) -> List[dict]:
+        """
+        Expire (drop) partitions based on time strategies configured in table options.
+
+        The following table options control partition expiration:
+            - partition.expiration-time: How old a partition must be before it expires (e.g., '7d').
+            - partition.expiration-check-interval: Minimum interval between checks (e.g., '1h').
+            - partition.expiration-strategy: 'values-time' or 'update-time'.
+            - partition.timestamp-pattern: Pattern to extract time from partition values.
+            - partition.timestamp-formatter: strptime format for parsing extracted time.
+
+        Args:
+            options: Optional override options dict for expiration configuration.
+
+        Returns:
+            List of partition specs (dicts) that were expired and dropped.
+            Empty list if no partitions were expired or expiration is not configured.
+
+        Raises:
+            ValueError: If the table is not partitioned or strategy is unknown.
+        """
+        from pypaimon.partition.partition_expire import PartitionExpire
+
+        expire = PartitionExpire.from_table(self, options=options)
+        if expire is None:
+            return []
+        return expire.expire()
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
