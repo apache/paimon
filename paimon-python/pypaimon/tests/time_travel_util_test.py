@@ -22,9 +22,11 @@ from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 
 
 class _StubSnapshot:
-    def __init__(self, snapshot_id, schema_id=0):
+    def __init__(self, snapshot_id, schema_id=0, time_millis=0, watermark=None):
         self.id = snapshot_id
         self.schema_id = schema_id
+        self.time_millis = time_millis
+        self.watermark = watermark
 
 
 class _StubSnapshotManager:
@@ -33,6 +35,31 @@ class _StubSnapshotManager:
 
     def get_snapshot_by_id(self, snapshot_id):
         return self._snapshots.get(snapshot_id)
+
+    def try_get_earliest_snapshot(self):
+        if not self._snapshots:
+            return None
+        return self._snapshots[min(self._snapshots.keys())]
+
+    def get_latest_snapshot(self):
+        if not self._snapshots:
+            return None
+        return self._snapshots[max(self._snapshots.keys())]
+
+    def earlier_or_equal_time_mills(self, timestamp):
+        result = None
+        for snap in sorted(self._snapshots.values(), key=lambda s: s.id):
+            if snap.time_millis <= timestamp:
+                result = snap
+            else:
+                break
+        return result
+
+    def later_or_equal_watermark(self, watermark):
+        for snap in sorted(self._snapshots.values(), key=lambda s: s.id):
+            if snap.watermark is not None and snap.watermark >= watermark:
+                return snap
+        return None
 
 
 class _StubTagManager:
@@ -87,10 +114,117 @@ class TimeTravelUtilTest(unittest.TestCase):
             )
 
     def test_scan_keys_contains_both_options(self):
-        # Sanity check: SCAN_KEYS must enumerate both time-travel modes,
+        # Sanity check: SCAN_KEYS must enumerate all time-travel modes,
         # otherwise the mutual-exclusion guard above would not trigger.
         self.assertIn('scan.snapshot-id', SCAN_KEYS)
         self.assertIn('scan.tag-name', SCAN_KEYS)
+        self.assertIn('scan.timestamp-millis', SCAN_KEYS)
+        self.assertIn('scan.timestamp', SCAN_KEYS)
+        self.assertIn('scan.watermark', SCAN_KEYS)
+
+    def test_resolves_timestamp_millis(self):
+        snap1 = _StubSnapshot(1, time_millis=1000)
+        snap2 = _StubSnapshot(2, time_millis=2000)
+        snap3 = _StubSnapshot(3, time_millis=3000)
+        mgr = _StubSnapshotManager([snap1, snap2, snap3])
+        result = TimeTravelUtil.try_travel_to_snapshot(
+            Options({'scan.timestamp-millis': '2500'}),
+            _StubTagManager({}),
+            mgr,
+        )
+        self.assertIs(result, snap2)
+
+    def test_resolves_timestamp_millis_exact_match(self):
+        snap1 = _StubSnapshot(1, time_millis=1000)
+        snap2 = _StubSnapshot(2, time_millis=2000)
+        mgr = _StubSnapshotManager([snap1, snap2])
+        result = TimeTravelUtil.try_travel_to_snapshot(
+            Options({'scan.timestamp-millis': '2000'}),
+            _StubTagManager({}),
+            mgr,
+        )
+        self.assertIs(result, snap2)
+
+    def test_timestamp_millis_no_match_raises(self):
+        snap1 = _StubSnapshot(1, time_millis=5000)
+        mgr = _StubSnapshotManager([snap1])
+        with self.assertRaises(ValueError):
+            TimeTravelUtil.try_travel_to_snapshot(
+                Options({'scan.timestamp-millis': '1000'}),
+                _StubTagManager({}),
+                mgr,
+            )
+
+    def test_timestamp_millis_without_snapshot_manager_raises(self):
+        with self.assertRaises(ValueError):
+            TimeTravelUtil.try_travel_to_snapshot(
+                Options({'scan.timestamp-millis': '1000'}),
+                _StubTagManager({}),
+                None,
+            )
+
+    def test_resolves_timestamp_string(self):
+        # Compute expected millis in local timezone, consistent with Java behavior
+        from datetime import datetime
+        expected_millis = int(datetime(2023, 12, 1, 0, 0, 0).timestamp() * 1000)
+        snap1 = _StubSnapshot(1, time_millis=expected_millis)
+        snap2 = _StubSnapshot(2, time_millis=expected_millis + 100000)
+        mgr = _StubSnapshotManager([snap1, snap2])
+        result = TimeTravelUtil.try_travel_to_snapshot(
+            Options({'scan.timestamp': '2023-12-01 00:00:00'}),
+            _StubTagManager({}),
+            mgr,
+        )
+        self.assertIs(result, snap1)
+
+    def test_timestamp_string_invalid_format_raises(self):
+        snap1 = _StubSnapshot(1, time_millis=1000)
+        mgr = _StubSnapshotManager([snap1])
+        with self.assertRaises(ValueError):
+            TimeTravelUtil.try_travel_to_snapshot(
+                Options({'scan.timestamp': 'not-a-timestamp'}),
+                _StubTagManager({}),
+                mgr,
+            )
+
+    def test_resolves_watermark(self):
+        snap1 = _StubSnapshot(1, watermark=100)
+        snap2 = _StubSnapshot(2, watermark=200)
+        snap3 = _StubSnapshot(3, watermark=300)
+        mgr = _StubSnapshotManager([snap1, snap2, snap3])
+        result = TimeTravelUtil.try_travel_to_snapshot(
+            Options({'scan.watermark': '200'}),
+            _StubTagManager({}),
+            mgr,
+        )
+        self.assertIs(result, snap2)
+
+    def test_watermark_no_match_raises(self):
+        snap1 = _StubSnapshot(1, watermark=100)
+        mgr = _StubSnapshotManager([snap1])
+        with self.assertRaises(ValueError):
+            TimeTravelUtil.try_travel_to_snapshot(
+                Options({'scan.watermark': '500'}),
+                _StubTagManager({}),
+                mgr,
+            )
+
+    def test_watermark_without_snapshot_manager_raises(self):
+        with self.assertRaises(ValueError):
+            TimeTravelUtil.try_travel_to_snapshot(
+                Options({'scan.watermark': '100'}),
+                _StubTagManager({}),
+                None,
+            )
+
+    def test_rejects_multiple_time_travel_options(self):
+        mgr = _StubSnapshotManager([_StubSnapshot(1, time_millis=1000)])
+        with self.assertRaises(ValueError):
+            TimeTravelUtil.try_travel_to_snapshot(
+                Options({'scan.timestamp-millis': '1000', 'scan.snapshot-id': '1'}),
+                _StubTagManager({}),
+                mgr,
+            )
 
 
 if __name__ == '__main__':

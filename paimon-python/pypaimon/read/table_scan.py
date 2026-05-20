@@ -57,7 +57,18 @@ class TableScan:
         options = self.table.options.options
         snapshot_manager = self.table.snapshot_manager()
         manifest_list_manager = ManifestListManager(self.table)
-        if options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil, SCAN_KEYS
+        has_time_travel = any(options.contains_key(key) for key in SCAN_KEYS)
+        has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+
+        if has_incremental and has_time_travel:
+            raise ValueError(
+                "incremental-between-timestamp cannot be used together with "
+                "point-in-time scan options: %s" % SCAN_KEYS
+            )
+
+        if has_incremental:
             ts = options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP).split(",")
             if len(ts) != 2:
                 raise ValueError(
@@ -106,35 +117,21 @@ class TableScan:
                 return manifests, end_snapshot
 
             return FileScanner(self.table, incremental_manifest, self.predicate, self.limit)
-        elif options.contains(CoreOptions.SCAN_TAG_NAME):  # Handle tag-based reading
-            tag_name = options.get(CoreOptions.SCAN_TAG_NAME)
 
-            def tag_manifest_scanner():
-                tag_manager = self.table.tag_manager()
-                tag = tag_manager.get_or_throw(tag_name)
-                snapshot = tag.trim_to_snapshot()
-                return manifest_list_manager.read_all(snapshot), snapshot
-
-            return FileScanner(
-                self.table,
-                tag_manifest_scanner,
-                self.predicate,
-                self.limit
-            )
-        elif options.contains(CoreOptions.SCAN_SNAPSHOT_ID):  # Handle snapshot-id-based reading
-            snapshot_id = int(options.get(CoreOptions.SCAN_SNAPSHOT_ID))
-
-            def snapshot_id_manifest_scanner():
-                snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+        if has_time_travel:
+            def time_travel_manifest_scanner():
+                snapshot = TimeTravelUtil.try_travel_to_snapshot(
+                    options, self.table.tag_manager(), snapshot_manager
+                )
                 if snapshot is None:
                     raise ValueError(
-                        "Snapshot id %d does not exist" % snapshot_id
+                        "Could not resolve time travel snapshot from scan options."
                     )
                 return manifest_list_manager.read_all(snapshot), snapshot
 
             return FileScanner(
                 self.table,
-                snapshot_id_manifest_scanner,
+                time_travel_manifest_scanner,
                 self.predicate,
                 self.limit
             )
