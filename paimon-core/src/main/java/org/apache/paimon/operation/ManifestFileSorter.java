@@ -191,17 +191,7 @@ public class ManifestFileSorter {
             throws Exception {
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
 
-        // Step 1: Build fileName -> index mapping and initialize 2D result
-        Map<String, Integer> fileNameToIndex = new HashMap<>();
-        for (int i = 0; i < input.size(); i++) {
-            fileNameToIndex.put(input.get(i).fileName(), i);
-        }
-        List<List<ManifestFileMeta>> result = new ArrayList<>(input.size());
-        for (int i = 0; i < input.size(); i++) {
-            result.add(new ArrayList<>());
-        }
-
-        // Step 2: Prepare compaction context
+        // Step 1: Prepare compaction context (early-return if nothing to compact)
         CompactionContext ctx =
                 prepareCompaction(input, manifestFile, partitionType, options, false);
         Map<ManifestFileMeta, Boolean> defaultCompactionMap = ctx.defaultCompactionManifests;
@@ -224,7 +214,15 @@ public class ManifestFileSorter {
                 pickedRuns.size(),
                 defaultCompactionMap.size());
 
-        // Step 3: Collect reused files at their original index positions and collect picked files
+        // Step 2: Build fileName -> index mapping and initialize 2D result
+        Map<String, Integer> fileNameToIndex = new HashMap<>();
+        List<List<ManifestFileMeta>> result = new ArrayList<>(input.size());
+        for (int i = 0; i < input.size(); i++) {
+            fileNameToIndex.put(input.get(i).fileName(), i);
+            result.add(new ArrayList<>());
+        }
+
+        // Step 3: Collect reused files and picked files
         Set<ManifestSortedRun> pickedSet = new HashSet<>(pickedRuns);
         for (ManifestSortedRun run : levelRuns) {
             if (!pickedSet.contains(run)) {
