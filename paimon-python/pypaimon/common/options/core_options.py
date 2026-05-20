@@ -548,6 +548,57 @@ class CoreOptions:
         )
     )
 
+    # Partition expiration options
+    PARTITION_EXPIRATION_TIME: ConfigOption[timedelta] = (
+        ConfigOptions.key("partition.expiration-time")
+        .duration_type()
+        .no_default_value()
+        .with_description(
+            "The expiration interval of a partition. A partition will be expired if "
+            "it's lifetime is over this value. Partition time is extracted from the "
+            "partition value."
+        )
+    )
+
+    PARTITION_EXPIRATION_CHECK_INTERVAL: ConfigOption[timedelta] = (
+        ConfigOptions.key("partition.expiration-check-interval")
+        .duration_type()
+        .no_default_value()
+        .with_description(
+            "The check interval of partition expiration."
+        )
+    )
+
+    PARTITION_EXPIRATION_STRATEGY: ConfigOption[str] = (
+        ConfigOptions.key("partition.expiration-strategy")
+        .string_type()
+        .default_value("values-time")
+        .with_description(
+            "The expiration strategy of a partition. 'values-time' extracts time from "
+            "partition values; 'update-time' uses the last file creation time."
+        )
+    )
+
+    PARTITION_TIMESTAMP_PATTERN: ConfigOption[str] = (
+        ConfigOptions.key("partition.timestamp-pattern")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Specify a pattern to get a timestamp from partitions. The pattern is "
+            "built from partition field placeholders (e.g., '$dt $hour:00:00')."
+        )
+    )
+
+    PARTITION_TIMESTAMP_FORMATTER: ConfigOption[str] = (
+        ConfigOptions.key("partition.timestamp-formatter")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "The formatter to parse the timestamp string to a datetime. "
+            "Uses Python strptime format (e.g., '%Y-%m-%d')."
+        )
+    )
+
     def __init__(self, options: Options):
         self.options = options
 
