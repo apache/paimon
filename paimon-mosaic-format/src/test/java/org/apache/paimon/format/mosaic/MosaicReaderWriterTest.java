@@ -1,0 +1,260 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.format.mosaic;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+/** Integration tests for Mosaic reader and writer. */
+class MosaicReaderWriterTest {
+
+    @TempDir java.nio.file.Path tempDir;
+
+    @BeforeAll
+    static void checkNativeLibrary() {
+        assumeTrue(isNativeAvailable(), "Mosaic native library not available");
+    }
+
+    @Test
+    void testWriteAndRead() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+
+        writeRows(
+                rowType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("hello")),
+                GenericRow.of(2, BinaryString.fromString("world")));
+
+        List<InternalRow> result = readAll(rowType, rowType, path, null);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getInt(0)).isEqualTo(1);
+        assertThat(result.get(0).getString(1).toString()).isEqualTo("hello");
+        assertThat(result.get(1).getInt(0)).isEqualTo(2);
+        assertThat(result.get(1).getString(1).toString()).isEqualTo("world");
+    }
+
+    @Test
+    void testNullValues() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+
+        writeRows(
+                rowType,
+                path,
+                GenericRow.of(1, null),
+                GenericRow.of(null, BinaryString.fromString("test")),
+                GenericRow.of(null, null));
+
+        List<InternalRow> result = readAll(rowType, rowType, path, null);
+        assertThat(result).hasSize(3);
+        assertThat(result.get(0).isNullAt(1)).isTrue();
+        assertThat(result.get(1).isNullAt(0)).isTrue();
+        assertThat(result.get(2).isNullAt(0)).isTrue();
+        assertThat(result.get(2).isNullAt(1)).isTrue();
+    }
+
+    @Test
+    void testColumnProjection() throws IOException {
+        RowType writeType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.DOUBLE());
+        RowType readType = DataTypes.ROW(DataTypes.STRING());
+        Path path = newPath();
+
+        writeRows(
+                writeType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("aaa"), 1.1),
+                GenericRow.of(2, BinaryString.fromString("bbb"), 2.2));
+
+        List<InternalRow> result = readAll(writeType, readType, path, null);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getString(0).toString()).isEqualTo("aaa");
+        assertThat(result.get(1).getString(0).toString()).isEqualTo("bbb");
+    }
+
+    @Test
+    void testLargeDataset() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+
+        int numRows = 10000;
+        GenericRow[] rows = new GenericRow[numRows];
+        for (int i = 0; i < numRows; i++) {
+            rows[i] = GenericRow.of(i, BinaryString.fromString("row" + i));
+        }
+        writeRows(rowType, path, rows);
+
+        List<InternalRow> result = readAll(rowType, rowType, path, null);
+        assertThat(result).hasSize(numRows);
+        assertThat(result.get(0).getInt(0)).isEqualTo(0);
+        assertThat(result.get(numRows - 1).getInt(0)).isEqualTo(numRows - 1);
+    }
+
+    @Test
+    void testRowGroupPredicateFiltering() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+        Path path = newPath();
+
+        int numRows = 10000;
+        GenericRow[] rows = new GenericRow[numRows];
+        for (int i = 0; i < numRows; i++) {
+            rows[i] = GenericRow.of(i, BinaryString.fromString("v" + i));
+        }
+        writeRows(rowType, path, rows);
+
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = builder.greaterThan(0, 9000);
+        List<InternalRow> result =
+                readAll(rowType, rowType, path, Collections.singletonList(predicate));
+
+        for (InternalRow row : result) {
+            assertThat(row.getInt(0)).isGreaterThan(9000);
+        }
+    }
+
+    @Test
+    void testReturnedPosition() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+
+        writeRows(
+                rowType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("a")),
+                GenericRow.of(2, BinaryString.fromString("b")),
+                GenericRow.of(3, BinaryString.fromString("c")));
+
+        MosaicFileFormat format = createFormat();
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        LocalFileIO fileIO = new LocalFileIO();
+        RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        FileRecordIterator<InternalRow> fileIter = (FileRecordIterator<InternalRow>) batch;
+
+        fileIter.next();
+        assertThat(fileIter.returnedPosition()).isEqualTo(0);
+        fileIter.next();
+        assertThat(fileIter.returnedPosition()).isEqualTo(1);
+        fileIter.next();
+        assertThat(fileIter.returnedPosition()).isEqualTo(2);
+
+        reader.close();
+    }
+
+    @Test
+    void testReachTargetSize() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+        MosaicFileFormat format = createFormat();
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatWriter writer = writerFactory.create(fileIO.newOutputStream(path, false), "zstd");
+
+        boolean reached = false;
+        for (int i = 0; i < 100000; i++) {
+            writer.addElement(GenericRow.of(i, BinaryString.fromString("value_" + i + "_padding")));
+            if (writer.reachTargetSize(true, 1024)) {
+                reached = true;
+                break;
+            }
+        }
+        writer.close();
+        assertThat(reached).isTrue();
+    }
+
+    private Path newPath() {
+        return new Path(tempDir.toUri().toString(), UUID.randomUUID() + ".mosaic");
+    }
+
+    private void writeRows(RowType rowType, Path path, GenericRow... rows) throws IOException {
+        MosaicFileFormat format = createFormat();
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatWriter writer = writerFactory.create(fileIO.newOutputStream(path, false), "zstd");
+        for (GenericRow row : rows) {
+            writer.addElement(row);
+        }
+        writer.close();
+    }
+
+    private List<InternalRow> readAll(
+            RowType dataType, RowType readType, Path path, List<Predicate> predicates)
+            throws IOException {
+        MosaicFileFormat format = createFormat();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataType, readType, predicates);
+        LocalFileIO fileIO = new LocalFileIO();
+        RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        InternalRowSerializer serializer = new InternalRowSerializer(readType);
+        List<InternalRow> result = new ArrayList<>();
+        reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+        reader.close();
+        return result;
+    }
+
+    private static MosaicFileFormat createFormat() {
+        return new MosaicFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+    }
+
+    private static boolean isNativeAvailable() {
+        try {
+            Class.forName("org.apache.paimon.mosaic.NativeLib");
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+}

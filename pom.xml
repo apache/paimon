@@ -74,6 +74,7 @@ under the License.
         <module>paimon-api</module>
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
+        <module>paimon-mosaic-format</module>
         <module>paimon-tantivy</module>
     </modules>
 
