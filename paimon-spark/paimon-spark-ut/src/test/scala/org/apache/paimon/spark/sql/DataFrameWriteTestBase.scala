@@ -183,6 +183,92 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon dataframe: writer v2 replace") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id BIGINT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+
+      val oldLocation = loadTable("t").location().toString
+      val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+      spark
+        .range(2, 4)
+        .selectExpr("id", "concat('v', cast(id as string)) AS data")
+        .writeTo("t")
+        .using("paimon")
+        .tableProperty("primary-key", "id")
+        .tableProperty("bucket", "3")
+        .replace()
+
+      val table = loadTable("t")
+      Assertions.assertEquals("3", table.options().get("bucket"))
+      Assertions.assertEquals(oldLocation, table.location().toString)
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(2L, "v2") :: Row(3L, "v3") :: Nil)
+      checkAnswer(sql(s"SELECT * FROM t VERSION AS OF $oldSnapshotId"), Row(1L, "old") :: Nil)
+    }
+  }
+
+  test("Paimon dataframe: writer v2 create fails when table exists") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("CREATE TABLE t (id BIGINT, data STRING) USING paimon")
+
+      val error = intercept[Exception] {
+        spark
+          .range(2)
+          .selectExpr("id", "concat('v', cast(id as string)) AS data")
+          .writeTo("t")
+          .using("paimon")
+          .create()
+      }.getMessage
+
+      Assertions.assertTrue(
+        error.contains("TABLE_OR_VIEW_ALREADY_EXISTS") || error.contains("already exists"))
+    }
+  }
+
+  test("Paimon dataframe: writer v2 create or replace") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      spark
+        .range(2)
+        .selectExpr("id", "concat('v', cast(id as string)) AS data")
+        .writeTo("t")
+        .using("paimon")
+        .tableProperty("primary-key", "id")
+        .tableProperty("bucket", "2")
+        .createOrReplace()
+
+      val createdLocation = loadTable("t").location().toString
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(0L, "v0") :: Row(1L, "v1") :: Nil)
+
+      spark
+        .range(3, 5)
+        .selectExpr(
+          "id",
+          "concat('v', cast(id as string)) AS data",
+          "concat('n', cast(id as string)) AS note")
+        .writeTo("t")
+        .using("paimon")
+        .tableProperty("primary-key", "id")
+        .tableProperty("bucket", "4")
+        .createOrReplace()
+
+      val table = loadTable("t")
+      Assertions.assertEquals(Seq("id", "data", "note"), spark.table("t").schema.fieldNames.toSeq)
+      Assertions.assertEquals("4", table.options().get("bucket"))
+      Assertions.assertEquals(createdLocation, table.location().toString)
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Row(3L, "v3", "n3") :: Row(4L, "v4", "n4") :: Nil)
+    }
+  }
+
   test("Paimon: DataFrameWrite partition table") {
     withTable("t") {
       spark.sql(s"""

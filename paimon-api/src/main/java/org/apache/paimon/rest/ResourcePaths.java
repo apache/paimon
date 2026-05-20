@@ -98,6 +98,17 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, TABLES, "rename");
     }
 
+    public String replaceTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "replace");
+    }
+
     public String commitTable(String databaseName, String objectName) {
         return SLASH.join(
                 V1,

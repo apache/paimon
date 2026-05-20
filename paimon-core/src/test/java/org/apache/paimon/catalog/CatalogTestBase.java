@@ -1172,6 +1172,96 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testReplaceTable() throws Exception {
+        if (!supportsReplaceTable()) {
+            return;
+        }
+        catalog.createDatabase("replace_db", true);
+        Identifier identifier = Identifier.create("replace_db", "t");
+
+        Schema initialSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("data", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("id", "pt")
+                        .option("bucket", "2")
+                        .build();
+        catalog.createTable(identifier, initialSchema, false);
+
+        Table created = catalog.getTable(identifier);
+        String oldLocation = ((FileStoreTable) created).location().toString();
+        BatchWriteBuilder writeBuilder = created.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("old"), BinaryString.fromString("a")));
+            commit.commit(write.prepareCommit());
+        }
+
+        long oldSnapshotId =
+                ((FileStoreTable) catalog.getTable(identifier))
+                        .snapshotManager()
+                        .latestSnapshotId();
+
+        // Replace with new PK + bucket (partition keys unchanged)
+        Schema newSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("id", "pt")
+                        .option("bucket", "4")
+                        .build();
+        catalog.replaceTable(identifier, newSchema, false);
+
+        FileStoreTable replaced = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(replaced.partitionKeys()).containsExactly("pt");
+        assertThat(replaced.primaryKeys()).containsExactly("id", "pt");
+        assertThat(replaced.options().get("bucket")).isEqualTo("4");
+        assertThat(replaced.location().toString()).isEqualTo(oldLocation);
+        assertThat(read(replaced, null, null, null, null)).isEmpty();
+
+        // Time-travel to old snapshot still returns old data with old schema
+        FileStoreTable oldView =
+                replaced.copy(Collections.singletonMap("scan.snapshot-id", "" + oldSnapshotId));
+        assertThat(oldView.schema().fieldNames()).containsExactly("id", "data", "pt");
+        assertThat(read(oldView, null, null, null, null)).hasSize(1);
+
+        // Changing partition keys is rejected
+        Schema changePartitionKeys =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .primaryKey("id")
+                        .option("bucket", "4")
+                        .build();
+        assertThatExceptionOfType(UnsupportedOperationException.class)
+                .isThrownBy(() -> catalog.replaceTable(identifier, changePartitionKeys, false))
+                .withMessageContaining("partition keys");
+
+        // ignoreIfNotExists = true: missing table is silently skipped
+        Identifier missing = Identifier.create("replace_db", "missing");
+        catalog.replaceTable(missing, newSchema, true);
+
+        // ignoreIfNotExists = false: missing table throws
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(() -> catalog.replaceTable(missing, newSchema, false));
+
+        // System table is rejected
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.replaceTable(
+                                        Identifier.create("replace_db", "$system_table"),
+                                        newSchema,
+                                        false));
+    }
+
+    @Test
     public void testView() throws Exception {
         if (!supportsView()) {
             return;
@@ -1655,6 +1745,10 @@ public abstract class CatalogTestBase {
     }
 
     protected boolean supportsViewDialects() {
+        return true;
+    }
+
+    protected boolean supportsReplaceTable() {
         return true;
     }
 

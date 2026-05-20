@@ -3173,6 +3173,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    @Override
+    protected boolean supportsReplaceTable() {
+        return true;
+    }
+
     // TODO implement this
     @Override
     @Test

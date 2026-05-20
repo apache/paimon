@@ -61,6 +61,7 @@ import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Functio
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.StagedTable;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
@@ -389,6 +390,87 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
+    @Override
+    public StagedTable stageCreate(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        return stageCreateDirectly(ident, schema, partitions, properties);
+    }
+
+    @Override
+    public StagedTable stageReplace(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException, NoSuchTableException {
+        return stageReplaceInternal(ident, schema, partitions, properties);
+    }
+
+    @Override
+    public StagedTable stageCreateOrReplace(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException {
+        try {
+            return stageReplaceInternal(ident, schema, partitions, properties);
+        } catch (NoSuchTableException e) {
+            try {
+                return stageCreate(ident, schema, partitions, properties);
+            } catch (TableAlreadyExistsException ex) {
+                throw new RuntimeException(ex);
+            }
+        }
+    }
+
+    private StagedTable stageReplaceInternal(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException, NoSuchTableException {
+        org.apache.paimon.catalog.Identifier tableIdent = toIdentifier(ident, catalogName);
+        Schema targetSchema = toInitialSchema(schema, partitions, properties);
+
+        try {
+            catalog.replaceTable(tableIdent, targetSchema, false);
+            return new RollbackStagedTable(loadTable(ident), () -> {});
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        } catch (UnsupportedOperationException e) {
+            // Catalog cannot replace in-place; fall back to drop+create, losing snapshot history.
+            LOG.warn(
+                    "Catalog {} does not support replaceTable, falling back to drop+create for {}.",
+                    catalog.getClass().getName(),
+                    tableIdent.getFullName(),
+                    e);
+            return stageReplaceByDropAndCreate(ident, tableIdent, targetSchema);
+        }
+    }
+
+    private StagedTable stageReplaceByDropAndCreate(
+            Identifier ident, org.apache.paimon.catalog.Identifier tableIdent, Schema targetSchema)
+            throws NoSuchTableException, NoSuchNamespaceException {
+        try {
+            catalog.dropTable(tableIdent, false);
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        }
+        try {
+            catalog.createTable(tableIdent, targetSchema, false);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new RuntimeException(e);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(ident.namespace());
+        }
+        return new RollbackStagedTable(loadTable(ident), () -> {});
+    }
+
     private SchemaChange toSchemaChange(TableChange change) {
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
@@ -455,6 +537,24 @@ public class SparkCatalog extends SparkBaseCatalog
                             fieldNames[0], ((TableChange.After) columnPosition).column());
         }
         return move;
+    }
+
+    private StagedTable stageCreateDirectly(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        org.apache.spark.sql.connector.catalog.Table table =
+                createTable(ident, schema, partitions, properties);
+        if (table == null) {
+            try {
+                table = loadTable(ident);
+            } catch (NoSuchTableException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return new RollbackStagedTable(table, () -> dropTable(ident));
     }
 
     private Schema toInitialSchema(

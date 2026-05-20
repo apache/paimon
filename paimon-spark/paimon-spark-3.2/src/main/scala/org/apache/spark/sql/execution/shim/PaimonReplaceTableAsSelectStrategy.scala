@@ -16,26 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.execution
+package org.apache.spark.sql.execution.shim
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.catalog.CatalogUtils
-import org.apache.spark.sql.catalyst.plans.logical.TableSpec
-import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
+import org.apache.spark.sql.{SparkSession, Strategy}
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.execution.SparkPlan
 
-trait PaimonStrategyHelper {
+case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession) extends Strategy {
 
-  def spark: SparkSession
+  override def apply(plan: LogicalPlan): Seq[SparkPlan] = Nil
+}
 
-  protected def makeQualifiedDBObjectPath(location: String): String = {
-    CatalogUtils.makeQualifiedDBObjectPath(
-      spark.sharedState.conf.get(WAREHOUSE_PATH),
-      location,
-      spark.sharedState.hadoopConf)
-  }
+case class PaimonReplaceTableStrategy(spark: SparkSession) extends Strategy {
 
-  protected def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
-    tableSpec.copy(location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
-  }
-
+  override def apply(plan: LogicalPlan): Seq[SparkPlan] = Nil
 }

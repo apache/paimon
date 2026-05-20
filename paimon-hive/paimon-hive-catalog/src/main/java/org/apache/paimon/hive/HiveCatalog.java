@@ -1297,6 +1297,41 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    protected void replaceTableImpl(
+            Identifier identifier, FileStoreTable existingTable, Schema newSchema)
+            throws TableNotExistException {
+        Table hmsTable = getHmsTable(identifier);
+        if (!isPaimonTable(hmsTable)) {
+            throw new UnsupportedOperationException("Only data table support replaceTable.");
+        }
+
+        truncateTable(existingTable);
+
+        SchemaManager schemaManager = existingTable.schemaManager();
+        long newSchemaId;
+        try {
+            newSchemaId = runWithLock(identifier, () -> appendNewSchema(existingTable, newSchema));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to replaceTable " + identifier.getFullName(), e);
+        }
+
+        // currently only changes to main branch affect metastore
+        if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
+            return;
+        }
+
+        try {
+            TableSchema newTableSchema = schemaManager.schema(newSchemaId);
+            alterTableToHms(hmsTable, identifier, newTableSchema, Collections.emptySet());
+        } catch (Exception te) {
+            schemaManager.deleteSchema(newSchemaId);
+            throw new RuntimeException(te);
+        }
+    }
+
+    @Override
     public boolean caseSensitive() {
         return options.getOptional(CASE_SENSITIVE).orElse(false);
     }

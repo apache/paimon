@@ -32,17 +32,19 @@ import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnreso
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 // NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
 // reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
 // on Spark 3.2 / 3.3 runtimes that still ship `paimon-spark3-common` (the module targets 3.5.8 at
 // compile time but must also run on 3.2 / 3.3).
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.util.ArrayData
-import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, ResolveDefaultColumns}
+import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
+import org.apache.spark.sql.connector.catalog.CatalogV2Util.structTypeToV2Columns
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.SparkFormatTable
+import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.internal.SQLConf
@@ -84,6 +86,103 @@ class Spark3Shim extends SparkShim {
       partitions: Array[Transform],
       properties: JMap[String, String]): Table = {
     tableCatalog.createTable(ident, schema, partitions, properties)
+  }
+
+  override def createReplaceTableAsSelectExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      orCreate: Boolean): SparkPlan = {
+    ReplaceTableAsSelectExec(
+      catalog,
+      ident,
+      partitioning,
+      query,
+      tableSpec,
+      writeOptions,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def createAtomicReplaceTableAsSelectExec(
+      catalog: StagingTableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      orCreate: Boolean): SparkPlan = {
+    AtomicReplaceTableAsSelectExec(
+      catalog,
+      ident,
+      partitioning,
+      query,
+      tableSpec,
+      writeOptions,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def createReplaceTableExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      columns: Array[Column],
+      partitioning: Seq[Transform],
+      tableSpec: TableSpec,
+      orCreate: Boolean): SparkPlan = {
+    ReplaceTableExec(
+      catalog,
+      ident,
+      columns,
+      partitioning,
+      tableSpec,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def createAtomicReplaceTableExec(
+      catalog: StagingTableCatalog,
+      ident: Identifier,
+      columns: Array[Column],
+      partitioning: Seq[Transform],
+      tableSpec: TableSpec,
+      orCreate: Boolean): SparkPlan = {
+    AtomicReplaceTableExec(
+      catalog,
+      ident,
+      columns,
+      partitioning,
+      tableSpec,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def toReplaceTableColumns(
+      tableSchema: StructType,
+      schemaOrColumns: Any,
+      catalog: TableCatalog,
+      ident: Identifier): Array[Column] = {
+    val statementType = "CREATE TABLE"
+    val schema = schemaOrColumns.asInstanceOf[StructType]
+    ResolveDefaultColumns.validateCatalogForDefaultValue(schema, catalog, ident)
+    val newSchema =
+      ResolveDefaultColumns.constantFoldCurrentDefaultsToExistDefaults(schema, statementType)
+    GeneratedColumn.validateGeneratedColumns(newSchema, catalog, ident, statementType)
+    structTypeToV2Columns(newSchema)
+  }
+
+  override def copyTableSpec(
+      tableSpec: TableSpec,
+      additionalProperties: Map[String, String],
+      location: Option[String]): TableSpec = {
+    tableSpec.copy(properties = tableSpec.properties ++ additionalProperties, location = location)
+  }
+
+  private def invalidateCache(tableCatalog: TableCatalog, table: Table, ident: Identifier): Unit = {
+    tableCatalog.invalidateTable(ident)
   }
 
   override def createCTERelationRef(

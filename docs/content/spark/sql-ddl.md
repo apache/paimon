@@ -285,6 +285,62 @@ CREATE TABLE my_table_all (
 CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
 
+### Replace Table
+
+Paimon supports preserving snapshot history for Spark `REPLACE TABLE` from **Spark 3.4**.
+
+```sql
+CREATE TABLE my_table (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING
+) TBLPROPERTIES (
+    'primary-key' = 'user_id',
+    'bucket' = '2'
+);
+
+INSERT INTO my_table VALUES (1, 10, 'pv');
+
+REPLACE TABLE my_table (
+    user_id BIGINT,
+    item_id BIGINT,
+    category STRING
+) TBLPROPERTIES (
+    'primary-key' = 'user_id',
+    'bucket' = '4'
+);
+```
+
+In Paimon, this is not an atomic replacement. Paimon changes Spark's drop+create replace path to
+truncate the current table and commit a new schema, while preserving the table location and snapshot
+history. The current table becomes empty and uses the new schema, but old snapshots can still be
+queried by time travel.
+
+```sql
+SELECT * FROM my_table;
+
+SELECT * FROM my_table VERSION AS OF 1;
+```
+
+`REPLACE TABLE` requires the table to exist. If the table does not exist, use
+`CREATE OR REPLACE TABLE` instead.
+
+`REPLACE TABLE` does not accept `AS SELECT`. To replace a table and populate it with query results,
+use `CREATE OR REPLACE TABLE ... AS SELECT`.
+
+```sql
+CREATE OR REPLACE TABLE my_table
+TBLPROPERTIES (
+    'primary-key' = 'user_id',
+    'bucket' = '4'
+)
+AS SELECT user_id, item_id, behavior FROM source_table;
+```
+
+When the existing table and target table use different table types,
+uses its fallback drop+create behavior instead of snapshot-preserving replace
+behavior.
+
 ### Create Table Like
 
 A new table can be created from an existing source table. Available from **Spark 3.4**.
