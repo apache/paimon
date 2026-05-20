@@ -107,6 +107,11 @@ class BatchTableCommit(TableCommit):
         self._check_committed()
         self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)
 
+    def update_statistics(self, stats) -> None:
+        """Commit statistics (ANALYZE) without data changes."""
+        self._check_committed()
+        self.file_store_commit.commit_statistics(stats, BATCH_COMMIT_IDENTIFIER)
+
     def _check_committed(self):
         if self.batch_committed:
             raise RuntimeError("BatchTableCommit only supports one-time committing.")

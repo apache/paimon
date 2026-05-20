@@ -239,6 +239,53 @@ class FileStoreCommit:
             allow_rollback=False,
         )
 
+    def commit_statistics(self, stats, commit_identifier: int) -> None:
+        """Commit statistics without data changes (ANALYZE commit).
+
+        Creates a new snapshot that references the stats file but carries
+        the same manifest lists as the previous snapshot.
+        """
+        from pypaimon.stats.stats_file_handler import StatsFileHandler
+
+        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        if latest_snapshot is None:
+            raise RuntimeError("Cannot commit statistics: table has no snapshots yet.")
+
+        stats_file_handler = StatsFileHandler(self.table.file_io, self.table.table_path)
+        stats_file_name = stats_file_handler.write_stats(stats)
+
+        new_snapshot_id = latest_snapshot.id + 1
+        snapshot_data = Snapshot(
+            version=3,
+            id=new_snapshot_id,
+            schema_id=self.table.table_schema.id,
+            base_manifest_list=latest_snapshot.base_manifest_list,
+            delta_manifest_list=latest_snapshot.delta_manifest_list,
+            total_record_count=latest_snapshot.total_record_count,
+            delta_record_count=0,
+            commit_user=self.commit_user,
+            commit_identifier=commit_identifier,
+            commit_kind="ANALYZE",
+            time_millis=int(time.time() * 1000),
+            index_manifest=latest_snapshot.index_manifest,
+            statistics=stats_file_name,
+            watermark=latest_snapshot.watermark,
+            next_row_id=latest_snapshot.next_row_id,
+        )
+
+        with self.snapshot_commit:
+            success = self.snapshot_commit.commit(snapshot_data, [])
+            if not success:
+                raise RuntimeError(
+                    f"Failed to commit ANALYZE snapshot #{new_snapshot_id}. "
+                    "Concurrent commit conflict detected."
+                )
+
+        logger.info(
+            "Successfully committed ANALYZE snapshot #%d with statistics file '%s'.",
+            new_snapshot_id, stats_file_name,
+        )
+
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False):
 
@@ -382,6 +429,12 @@ class FileStoreCommit:
             if latest_snapshot and commit_kind == "APPEND":
                 index_manifest = latest_snapshot.index_manifest
 
+            # Inherit statistics from previous snapshot if schema unchanged
+            inherited_statistics = None
+            if latest_snapshot and latest_snapshot.statistics:
+                if latest_snapshot.schema_id == self.table.table_schema.id:
+                    inherited_statistics = latest_snapshot.statistics
+
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
@@ -396,6 +449,7 @@ class FileStoreCommit:
                 time_millis=int(time.time() * 1000),
                 next_row_id=next_row_id,
                 index_manifest=index_manifest,
+                statistics=inherited_statistics,
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
