@@ -15,8 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import pyarrow as pa
 from pathlib import Path
+from typing import Optional
+
+import pyarrow as pa
 
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 from pypaimon.table.row.generic_row import GenericRow, RowKind
@@ -58,9 +60,11 @@ class BlobFileWriter:
         self.writer.add_element(row)
         self.row_count += 1
 
-    def _to_blob(self, col_data) -> Blob:
+    def _to_blob(self, col_data) -> Optional[Blob]:
         if hasattr(col_data, 'as_py'):
             col_data = col_data.as_py()
+        if col_data is None:
+            return None
         if isinstance(col_data, str):
             col_data = col_data.encode('utf-8')
         if isinstance(col_data, bytearray):
