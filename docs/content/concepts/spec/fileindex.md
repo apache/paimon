@@ -346,6 +346,66 @@ Bit-slice index bitmap format (V1)
 
 RangeBitmap only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, TimeType, LocalZonedTimestampType, TimestampType, CharType, VarCharType, StringType, BooleanType, DoubleType, FloatType.
 
+## Index: RTree
+
+RTree file index is a spatial index, used to accelerate point query and range query on multi-dimensional data.
+
+Advantage:
+1. Efficient for multi-dimensional spatial queries.
+2. Supports both point lookup and bounding box range query.
+
+Shortcoming:
+1. Only supports ARRAY<DOUBLE> data type.
+2. The index structure may consume more space for high-dimensional data.
+
+Options:
+* `file-index.rtree.columns`: specify the columns that need rtree index.
+* `file-index.rtree.<column_name>.dimensions`: to config the dimensions of the spatial data, default value is 2.
+* `file-index.rtree.<column_name>.max-entries`: to config the maximum entries per node, default value is 32.
+
+Table supports using rtree file index to optimize the `EQUALS` predicate. The literal can be either a point (double array) or a bounding box for range query.
+
+<pre>
+RTree file index format (V1)
++-------------------------------------------------+-----------------
+| dimensions (4 bytes int)                        |
++-------------------------------------------------+
+| max entries (4 bytes int)                       |
++-------------------------------------------------+
+| tree size (4 bytes int)                         |       HEAD
++-------------------------------------------------+-----------------
+| node: is leaf (1 byte boolean)                  |
++-------------------------------------------------+
+| node: entry count (4 bytes int)                 |
++-------------------------------------------------+
+| node: bounding box min[0] (8 bytes double)      |
++-------------------------------------------------+
+| ...                                             |
++-------------------------------------------------+
+| node: bounding box min[dimensions-1]            |
++-------------------------------------------------+
+| node: bounding box max[0] (8 bytes double)      |
++-------------------------------------------------+
+| ...                                             |
++-------------------------------------------------+
+| node: bounding box max[dimensions-1]            |
++-------------------------------------------------+-----------------
+| if leaf: row id 1 (4 bytes int)                 |
++-------------------------------------------------+
+| if leaf: row id 2 (4 bytes int)                 |       BODY
++-------------------------------------------------+
+| ...                                             |
++-------------------------------------------------+-----------------
+| if not leaf: child node 1                       |
++-------------------------------------------------+
+| if not leaf: child node 2                       |
++-------------------------------------------------+
+| ...                                             |
++-------------------------------------------------+-----------------
+</pre>
+
+RTree only support the following data type: ArrayType of DoubleType.
+
 ## Index: Bit-Slice Index Bitmap
 
 {{< hint warning >}}
