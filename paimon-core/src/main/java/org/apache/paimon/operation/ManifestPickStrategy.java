@@ -56,13 +56,13 @@ public class ManifestPickStrategy {
      * @param levelRuns runs with assigned levels (level 0~4)
      * @return list of picked runs to compact
      */
-    public List<ManifestSortedRun> pick(List<ManifestSortedRun> levelRuns) {
+    public List<ManifestAdjacentSortedRun> pick(List<ManifestAdjacentSortedRun> levelRuns) {
         if (levelRuns.isEmpty() || levelRuns.size() <= MAX_LEVEL) {
             return new ArrayList<>();
         }
 
         // Try SizeAmp first
-        List<ManifestSortedRun> sizeAmpResult = pickForSizeAmp(levelRuns);
+        List<ManifestAdjacentSortedRun> sizeAmpResult = pickForSizeAmp(levelRuns);
         if (sizeAmpResult != null) {
             return sizeAmpResult;
         }
@@ -78,13 +78,14 @@ public class ManifestPickStrategy {
      * <p>Formula (consistent with {@code UniversalCompaction#pickForSizeAmp}): {@code
      * lowerLevelTotalSize * 100 > sizeAmpThreshold * highestRunSize}
      */
-    private List<ManifestSortedRun> pickForSizeAmp(List<ManifestSortedRun> levelRuns) {
+    private List<ManifestAdjacentSortedRun> pickForSizeAmp(
+            List<ManifestAdjacentSortedRun> levelRuns) {
         if (levelRuns.isEmpty()) {
             return null;
         }
 
         // The last run has the highest level (set by buildLevelSortedRuns)
-        ManifestSortedRun highestRun = levelRuns.get(levelRuns.size() - 1);
+        ManifestAdjacentSortedRun highestRun = levelRuns.get(levelRuns.size() - 1);
         int maxLevel = highestRun.level();
 
         if (maxLevel <= 0) {
@@ -92,7 +93,7 @@ public class ManifestPickStrategy {
         }
 
         long lowerLevelTotalSize = 0;
-        for (ManifestSortedRun run : levelRuns) {
+        for (ManifestAdjacentSortedRun run : levelRuns) {
             if (run.level() < maxLevel) {
                 lowerLevelTotalSize += run.totalSize();
             }
@@ -117,9 +118,10 @@ public class ManifestPickStrategy {
      * <p>Formula (consistent with {@code UniversalCompaction#pickForSizeRatio}): {@code pickedSize
      * * (100.0 + sizeRatioThreshold) / 100.0 >= nextRunSize}
      */
-    private List<ManifestSortedRun> pickForSizeRatioAndForce(List<ManifestSortedRun> levelRuns) {
+    private List<ManifestAdjacentSortedRun> pickForSizeRatioAndForce(
+            List<ManifestAdjacentSortedRun> levelRuns) {
         // levelRuns is already sorted by level ascending (set by buildLevelSortedRuns)
-        List<ManifestSortedRun> picked = new ArrayList<>();
+        List<ManifestAdjacentSortedRun> picked = new ArrayList<>();
 
         // Always pick the first run to guarantee a non-empty result.
         picked.add(levelRuns.get(0));
@@ -127,7 +129,7 @@ public class ManifestPickStrategy {
 
         // From the second run onward: forced pick level0/level1, then SizeRatio for the rest.
         for (int i = 1; i < levelRuns.size(); i++) {
-            ManifestSortedRun run = levelRuns.get(i);
+            ManifestAdjacentSortedRun run = levelRuns.get(i);
             if (run.level() <= 1) {
                 picked.add(run);
                 pickedSize += run.totalSize();
