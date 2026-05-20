@@ -23,6 +23,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 
 import java.io.Serializable;
+import java.util.List;
 
 /** Builder to build vector search. */
 public interface VectorSearchBuilder extends Serializable {
@@ -42,6 +43,9 @@ public interface VectorSearchBuilder extends Serializable {
     /** The vector to search. */
     VectorSearchBuilder withVector(float[] vector);
 
+    /** The vectors to batch search. */
+    VectorSearchBuilder withVectors(float[][] vectors);
+
     /** Create vector scan to scan index files. */
     VectorScan newVectorScan();
 
@@ -51,5 +55,10 @@ public interface VectorSearchBuilder extends Serializable {
     /** Execute vector index search in local. */
     default GlobalIndexResult executeLocal() {
         return newVectorRead().read(newVectorScan().scan());
+    }
+
+    /** Execute batch vector index search in local. */
+    default List<GlobalIndexResult> executeBatchLocal() {
+        return newVectorRead().readBatch(newVectorScan().scan());
     }
 }

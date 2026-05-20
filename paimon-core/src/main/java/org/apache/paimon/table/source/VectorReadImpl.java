@@ -59,25 +59,39 @@ public class VectorReadImpl implements VectorRead {
     private final Predicate filter;
     private final int limit;
     private final DataField vectorColumn;
-    private final float[] vector;
+    private final float[][] vectors;
 
     public VectorReadImpl(
             FileStoreTable table,
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[] vector) {
+            float[][] vectors) {
         this.table = table;
         this.filter = filter;
         this.limit = limit;
         this.vectorColumn = vectorColumn;
-        this.vector = vector;
+        this.vectors = vectors;
     }
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
+        if (vectors.length > 1) {
+            throw new IllegalStateException(
+                    "read() supports single vector only; use readBatch() for multiple vectors");
+        }
+        return readBatch(splits).get(0);
+    }
+
+    @Override
+    public List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+        int n = vectors.length;
         if (splits.isEmpty()) {
-            return GlobalIndexResult.createEmpty();
+            List<GlobalIndexResult> empty = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                empty.add(GlobalIndexResult.createEmpty());
+            }
+            return empty;
         }
 
         RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
@@ -88,11 +102,12 @@ public class VectorReadImpl implements VectorRead {
                 GlobalIndexerFactoryUtils.load(indexType)
                         .create(vectorColumn, table.coreOptions().toConfiguration());
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-        Iterator<Optional<ScoredGlobalIndexResult>> resultIterators =
+
+        Iterator<List<Optional<ScoredGlobalIndexResult>>> batchIterator =
                 randomlyExecuteSequentialReturn(
                         split ->
                                 singletonList(
-                                        eval(
+                                        evalBatch(
                                                 globalIndexer,
                                                 indexPathFactory,
                                                 split.rowRangeStart(),
@@ -102,15 +117,25 @@ public class VectorReadImpl implements VectorRead {
                         splits,
                         threadNum);
 
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
-        while (resultIterators.hasNext()) {
-            Optional<ScoredGlobalIndexResult> next = resultIterators.next();
-            if (next.isPresent()) {
-                result = result.or(next.get());
+        ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            merged[i] = ScoredGlobalIndexResult.createEmpty();
+        }
+
+        while (batchIterator.hasNext()) {
+            List<Optional<ScoredGlobalIndexResult>> splitResults = batchIterator.next();
+            for (int i = 0; i < n; i++) {
+                if (splitResults.get(i).isPresent()) {
+                    merged[i] = merged[i].or(splitResults.get(i).get());
+                }
             }
         }
 
-        return result.topK(limit);
+        List<GlobalIndexResult> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(merged[i].topK(limit));
+        }
+        return results;
     }
 
     private Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
@@ -132,13 +157,32 @@ public class VectorReadImpl implements VectorRead {
         }
     }
 
-    private Optional<ScoredGlobalIndexResult> eval(
+    private List<Optional<ScoredGlobalIndexResult>> evalBatch(
             GlobalIndexer globalIndexer,
             IndexPathFactory indexPathFactory,
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
             @Nullable RoaringNavigableMap64 includeRowIds) {
+        List<GlobalIndexIOMeta> indexIOMetaList =
+                buildIOMetaList(indexPathFactory, vectorIndexFiles);
+        @SuppressWarnings("resource")
+        FileIO fileIO = table.fileIO();
+        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
+            VectorSearch vectorSearch =
+                    new VectorSearch(vectors, limit, vectorColumn.name())
+                            .withIncludeRowIds(includeRowIds);
+            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                    .visitBatchVectorSearch(vectorSearch);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private List<GlobalIndexIOMeta> buildIOMetaList(
+            IndexPathFactory indexPathFactory, List<IndexFileMeta> vectorIndexFiles) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : vectorIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -148,18 +192,6 @@ public class VectorReadImpl implements VectorRead {
                             indexFile.fileSize(),
                             meta.indexMeta()));
         }
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
-            VectorSearch vectorSearch =
-                    new VectorSearch(vector, limit, vectorColumn.name())
-                            .withIncludeRowIds(includeRowIds);
-            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                    .visitVectorSearch(vectorSearch);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return indexIOMetaList;
     }
 }

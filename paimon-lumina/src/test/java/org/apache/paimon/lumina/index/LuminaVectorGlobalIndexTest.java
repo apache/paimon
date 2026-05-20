@@ -25,6 +25,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
@@ -49,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 
@@ -509,6 +511,157 @@ public class LuminaVectorGlobalIndexTest {
                                         fileWriter, intVecType, indexOptions))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("float vector");
+    }
+
+    @Test
+    public void testBatchVectorSearch() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.98f, 0.05f},
+                    new float[] {0.0f, 1.0f},
+                    new float[] {0.05f, 0.98f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        Arrays.stream(vectors).forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            float[][] queryVectors =
+                    new float[][] {
+                        new float[] {1.0f, 0.0f},
+                        new float[] {0.0f, 1.0f},
+                        new float[] {0.7f, 0.7f}
+                    };
+            VectorSearch batchSearch = new VectorSearch(queryVectors, 2, fieldName);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch);
+
+            assertThat(batchResults).hasSize(3);
+
+            // Query 0: (1,0) -> nearest are row 0 (1,0) and row 3 (0.98,0.05)
+            assertThat(batchResults.get(0)).isPresent();
+            assertThat(batchResults.get(0).get().results().contains(0L)).isTrue();
+            assertThat(batchResults.get(0).get().results().contains(3L)).isTrue();
+
+            // Query 1: (0,1) -> nearest are row 4 (0,1) and row 5 (0.05,0.98)
+            assertThat(batchResults.get(1)).isPresent();
+            assertThat(batchResults.get(1).get().results().contains(4L)).isTrue();
+            assertThat(batchResults.get(1).get().results().contains(5L)).isTrue();
+
+            // Query 2: (0.7,0.7) -> nearest are row 2 (0.1,0.95) and row 1 (0.95,0.1)
+            assertThat(batchResults.get(2)).isPresent();
+            assertThat(batchResults.get(2).get().results().getLongCardinality()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    public void testBatchVectorSearchWithFilter() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.0f, 1.0f},
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        Arrays.stream(vectors).forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            float[][] queryVectors =
+                    new float[][] {new float[] {1.0f, 0.0f}, new float[] {0.0f, 1.0f}};
+
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            filter.add(1L);
+            filter.add(2L);
+
+            VectorSearch batchSearch =
+                    new VectorSearch(queryVectors, 2, fieldName).withIncludeRowIds(filter);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch);
+
+            assertThat(batchResults).hasSize(2);
+
+            // Query 0: (1,0) filtered to {1,2} -> row 1 (0.95,0.1) is closer
+            assertThat(batchResults.get(0)).isPresent();
+            assertThat(batchResults.get(0).get().results().contains(1L)).isTrue();
+
+            // Query 1: (0,1) filtered to {1,2} -> row 2 (0.1,0.95) is closer
+            assertThat(batchResults.get(1)).isPresent();
+            assertThat(batchResults.get(1).get().results().contains(2L)).isTrue();
+        }
+    }
+
+    @Test
+    public void testBatchConsistentWithSingle() throws IOException {
+        int dimension = 32;
+        int numVectors = 100;
+        Options options = createDefaultOptions(dimension);
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        testVectors.forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            float[][] queryVectors =
+                    new float[][] {testVectors.get(10), testVectors.get(50), testVectors.get(90)};
+            int limit = 5;
+
+            // Batch search
+            VectorSearch batchSearch = new VectorSearch(queryVectors, limit, fieldName);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch);
+
+            // Single searches
+            for (int i = 0; i < queryVectors.length; i++) {
+                VectorSearch singleSearch = new VectorSearch(queryVectors[i], limit, fieldName);
+                Optional<ScoredGlobalIndexResult> singleResult =
+                        reader.visitVectorSearch(singleSearch);
+
+                assertThat(batchResults.get(i).isPresent()).isEqualTo(singleResult.isPresent());
+                if (singleResult.isPresent()) {
+                    assertThat(batchResults.get(i).get().results().getIntCardinality())
+                            .isEqualTo(singleResult.get().results().getIntCardinality());
+                    for (long rowId : singleResult.get().results()) {
+                        assertThat(batchResults.get(i).get().results().contains(rowId)).isTrue();
+                    }
+                }
+            }
+        }
     }
 
     private Options createDefaultOptions(int dimension) {

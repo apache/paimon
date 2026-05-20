@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -47,6 +48,15 @@ public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexR
 
     default Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         throw new UnsupportedOperationException();
+    }
+
+    default List<Optional<ScoredGlobalIndexResult>> visitBatchVectorSearch(
+            VectorSearch vectorSearch) {
+        List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>();
+        for (int i = 0; i < vectorSearch.vectorCount(); i++) {
+            results.add(visitVectorSearch(vectorSearch.forIndex(i)));
+        }
+        return results;
     }
 
     default Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {

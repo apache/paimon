@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -121,6 +122,18 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         return wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to))
                 .map(r -> r.offset(offset));
+    }
+
+    @Override
+    public List<Optional<ScoredGlobalIndexResult>> visitBatchVectorSearch(
+            VectorSearch vectorSearch) {
+        List<Optional<ScoredGlobalIndexResult>> results =
+                wrapped.visitBatchVectorSearch(vectorSearch.offsetRange(this.offset, this.to));
+        List<Optional<ScoredGlobalIndexResult>> offsetResults = new ArrayList<>(results.size());
+        for (Optional<ScoredGlobalIndexResult> result : results) {
+            offsetResults.add(result.map(r -> r.offset(offset)));
+        }
+        return offsetResults;
     }
 
     @Override
