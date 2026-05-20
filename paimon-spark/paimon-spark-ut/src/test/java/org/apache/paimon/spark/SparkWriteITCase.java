@@ -102,12 +102,12 @@ public class SparkWriteITCase {
 
         // test partial write
         spark.sql("INSERT INTO T (a) VALUES (1), (2)").collectAsList();
-        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T ORDER BY a").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value]]");
 
         // test write with DEFAULT
         spark.sql("INSERT INTO T VALUES (3, DEFAULT, DEFAULT)").collectAsList();
-        rows = spark.sql("SELECT * FROM T").collectAsList();
+        rows = spark.sql("SELECT * FROM T ORDER BY a").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value]]");
 
         // test add column with DEFAULT not support
@@ -118,14 +118,14 @@ public class SparkWriteITCase {
         // test alter type to default column
         spark.sql("ALTER TABLE T ALTER COLUMN b TYPE STRING").collectAsList();
         spark.sql("INSERT INTO T (a) VALUES (4)").collectAsList();
-        rows = spark.sql("SELECT * FROM T").collectAsList();
+        rows = spark.sql("SELECT * FROM T ORDER BY a").collectAsList();
         assertThat(rows.toString())
                 .isEqualTo("[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value]]");
 
         // test alter default column
         spark.sql("ALTER TABLE T ALTER COLUMN b SET DEFAULT '3'");
         spark.sql("INSERT INTO T (a) VALUES (5)").collectAsList();
-        rows = spark.sql("SELECT * FROM T").collectAsList();
+        rows = spark.sql("SELECT * FROM T ORDER BY a").collectAsList();
         assertThat(rows.toString())
                 .isEqualTo(
                         "[[1,2,my_value], [2,2,my_value], [3,2,my_value], [4,2,my_value], [5,3,my_value]]");
