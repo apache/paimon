@@ -259,6 +259,20 @@ class SchemaManager:
         except Exception as e:
             raise RuntimeError(f"Failed to load schema from path: {self.schema_path}") from e
 
+    def list_all(self) -> List['TableSchema']:
+        """Return every committed schema in ascending ID order.
+
+        Missing IDs (deleted on disk after expiry, for instance) are
+        skipped.
+        """
+        ids = sorted(self._list_versioned_files())
+        schemas: List['TableSchema'] = []
+        for schema_id in ids:
+            schema = self.get_schema(schema_id)
+            if schema is not None:
+                schemas.append(schema)
+        return schemas
+
     def create_table(self, schema: Schema) -> TableSchema:
         while True:
             latest = self.latest()

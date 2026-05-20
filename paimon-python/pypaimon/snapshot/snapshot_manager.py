@@ -224,6 +224,39 @@ class SnapshotManager:
 
         return final_snapshot
 
+    def list_snapshots(self) -> List[Snapshot]:
+        """Return every persisted snapshot in ascending ID order.
+
+        Scans ``snapshot_dir`` for ``snapshot-N`` files and decodes
+        each. IDs whose file is missing (because a previous expire
+        cleaned them) are skipped silently, so the result reflects
+        only snapshots that can still be inspected.
+        """
+        import re
+
+        if not self.file_io.exists(self.snapshot_dir):
+            return []
+
+        file_infos = self.file_io.list_status(self.snapshot_dir)
+        if file_infos is None:
+            return []
+
+        pattern = re.compile(r'^snapshot-(\d+)$')
+        ids = []
+        for file_info in file_infos:
+            name = file_info.path.split('/')[-1]
+            match = pattern.match(name)
+            if match:
+                ids.append(int(match.group(1)))
+        ids.sort()
+
+        snapshots: List[Snapshot] = []
+        for snapshot_id in ids:
+            snapshot = self.get_snapshot_by_id(snapshot_id)
+            if snapshot is not None:
+                snapshots.append(snapshot)
+        return snapshots
+
     def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
         """
         Get a snapshot by its ID.
