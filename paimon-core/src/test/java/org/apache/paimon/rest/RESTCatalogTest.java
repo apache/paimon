@@ -375,7 +375,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.fastForward(identifier, "test_branch"));
         assertThrows(
-                Catalog.TableNoPermissionException.class,
+                UnsupportedOperationException.class,
                 () -> restCatalog.mergeBranch(identifier, "test_branch", "main"));
         assertThrows(ForbiddenException.class, () -> restCatalog.api().loadTableToken(identifier));
         assertThrows(
@@ -2138,34 +2138,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    public void testMergeBranch() throws Exception {
+    public void testMergeBranchUnsupported() throws Exception {
         Identifier tableIdentifier = Identifier.create("merge_db", "merge_table");
         Map<String, String> options = Maps.newHashMap();
-        options.put("branch-merge.enabled", "true");
         createTable(tableIdentifier, options, Collections.emptyList());
-        FileStoreTable mainTable = (FileStoreTable) catalog.getTable(tableIdentifier);
-        batchWrite(mainTable, Lists.newArrayList(1, 2, 3));
 
-        mainTable = (FileStoreTable) catalog.getTable(tableIdentifier);
-        mainTable.createTag("tag1", 1);
-        restCatalog.createBranch(tableIdentifier, "branch1", "tag1");
-
-        Identifier branchIdentifier = new Identifier("merge_db", "merge_table", "branch1");
-        FileStoreTable branchTable = (FileStoreTable) catalog.getTable(branchIdentifier);
-        batchWrite(branchTable, Lists.newArrayList(7, 8, 9));
-
-        // Write more data to main (this data should not be in branch)
-        mainTable = (FileStoreTable) catalog.getTable(tableIdentifier);
-        batchWrite(mainTable, Lists.newArrayList(4, 5, 6));
-
-        restCatalog.mergeBranch(tableIdentifier, "branch1", "main");
-
-        mainTable = (FileStoreTable) catalog.getTable(tableIdentifier);
-        List<String> result = batchRead(mainTable);
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        "+I[1]", "+I[2]", "+I[3]", "+I[4]", "+I[5]", "+I[6]", "+I[7]", "+I[8]",
-                        "+I[9]");
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> restCatalog.mergeBranch(tableIdentifier, "branch1", "main"));
     }
 
     @Test
@@ -2222,7 +2202,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchNotExistException.class,
                 () -> restCatalog.fastForward(identifier, "no_exist_branch"));
         assertThrows(
-                Catalog.BranchNotExistException.class,
+                UnsupportedOperationException.class,
                 () -> restCatalog.mergeBranch(identifier, "no_exist_branch", "main"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
     }

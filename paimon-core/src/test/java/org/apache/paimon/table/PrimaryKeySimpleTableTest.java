@@ -2688,6 +2688,6 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         table.createBranch(BRANCH_NAME, "tag1");
 
         assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
-                .satisfies(anyCauseMatches(IllegalArgumentException.class, "branch-merge.enabled"));
+                .satisfies(anyCauseMatches(IllegalArgumentException.class, "append-only tables"));
     }
 }

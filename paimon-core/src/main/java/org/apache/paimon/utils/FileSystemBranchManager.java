@@ -224,7 +224,7 @@ public class FileSystemBranchManager implements BranchManager {
     public void mergeBranch(String sourceBranch, String targetBranch) {
         BranchManager.mergeValidate(sourceBranch, targetBranch);
         validateMergeBranches(sourceBranch, targetBranch);
-        validateBranchMergeEnabled(sourceBranch, targetBranch);
+        validateAppendOnlyHistory(sourceBranch, targetBranch);
         validateAppendOnly(sourceBranch, targetBranch);
         validateNoDataEvolution(sourceBranch, targetBranch);
         validateRowTrackingConsistent(sourceBranch, targetBranch);
@@ -318,16 +318,46 @@ public class FileSystemBranchManager implements BranchManager {
                 targetBranch);
     }
 
-    private void validateBranchMergeEnabled(String sourceBranch, String targetBranch) {
-        for (String branch : new String[] {sourceBranch, targetBranch}) {
-            SchemaManager sm = new SchemaManager(fileIO, tablePath, branch);
-            TableSchema schema = sm.latest().get();
-            CoreOptions opts = new CoreOptions(schema.options());
-            checkArgument(
-                    opts.branchMergeEnabled(),
-                    "Branch merge requires '%s' to be true (branch '%s').",
-                    CoreOptions.BRANCH_MERGE_ENABLED.key(),
-                    branch);
+    // Branch merge is implemented as a conservative file-level merge. Without persisted branch
+    // lineage metadata, we cannot reliably infer a fork point after snapshots expire. To preserve
+    // correctness, both branches must retain complete append-only history from the first snapshot.
+    // This restriction can be relaxed in the future if branch fork metadata is introduced.
+    private void validateAppendOnlyHistory(String sourceBranch, String targetBranch) {
+        validateCompleteAppendOnly(snapshotManager.copyWithBranch(sourceBranch), sourceBranch);
+        validateCompleteAppendOnly(snapshotManager.copyWithBranch(targetBranch), targetBranch);
+    }
+
+    private void validateCompleteAppendOnly(SnapshotManager sm, String branch) {
+        Long earliest = sm.earliestSnapshotId();
+        Long latest = sm.latestSnapshotId();
+        if (earliest == null || latest == null) {
+            return;
+        }
+        if (earliest != Snapshot.FIRST_SNAPSHOT_ID) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot merge: branch '%s' does not start at snapshot %d "
+                                    + "(earliest is %d). "
+                                    + "Branch merge requires complete append-only snapshot history.",
+                            branch, Snapshot.FIRST_SNAPSHOT_ID, earliest));
+        }
+        for (long id = Snapshot.FIRST_SNAPSHOT_ID; id <= latest; id++) {
+            if (!sm.snapshotExists(id)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot merge: snapshot %d is missing on branch '%s'. "
+                                        + "Branch merge requires complete append-only snapshot history.",
+                                id, branch));
+            }
+            Snapshot snapshot = sm.snapshot(id);
+            Snapshot.CommitKind kind = snapshot.commitKind();
+            if (kind != Snapshot.CommitKind.APPEND && kind != Snapshot.CommitKind.ANALYZE) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot merge: snapshot %d on branch '%s' has commit kind '%s'. "
+                                        + "Branch merge requires complete append-only snapshot history.",
+                                id, branch, kind));
+            }
         }
     }
 

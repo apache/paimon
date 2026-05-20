@@ -786,13 +786,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void mergeBranch(Identifier identifier, String sourceBranch, String targetBranch)
             throws BranchNotExistException {
-        try {
-            api.mergeBranch(identifier, sourceBranch, targetBranch);
-        } catch (NoSuchResourceException e) {
-            throw new BranchNotExistException(identifier, e.resourceName(), e);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+        throw new UnsupportedOperationException("Branch merge is not supported via REST catalog.");
     }
 
     @Override

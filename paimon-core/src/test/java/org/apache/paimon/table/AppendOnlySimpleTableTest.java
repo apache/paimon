@@ -1708,16 +1708,12 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     protected FileStoreTable createBranchMergeTable() throws Exception {
-        return createFileStoreTable(conf -> conf.set(CoreOptions.BRANCH_MERGE_ENABLED, true));
+        return createFileStoreTable();
     }
 
     protected FileStoreTable createBranchMergeTable(Consumer<Options> extraConfigure)
             throws Exception {
-        return createFileStoreTable(
-                conf -> {
-                    conf.set(CoreOptions.BRANCH_MERGE_ENABLED, true);
-                    extraConfigure.accept(conf);
-                });
+        return createFileStoreTable(extraConfigure);
     }
 
     @Test
@@ -1731,8 +1727,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        // Create branch
-        table.createBranch(BRANCH_NAME);
+        // Create branch from tag
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // Write data to branch
@@ -1775,8 +1772,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        // Create branch
-        table.createBranch(BRANCH_NAME);
+        // Create branch from tag
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // First write to branch
@@ -1856,8 +1854,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        // Create branch
-        table.createBranch(BRANCH_NAME);
+        // Create branch from tag
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // Write to branch
@@ -1999,7 +1998,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
@@ -2043,7 +2043,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // First write to branch + merge
@@ -2089,7 +2090,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // Write 2 rows to branch
@@ -2183,7 +2185,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
@@ -2230,7 +2233,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // Write to branch
@@ -2336,8 +2340,9 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        // Create branch
-        table.createBranch(BRANCH_NAME);
+        // Create branch from tag
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         // Write to branch with same partition pt=0
@@ -2384,7 +2389,6 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.BUCKET, 2);
-                            conf.set(CoreOptions.BRANCH_MERGE_ENABLED, true);
                         });
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -2394,7 +2398,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
         FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
@@ -2485,7 +2490,50 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testMergeBranchWithoutBranchMergeEnabled() throws Exception {
+    public void testMergeBranchAfterSnapshotExpiration() throws Exception {
+        FileStoreTable table =
+                createBranchMergeTable(
+                        conf -> {
+                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
+                        });
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        for (int i = 2; i < 5; i++) {
+            try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                    StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+                write.write(rowData(i, i * 10, (long) i * 100));
+                commit.commit(i, write.prepareCommit(false, i + 1));
+            }
+        }
+
+        tableBranch.newExpireSnapshots().config(tableBranch.coreOptions().expireConfig()).expire();
+
+        // After expiration, baseline snapshot is gone — merge should fail
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch merge requires complete append-only snapshot history"));
+    }
+
+    @Test
+    public void testMergeBranchRejectsNonAppendHistory() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
@@ -2494,8 +2542,166 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
-        table.createBranch(BRANCH_NAME);
-        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        // Write data to branch
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(0, 10, 100L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        // Perform INSERT OVERWRITE on branch — creates an OVERWRITE snapshot
+        List<CommitMessage> commitMessages;
+        try (BatchTableWrite write =
+                tableBranch.newBatchWriteBuilder().withOverwrite().newWrite()) {
+            write.write(rowData(0, 20, 200L));
+            commitMessages = write.prepareCommit();
+        }
+        try (BatchTableCommit commit =
+                tableBranch.newBatchWriteBuilder().withOverwrite().newCommit()) {
+            commit.commit(commitMessages);
+        }
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch merge requires complete append-only snapshot history"));
+    }
+
+    @Test
+    public void testMergeBranchRejectsTargetOverwrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(0, 10, 100L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        // INSERT OVERWRITE on target (main)
+        List<CommitMessage> commitMessages;
+        try (BatchTableWrite write = table.newBatchWriteBuilder().withOverwrite().newWrite()) {
+            write.write(rowData(0, 20, 200L));
+            commitMessages = write.prepareCommit();
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().withOverwrite().newCommit()) {
+            commit.commit(commitMessages);
+        }
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch merge requires complete append-only snapshot history"));
+    }
+
+    @Test
+    public void testMergeBranchRejectsSourceOverwrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(0, 10, 100L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        // INSERT OVERWRITE on source (branch)
+        List<CommitMessage> commitMessages;
+        try (BatchTableWrite write =
+                tableBranch.newBatchWriteBuilder().withOverwrite().newWrite()) {
+            write.write(rowData(0, 20, 200L));
+            commitMessages = write.prepareCommit();
+        }
+        try (BatchTableCommit commit =
+                tableBranch.newBatchWriteBuilder().withOverwrite().newCommit()) {
+            commit.commit(commitMessages);
+        }
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch merge requires complete append-only snapshot history"));
+    }
+
+    @Test
+    public void testMergeBranchRejectsSourceExpiredSnapshots() throws Exception {
+        FileStoreTable table =
+                createBranchMergeTable(
+                        conf -> {
+                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
+                        });
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        for (int i = 1; i < 5; i++) {
+            try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                    StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+                write.write(rowData(i, i * 10, (long) i * 100));
+                commit.commit(i, write.prepareCommit(false, i + 1));
+            }
+        }
+
+        tableBranch.newExpireSnapshots().config(tableBranch.coreOptions().expireConfig()).expire();
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch merge requires complete append-only snapshot history"));
+    }
+
+    @Test
+    public void testMergeBranchRejectsTargetExpiredSnapshots() throws Exception {
+        FileStoreTable table =
+                createBranchMergeTable(
+                        conf -> {
+                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
+                        });
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
 
         try (StreamTableWrite write = tableBranch.newWrite(commitUser);
                 StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
@@ -2503,18 +2709,66 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(1, write.prepareCommit(false, 2));
         }
 
+        // Write multiple commits on main to allow expiration
+        for (int i = 2; i < 5; i++) {
+            try (StreamTableWrite write = table.newWrite(commitUser);
+                    StreamTableCommit commit = table.newCommit(commitUser)) {
+                write.write(rowData(i, i * 10, (long) i * 100));
+                commit.commit(i, write.prepareCommit(false, i + 1));
+            }
+        }
+
+        table.newExpireSnapshots().config(table.coreOptions().expireConfig()).expire();
+
         assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
-                .satisfies(anyCauseMatches(IllegalArgumentException.class, "branch-merge.enabled"));
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch merge requires complete append-only snapshot history"));
     }
 
     @Test
-    public void testMergeBranchAfterSnapshotExpiration() throws Exception {
-        FileStoreTable table =
-                createBranchMergeTable(
-                        conf -> {
-                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
-                            conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1);
-                        });
+    public void testMergeBranchFromTagSucceeds() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+        FileStoreTable tableBranch = table.switchToBranch(BRANCH_NAME);
+
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(2, 20, 200L));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        table.mergeBranch(BRANCH_NAME, "main");
+
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
+    public void testMergePlainBranchSucceedsWithCompleteHistory() throws Exception {
+        FileStoreTable table = createBranchMergeTable();
 
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser)) {
@@ -2531,15 +2785,11 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
             commit.commit(1, write.prepareCommit(false, 2));
         }
 
-        for (int i = 2; i < 5; i++) {
-            try (StreamTableWrite write = table.newWrite(commitUser);
-                    StreamTableCommit commit = table.newCommit(commitUser)) {
-                write.write(rowData(i, i * 10, (long) i * 100));
-                commit.commit(i, write.prepareCommit(false, i + 1));
-            }
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(2, 20, 200L));
+            commit.commit(2, write.prepareCommit(false, 2));
         }
-
-        table.newExpireSnapshots().config(table.coreOptions().expireConfig()).expire();
 
         table.mergeBranch(BRANCH_NAME, "main");
 
@@ -2551,25 +2801,6 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 .containsExactlyInAnyOrder(
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
-                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
-                        "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
-                        "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
-    }
-
-    @Test
-    public void testBranchMergeEnabledRejectsOverwrite() throws Exception {
-        FileStoreTable table = createBranchMergeTable();
-
-        List<CommitMessage> commitMessages;
-        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
-            write.write(rowData(1, 10, 100L));
-            commitMessages = write.prepareCommit();
-        }
-
-        List<CommitMessage> finalMessages = commitMessages;
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().withOverwrite().newCommit()) {
-            assertThatThrownBy(() -> commit.commit(finalMessages))
-                    .hasMessageContaining("branch-merge.enabled");
-        }
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 }
