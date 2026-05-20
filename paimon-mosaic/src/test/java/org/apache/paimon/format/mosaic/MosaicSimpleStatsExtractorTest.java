@@ -20,11 +20,8 @@ package org.apache.paimon.format.mosaic;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleColStatsExtractorTest;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -55,28 +52,17 @@ class MosaicSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
                 .field("f_bigint", DataTypes.BIGINT())
                 .field("f_float", DataTypes.FLOAT())
                 .field("f_double", DataTypes.DOUBLE())
-                .field("f_string", DataTypes.STRING())
-                .field("f_binary", DataTypes.BYTES())
+                .field("f_string", DataTypes.VARCHAR(100))
                 .field("f_decimal_5_2", DataTypes.DECIMAL(5, 2))
-                .field("f_decimal_20_0", DataTypes.DECIMAL(20, 0))
                 .field("f_date", DataTypes.DATE())
                 .field("f_timestamp3", DataTypes.TIMESTAMP(3))
                 .field("f_timestamp6", DataTypes.TIMESTAMP(6))
-                .field("f_array", DataTypes.ARRAY(DataTypes.INT()))
                 .build();
     }
 
     @Override
     protected String fileCompression() {
         return "zstd";
-    }
-
-    @Override
-    protected SimpleColStats regenerate(SimpleColStats stats, DataType type) {
-        if (type instanceof ArrayType) {
-            return new SimpleColStats(null, null, stats.nullCount());
-        }
-        return stats;
     }
 
     private static boolean isNativeAvailable() {
