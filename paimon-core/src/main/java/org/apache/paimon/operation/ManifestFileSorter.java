@@ -28,7 +28,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.operation.ManifestFileMerger.FullCompactionReadResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -729,15 +728,16 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Unified method to sort and rewrite a section.
+     * Sort and rewrite a section. Dispatches to full or minor compact path.
      *
-     * @param fullCompaction if true, merge ADD+DELETE entries together; if false, separate them
+     * <p>sortNewFiles is the same reference as newFilesForAbort, ensuring newly written files are
+     * cleaned up on exception by the caller's catch block.
      */
     private static void sortAndRewriteSection(
             List<ManifestFileMeta> section,
             ManifestFile manifestFile,
             RecordComparator fieldComparator,
-            Set<FileEntry.Identifier> deleteEntries,
+            Set<FileEntry.Identifier> deletedIdentifiers,
             Map<ManifestFileMeta, Boolean> defaultCompactionMap,
             RewriteOutput output,
             List<ManifestFileMeta> sortNewFiles,
@@ -750,28 +750,111 @@ public class ManifestFileSorter {
             return;
         }
 
-        // Read all entries in parallel (common for both paths).
-        Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
-                meta -> singletonList(readForSortRewrite(meta, manifestFile, deleteEntries));
+        if (fullCompaction) {
+            sortAndRewriteFull(
+                    section,
+                    manifestFile,
+                    fieldComparator,
+                    deletedIdentifiers,
+                    output,
+                    sortNewFiles,
+                    manifestReadParallelism);
+        } else {
+            sortAndRewriteMinor(
+                    section,
+                    manifestFile,
+                    fieldComparator,
+                    output,
+                    sortNewFiles,
+                    manifestReadParallelism);
+        }
+    }
 
-        List<ManifestEntry> addEntries = new ArrayList<>();
-        List<ManifestEntry> deleteEntriesToRewrite = new ArrayList<>();
-        for (FullCompactionReadResult readResult :
-                sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
-            if (fullCompaction) {
-                addEntries.addAll(readResult.entries);
-            } else {
-                for (ManifestEntry entry : readResult.entries) {
-                    if (entry.kind() == FileKind.ADD) {
-                        addEntries.add(entry);
-                    } else {
-                        deleteEntriesToRewrite.add(entry);
+    /**
+     * Full compaction path: read all surviving entries (ADD merged with DELETE), sort them
+     * together, and write to output as a single sorted stream.
+     */
+    private static void sortAndRewriteFull(
+            List<ManifestFileMeta> section,
+            ManifestFile manifestFile,
+            RecordComparator fieldComparator,
+            Set<FileEntry.Identifier> deletedIdentifiers,
+            RewriteOutput output,
+            List<ManifestFileMeta> sortNewFiles,
+            @Nullable Integer manifestReadParallelism)
+            throws Exception {
+        // Read surviving ADD entries: filter out entries cancelled by deletedIdentifiers.
+        Function<ManifestFileMeta, List<ManifestEntry>> reader =
+                meta -> {
+                    List<ManifestEntry> batch = new ArrayList<>();
+                    for (ManifestEntry entry :
+                            manifestFile.read(
+                                    meta.fileName(),
+                                    meta.fileSize(),
+                                    FileEntry.addFilter(),
+                                    Filter.alwaysTrue())) {
+                        if (!deletedIdentifiers.contains(entry.identifier())) {
+                            batch.add(entry);
+                        }
                     }
-                }
-            }
+                    return batch;
+                };
+
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (ManifestEntry entry :
+                sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
+            entries.add(entry);
         }
 
-        // Write ADD (or all) entries
+        if (!entries.isEmpty()) {
+            List<ManifestFileMeta> sorted =
+                    sortAndWriteEntries(entries, manifestFile, fieldComparator);
+            output.addSortedFiles(sorted);
+            sortNewFiles.addAll(sorted);
+        }
+    }
+
+    /**
+     * Minor compaction path: read entries with ADD/DELETE classified in a single pass per file,
+     * then sort each group independently and write them to output.
+     *
+     * <p>Each file is read in parallel (via sequentialBatchedExecute). The reader classifies
+     * entries into ADD and DELETE within each file, returning a Pair. Results are merged in the
+     * main thread.
+     */
+    private static void sortAndRewriteMinor(
+            List<ManifestFileMeta> section,
+            ManifestFile manifestFile,
+            RecordComparator fieldComparator,
+            RewriteOutput output,
+            List<ManifestFileMeta> sortNewFiles,
+            @Nullable Integer manifestReadParallelism)
+            throws Exception {
+        // Read and classify ADD/DELETE in one pass per file.
+        // Returns Pair<addEntries, deleteEntries> packed as a singleton list of a wrapper.
+        Function<ManifestFileMeta, List<Pair<List<ManifestEntry>, List<ManifestEntry>>>> reader =
+                meta -> {
+                    List<ManifestEntry> addBatch = new ArrayList<>();
+                    List<ManifestEntry> deleteBatch = new ArrayList<>();
+                    for (ManifestEntry entry :
+                            manifestFile.read(meta.fileName(), meta.fileSize())) {
+                        if (entry.kind() == FileKind.ADD) {
+                            addBatch.add(entry);
+                        } else {
+                            deleteBatch.add(entry);
+                        }
+                    }
+                    return singletonList(Pair.of(addBatch, deleteBatch));
+                };
+
+        List<ManifestEntry> addEntries = new ArrayList<>();
+        List<ManifestEntry> deleteEntries = new ArrayList<>();
+        for (Pair<List<ManifestEntry>, List<ManifestEntry>> pair :
+                sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
+            addEntries.addAll(pair.getLeft());
+            deleteEntries.addAll(pair.getRight());
+        }
+
         if (!addEntries.isEmpty()) {
             List<ManifestFileMeta> sorted =
                     sortAndWriteEntries(addEntries, manifestFile, fieldComparator);
@@ -779,10 +862,9 @@ public class ManifestFileSorter {
             sortNewFiles.addAll(sorted);
         }
 
-        // Write DELETE entries (minor compact only)
-        if (!deleteEntriesToRewrite.isEmpty()) {
+        if (!deleteEntries.isEmpty()) {
             List<ManifestFileMeta> sorted =
-                    sortAndWriteEntries(deleteEntriesToRewrite, manifestFile, fieldComparator);
+                    sortAndWriteEntries(deleteEntries, manifestFile, fieldComparator);
             output.addDeleteFiles(sorted);
             sortNewFiles.addAll(sorted);
         }
@@ -845,38 +927,6 @@ public class ManifestFileSorter {
             return sortPartitionField;
         }
         return partitionType.getFieldNames().get(0);
-    }
-
-    /**
-     * Read a single manifest file for sort rewrite.
-     *
-     * <p>When {@code deletedIdentifiers} is non-empty (full compaction path), only surviving ADD
-     * entries (not cancelled by deletedIdentifiers) are kept, and DELETE entries are dropped
-     * because the full compaction has already resolved them.
-     *
-     * <p>When {@code deletedIdentifiers} is empty (non-full-compaction path), all entries (both ADD
-     * and DELETE) are preserved to avoid losing unresolved DELETE entries.
-     */
-    private static FullCompactionReadResult readForSortRewrite(
-            ManifestFileMeta meta,
-            ManifestFile manifestFile,
-            Set<FileEntry.Identifier> deletedIdentifiers) {
-        List<ManifestEntry> entries = new ArrayList<>();
-        if (deletedIdentifiers.isEmpty()) {
-            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
-        } else {
-            for (ManifestEntry entry :
-                    manifestFile.read(
-                            meta.fileName(),
-                            meta.fileSize(),
-                            FileEntry.addFilter(),
-                            Filter.alwaysTrue())) {
-                if (!deletedIdentifiers.contains(entry.identifier())) {
-                    entries.add(entry);
-                }
-            }
-        }
-        return new FullCompactionReadResult(meta, true, entries);
     }
 
     /** Strategy interface for writing compaction results. */
@@ -998,7 +1048,6 @@ public class ManifestFileSorter {
     /** Result of classifying manifest files into default-compaction and LSM groups. */
     private static class ClassifyResult {
         final Map<ManifestFileMeta, Boolean> defaultCompactionManifests;
-
         final List<ManifestFileMeta> lsmFiles;
         @Nullable final Set<FileEntry.Identifier> deleteEntries;
 
