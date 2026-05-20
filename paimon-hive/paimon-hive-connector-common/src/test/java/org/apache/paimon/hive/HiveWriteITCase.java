@@ -197,6 +197,45 @@ public class HiveWriteITCase extends HiveTestBase {
     }
 
     @Test
+    public void testInsertStaticPartition() throws Exception {
+        String tableName =
+                "static_partition_insert_" + UUID.randomUUID().toString().replace('-', '_');
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + folder.newFolder().toURI());
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + tableName + " (",
+                                "  id INT,",
+                                "  name STRING,",
+                                "  salary DOUBLE,",
+                                "  department STRING",
+                                ")",
+                                "PARTITIONED BY (dt STRING)",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key' = 'id,dt',",
+                                "  'bucket' = '-1',",
+                                "  'file.format' = 'parquet'",
+                                ")")));
+
+        hiveShell.execute(
+                "INSERT INTO TABLE "
+                        + tableName
+                        + " PARTITION (dt='2026') VALUES "
+                        + "(1, 'Alice', 5000.0, 'IT'),"
+                        + "(2, 'Bob', 6000.0, 'HR'),"
+                        + "(3, 'Charlie', 5500.0, 'IT')");
+
+        List<String> rows = hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY id");
+        assertThat(rows)
+                .containsExactly(
+                        "1\tAlice\t5000.0\tIT\t2026",
+                        "2\tBob\t6000.0\tHR\t2026",
+                        "3\tCharlie\t5500.0\tIT\t2026");
+    }
+
+    @Test
     public void testWriteOnlyWithChangeLogTableOption() throws Exception {
 
         String innerName = "hive_test_table_output";
