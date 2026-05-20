@@ -1351,6 +1351,94 @@ class CliTableTest(unittest.TestCase):
                 output = mock_stdout.getvalue()
                 self.assertIn('No partitions found', output)
 
+    def test_cli_table_drop_partition(self):
+        """Test drop-partition command drops a partition from a table."""
+        # Create a partitioned table for drop-partition test
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('id', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('test_db.drop_part_cli', schema, True)
+        table = self.catalog.get_table('test_db.drop_part_cli')
+
+        # Write data for two partitions
+        for dt_val in ['2024-01-01', '2024-01-02', '2024-01-03']:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [dt_val],
+                'id': [1],
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Drop one partition via CLI
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'drop-partition', 'test_db.drop_part_cli',
+                    '--partition', 'dt=2024-01-02']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Successfully dropped', output)
+
+        # Verify partition was dropped
+        result = self.catalog.list_partitions_paged('test_db.drop_part_cli')
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-01-01', '2024-01-03'])
+
+    def test_cli_table_drop_partition_multiple(self):
+        """Test drop-partition command with multiple --partition flags."""
+        # Create a partitioned table
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('id', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('test_db.drop_multi_cli', schema, True)
+        table = self.catalog.get_table('test_db.drop_multi_cli')
+
+        for dt_val in ['2024-01-01', '2024-01-02', '2024-01-03']:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [dt_val],
+                'id': [1],
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Drop multiple partitions via CLI
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'drop-partition', 'test_db.drop_multi_cli',
+                    '--partition', 'dt=2024-01-01',
+                    '--partition', 'dt=2024-01-03']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Successfully dropped', output)
+
+        # Verify only the middle partition remains
+        result = self.catalog.list_partitions_paged('test_db.drop_multi_cli')
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-02')
+
 
 if __name__ == '__main__':
     unittest.main()
