@@ -129,16 +129,13 @@ class GetOssFilesystemDispatchTest(unittest.TestCase):
 
 
 class GetFilesystemOssWiringTest(unittest.TestCase):
-    """_get_filesystem must feed the table's OSS storage path into the backend.
+    """_get_filesystem must forward the caller-supplied storage_location into
+    the OSS backend factory. Callers always have the table path in hand (from
+    _get_table_store) by the time they reach _get_filesystem, so threading it
+    through avoids a redundant REST round-trip inside the write critical
+    section."""
 
-    Only the network calls are stubbed, so the real _get_filesystem runs --
-    including its _table_cache_lock critical section. That makes this a
-    regression guard against the self-deadlock: _get_filesystem holds that
-    lock, so it must resolve the table path without calling a helper that
-    re-acquires the same (non-reentrant) lock.
-    """
-
-    def test_oss_branch_forwards_table_storage_path(self):
+    def test_oss_branch_forwards_caller_storage_location(self):
         pvfs = _make_pvfs()
         identifier = PVFSTableIdentifier(
             catalog="cat", endpoint="http://rest", database="db", table="tbl")
@@ -151,15 +148,9 @@ class GetFilesystemOssWiringTest(unittest.TestCase):
             }
             expires_at_millis = None
 
-        class FakeTable:
-            path = "oss://wired-bucket/warehouse/db/tbl"
-
         class FakeRestApi:
             def load_table_token(self, ident):
                 return FakeTokenResponse()
-
-            def get_table(self, ident):
-                return FakeTable()
 
         captured = {}
 
@@ -173,11 +164,10 @@ class GetFilesystemOssWiringTest(unittest.TestCase):
                                lambda self, ident: FakeRestApi()), \
              mock.patch.object(PaimonVirtualFileSystem, "_get_oss_filesystem",
                                fake_get_oss_filesystem):
-            fs = pvfs._get_filesystem(identifier, StorageType.OSS)
+            fs = pvfs._get_filesystem(
+                identifier, StorageType.OSS, "oss://wired-bucket/warehouse/db/tbl")
 
         self.assertEqual(fs, "FS")
-        # _get_filesystem must hand the backend the table's real OSS location,
-        # from which _extract_oss_bucket then derives the jindo root uri.
         self.assertEqual(captured["storage_location"], "oss://wired-bucket/warehouse/db/tbl")
         self.assertEqual(
             PaimonVirtualFileSystem._extract_oss_bucket(captured["storage_location"]),
@@ -213,10 +203,15 @@ class StripStorageProtocolTest(unittest.TestCase):
 class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
     """When _get_filesystem rebuilds a cached fs (token near expiry), the old
     filesystem must be released. For the jindo backend this is the only way
-    the underlying native JindoSDK connection gets reclaimed."""
+    the underlying native JindoSDK connection gets reclaimed. The close must
+    also happen outside _table_cache_lock -- JindoSDK close() can block on
+    native teardown, and holding the write lock through it would stall every
+    other OSS rebuild."""
+
+    STORAGE_LOCATION = "oss://b/wh/db/tbl"
 
     @staticmethod
-    def _stub_oss_rebuild(close_log):
+    def _stub_oss_rebuild():
         identifier = PVFSTableIdentifier(
             catalog="cat", endpoint="http://rest", database="db", table="tbl")
 
@@ -228,15 +223,9 @@ class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
             }
             expires_at_millis = None
 
-        class FakeTable:
-            path = "oss://b/wh/db/tbl"
-
         class FakeRestApi:
             def load_table_token(self, ident):
                 return FakeTokenResponse()
-
-            def get_table(self, ident):
-                return FakeTable()
 
         return identifier, mock.patch.object(
             PaimonVirtualFileSystem,
@@ -250,7 +239,7 @@ class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
 
     def test_old_filesystem_close_called_when_token_expires(self):
         pvfs = _make_pvfs()
-        identifier, patch_rest, patch_build = self._stub_oss_rebuild([])
+        identifier, patch_rest, patch_build = self._stub_oss_rebuild()
 
         close_log = []
 
@@ -263,7 +252,7 @@ class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
             token={}, expires_at_millis=0, file_system=StaleFs())
 
         with patch_rest, patch_build:
-            new_fs = pvfs._get_filesystem(identifier, StorageType.OSS)
+            new_fs = pvfs._get_filesystem(identifier, StorageType.OSS, self.STORAGE_LOCATION)
 
         self.assertEqual(new_fs, "NEW_FS")
         self.assertEqual(close_log, ["closed"],
@@ -271,13 +260,39 @@ class CloseStaleFilesystemOnRefreshTest(unittest.TestCase):
 
     def test_first_build_does_not_invoke_close(self):
         pvfs = _make_pvfs()
-        identifier, patch_rest, patch_build = self._stub_oss_rebuild([])
+        identifier, patch_rest, patch_build = self._stub_oss_rebuild()
 
         with patch_rest, patch_build:
-            new_fs = pvfs._get_filesystem(identifier, StorageType.OSS)
+            new_fs = pvfs._get_filesystem(identifier, StorageType.OSS, self.STORAGE_LOCATION)
 
         # No prior cache entry -> nothing to close, must not raise.
         self.assertEqual(new_fs, "NEW_FS")
+
+    def test_close_runs_after_write_lock_released(self):
+        # Regression guard: close() of the stale fs runs after the write
+        # lock is released. If close were still inside the critical section,
+        # attempting to acquire the same non-reentrant write lock from
+        # within close would fail (blocking=False -> False).
+        pvfs = _make_pvfs()
+        identifier, patch_rest, patch_build = self._stub_oss_rebuild()
+        lock_was_free_during_close = []
+
+        class StaleFs:
+            def close(self_inner):
+                probe = pvfs._table_cache_lock.gen_wlock()
+                got = probe.acquire(blocking=False)
+                lock_was_free_during_close.append(got)
+                if got:
+                    probe.release()
+
+        pvfs._fs_cache[identifier] = PaimonRealStorage(
+            token={}, expires_at_millis=0, file_system=StaleFs())
+
+        with patch_rest, patch_build:
+            pvfs._get_filesystem(identifier, StorageType.OSS, self.STORAGE_LOCATION)
+
+        self.assertEqual(lock_was_free_during_close, [True],
+                         "stale fs close must run after _table_cache_lock is released")
 
     def test_close_without_close_method_is_no_op(self):
         # _close_filesystem_quietly must tolerate filesystems that don't

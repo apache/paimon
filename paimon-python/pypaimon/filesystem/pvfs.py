@@ -208,7 +208,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             storage_location = table_path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
             virtual_location = pvfs_identifier.get_virtual_location()
-            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
             entries = fs.ls(actual_path, detail=detail, **kwargs)
             if detail:
                 virtual_entities = [
@@ -240,7 +240,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             storage_location = table_path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
             virtual_location = pvfs_identifier.get_virtual_location()
-            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
             entry = fs.info(actual_path)
             return self._convert_actual_info(entry, storage_type, storage_location, virtual_location)
 
@@ -264,7 +264,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table_path)
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.exists(actual_path)
             except NoSuchResourceException:
                 return False
@@ -283,7 +283,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             storage_location = table_path
             source_actual_path = source.get_actual_path(storage_location)
             target_actual_path = target.get_actual_path(storage_location)
-            fs = self._get_filesystem(source, storage_type)
+            fs = self._get_filesystem(source, storage_type, storage_location)
             fs.cp_file(
                 self._strip_storage_protocol(storage_type, source_actual_path),
                 self._strip_storage_protocol(storage_type, target_actual_path),
@@ -309,7 +309,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_location = table_path
                 source_actual_path = source.get_actual_path(storage_location)
                 target_actual_path = target.get_actual_path(storage_location)
-                fs = self._get_filesystem(source, storage_type)
+                fs = self._get_filesystem(source, storage_type, storage_location)
                 if storage_type == StorageType.LOCAL:
                     fs.mv(
                         self._strip_storage_protocol(storage_type, source_actual_path),
@@ -350,7 +350,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             storage_type = self._get_storage_type(table_path)
             storage_location = table_path
             actual_path = pvfs_identifier.get_actual_path(storage_location)
-            fs = self._get_filesystem(pvfs_identifier, storage_type)
+            fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
             return fs.rm(
                 self._strip_storage_protocol(storage_type, actual_path),
                 recursive,
@@ -369,7 +369,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table_path)
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.rm_file(
                     self._strip_storage_protocol(storage_type, actual_path),
                 )
@@ -394,7 +394,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table_path)
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.rmdir(
                     self._strip_storage_protocol(storage_type, actual_path)
                 )
@@ -427,7 +427,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table_path)
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.open(
                     self._strip_storage_protocol(storage_type, actual_path),
                     mode,
@@ -471,7 +471,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table_path)
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.mkdir(
                     self._strip_storage_protocol(storage_type, actual_path),
                     create_parents,
@@ -510,7 +510,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table_path)
                 storage_location = table_path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.makedirs(
                     self._strip_storage_protocol(storage_type, actual_path),
                     exist_ok
@@ -531,7 +531,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.created(
                     self._strip_storage_protocol(storage_type, actual_path)
                 )
@@ -552,7 +552,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.modified(
                     self._strip_storage_protocol(storage_type, actual_path)
                 )
@@ -578,7 +578,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.cat_file(
                     self._strip_storage_protocol(storage_type, actual_path),
                     start,
@@ -607,7 +607,7 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                 storage_type = self._get_storage_type(table.path)
                 storage_location = table.path
                 actual_path = pvfs_identifier.get_actual_path(storage_location)
-                fs = self._get_filesystem(pvfs_identifier, storage_type)
+                fs = self._get_filesystem(pvfs_identifier, storage_type, storage_location)
                 return fs.get_file(
                     self._strip_storage_protocol(storage_type, actual_path),
                     lpath,
@@ -816,7 +816,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         finally:
             write_lock.release()
 
-    def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType) -> 'FileSystem':
+    def _get_filesystem(self, pvfs_table_identifier: PVFSTableIdentifier, storage_type: StorageType,
+                        storage_location: str) -> 'FileSystem':
         read_lock = self._fs_cache_lock.gen_rlock()
         try:
             read_lock.acquire()
@@ -828,6 +829,12 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
         finally:
             read_lock.release()
 
+        # The previous filesystem (if any) is closed after the write lock is
+        # released. For the jindo backend, fs.close() tears down a native
+        # JindoSDK connection, which can block on flushing buffers and
+        # terminating worker threads; holding the write lock through that
+        # would stall every other OSS filesystem rebuild.
+        stale_fs = None
         write_lock = self._table_cache_lock.gen_wlock()
         try:
             write_lock.acquire()
@@ -842,22 +849,15 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
                     pvfs_table_identifier.database, pvfs_table_identifier.table)
                 load_token_response: GetTableTokenResponse = rest_api.load_table_token(table_identifier)
                 merged_token = self._merge_token_with_catalog_options(load_token_response.token)
-                # Resolve the table's OSS storage location directly via the REST API.
-                # _get_table_store() re-acquires _table_cache_lock, which is already
-                # held in this critical section, and would self-deadlock.
-                table_path = rest_api.get_table(table_identifier).path
-                fs = self._get_oss_filesystem(Options(merged_token), table_path)
+                fs = self._get_oss_filesystem(Options(merged_token), storage_location)
                 paimon_real_storage = PaimonRealStorage(
                     token=load_token_response.token,
                     expires_at_millis=load_token_response.expires_at_millis,
                     file_system=fs
                 )
                 self._fs_cache[pvfs_table_identifier] = paimon_real_storage
-                # Release the previous filesystem's resources -- particularly
-                # important for the jindo backend, where each instance holds a
-                # native JindoSDK connection that is not released by GC alone.
                 if cache_value is not None:
-                    PaimonVirtualFileSystem._close_filesystem_quietly(cache_value.file_system)
+                    stale_fs = cache_value.file_system
             else:
                 raise Exception(
                     "Storage type: `{}` doesn't support now.".format(storage_type)
@@ -865,6 +865,8 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return fs
         finally:
             write_lock.release()
+            if stale_fs is not None:
+                PaimonVirtualFileSystem._close_filesystem_quietly(stale_fs)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
