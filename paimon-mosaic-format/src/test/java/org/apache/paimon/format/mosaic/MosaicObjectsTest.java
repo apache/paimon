@@ -26,7 +26,6 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,39 +60,39 @@ class MosaicObjectsTest {
 
     @Test
     void testSmallInt() {
-        byte[] bytes = toLE(ByteBuffer.allocate(2).putShort((short) 1234));
+        byte[] bytes = ByteBuffer.allocate(2).putShort((short) 1234).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.SMALLINT()))
                 .isEqualTo((short) 1234);
     }
 
     @Test
     void testInt() {
-        byte[] bytes = toLE(ByteBuffer.allocate(4).putInt(123456));
+        byte[] bytes = ByteBuffer.allocate(4).putInt(123456).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.INT())).isEqualTo(123456);
     }
 
     @Test
     void testIntNegative() {
-        byte[] bytes = toLE(ByteBuffer.allocate(4).putInt(-999));
+        byte[] bytes = ByteBuffer.allocate(4).putInt(-999).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.INT())).isEqualTo(-999);
     }
 
     @Test
     void testBigInt() {
-        byte[] bytes = toLE(ByteBuffer.allocate(8).putLong(9876543210L));
+        byte[] bytes = ByteBuffer.allocate(8).putLong(9876543210L).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.BIGINT()))
                 .isEqualTo(9876543210L);
     }
 
     @Test
     void testFloat() {
-        byte[] bytes = toLE(ByteBuffer.allocate(4).putFloat(3.14f));
+        byte[] bytes = ByteBuffer.allocate(4).putFloat(3.14f).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.FLOAT())).isEqualTo(3.14f);
     }
 
     @Test
     void testDouble() {
-        byte[] bytes = toLE(ByteBuffer.allocate(8).putDouble(2.718281828));
+        byte[] bytes = ByteBuffer.allocate(8).putDouble(2.718281828).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.DOUBLE()))
                 .isEqualTo(2.718281828);
     }
@@ -113,14 +112,14 @@ class MosaicObjectsTest {
 
     @Test
     void testDate() {
-        byte[] bytes = toLE(ByteBuffer.allocate(4).putInt(18000));
+        byte[] bytes = ByteBuffer.allocate(4).putInt(18000).array();
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.DATE())).isEqualTo(18000);
     }
 
     @Test
     void testTimestampMillis() {
         long millis = 1700000000000L;
-        byte[] bytes = toLE(ByteBuffer.allocate(8).putLong(millis));
+        byte[] bytes = ByteBuffer.allocate(8).putLong(millis).array();
         Object result = MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP(3));
         assertThat(result).isEqualTo(Timestamp.fromEpochMillis(millis));
     }
@@ -128,15 +127,16 @@ class MosaicObjectsTest {
     @Test
     void testTimestampMicros() {
         long micros = 1700000000000000L;
-        byte[] bytes = toLE(ByteBuffer.allocate(8).putLong(micros));
+        byte[] bytes = ByteBuffer.allocate(8).putLong(micros).array();
         Object result = MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP(6));
         assertThat(result).isEqualTo(Timestamp.fromMicros(micros));
     }
 
     @Test
     void testDecimal() {
-        byte[] leBytes = new byte[] {(byte) 0xE8, 0x03, 0, 0, 0, 0, 0, 0};
-        Object result = MosaicObjects.convertStatsValue(leBytes, DataTypes.DECIMAL(10, 2));
+        // 1000 in big-endian two's complement = 0x03E8
+        byte[] beBytes = new byte[] {0x03, (byte) 0xE8};
+        Object result = MosaicObjects.convertStatsValue(beBytes, DataTypes.DECIMAL(10, 2));
         assertThat(result).isInstanceOf(Decimal.class);
         Decimal decimal = (Decimal) result;
         assertThat(decimal.toBigDecimal().intValue()).isEqualTo(10);
@@ -147,19 +147,5 @@ class MosaicObjectsTest {
         byte[] bytes = new byte[] {1, 2, 3};
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.ARRAY(DataTypes.INT())))
                 .isNull();
-    }
-
-    private static byte[] toLE(ByteBuffer bigEndianBuf) {
-        byte[] beBytes = bigEndianBuf.array();
-        ByteBuffer leBuf = ByteBuffer.allocate(beBytes.length).order(ByteOrder.LITTLE_ENDIAN);
-        ByteBuffer beBuf = ByteBuffer.wrap(beBytes).order(ByteOrder.BIG_ENDIAN);
-        if (beBytes.length == 2) {
-            leBuf.putShort(beBuf.getShort());
-        } else if (beBytes.length == 4) {
-            leBuf.putInt(beBuf.getInt());
-        } else if (beBytes.length == 8) {
-            leBuf.putLong(beBuf.getLong());
-        }
-        return leBuf.array();
     }
 }

@@ -30,7 +30,6 @@ import javax.annotation.Nullable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 
 /** Converts Mosaic's byte[] statistics to Paimon objects. */
 public class MosaicObjects {
@@ -40,7 +39,7 @@ public class MosaicObjects {
         if (bytes == null || bytes.length == 0) {
             return null;
         }
-        ByteBuffer buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer buf = ByteBuffer.wrap(bytes);
         switch (dataType.getTypeRoot()) {
             case BOOLEAN:
                 return bytes[0] != 0;
@@ -66,7 +65,7 @@ public class MosaicObjects {
                 return bytes;
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) dataType;
-                BigInteger unscaled = new BigInteger(reverseBytes(bytes));
+                BigInteger unscaled = new BigInteger(bytes);
                 BigDecimal decimal = new BigDecimal(unscaled, decimalType.getScale());
                 return Decimal.fromBigDecimal(
                         decimal, decimalType.getPrecision(), decimalType.getScale());
@@ -84,14 +83,6 @@ public class MosaicObjects {
             default:
                 return null;
         }
-    }
-
-    private static byte[] reverseBytes(byte[] bytes) {
-        byte[] reversed = new byte[bytes.length];
-        for (int i = 0; i < bytes.length; i++) {
-            reversed[i] = bytes[bytes.length - 1 - i];
-        }
-        return reversed;
     }
 
     private MosaicObjects() {}
