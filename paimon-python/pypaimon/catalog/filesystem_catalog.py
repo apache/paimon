@@ -584,3 +584,35 @@ class FileSystemCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         table = self.get_table(identifier)
         return table.branch_manager().branches()
+
+    def repair_table(self, identifier: Union[str, Identifier],
+                     check_data_files: bool = False, dry_run: bool = True):
+        """Repair the metadata of a single table."""
+        from pypaimon.operation.repair import repair_table as _repair_table
+
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table_path = self.get_table_path(identifier)
+        if not self.file_io.exists(table_path):
+            raise TableNotExistException(identifier)
+        return _repair_table(self.file_io, table_path, branch=identifier.get_branch_name(),
+                             check_data_files=check_data_files, dry_run=dry_run)
+
+    def repair_database(self, database_name: str,
+                        check_data_files: bool = False, dry_run: bool = True):
+        """Repair all tables in a database."""
+        from pypaimon.operation.repair import repair_database as _repair_database
+
+        try:
+            self.get_database(database_name)
+        except DatabaseNotExistException:
+            raise
+        return _repair_database(self.file_io, self.warehouse, database_name,
+                                check_data_files=check_data_files, dry_run=dry_run)
+
+    def repair_catalog(self, check_data_files: bool = False, dry_run: bool = True):
+        """Repair all tables in all databases in the catalog."""
+        from pypaimon.operation.repair import repair_catalog as _repair_catalog
+
+        return _repair_catalog(self.file_io, self.warehouse,
+                               check_data_files=check_data_files, dry_run=dry_run)
