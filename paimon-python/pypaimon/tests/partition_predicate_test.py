@@ -28,6 +28,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 PARTITION_FIELDS = [
@@ -170,7 +171,11 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
 
     @staticmethod
     def _msg(partition):
-        return CommitMessage(partition=partition, bucket=0, new_files=[Mock(row_count=10)])
+        return CommitMessage(
+            partition=partition,
+            bucket=0,
+            data_increment=DataIncrement(new_files=[Mock(row_count=10)]),
+        )
 
     def _extract_partition_predicate(self, commit):
         entries_plan = commit._try_commit.call_args[1]['commit_entries_plan']
