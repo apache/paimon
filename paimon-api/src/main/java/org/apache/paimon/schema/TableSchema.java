@@ -342,6 +342,7 @@ public class TableSchema implements Serializable {
         }
         TableSchema tableSchema = (TableSchema) o;
         return version == tableSchema.version
+                && highestFieldId == tableSchema.highestFieldId
                 && Objects.equals(fields, tableSchema.fields)
                 && Objects.equals(partitionKeys, tableSchema.partitionKeys)
                 && Objects.equals(primaryKeys, tableSchema.primaryKeys)
@@ -354,6 +355,16 @@ public class TableSchema implements Serializable {
     public int hashCode() {
         return Objects.hash(
                 version, fields, partitionKeys, primaryKeys, options, comment, timeMillis);
+    }
+
+    /** Checks if two schemas have the same content, ignoring version and timeMillis. */
+    public boolean sameContent(TableSchema other) {
+        return Objects.equals(fields, other.fields)
+                && highestFieldId == other.highestFieldId
+                && Objects.equals(partitionKeys, other.partitionKeys)
+                && Objects.equals(primaryKeys, other.primaryKeys)
+                && Objects.equals(options, other.options)
+                && Objects.equals(comment, other.comment);
     }
 
     public static List<DataField> newFields(RowType rowType) {

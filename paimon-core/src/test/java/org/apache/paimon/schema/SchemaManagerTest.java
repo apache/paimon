@@ -939,4 +939,36 @@ public class SchemaManagerTest {
                                         new ChangelogManager(LocalFileIO.create(), path, null)))
                 .hasMessageContaining("Schema 999 does not exist");
     }
+
+    @Test
+    public void testNoChangeCommitDoesNotCreateNewSchema() throws Exception {
+        // Create table with an initial option foo=bar
+        Map<String, String> initialOptions = new HashMap<>();
+        initialOptions.put("foo", "bar");
+        Schema schemaWithOption =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initialOptions,
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schemaWithOption);
+
+        long initialSchemaId = manager.latest().get().id();
+        assertThat(manager.latest().get().options()).containsEntry("foo", "bar");
+
+        // Set option foo=bar again (no actual change)
+        manager.commitChanges(SchemaChange.setOption("foo", "bar"));
+
+        // Verify no new schema is created when value didn't change
+        long newSchemaId = manager.latest().get().id();
+        assertThat(newSchemaId).isEqualTo(initialSchemaId);
+        assertThat(manager.latest().get().options()).containsEntry("foo", "bar");
+
+        // Also test with UpdateComment when comment is unchanged
+        String initialComment = manager.latest().get().comment();
+        manager.commitChanges(SchemaChange.updateComment(initialComment));
+        assertThat(manager.latest().get().id()).isEqualTo(initialSchemaId);
+    }
 }
