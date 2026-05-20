@@ -411,3 +411,64 @@ class FileSystemCatalogTest(unittest.TestCase):
             identifier, partition_name_pattern='dt=2025*'
         )
         self.assertEqual(len(result.elements), 0)
+
+    def test_drop_partitions(self):
+        """Test drop_partitions removes specified partitions from a table."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_part_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 2},
+            {'dt': '2024-01-02', 'rows': 3},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # Verify all 3 partitions exist
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 3)
+
+        # Drop one partition
+        catalog.drop_partitions(identifier, [{'dt': '2024-01-02'}])
+
+        # Verify only 2 partitions remain
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 2)
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-01-01', '2024-01-03'])
+
+    def test_drop_partitions_multiple(self):
+        """Test drop_partitions with multiple partitions at once."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_multi_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # Drop two partitions at once
+        catalog.drop_partitions(identifier, [
+            {'dt': '2024-01-01'},
+            {'dt': '2024-01-03'},
+        ])
+
+        # Verify only 1 partition remains
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-02')
+
+    def test_drop_partitions_empty_list_raises(self):
+        """Test drop_partitions raises ValueError for empty partitions list."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_empty_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+        ])
+
+        with self.assertRaises(ValueError):
+            catalog.drop_partitions(identifier, [])

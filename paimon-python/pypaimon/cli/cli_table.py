@@ -724,6 +724,67 @@ def cmd_table_list_partitions(args):
         sys.exit(1)
 
 
+def cmd_table_drop_partition(args):
+    """
+    Execute the 'table drop-partition' command.
+
+    Drops one or more partitions from a Paimon table.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    # Load catalog configuration
+    config_path = args.config
+    config = load_catalog_config(config_path)
+
+    # Create catalog
+    catalog = create_catalog(config)
+
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse partition specs
+    partition_strings = args.partition
+    if not partition_strings:
+        print("Error: At least one --partition must be specified.", file=sys.stderr)
+        sys.exit(1)
+
+    partitions = []
+    for partition_str in partition_strings:
+        partition_dict = {}
+        for kv in partition_str.split(','):
+            kv = kv.strip()
+            if '=' not in kv:
+                print(f"Error: Invalid partition spec '{kv}'. "
+                      f"Expected format: 'key=value'", file=sys.stderr)
+                sys.exit(1)
+            key, value = kv.split('=', 1)
+            partition_dict[key.strip()] = value.strip()
+        if not partition_dict:
+            print("Error: Empty partition spec.", file=sys.stderr)
+            sys.exit(1)
+        partitions.append(partition_dict)
+
+    # Drop partitions
+    try:
+        catalog.drop_partitions(table_identifier, partitions)
+        partition_desc = "; ".join(
+            ",".join(f"{k}={v}" for k, v in p.items()) for p in partitions
+        )
+        print(f"Successfully dropped partition(s) [{partition_desc}] "
+              f"from table '{table_identifier}'.")
+    except Exception as e:
+        print(f"Error: Failed to drop partition(s): {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -814,6 +875,22 @@ def add_table_subcommands(table_parser):
     )
     drop_parser.set_defaults(func=cmd_table_drop)
     
+    # table drop-partition command
+    drop_partition_parser = table_subparsers.add_parser(
+        'drop-partition', help='Drop one or more partitions from a table')
+    drop_partition_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    drop_partition_parser.add_argument(
+        '--partition', '-p',
+        action='append',
+        required=True,
+        help=('Partition spec in format: "key1=value1,key2=value2". '
+              'Can be specified multiple times to drop multiple partitions.')
+    )
+    drop_partition_parser.set_defaults(func=cmd_table_drop_partition)
+
     # table import command
     import_parser = table_subparsers.add_parser('import', help='Import data from CSV or JSON file')
     import_parser.add_argument(

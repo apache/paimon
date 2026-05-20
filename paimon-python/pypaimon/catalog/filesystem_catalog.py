@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from pypaimon.api.api_response import GetTagResponse, PagedList
 from pypaimon.catalog.catalog import Catalog
@@ -353,6 +353,22 @@ class FileSystemCatalog(Catalog):
             next_page_token = str(end_index)
 
         return PagedList(elements=result_partitions, next_page_token=next_page_token)
+
+    def drop_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+        table = self.get_table(identifier)
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.truncate_partitions(partitions)
+        finally:
+            commit.close()
 
     # ===================== Tag CRUD =====================
     # Thin wrappers that delegate to FileStoreTable's existing tag helpers
