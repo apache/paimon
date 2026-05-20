@@ -26,18 +26,18 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * A {@code ManifestSortedRun} is a list of {@link ManifestFileMeta}s sorted by a single partition
- * field (the configured manifest sort field). The intervals {@code [partitionStats.minValues[k],
- * partitionStats.maxValues[k]]} of these manifests do not overlap on field {@code k}, where {@code
- * k} is the configured sort field index.
+ * A {@code ManifestAdjacentSortedRun} is a list of {@link ManifestFileMeta}s sorted by a single
+ * partition field (the configured manifest sort field). The intervals {@code
+ * [partitionStats.minValues[k], partitionStats.maxValues[k]]} of these manifests do not overlap on
+ * field {@code k}, where {@code k} is the configured sort field index.
  */
-public class ManifestSortedRun {
+public class ManifestAdjacentSortedRun {
 
     private int level;
     private final List<ManifestFileMeta> files;
     private final long totalSize;
 
-    private ManifestSortedRun(List<ManifestFileMeta> files) {
+    private ManifestAdjacentSortedRun(List<ManifestFileMeta> files) {
         this.level = -1;
         this.files = Collections.unmodifiableList(files);
         long size = 0L;
@@ -48,12 +48,12 @@ public class ManifestSortedRun {
     }
 
     /**
-     * Build a {@code ManifestSortedRun} from an already-sorted list. The caller MUST guarantee that
-     * {@code sortedFiles} is sorted ascending on the configured sort field's min value, and that
-     * intervals do not overlap on that field.
+     * Build a {@code ManifestAdjacentSortedRun} from an already-sorted list. The caller MUST
+     * guarantee that {@code sortedFiles} is sorted ascending on the configured sort field's min
+     * value, and that intervals do not overlap on that field.
      */
-    public static ManifestSortedRun fromSorted(List<ManifestFileMeta> sortedFiles) {
-        return new ManifestSortedRun(sortedFiles);
+    public static ManifestAdjacentSortedRun fromSorted(List<ManifestFileMeta> sortedFiles) {
+        return new ManifestAdjacentSortedRun(sortedFiles);
     }
 
     public List<ManifestFileMeta> files() {
@@ -74,10 +74,10 @@ public class ManifestSortedRun {
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof ManifestSortedRun)) {
+        if (!(o instanceof ManifestAdjacentSortedRun)) {
             return false;
         }
-        ManifestSortedRun that = (ManifestSortedRun) o;
+        ManifestAdjacentSortedRun that = (ManifestAdjacentSortedRun) o;
         return level == that.level && files.equals(that.files);
     }
 
@@ -88,7 +88,7 @@ public class ManifestSortedRun {
 
     @Override
     public String toString() {
-        return "ManifestSortedRun{level="
+        return "ManifestAdjacentSortedRun{level="
                 + level
                 + ", files=["
                 + files.stream().map(ManifestFileMeta::fileName).collect(Collectors.joining(", "))
