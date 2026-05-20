@@ -27,10 +27,15 @@ public class MosaicWriterMetadata {
 
     private final int numRowGroups;
     private final List<List<ColumnStatistics>> rowGroupStats;
+    private final List<String> statsColumnNames;
 
-    public MosaicWriterMetadata(int numRowGroups, List<List<ColumnStatistics>> rowGroupStats) {
+    public MosaicWriterMetadata(
+            int numRowGroups,
+            List<List<ColumnStatistics>> rowGroupStats,
+            List<String> statsColumnNames) {
         this.numRowGroups = numRowGroups;
         this.rowGroupStats = rowGroupStats;
+        this.statsColumnNames = statsColumnNames;
     }
 
     public int numRowGroups() {
@@ -39,5 +44,9 @@ public class MosaicWriterMetadata {
 
     public List<ColumnStatistics> getRowGroupStatistics(int rowGroupIndex) {
         return rowGroupStats.get(rowGroupIndex);
+    }
+
+    public List<String> statsColumnNames() {
+        return statsColumnNames;
     }
 }

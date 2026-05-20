@@ -47,12 +47,15 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     private final ArrowFormatWriter arrowFormatWriter;
     private final MosaicWriter nativeWriter;
     private final BufferAllocator allocator;
+    private final List<String> statsColumnNames;
     @Nullable private MosaicWriterMetadata metadata;
 
     public MosaicRecordsWriter(
             OutputStream outputStream,
             RowType rowType,
-            FileFormatFactory.FormatContext formatContext) {
+            FileFormatFactory.FormatContext formatContext,
+            List<String> statsColumnNames) {
+        this.statsColumnNames = statsColumnNames;
         this.allocator = new RootAllocator();
 
         int writeBatchSize = formatContext.writeBatchSize();
@@ -62,19 +65,35 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
                 new ArrowFormatWriter(rowType, writeBatchSize, true, allocator, writeBatchMemory);
 
         Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
-        int numFields = arrowSchema.getFields().size();
-        int[] allColumns = new int[numFields];
-        for (int i = 0; i < numFields; i++) {
-            allColumns[i] = i;
+        WriterOptions options = new WriterOptions().zstdLevel(formatContext.zstdLevel());
+        if (!statsColumnNames.isEmpty()) {
+            int[] statsIndices = resolveColumnIndices(arrowSchema, statsColumnNames);
+            options.statsColumns(statsIndices);
         }
-        WriterOptions options =
-                new WriterOptions().zstdLevel(formatContext.zstdLevel()).statsColumns(allColumns);
 
         this.nativeWriter = new MosaicWriter(outputStream, arrowSchema, options, allocator);
     }
 
+    private static int[] resolveColumnIndices(Schema schema, List<String> columnNames) {
+        List<org.apache.arrow.vector.types.pojo.Field> fields = schema.getFields();
+        List<Integer> indices = new ArrayList<>();
+        for (String name : columnNames) {
+            for (int i = 0; i < fields.size(); i++) {
+                if (fields.get(i).getName().equals(name)) {
+                    indices.add(i);
+                    break;
+                }
+            }
+        }
+        int[] result = new int[indices.size()];
+        for (int i = 0; i < indices.size(); i++) {
+            result[i] = indices.get(i);
+        }
+        return result;
+    }
+
     @Override
-    public void addElement(InternalRow internalRow) throws IOException {
+    public void addElement(InternalRow internalRow) {
         if (!arrowFormatWriter.write(internalRow)) {
             flush();
             if (!arrowFormatWriter.write(internalRow)) {
@@ -84,7 +103,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     }
 
     @Override
-    public void writeBundle(BundleRecords bundleRecords) throws IOException {
+    public void writeBundle(BundleRecords bundleRecords) {
         if (bundleRecords instanceof ArrowBundleRecords) {
             flush();
             nativeWriter.write(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
@@ -96,7 +115,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
     }
 
     @Override
-    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
         if (!suggestedCheck) {
             return false;
         }
@@ -154,7 +173,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         for (int i = 0; i < numRowGroups; i++) {
             allStats.add(nativeWriter.getRowGroupStatistics(i));
         }
-        this.metadata = new MosaicWriterMetadata(numRowGroups, allStats);
+        this.metadata = new MosaicWriterMetadata(numRowGroups, allStats, statsColumnNames);
     }
 
     private void flush() {
