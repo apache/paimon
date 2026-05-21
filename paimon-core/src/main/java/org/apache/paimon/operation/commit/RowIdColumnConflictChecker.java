@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
  *   <li>Merge delta files by row range and calculate updated columns.
  *   <li>Sort those items by range.
  *   <li>For each checking files, do binary search to find overlapping ranges. If their updated
- *       columns also overlaps, return conflicting result.
+ *       columns also overlap, return conflicting result.
  * </ol>
  */
 public class RowIdColumnConflictChecker {
