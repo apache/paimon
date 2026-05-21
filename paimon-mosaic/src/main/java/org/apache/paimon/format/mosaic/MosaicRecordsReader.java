@@ -24,7 +24,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.mosaic.ColumnStatistics;
-import org.apache.paimon.mosaic.InputFile;
 import org.apache.paimon.mosaic.MosaicReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordIterator;
@@ -36,19 +35,25 @@ import org.apache.paimon.types.RowType;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
 
 /** File reader for Mosaic format. */
 public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
+    private final MosaicInputFileAdapter inputFileAdapter;
     private final MosaicReader reader;
     private final ArrowBatchReader arrowBatchReader;
     private final Path filePath;
@@ -62,26 +67,40 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private VectorSchemaRoot currentVsr;
 
     public MosaicRecordsReader(
-            InputFile inputFile,
+            MosaicInputFileAdapter inputFileAdapter,
             long fileSize,
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates,
             Path filePath) {
         this.filePath = filePath;
+        this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
         this.predicates = predicates;
         this.allocator = new RootAllocator();
 
         try {
-            this.reader = MosaicReader.open(inputFile, fileSize, allocator);
+            this.reader = MosaicReader.open(inputFileAdapter, fileSize, allocator);
         } catch (Exception e) {
             allocator.close();
             throw e;
         }
 
+        Schema fileSchema = reader.getSchema();
+        Set<String> fileColumnNames = new HashSet<>();
+        for (Field field : fileSchema.getFields()) {
+            fileColumnNames.add(field.getName());
+        }
         List<String> projectedNames = projectedRowType.getFieldNames();
-        reader.project(projectedNames.toArray(new String[0]));
+        List<String> existingColumns = new ArrayList<>();
+        for (String name : projectedNames) {
+            if (fileColumnNames.contains(name)) {
+                existingColumns.add(name);
+            }
+        }
+        if (!existingColumns.isEmpty()) {
+            reader.project(existingColumns.toArray(new String[0]));
+        }
 
         this.numRowGroups = reader.numRowGroups();
         this.currentRowGroup = 0;
@@ -190,5 +209,6 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         releaseCurrentVsr();
         reader.close();
         allocator.close();
+        inputFileAdapter.close();
     }
 }

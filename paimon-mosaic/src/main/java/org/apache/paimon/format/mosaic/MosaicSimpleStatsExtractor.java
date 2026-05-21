@@ -34,6 +34,7 @@ import org.apache.arrow.memory.RootAllocator;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -55,10 +56,12 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
 
     @Override
     public SimpleColStats[] extract(FileIO fileIO, Path path, long length) {
-        MosaicInputFileAdapter inputFile = new MosaicInputFileAdapter(fileIO, path);
-        try (BufferAllocator allocator = new RootAllocator();
+        try (MosaicInputFileAdapter inputFile = new MosaicInputFileAdapter(fileIO, path);
+                BufferAllocator allocator = new RootAllocator();
                 MosaicReader reader = MosaicReader.open(inputFile, length, allocator)) {
             return extractFromStats(reader.numRowGroups(), reader::getRowGroupStatistics, null);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to extract stats from " + path, e);
         }
     }
 
@@ -77,8 +80,8 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
     @Override
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
             FileIO fileIO, Path path, long length) {
-        MosaicInputFileAdapter inputFile = new MosaicInputFileAdapter(fileIO, path);
-        try (BufferAllocator allocator = new RootAllocator();
+        try (MosaicInputFileAdapter inputFile = new MosaicInputFileAdapter(fileIO, path);
+                BufferAllocator allocator = new RootAllocator();
                 MosaicReader reader = MosaicReader.open(inputFile, length, allocator)) {
             int numRowGroups = reader.numRowGroups();
             SimpleColStats[] stats =
@@ -88,6 +91,8 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
                 rowCount += reader.rowGroupNumRows(rg);
             }
             return Pair.of(stats, new FileInfo(rowCount));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to extract stats from " + path, e);
         }
     }
 

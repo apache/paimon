@@ -33,7 +33,7 @@ import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
-import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -69,6 +69,14 @@ public class MosaicFileFormat extends FileFormat {
                             "Comma-separated list of column names to collect statistics for. "
                                     + "Empty means no statistics collection.");
 
+    public static final ConfigOption<Integer> NUM_BUCKETS =
+            ConfigOptions.key("mosaic.num-buckets")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "Number of column buckets for parallel IO. "
+                                    + "0 means auto (defaults to number of columns).");
+
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
     }
@@ -95,7 +103,10 @@ public class MosaicFileFormat extends FileFormat {
 
     @Override
     public void validateDataFields(RowType rowType) {
-        rowType.accept(new MosaicRowTypeVisitor());
+        MosaicRowTypeVisitor visitor = new MosaicRowTypeVisitor();
+        for (DataType fieldType : rowType.getFieldTypes()) {
+            fieldType.accept(visitor);
+        }
     }
 
     @Override
@@ -200,12 +211,14 @@ public class MosaicFileFormat extends FileFormat {
 
         @Override
         public Void visit(ArrayType arrayType) {
-            return null;
+            throw new UnsupportedOperationException(
+                    "Mosaic file format does not support type ARRAY");
         }
 
         @Override
         public Void visit(VectorType vectorType) {
-            return null;
+            throw new UnsupportedOperationException(
+                    "Mosaic file format does not support type VECTOR");
         }
 
         @Override
@@ -221,10 +234,7 @@ public class MosaicFileFormat extends FileFormat {
 
         @Override
         public Void visit(RowType rowType) {
-            for (DataField field : rowType.getFields()) {
-                field.type().accept(this);
-            }
-            return null;
+            throw new UnsupportedOperationException("Mosaic file format does not support type ROW");
         }
     }
 }

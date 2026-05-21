@@ -143,6 +143,64 @@ class MosaicObjectsTest {
     }
 
     @Test
+    void testTimestampNanos() {
+        long millis = 1700000000123L;
+        int nanosOfMilli = 456789;
+        byte[] bytes = ByteBuffer.allocate(12).putLong(millis).putInt(nanosOfMilli).array();
+        Object result = MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP(9));
+        assertThat(result).isEqualTo(Timestamp.fromEpochMillis(millis, nanosOfMilli));
+    }
+
+    @Test
+    void testTimestampNanosPrecision7() {
+        long millis = 1700000000000L;
+        int nanosOfMilli = 100000;
+        byte[] bytes = ByteBuffer.allocate(12).putLong(millis).putInt(nanosOfMilli).array();
+        Object result = MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP(7));
+        assertThat(result).isEqualTo(Timestamp.fromEpochMillis(millis, nanosOfMilli));
+    }
+
+    @Test
+    void testTimestampWithLocalTimeZoneMillis() {
+        long millis = 1700000000000L;
+        byte[] bytes = ByteBuffer.allocate(8).putLong(millis).array();
+        Object result =
+                MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
+        assertThat(result).isEqualTo(Timestamp.fromEpochMillis(millis));
+    }
+
+    @Test
+    void testTimestampWithLocalTimeZoneMicros() {
+        long micros = 1700000000000000L;
+        byte[] bytes = ByteBuffer.allocate(8).putLong(micros).array();
+        Object result =
+                MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6));
+        assertThat(result).isEqualTo(Timestamp.fromMicros(micros));
+    }
+
+    @Test
+    void testTimestampWithLocalTimeZoneNanos() {
+        long millis = 1700000000123L;
+        int nanosOfMilli = 456789;
+        byte[] bytes = ByteBuffer.allocate(12).putLong(millis).putInt(nanosOfMilli).array();
+        Object result =
+                MosaicObjects.convertStatsValue(bytes, DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
+        assertThat(result).isEqualTo(Timestamp.fromEpochMillis(millis, nanosOfMilli));
+    }
+
+    @Test
+    void testEmptyStringVarChar() {
+        Object result = MosaicObjects.convertStatsValue(new byte[0], DataTypes.STRING());
+        assertThat(result).isEqualTo(BinaryString.fromString(""));
+    }
+
+    @Test
+    void testEmptyBinary() {
+        Object result = MosaicObjects.convertStatsValue(new byte[0], DataTypes.BYTES());
+        assertThat(result).isEqualTo(new byte[0]);
+    }
+
+    @Test
     void testUnsupportedTypeReturnsNull() {
         byte[] bytes = new byte[] {1, 2, 3};
         assertThat(MosaicObjects.convertStatsValue(bytes, DataTypes.ARRAY(DataTypes.INT())))
