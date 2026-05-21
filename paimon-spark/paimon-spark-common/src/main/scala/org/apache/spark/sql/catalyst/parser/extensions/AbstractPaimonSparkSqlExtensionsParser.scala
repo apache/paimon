@@ -28,8 +28,8 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{AnalysisException, PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
-import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser.{NonReservedContext, QuotedIdentifierContext}
+import org.apache.spark.sql.catalyst.parser.ParserInterface
+import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser.{CreateTableLikeContext, MultipartIdentifierContext, NonReservedContext, QuotedIdentifierContext}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.internal.VariableSubstitution
@@ -65,15 +65,27 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     if (isPaimonCommand(sqlTextAfterSubstitution)) {
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
         .asInstanceOf[LogicalPlan]
+    } else if (isCatalogCreateTableLike(sqlTextAfterSubstitution)) {
+      applyParserRules(
+        parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
+          .asInstanceOf[LogicalPlan])
     } else {
-      var plan = delegate.parsePlan(sqlText)
-      val sparkSession = PaimonSparkSession.active
-      parserRules(sparkSession).foreach(
-        rule => {
-          plan = rule.apply(plan)
-        })
-      plan
+      parsePlanWithDelegate(sqlText)
     }
+  }
+
+  private def parsePlanWithDelegate(sqlText: String): LogicalPlan = {
+    applyParserRules(delegate.parsePlan(sqlText))
+  }
+
+  private def applyParserRules(plan: LogicalPlan): LogicalPlan = {
+    var rewrittenPlan = plan
+    val sparkSession = PaimonSparkSession.active
+    parserRules(sparkSession).foreach(
+      rule => {
+        rewrittenPlan = rule.apply(rewrittenPlan)
+      })
+    rewrittenPlan
   }
 
   private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
@@ -138,6 +150,66 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
         normalized.contains("replace tag") ||
         normalized.contains("rename tag") ||
         normalized.contains("delete tag")))
+  }
+
+  private def isCatalogCreateTableLike(sqlText: String): Boolean = {
+    if (org.apache.spark.SPARK_VERSION < "3.4") {
+      return false
+    }
+
+    tokenStream(sqlText) match {
+      case Some(tokens) if maybeCreateTableLike(tokens) =>
+        isParsedCatalogCreateTableLike(sqlText)
+      case _ => false
+    }
+  }
+
+  private def tokenStream(sqlText: String): Option[CommonTokenStream] = {
+    try {
+      val lexer = new PaimonSqlExtensionsLexer(
+        new UpperCaseCharStream(CharStreams.fromString(sqlText)))
+      lexer.removeErrorListeners()
+      lexer.addErrorListener(PaimonParseErrorListener)
+
+      val tokens = new CommonTokenStream(lexer)
+      tokens.fill()
+      Some(tokens)
+    } catch {
+      case _: PaimonParseException => None
+    }
+  }
+
+  private def maybeCreateTableLike(tokenStream: CommonTokenStream): Boolean = {
+    val tokens = tokenStream.getTokens.asScala
+      .filter(token => token.getChannel == Token.DEFAULT_CHANNEL)
+      .filterNot(token => token.getType == Token.EOF)
+
+    tokens.length >= 5 &&
+    tokens.head.getType == PaimonSqlExtensionsParser.CREATE &&
+    tokens(1).getType == PaimonSqlExtensionsParser.TABLE &&
+    tokens.exists(_.getType == PaimonSqlExtensionsParser.LIKE) &&
+    tokens.exists(_.getText == ".")
+  }
+
+  private def isParsedCatalogCreateTableLike(sqlText: String): Boolean = {
+    try {
+      parse(sqlText) {
+        parser =>
+          val singleStatement = parser.singleStatement()
+          singleStatement.statement() match {
+            case ctx: CreateTableLikeContext
+                if isCatalogIdentifier(ctx.target) || isCatalogIdentifier(ctx.source) =>
+              true
+            case _ => false
+          }
+      }
+    } catch {
+      case _: PaimonParseException => false
+    }
+  }
+
+  private def isCatalogIdentifier(identifier: MultipartIdentifierContext): Boolean = {
+    identifier.parts.size() == 3
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {

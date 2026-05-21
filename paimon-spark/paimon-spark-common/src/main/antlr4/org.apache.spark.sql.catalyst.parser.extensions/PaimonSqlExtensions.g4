@@ -74,7 +74,66 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
+    | CREATE TABLE (IF NOT EXISTS)? target=multipartIdentifier
+        LIKE source=multipartIdentifier
+        (tableProvider |
+        rowFormat |
+        createFileFormat |
+        locationSpec |
+        (TBLPROPERTIES tableProps=propertyList))*                                           #createTableLike
   ;
+
+tableProvider
+    : USING multipartIdentifier
+    ;
+
+locationSpec
+    : LOCATION stringLit
+    ;
+
+propertyList
+    : '(' property (',' property)* ')'
+    ;
+
+property
+    : key=propertyKey ('='? value=propertyValue)?
+    ;
+
+propertyKey
+    : identifier ('.' identifier)*
+    | stringLit
+    ;
+
+propertyValue
+    : INTEGER_VALUE
+    | DECIMAL_VALUE
+    | booleanValue
+    | stringLit
+    ;
+
+createFileFormat
+    : STORED AS fileFormat
+    | STORED BY storageHandler
+    ;
+
+fileFormat
+    : INPUTFORMAT inFmt=stringLit OUTPUTFORMAT outFmt=stringLit    #tableFileFormat
+    | identifier                                                    #genericFileFormat
+    ;
+
+storageHandler
+    : stringLit (WITH SERDEPROPERTIES propertyList)?
+    ;
+
+rowFormat
+    : ROW FORMAT SERDE name=stringLit (WITH SERDEPROPERTIES props=propertyList)?             #rowFormatSerde
+    | ROW FORMAT DELIMITED
+      (FIELDS TERMINATED BY fieldsTerminatedBy=stringLit (ESCAPED BY escapedBy=stringLit)?)?
+      (COLLECTION ITEMS TERMINATED BY collectionItemsTerminatedBy=stringLit)?
+      (MAP KEYS TERMINATED BY keysTerminatedBy=stringLit)?
+      (LINES TERMINATED BY linesSeparatedBy=stringLit)?
+      (NULL DEFINED AS nullDefinedAs=stringLit)?                                             #rowFormatDelimited
+    ;
 
 callArgument
     : expression                    #positionalArgument
@@ -124,6 +183,10 @@ booleanValue
     : TRUE | FALSE
     ;
 
+stringLit
+    : STRING+
+    ;
+
 number
     : MINUS? EXPONENT_VALUE           #exponentLiteral
     | MINUS? DECIMAL_VALUE            #decimalLiteral
@@ -151,34 +214,60 @@ quotedIdentifier
     ;
 
 nonReserved
-    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | OR | TABLE
-    | REPLACE | RETAIN | VERSION | TAG
+    : ALTER | AS | BY | CALL | COLLECTION | CREATE | DAYS | DEFINED | DELETE | DELIMITED
+    | ESCAPED | EXISTS | FIELDS | FORMAT | HOURS | IF | INPUTFORMAT | ITEMS | KEYS | LIKE
+    | LINES | LOCATION | NOT | NULL | OF | OR | OUTPUTFORMAT | ROW | SERDE | SERDEPROPERTIES
+    | STORED | TABLE | TBLPROPERTIES | TERMINATED | REPLACE | RETAIN | USING | VERSION | TAG
+    | WITH
     | TRUE | FALSE
     | MAP
     ;
 
 ALTER: 'ALTER';
 AS: 'AS';
+BY: 'BY';
 CALL: 'CALL';
+COLLECTION: 'COLLECTION';
 CREATE: 'CREATE';
 DAYS: 'DAYS';
+DEFINED: 'DEFINED';
 DELETE: 'DELETE';
+DELIMITED: 'DELIMITED';
+ESCAPED: 'ESCAPED';
 EXISTS: 'EXISTS';
+FIELDS: 'FIELDS';
+FORMAT: 'FORMAT';
 HOURS: 'HOURS';
 IF : 'IF';
+INPUTFORMAT: 'INPUTFORMAT';
+ITEMS: 'ITEMS';
+KEYS: 'KEYS';
+LIKE: 'LIKE';
+LINES: 'LINES';
+LOCATION: 'LOCATION';
 MINUTES: 'MINUTES';
 NOT: 'NOT';
+NULL: 'NULL';
 OF: 'OF';
 OR: 'OR';
+OUTPUTFORMAT: 'OUTPUTFORMAT';
 RENAME: 'RENAME';
 REPLACE: 'REPLACE';
 RETAIN: 'RETAIN';
+ROW: 'ROW';
+SERDE: 'SERDE';
+SERDEPROPERTIES: 'SERDEPROPERTIES';
 SHOW: 'SHOW';
+STORED: 'STORED';
 TABLE: 'TABLE';
 TAG: 'TAG';
 TAGS: 'TAGS';
+TBLPROPERTIES: 'TBLPROPERTIES';
+TERMINATED: 'TERMINATED';
 TO: 'TO';
+USING: 'USING';
 VERSION: 'VERSION';
+WITH: 'WITH';
 
 TRUE: 'TRUE';
 FALSE: 'FALSE';
