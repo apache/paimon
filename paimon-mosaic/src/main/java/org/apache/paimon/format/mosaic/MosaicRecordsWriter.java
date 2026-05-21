@@ -55,7 +55,8 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             OutputStream outputStream,
             RowType rowType,
             FileFormatFactory.FormatContext formatContext,
-            List<String> statsColumnNames) {
+            List<String> statsColumnNames,
+            int numBuckets) {
         this.statsColumnNames = statsColumnNames;
         this.allocator = new RootAllocator();
 
@@ -66,7 +67,11 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
                 new ArrowFormatWriter(rowType, writeBatchSize, true, allocator, writeBatchMemory);
 
         Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
-        WriterOptions options = new WriterOptions().zstdLevel(formatContext.zstdLevel());
+        WriterOptions options =
+                new WriterOptions()
+                        .zstdLevel(formatContext.zstdLevel())
+                        .numBuckets(numBuckets)
+                        .rowGroupMaxSize(writeBatchMemory);
         if (!statsColumnNames.isEmpty()) {
             options.statsColumns(statsColumnNames.toArray(new String[0]));
         }

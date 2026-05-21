@@ -23,6 +23,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 
 import javax.annotation.Nullable;
@@ -36,7 +37,20 @@ public class MosaicObjects {
 
     @Nullable
     public static Object convertStatsValue(byte[] bytes, DataType dataType) {
-        if (bytes == null || bytes.length == 0) {
+        if (bytes == null) {
+            return null;
+        }
+        switch (dataType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return BinaryString.fromBytes(bytes);
+            case BINARY:
+            case VARBINARY:
+                return bytes;
+            default:
+                break;
+        }
+        if (bytes.length == 0) {
             return null;
         }
         ByteBuffer buf = ByteBuffer.wrap(bytes);
@@ -57,12 +71,6 @@ public class MosaicObjects {
                 return buf.getFloat();
             case DOUBLE:
                 return buf.getDouble();
-            case CHAR:
-            case VARCHAR:
-                return BinaryString.fromBytes(bytes);
-            case BINARY:
-            case VARBINARY:
-                return bytes;
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) dataType;
                 BigInteger unscaled = new BigInteger(bytes);
@@ -70,18 +78,24 @@ public class MosaicObjects {
                 return Decimal.fromBigDecimal(
                         decimal, decimalType.getPrecision(), decimalType.getScale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                TimestampType tsType = (TimestampType) dataType;
-                long tsValue = buf.getLong();
-                if (tsType.getPrecision() <= 3) {
-                    return Timestamp.fromEpochMillis(tsValue);
-                } else if (tsType.getPrecision() <= 6) {
-                    return Timestamp.fromMicros(tsValue);
-                } else {
-                    return Timestamp.fromEpochMillis(
-                            tsValue / 1_000_000, (int) (tsValue % 1_000_000));
-                }
+                return convertTimestamp(buf, ((TimestampType) dataType).getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return convertTimestamp(buf, ((LocalZonedTimestampType) dataType).getPrecision());
             default:
                 return null;
+        }
+    }
+
+    private static Timestamp convertTimestamp(ByteBuffer buf, int precision) {
+        if (precision <= 3) {
+            return Timestamp.fromEpochMillis(buf.getLong());
+        } else if (precision <= 6) {
+            return Timestamp.fromMicros(buf.getLong());
+        } else {
+            // precision 7-9: 12 bytes = i64 millis (BE) + i32 nanos_of_milli (BE)
+            long millis = buf.getLong();
+            int nanosOfMilli = buf.getInt();
+            return Timestamp.fromEpochMillis(millis, nanosOfMilli);
         }
     }
 

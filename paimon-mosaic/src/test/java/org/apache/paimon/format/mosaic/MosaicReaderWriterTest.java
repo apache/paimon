@@ -204,6 +204,67 @@ class MosaicReaderWriterTest {
     }
 
     @Test
+    void testProjectionWithMissingColumns() throws IOException {
+        RowType writeType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
+        // Read type has a column that doesn't exist in the file (schema evolution)
+        RowType readType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_new_col", DataTypes.BIGINT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
+        Path path = newPath();
+
+        writeRows(
+                writeType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("aaa")),
+                GenericRow.of(2, BinaryString.fromString("bbb")));
+
+        List<InternalRow> result = readAll(writeType, readType, path, null);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getInt(0)).isEqualTo(1);
+        assertThat(result.get(0).isNullAt(1)).isTrue();
+        assertThat(result.get(0).getString(2).toString()).isEqualTo("aaa");
+        assertThat(result.get(1).getInt(0)).isEqualTo(2);
+        assertThat(result.get(1).isNullAt(1)).isTrue();
+        assertThat(result.get(1).getString(2).toString()).isEqualTo("bbb");
+    }
+
+    @Test
+    void testProjectionAllColumnsMissing() throws IOException {
+        RowType writeType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .build();
+        // Read type has only columns that don't exist in the file
+        RowType readType =
+                RowType.builder()
+                        .field("f_new_a", DataTypes.INT())
+                        .field("f_new_b", DataTypes.STRING())
+                        .build();
+        Path path = newPath();
+
+        writeRows(
+                writeType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("x")),
+                GenericRow.of(2, BinaryString.fromString("y")));
+
+        List<InternalRow> result = readAll(writeType, readType, path, null);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).isNullAt(0)).isTrue();
+        assertThat(result.get(0).isNullAt(1)).isTrue();
+        assertThat(result.get(1).isNullAt(0)).isTrue();
+        assertThat(result.get(1).isNullAt(1)).isTrue();
+    }
+
+    @Test
     void testReachTargetSize() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
         Path path = newPath();

@@ -36,6 +36,7 @@ public class MosaicWriterFactory implements FormatWriterFactory {
     private final RowType rowType;
     private final FileFormatFactory.FormatContext formatContext;
     private final List<String> statsColumnNames;
+    private final int numBuckets;
 
     public MosaicWriterFactory(RowType rowType, FileFormatFactory.FormatContext formatContext) {
         this.rowType = rowType;
@@ -50,10 +51,11 @@ public class MosaicWriterFactory implements FormatWriterFactory {
                             .filter(s -> !s.isEmpty())
                             .collect(Collectors.toList());
         }
+        this.numBuckets = formatContext.options().get(MosaicFileFormat.NUM_BUCKETS);
     }
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames);
+        return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames, numBuckets);
     }
 }
