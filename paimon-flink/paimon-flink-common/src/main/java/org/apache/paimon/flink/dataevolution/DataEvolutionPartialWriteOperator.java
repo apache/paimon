@@ -70,6 +70,7 @@ public class DataEvolutionPartialWriteOperator
             LoggerFactory.getLogger(DataEvolutionPartialWriteOperator.class);
 
     private final FileStoreTable table;
+    private final Long baseSnapshotId;
 
     // dataType
     private final RowType dataType;
@@ -91,9 +92,11 @@ public class DataEvolutionPartialWriteOperator
     private transient AbstractFileStoreWrite<InternalRow> tableWrite;
     private transient Writer writer;
 
-    public DataEvolutionPartialWriteOperator(FileStoreTable table, RowType dataType) {
+    public DataEvolutionPartialWriteOperator(
+            FileStoreTable table, RowType dataType, Long baseSnapshotId) {
         this.table =
                 table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"));
+        this.baseSnapshotId = baseSnapshotId;
         List<String> fieldNames =
                 dataType.getFieldNames().stream()
                         .filter(name -> !SpecialFields.ROW_ID.name().equals(name))
@@ -121,6 +124,7 @@ public class DataEvolutionPartialWriteOperator
                                         entry.file().firstRowId() != null
                                                 && !isBlobFile(entry.file().fileName())
                                                 && !isVectorStoreFile(entry.file().fileName()))
+                        .withSnapshot(baseSnapshotId)
                         .plan()
                         .files();
 

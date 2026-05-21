@@ -140,6 +140,48 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: concurrent merge with disjoint update columns") {
+    withTable("sb", "sc", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1)).toDF("id", "b").createOrReplaceTempView("sb")
+      Seq((1, 1)).toDF("id", "c").createOrReplaceTempView("sc")
+
+      val mergeB = Future {
+        for (_ <- 1 to 10) {
+          sql(s"""
+                 |MERGE INTO t
+                 |USING sb
+                 |ON t.id = sb.id
+                 |WHEN MATCHED THEN
+                 |UPDATE SET t.b = sb.b + t.b
+                 |""".stripMargin).collect()
+        }
+      }
+
+      val mergeC = Future {
+        for (_ <- 1 to 10) {
+          sql(s"""
+                 |MERGE INTO t
+                 |USING sc
+                 |ON t.id = sc.id
+                 |WHEN MATCHED THEN
+                 |UPDATE SET t.c = sc.c + t.c
+                 |""".stripMargin).collect()
+        }
+      }
+
+      Await.result(mergeB, 60.seconds)
+      Await.result(mergeC, 60.seconds)
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10, 10)))
+    }
+  }
+
   test("Data Evolution: concurrent merge and small files compact") {
     withTable("s", "t") {
       sql(s"""

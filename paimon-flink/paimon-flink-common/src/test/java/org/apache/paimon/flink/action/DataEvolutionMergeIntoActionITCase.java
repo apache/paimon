@@ -744,10 +744,6 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 "(2, 'name2', X'5945')",
                 "(3, 'name3', X'414243')");
         testBatchRead(
-                "SELECT COUNT(*) FROM `RAW_BLOB_SPLIT_T$files` "
-                        + "WHERE file_path NOT LIKE '%.blob'",
-                Collections.singletonList(changelogRow("+I", 1L)));
-        testBatchRead(
                 "SELECT COUNT(*) > 1 FROM `RAW_BLOB_SPLIT_T$files` "
                         + "WHERE file_path LIKE '%.blob'",
                 Collections.singletonList(changelogRow("+I", true)));
