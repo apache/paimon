@@ -220,11 +220,15 @@ public abstract class OrphanFilesClean implements Serializable {
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
-                    fileIO.deleteDirectoryQuietly(path);
-                } else {
-                    fileIO.deleteQuietly(path);
+                    LOG.error(
+                            "Refusing to delete directory {} in orphan file cleanup. "
+                                    + "This indicates a bug in candidate collection.",
+                            path);
+                    return;
                 }
-            } catch (IOException ignored) {
+                fileIO.deleteQuietly(path);
+            } catch (IOException e) {
+                LOG.warn("Failed to check whether {} is directory, skip deleting it.", path, e);
             }
         }
     }
