@@ -1,0 +1,79 @@
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 45%">JsonPath</th>
+        <th class="text-left" style="width: 55%">Result</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>$.store.book[*].author</h5></td>
+        <td>Provides the min value of an array of numbers.</td>
+    </tr>
+    <tr>
+        <td><h5>$..author</h5></td>
+        <td>All authors.</td>
+    </tr>
+    <tr>
+        <td><h5>$.store.*</h5></td>
+        <td>All things, both books and bicycles.</td>
+    </tr>
+    <tr>
+        <td><h5>$.store..price</h5></td>
+        <td>Provides the standard deviation value of an array of numbers.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[2]</h5></td>
+        <td>The third book.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[-2]</h5></td>
+        <td>The second to last book.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[0,1]</h5></td>
+        <td>The first two books.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[:2]</h5></td>
+        <td>All books from index 0 (inclusive) until index 2 (exclusive).</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[1:2]</h5></td>
+        <td>All books from index 1 (inclusive) until index 2 (exclusive)</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[-2:]</h5></td>
+        <td>Last two books</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[2:]</h5></td>
+        <td>All books from index 2 (inclusive) to last</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[?(@.isbn)]</h5></td>
+        <td>All books with an ISBN number</td>
+    </tr>
+    <tr>
+        <td><h5>$.store.book[?(@.price < 10)]</h5></td>
+        <td>All books in store cheaper than 10</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[?(@.price <= $['expensive'])]</h5></td>
+        <td>All books in store that are not "expensive"</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[?(@.author =~ /.*REES/i)]</h5></td>
+        <td>All books matching regex (ignore case)</td>
+    </tr>
+    <tr>
+        <td><h5>$..*</h5></td>
+        <td>Give me every thing</td>
+    </tr>
+    <tr>
+        <td><h5>$..book.length()</h5></td>
+        <td>The number of books</td>
+    </tr>
+    </tbody>
+</table>

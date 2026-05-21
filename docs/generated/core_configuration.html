@@ -1,0 +1,1666 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>add-column-before-partition</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, when adding a new column without specifying a position, the column will be placed before the first partition column instead of at the end of the schema. This only takes effect for partitioned tables.</td>
+        </tr>
+        <tr>
+            <td><h5>aggregation.remove-record-on-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
+        </tr>
+        <tr>
+            <td><h5>alter-column-null-to-not-null.disabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
+        </tr>
+        <tr>
+            <td><h5>async-file-write</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable asynchronous IO writing when writing files.</td>
+        </tr>
+        <tr>
+            <td><h5>auto-create</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to create underlying storage when reading and writing the table.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Write blob field using blob descriptor rather than blob bytes.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-descriptor-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobDescriptor bytes inline in data files.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-external-storage-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') whose raw data will be written to external storage at write time. The external storage path is configured via 'blob-external-storage-path'. Orphan file cleanup is not applied to that path.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-external-storage-path</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The external storage path where raw BLOB data from fields configured by 'blob-external-storage-field' is written at write time. Orphan file cleanup is not applied to this path.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in blob-descriptor-field or blob-view-field are also treated as BLOB fields.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-view-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobViewStruct bytes inline in data files and resolve from upstream tables at read time.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-write-null-on-missing-file</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced file does not exist during Flink writes. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
+            <td><h5>blob.split-by-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether to consider blob file size as a factor when performing scan splitting.</td>
+        </tr>
+        <tr>
+            <td><h5>blob.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a blob file. Default is value of TARGET_FILE_SIZE.</td>
+        </tr>
+        <tr>
+            <td><h5>bucket</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>Bucket number for file store.<br />It should either be equal to -1 (dynamic bucket mode), -2 (postpone bucket mode), or it must be greater than 0 (fixed bucket mode).</td>
+        </tr>
+        <tr>
+            <td><h5>bucket-append-ordered</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to ignore the order of the buckets when reading data from an append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>bucket-function.type</h5></td>
+            <td style="word-wrap: break-word;">default</td>
+            <td><p>Enum</p></td>
+            <td>The bucket function for paimon bucket.<br /><br />Possible values:<ul><li>"default": The default bucket function which will use arithmetic: bucket_id = Math.abs(hash_bucket_binary_row % numBuckets) to get bucket.</li><li>"mod": The modulus bucket function which will use modulus arithmetic: bucket_id = Math.floorMod(bucket_key_value, numBuckets) to get bucket. Note: the bucket key must be a single field of INT or BIGINT datatype.</li><li>"hive": The hive bucket function which will use hive-compatible hash arithmetic to get bucket.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>bucket-key</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
+        </tr>
+        <tr>
+            <td><h5>cache-page-size</h5></td>
+            <td style="word-wrap: break-word;">64 kb</td>
+            <td>MemorySize</td>
+            <td>Memory page size for caching.</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.chain-partition-keys</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition keys that participate in chain logic. Must be a contiguous suffix of the table's partition keys. Comma-separated. If not set, all partition keys participate in chain.</td>
+        </tr>
+        <tr>
+            <td><h5>chain-table.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enabled chain table.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.compression</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Changelog file compression.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the message format of changelog files, currently parquet, avro and orc are supported.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.prefix</h5></td>
+            <td style="word-wrap: break-word;">"changelog-"</td>
+            <td>String</td>
+            <td>Specify the file name prefix of changelog files.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-file.stats-mode</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Changelog file metadata stats collection. none, counts, truncate(16), full is available.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' compaction.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer.row-deduplicate</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer.row-deduplicate-ignore-fields</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog.num-retained.max</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of completed changelog to retain. Should be greater than or equal to the minimum number.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog.num-retained.min</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The minimum number of completed changelog to retain. Should be greater than or equal to 1.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog.time-retained</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The maximum time of completed changelog to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies the column name(s) used for comparison during range partitioning, in the format 'columnName1,columnName2'. If not set or set to an empty string, it indicates that the range partitioning feature is not enabled. This option will be effective only for append table without primary keys and batch execution mode.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.history-partition.idle-to-full-sort</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The duration after which a partition without new updates is considered a historical partition. Historical partitions will be automatically fully clustered during the cluster operation.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.history-partition.limit</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>The limit of history partition number for automatically performing full clustering.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.incremental</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable incremental clustering.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.incremental.mode</h5></td>
+            <td style="word-wrap: break-word;">global-sort</td>
+            <td><p>Enum</p></td>
+            <td>The sort mode for incremental clustering compaction. 'global-sort' (default) performs a global range shuffle so output files are globally ordered. 'local-sort' skips the global shuffle and only sorts rows within each compaction task, producing files that are internally ordered. 'local-sort' is cheaper and sufficient for Parquet lookup optimizations.<br /><br />Possible values:<ul><li>"global-sort": Perform global range shuffle and then local sort. Output files are globally ordered but require network shuffling.</li><li>"local-sort": Sort rows only within each compaction task without global shuffle. Every output file is internally ordered.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>clustering.incremental.optimize-write</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable perform clustering before write phase when incremental clustering is enabled.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.strategy</h5></td>
+            <td style="word-wrap: break-word;">"auto"</td>
+            <td>String</td>
+            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.callback.#.param</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Parameter string for the constructor of class #. Callback class should parse the parameter by itself.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.callbacks</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>A list of commit callback classes to be called after a successful commit. Class names are connected with comma (example: com.test.CallbackA,com.sample.CallbackB).</td>
+        </tr>
+        <tr>
+            <td><h5>commit.discard-duplicate-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether discard duplicate files in commit.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.force-compact</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force a compaction before commit.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.force-create-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>In streaming job, whether to force creating snapshot when there is no data in this write-commit phase.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.max-retries</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Maximum number of retries when commit failed.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.max-retry-wait</h5></td>
+            <td style="word-wrap: break-word;">10 s</td>
+            <td>Duration</td>
+            <td>Max retry wait time when commit failed.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.min-retry-wait</h5></td>
+            <td style="word-wrap: break-word;">10 ms</td>
+            <td>Duration</td>
+            <td>Min retry wait time when commit failed.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.strict-mode.last-safe-snapshot</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>If set, committer will check if there are other commit user's snapshot starting from the snapshot after this one. If found a COMPACT / OVERWRITE snapshot, or found a APPEND snapshot which committed files to fixed bucket, commit will be aborted.If the value of this option is -1, committer will not check for its first commit.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Timeout duration of retry when commit failed.</td>
+        </tr>
+        <tr>
+            <td><h5>commit.user-prefix</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies the commit user prefix.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.delete-ratio-threshold</h5></td>
+            <td style="word-wrap: break-word;">0.2</td>
+            <td>Double</td>
+            <td>Ratio of the deleted rows in a data file to be forced compacted for append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.file-num-limit</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Integer</td>
+            <td>To avoid OOM caused by scanning compaction files, you can use this option to limit the for unaware-bucket append table compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.force-rewrite-all-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force pick all files for a full compaction. Usually seen in a compaction task to external paths.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.force-up-level-0</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If set to true, compaction strategy will always include all level 0 files in candidates.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.incremental-size-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>When incremental size is bigger than this threshold, force a full compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.max-size-amplification-percent</h5></td>
+            <td style="word-wrap: break-word;">200</td>
+            <td>Integer</td>
+            <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.min.file-num</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>For file set [f_0,...,f_N], the minimum file number to trigger a compaction for append-only table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak-ratio</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>Allows you to set a different (by default, more aggressive) percentage ratio for determining  whether larger sorted run's size are included in compactions during off-peak hours. Works in the  same way as compaction.size-ratio. Only applies if offpeak.start.hour and  offpeak.end.hour are also enabled. <br /> For instance, if your cluster experiences low pressure between 2 AM  and 6 PM ,  you can configure `compaction.offpeak.start.hour=2` and `compaction.offpeak.end.hour=18` to define this period as off-peak hours.  During these hours, you can increase the off-peak compaction ratio (e.g. `compaction.offpeak-ratio=20`) to enable more aggressive data compaction</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak.end.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The end of off-peak hours, expressed as an integer between 0 and 23, exclusive. Set to -1 to disable off-peak.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.offpeak.start.hour</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>The start of off-peak hours, expressed as an integer between 0 and 23, inclusive Set to -1 to disable off-peak</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.optimization-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Implying how often to perform an optimization compaction, this configuration is used to ensure the query timeliness of the read-optimized system table.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.size-ratio</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.small-file-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.7</td>
+            <td>Double</td>
+            <td>The ratio of target file size. Files whose size is smaller than target-file-size * compaction.small-file-ratio will be picked for compaction rewriting. This avoids compacting the same file repeatedly due to compression inaccuracy causing output files to be slightly smaller than the target size.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.total-size-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>When total size is smaller than this threshold, force a full compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer-id</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Consumer id for recording the offset of consumption in the storage.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer.changelog-only</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, consumer will only affect changelog expiration and will not prevent snapshot from being expired.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer.expiration-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer.ignore-progress</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore consumer progress for the newly started job.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer.mode</h5></td>
+            <td style="word-wrap: break-word;">exactly-once</td>
+            <td><p>Enum</p></td>
+            <td>Specify the consumer consistency mode for table.<br /><br />Possible values:<ul><li>"exactly-once": Readers consume data at snapshot granularity, and strictly ensure that the snapshot-id recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed.</li><li>"at-least-once": Each reader consumes snapshots at a different rate, and the snapshot with the slowest consumption progress among all readers will be recorded in the consumer.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>continuous.discovery-interval</h5></td>
+            <td style="word-wrap: break-word;">10 s</td>
+            <td>Duration</td>
+            <td>The discovery interval of continuous reading.</td>
+        </tr>
+        <tr>
+            <td><h5>cross-partition-upsert.bootstrap-parallelism</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The parallelism for bootstrap in a single task for cross partition upsert.</td>
+        </tr>
+        <tr>
+            <td><h5>cross-partition-upsert.index-ttl</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable data evolution for row tracking table.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The external paths where the data of this table will be written, multiple elements separated by commas.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.specific-fs</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The specific file system of the external path when data-file.external-paths.strategy is set to specific-fs, should be the prefix scheme of the external path, now supported are s3 and oss.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.strategy</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>The strategy of selecting an external path when writing data.<br /><br />Possible values:<ul><li>"none": Do not choose any external storage, data will still be written to the default warehouse path.</li><li>"specific-fs": Select a specific file system as the external path. Currently supported are S3 and OSS.</li><li>"round-robin": When writing a new file, a path is chosen from data-file.external-paths in turn.</li><li>"entropy-inject": When writing a new file, a path is chosen based on the hash value of the file's content.</li><li>"weight-robin": When writing a new file, a path is chosen based on configured weights.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>data-file.external-paths.weights</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The weights for external paths when data-file.external-paths.strategy is set to weight-robin. Format: 'weight1,weight2,...' with weights corresponding to paths in data-file.external-paths by order. Example: '10,5,15' means first path has weight 10, second 5, third 15. Weights must be positive integers.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.path-directory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the path directory of data files.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.prefix</h5></td>
+            <td style="word-wrap: break-word;">"data-"</td>
+            <td>String</td>
+            <td>Specify the file name prefix of data files.</td>
+        </tr>
+        <tr>
+            <td><h5>data-file.thin-mode</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable data file thin mode to avoid duplicate columns storage.</td>
+        </tr>
+        <tr>
+            <td><h5>delete.force-produce-changelog</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Force produce changelog in delete sql, or you can use 'streaming-read-overwrite' to read changelog from overwrite commit.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vector.index-file.target-size</h5></td>
+            <td style="word-wrap: break-word;">2 mb</td>
+            <td>MemorySize</td>
+            <td>The target size of deletion vector index file.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vectors.bitmap64</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable 64 bit bitmap implementation. Note that only 64 bit bitmap implementation is compatible with Iceberg.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vectors.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable deletion vectors mode. In this mode, index files containing deletion vectors are generated when data is written, which marks the data for deletion. During read operations, by applying these index files, merging can be avoided.</td>
+        </tr>
+        <tr>
+            <td><h5>deletion-vectors.modifiable</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable modifying deletion vectors mode.</td>
+        </tr>
+        <tr>
+            <td><h5>disable-explicit-type-casting</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. Users can enable this option to disable explicit type casting</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Parallelism of assigner operator for dynamic bucket mode, it is related to the number of initialized bucket, too small will lead to insufficient processing speed of assigner.</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.initial-buckets</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.max-buckets</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>Max buckets for a partition in dynamic bucket mode, It should either be equal to -1 (unlimited), or it must be greater than 0 (fixed upper bound).</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.target-row-num</h5></td>
+            <td style="word-wrap: break-word;">2000000</td>
+            <td>Long</td>
+            <td>If the bucket is -1, for primary key table, is dynamic bucket mode, this option controls the target row number for one bucket.</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-partition-overwrite</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether only overwrite dynamic partition when overwriting a partitioned table with dynamic partition columns. Works only when the table has partition keys.</td>
+        </tr>
+        <tr>
+            <td><h5>end-input.check-partition-expire</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Optional endInput check partition expire used in case of batch mode or bounded stream.</td>
+        </tr>
+        <tr>
+            <td><h5>fields.default-aggregate-function</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Default aggregate function of all fields for partial-update and aggregate merge function.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.in-manifest-threshold</h5></td>
+            <td style="word-wrap: break-word;">500 bytes</td>
+            <td>MemorySize</td>
+            <td>The threshold to store file index bytes in manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.read.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether enabled read file index.</td>
+        </tr>
+        <tr>
+            <td><h5>file-operation.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent file operations. By default is the number of processors available to the Java virtual machine.</td>
+        </tr>
+        <tr>
+            <td><h5>file-reader-async-threshold</h5></td>
+            <td style="word-wrap: break-word;">10 mb</td>
+            <td>MemorySize</td>
+            <td>The threshold for read file async.</td>
+        </tr>
+        <tr>
+            <td><h5>file.block-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>File block size of format, default value of orc stripe is 64 MB, and parquet row group is 128 MB.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
+            <td>String</td>
+            <td>Default file compression. For faster read and write, it is recommended to use zstd.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zstd'.</td>
+        </tr>
+        <tr>
+            <td><h5>file.compression.zstd-level</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Default file compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
+        </tr>
+        <tr>
+            <td><h5>file.format</h5></td>
+            <td style="word-wrap: break-word;">"parquet"</td>
+            <td>String</td>
+            <td>Specify the message format of data files, currently orc, parquet and avro are supported.</td>
+        </tr>
+        <tr>
+            <td><h5>file.format.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
+        </tr>
+        <tr>
+            <td><h5>file.suffix.include.compression</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to add file compression type in the file name of data file and changelog file.</td>
+        </tr>
+        <tr>
+            <td><h5>force-lookup</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force the use of lookup for compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.commit-hive-sync-url</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Format table commit hive sync uri.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.file.compression</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Format table file compression.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.implementation</h5></td>
+            <td style="word-wrap: break-word;">paimon</td>
+            <td><p>Enum</p></td>
+            <td>Format table uses paimon or engine.<br /><br />Possible values:<ul><li>"paimon": Paimon format table implementation.</li><li>"engine": Engine format table implementation.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>format-table.partition-path-only-value</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Format table file path only contain partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>full-compaction.delta-commits</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.build.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Integer</td>
+            <td>The max parallelism of Flink/Spark for building global index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.build.max-shard</h5></td>
+            <td style="word-wrap: break-word;">32</td>
+            <td>Integer</td>
+            <td>The preferred max number of shards for building global index. If the number of shards calculated by 'global-index.row-count-per-shard' exceeds this value, max-shard will be automatically increased to accommodate the data volume while keeping 'global-index.row-count-per-shard' unchanged.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.column-update-action</h5></td>
+            <td style="word-wrap: break-word;">THROW_ERROR</td>
+            <td><p>Enum</p></td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>global-index.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable global index for scan.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.external-path</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.row-count-per-shard</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Long</td>
+            <td>Row count per shard for global index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.thread-num</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent scanner for global index.By default is the number of processors available to the Java virtual machine.</td>
+        </tr>
+        <tr>
+            <td><h5>ignore-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore delete records.</td>
+        </tr>
+        <tr>
+            <td><h5>ignore-update-before</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore update-before records.</td>
+        </tr>
+        <tr>
+            <td><h5>incremental-between</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive), for example, '5,10' means changes between snapshot 5 and snapshot 10.</td>
+        </tr>
+        <tr>
+            <td><h5>incremental-between-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">auto</td>
+            <td><p>Enum</p></td>
+            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot (inclusive). <br /><br />Possible values:<ul><li>"auto": Scan changelog files for the table which produces changelog files. Otherwise, scan newly changed files.</li><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li><li>"diff": Get diff by comparing data of end snapshot with data of start snapshot.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>incremental-between-tag-to-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read incremental changes between the snapshot corresponding to the tag.</td>
+        </tr>
+        <tr>
+            <td><h5>incremental-between-timestamp</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Read incremental changes between start timestamp (exclusive) and end timestamp (inclusive), for example, 't1,t2' means changes between timestamp t1 and timestamp t2.</td>
+        </tr>
+        <tr>
+            <td><h5>incremental-to-auto-tag</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Used to specify the end tag (inclusive), and Paimon will find an earlier tag and return changes between them. If the tag doesn't exist or the earlier tag doesn't exist, return empty. This option requires 'tag.creation-period' and 'tag.period-formatter' configured.</td>
+        </tr>
+        <tr>
+            <td><h5>index-file-in-data-file-dir</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether index file in data file directory.</td>
+        </tr>
+        <tr>
+            <td><h5>local-merge-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Local merge will buffer and merge input records before they're shuffled by bucket and written into sink. The buffer will be flushed when it is full.
+Mainly to resolve data skew on primary keys. We recommend starting with 64 mb when trying out this feature.</td>
+        </tr>
+        <tr>
+            <td><h5>local-sort.max-num-file-handles</h5></td>
+            <td style="word-wrap: break-word;">128</td>
+            <td>Integer</td>
+            <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup-compact</h5></td>
+            <td style="word-wrap: break-word;">RADICAL</td>
+            <td><p>Enum</p></td>
+            <td>Lookup compact mode used for lookup compaction.<br /><br />Possible values:<ul><li>"RADICAL"</li><li>"GENTLE"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>lookup-compact.max-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The max interval for a gentle mode lookup compaction to be triggered. For every interval, a forced lookup compaction will be performed to flush L0 files to higher level. This option is only valid when lookup-compact mode is gentle.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup-wait</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>When need to lookup, commit will wait for compaction by lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache-file-retention</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>The cached files retention time for lookup. After the file expires, if there is a need for access, it will be re-read from the DFS to build an index on the local disk.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache-max-disk-size</h5></td>
+            <td style="word-wrap: break-word;">infinite</td>
+            <td>MemorySize</td>
+            <td>Max disk size for lookup cache, you can use this option to limit the use of local disks.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache-max-memory-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Max memory size for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache-spill-compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
+            <td>String</td>
+            <td>Spill compression for lookup cache, currently zstd, none, lz4 and lzo are supported.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache.bloom.filter.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable the bloom filter for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache.bloom.filter.fpp</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Define the default false positive probability for lookup cache bloom filters.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache.high-priority-pool-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.25</td>
+            <td>Double</td>
+            <td>The fraction of cache memory that is reserved for high-priority data like index, filter.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.hash-load-factor</h5></td>
+            <td style="word-wrap: break-word;">0.75</td>
+            <td>Float</td>
+            <td>The index load factor for lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.merge-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">8 mb</td>
+            <td>MemorySize</td>
+            <td>Buffer memory size for one key merging in lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.merge-records-threshold</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Threshold for merging records to binary buffer in lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.remote-file.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable the remote file for lookup.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.remote-file.level-threshold</h5></td>
+            <td style="word-wrap: break-word;">-2147483648</td>
+            <td>Integer</td>
+            <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
+            <td>String</td>
+            <td>Default file compression for manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.delete-file-drop-stats</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>For DELETE manifest entry in manifest file, drop stats to reduce memory and storage. Default value is false only for compatibility of old reader.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.format</h5></td>
+            <td style="word-wrap: break-word;">"avro"</td>
+            <td>String</td>
+            <td>Specify the message format of manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.full-compaction-threshold-size</h5></td>
+            <td style="word-wrap: break-word;">16 mb</td>
+            <td>MemorySize</td>
+            <td>The size threshold for triggering full compaction of manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge-min-count</h5></td>
+            <td style="word-wrap: break-word;">30</td>
+            <td>Integer</td>
+            <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">8 mb</td>
+            <td>MemorySize</td>
+            <td>Suggested file size of a manifest file.</td>
+        </tr>
+        <tr>
+            <td><h5>merge-engine</h5></td>
+            <td style="word-wrap: break-word;">deduplicate</td>
+            <td><p>Enum</p></td>
+            <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li><li>"first-row": De-duplicate and keep the first row.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.stats-dense-store</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to store statistic densely in metadata (manifest files), which will significantly reduce the storage size of metadata when the none statistic mode is set.<br />Note, when this mode is enabled with 'metadata.stats-mode:none', the Paimon sdk in reading engine requires at least version 0.9.1 or 1.0.0 or higher.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.stats-keep-first-n-columns</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>Define how many columns' stats are kept in metadata file from front to end. Default value '-1' means ignoring this config.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.stats-mode</h5></td>
+            <td style="word-wrap: break-word;">"truncate(16)"</td>
+            <td>String</td>
+            <td>The mode of metadata stats collection. none, counts, truncate(16), full is available.<br /><ul><li>"none": means disable the metadata stats collection.</li></ul><ul><li>"counts" means only collect the null count.</li></ul><ul><li>"full": means collect the null count, min/max value.</li></ul><ul><li>"truncate(16)": means collect the null count, min/max value with truncated length of 16.</li></ul><ul><li>Field level stats mode can be specified by fields.{field_name}.stats-mode</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.stats-mode.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different 'metadata.stats-mode' for different level, you can add the conf like this: 'metadata.stats-mode.per.level' = '0:none', if the metadata.stats-mode for level is not provided, the default mode which set by `metadata.stats-mode` will be used.</td>
+        </tr>
+        <tr>
+            <td><h5>metastore.partitioned-table</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to create this table as a partitioned table in metastore.
+For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
+This config option does not affect the default filesystem metastore.</td>
+        </tr>
+        <tr>
+            <td><h5>metastore.tag-to-partition</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Whether to create this table as a partitioned table for mapping non-partitioned table tags in metastore. This allows the Hive engine to view this table in a partitioned table view and use partitioning field to read specific partitions (specific tags).</td>
+        </tr>
+        <tr>
+            <td><h5>metastore.tag-to-partition.preview</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Whether to preview tag of generated snapshots in metastore. This allows the Hive engine to query specific tag before creation.<br /><br />Possible values:<ul><li>"none": No automatically created tags.</li><li>"process-time": Based on the time of the machine, create TAG once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, create TAG once the watermark passes period time plus delay.</li><li>"batch": In the batch processing scenario, the tag corresponding to the current snapshot is generated after the task is completed.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>num-levels</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Total level number, for example, there are 3 levels, including 0,1,2 levels.</td>
+        </tr>
+        <tr>
+            <td><h5>num-sorted-run.compaction-trigger</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>The sorted run number to trigger compaction. Includes level0 files (one file one sorted run) and high-level runs (one level one sorted run).</td>
+        </tr>
+        <tr>
+            <td><h5>num-sorted-run.stop-trigger</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
+        </tr>
+        <tr>
+            <td><h5>overwrite-upgrade</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to try upgrading the data files after overwriting a primary key table.</td>
+        </tr>
+        <tr>
+            <td><h5>page-size</h5></td>
+            <td style="word-wrap: break-word;">64 kb</td>
+            <td>MemorySize</td>
+            <td>Memory page size.</td>
+        </tr>
+        <tr>
+            <td><h5>parquet.enable.dictionary</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Turn off the dictionary encoding for all fields in parquet.</td>
+        </tr>
+        <tr>
+            <td><h5>partial-update.remove-record-on-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to remove the whole row in partial-update engine when -D records are received.</td>
+        </tr>
+        <tr>
+            <td><h5>partial-update.remove-record-on-sequence-group</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When -D records of the given sequence groups are received, remove the whole row.</td>
+        </tr>
+        <tr>
+            <td><h5>partition</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Define partition by table options, cannot define partition on DDL and table options at the same time.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.default-name</h5></td>
+            <td style="word-wrap: break-word;">"__DEFAULT_PARTITION__"</td>
+            <td>String</td>
+            <td>The default partition name in case the dynamic partition column value is null/empty string.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.end-input-to-done</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether mark the done status to indicate that the data is ready when end input.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-batch-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The batch size of partition expiration. By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. Use this parameter to divide partition expiration process and mitigate memory pressure.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-check-interval</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>The check interval of partition expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-max-num</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>The default deleted num of partition expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-strategy</h5></td>
+            <td style="word-wrap: break-word;">"values-time"</td>
+            <td>String</td>
+            <td>The strategy determines how to extract the partition time and compare it with the current time.<ul><li>"values-time": This strategy compares the time extracted from the partition value with the current time.</li><li>"update-time": This strategy compares the last update time of the partition with the current time.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>partition.expiration-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.idle-time-to-report-statistic</h5></td>
+            <td style="word-wrap: break-word;">0 ms</td>
+            <td>Duration</td>
+            <td>Set a time duration when a partition has no new data after this time duration, start to report the partition statistics to hms.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.legacy-name</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>The legacy partition name is using `toString` fpr all types. If false, using cast to string for all types.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action</h5></td>
+            <td style="word-wrap: break-word;">"success-file"</td>
+            <td>String</td>
+            <td>Action to mark a partition done is to notify the downstream application that the partition has finished writing, the partition is ready to be read.<br />1. 'success-file': add '_success' file to directory.<br />2. 'done-partition': add 'xxx.done' partition to metastore.<br />3. 'mark-event': mark partition event to metastore.<br />4. 'http-report': report partition mark done to remote http server.<br />5. 'custom': use policy class to create a mark-partition policy.<br />Both can be configured at the same time: 'done-partition,success-file,mark-event,custom'.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action.custom.class</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The partition mark done class for implement PartitionMarkDoneAction interface. Only work in custom mark-done-action.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action.http.params</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Http client request parameters will be written to the request body, this can only be used by http-report partition mark done action.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.mark-done-action.http.url</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Mark done action will reports the partition to the remote http server, this can only be used by http-report partition mark done action.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.sink-strategy</h5></td>
+            <td style="word-wrap: break-word;">NONE</td>
+            <td><p>Enum</p></td>
+            <td>This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li><li>partition_dynamic: Dynamically adjusts shuffle strategy based on partition key traffic patterns. This mode monitors data distribution across partitions and rebalances load across downstream subtasks. Suitable when partition traffic is skewed and you want balanced write throughput.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li><li>"PARTITION_DYNAMIC"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>partition.timestamp-format.strict</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, if a partition value does not match the 'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration, an error will be thrown during writing. This helps prevent dirty partition directories caused by incorrectly specified partition fields.</td>
+        </tr>
+        <tr>
+            <td><h5>partition.timestamp-formatter</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The formatter to format timestamp from string. It can be used with 'partition.timestamp-pattern' to create a formatter using the specified value.<ul><li>Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'.</li><li>Supports multiple partition fields like '$year-$month-$day $hour:00:00'.</li><li>The timestamp-formatter is compatible with Java's DateTimeFormatter.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>partition.timestamp-pattern</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>pk-clustering-override</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.batch-write-fixed-bucket</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to write the data into fixed bucket for batch writing a postpone bucket table.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.batch-write-fixed-bucket.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">2048</td>
+            <td>Integer</td>
+            <td>The number of partitions for global index.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.default-bucket-num</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
+        </tr>
+        <tr>
+            <td><h5>primary-key</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
+        </tr>
+        <tr>
+            <td><h5>query-auth.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Enable query auth to give Catalog the opportunity to perform column level and row level permission validation on queries.</td>
+        </tr>
+        <tr>
+            <td><h5>read.batch-size</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Read batch size for any file format if it supports.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.expire-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Record level expire time for primary key table, expiration happens in compaction, there is no strong guarantee to expire records in time. You must specific 'record-level.time-field' too.</td>
+        </tr>
+        <tr>
+            <td><h5>record-level.time-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Time field for record level expire. It supports the following types: `timestamps in seconds with INT`,`timestamps in seconds with BIGINT`, `timestamps in milliseconds with BIGINT` or `timestamp`.</td>
+        </tr>
+        <tr>
+            <td><h5>row-tracking.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable unique row id for append table.</td>
+        </tr>
+        <tr>
+            <td><h5>row-tracking.partition-group-on-commit</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>When row-tracking is enabled, whether to group new file metas by partition before commit, so that assigned row IDs are contiguous within each partition.This is useful if you want to build global indices on this table. </td>
+        </tr>
+        <tr>
+            <td><h5>rowkind.field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.bounded.watermark</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>End condition "watermark" for bounded streaming mode. Stream reading will end when a larger watermark snapshot is encountered.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.creation-time-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-creation-timestamp" scan mode.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a table, if a partition does not exist in the current branch, the reader will try to get this partition from this fallback branch.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-branch.read-fail-fast</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to fail the read immediately when reading from a fallback branch throws. By default the failure is logged with the full stack trace and the reader falls through to the current branch, which can mask data issues. Set this to true to surface fallback branch errors to the caller instead.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-delta-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a chain table, if a partition does not exist in either main or snapshot branch, the reader will try to get this partition from chain snapshot and delta branch together.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.fallback-snapshot-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a chain table, if a partition does not exist in the main branch, the reader will try to get this partition from chain snapshot branch.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.file-creation-time-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>After configuring this time, only the data files created after this time will be read. It is independent of snapshots, but it is imprecise filtering (depending on whether or not compaction occurs).</td>
+        </tr>
+        <tr>
+            <td><h5>scan.ignore-corrupt-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Ignore corrupt files while scanning.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.ignore-lost-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Ignore lost files while scanning.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.manifest.parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The parallelism of scanning manifest files, default value is the size of cpu processor. Note: Scale-up this parameter will increase memory usage while scanning manifest files. We can consider downsize it when we encounter an out of memory exception while scanning</td>
+        </tr>
+        <tr>
+            <td><h5>scan.max-splits-per-task</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Max split size should be cached for one task while scanning. If splits size cached in enumerator are greater than tasks size multiply by this value, scanner will pause scanning.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.mode</h5></td>
+            <td style="word-wrap: break-word;">default</td>
+            <td><p>Enum</p></td>
+            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"default": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp", and if "scan.snapshot-id" or "scan.tag-name" is set the actual startup mode will be "from-snapshot". Otherwise the actual startup mode will be "latest-full".</li><li>"latest-full": For streaming sources, produces the latest snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce the latest snapshot but does not read new changes.</li><li>"full": Deprecated. Same as "latest-full".</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "latest-full" startup mode.</li><li>"compacted-full": For streaming sources, produces a snapshot after the latest compaction on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot after the latest compaction but does not read new changes. Snapshots of full compaction are picked when scheduled full-compaction is enabled.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li><li>"from-creation-timestamp": For streaming sources and batch sources, If timestamp specified by "scan.creation-time-millis" is during in the range of earliest snapshot and latest snapshot: mode is from-snapshot which snapshot is equal or later the timestamp. If timestamp is earlier than earliest snapshot or later than latest snapshot, mode is from-file-creation-time.</li><li>"from-file-creation-time": For streaming and batch sources, consumes a snapshot and filters the data files by creation time. For streaming sources, upon first startup, and continue to read the latest changes.</li><li>"from-snapshot": For streaming sources, continuously reads changes starting from snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning. For batch sources, produces a snapshot specified by "scan.snapshot-id" or "scan.tag-name" but does not read new changes.</li><li>"from-snapshot-full": For streaming sources, produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes. For batch sources, produces a snapshot specified by "scan.snapshot-id" but does not read new changes.</li><li>"incremental": Read incremental changes between start and end snapshot or timestamp.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>scan.plan-auto-tag-for-read.time-retained</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>When set, a temporary tag will be auto-created during batch scan planning to protect the read snapshot from expiration. The value specifies the tag's TTL. Should be longer than the longest expected batch read duration.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.plan-sort-partition</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to sort plan files by partition fields, this allows you to read according to the partition order, even if your partition writes are out of order.<br />It is recommended that you use this for streaming read of the 'append-only' table. By default, streaming read will read the full snapshot first. In order to avoid the disorder reading for partitions, you can open this option.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.primary-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a table, if a partition exists in the primary branch, the reader will read this partition from the primary branch. Otherwise, the reader will read this partition from the current branch.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.snapshot-id</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional snapshot id used in case of "from-snapshot" or "from-snapshot-full" scan mode</td>
+        </tr>
+        <tr>
+            <td><h5>scan.tag-name</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Optional tag name used in case of "from-snapshot" scan mode.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.timestamp</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode, it will be automatically converted to timestamp in unix milliseconds, use local time zone</td>
+        </tr>
+        <tr>
+            <td><h5>scan.timestamp-millis</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional timestamp used in case of "from-timestamp" scan mode. If there is no snapshot earlier than this time, the earliest snapshot will be chosen.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.watermark</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional watermark used in case of "from-snapshot" scan mode. If there is no snapshot later than this watermark, will throw an exceptions.</td>
+        </tr>
+        <tr>
+            <td><h5>sequence.field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
+        </tr>
+        <tr>
+            <td><h5>sequence.field.sort-order</h5></td>
+            <td style="word-wrap: break-word;">ascending</td>
+            <td><p>Enum</p></td>
+            <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>sink.process-time-zone</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The time zone to parse the long process time to TIMESTAMP value. The default value is JVM's default time zone. If you want to specify a time zone, you should either set a full name such as 'America/Los_Angeles' or a custom zone id such as 'GMT-08:00'. This option currently is used for extract tag name.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.watermark-time-zone</h5></td>
+            <td style="word-wrap: break-word;">"UTC"</td>
+            <td>String</td>
+            <td>The time zone to parse the long watermark value to TIMESTAMP value. The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined. If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone, the value should be the user configured local time zone. The option value is either a full name such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.clean-empty-directories</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to try to clean empty directories when expiring snapshots, if enabled, please note:<ul><li>hdfs: may print exceptions in NameNode.</li><li>oss/s3: may cause performance issue.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.expire.execution-mode</h5></td>
+            <td style="word-wrap: break-word;">sync</td>
+            <td><p>Enum</p></td>
+            <td>Specifies the execution mode of expire.<br /><br />Possible values:<ul><li>"sync": Execute expire synchronously. If there are too many files, it may take a long time and block stream processing.</li><li>"async": Execute expire asynchronously. If the generation of snapshots is greater than the deletion, there will be a backlog of files.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.expire.limit</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>The maximum number of snapshots allowed to expire at a time.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.ignore-empty-commit</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether ignore empty commit.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.num-retained.max</h5></td>
+            <td style="word-wrap: break-word;">infinite</td>
+            <td>Integer</td>
+            <td>The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.num-retained.min</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The minimum number of completed snapshots to retain. Should be greater than or equal to 1.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.time-retained</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>The maximum time of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.watermark-idle-timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
+        </tr>
+        <tr>
+            <td><h5>sort-compaction.local-sample.magnification</h5></td>
+            <td style="word-wrap: break-word;">1000</td>
+            <td>Integer</td>
+            <td>The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.</td>
+        </tr>
+        <tr>
+            <td><h5>sort-compaction.range-strategy</h5></td>
+            <td style="word-wrap: break-word;">SIZE</td>
+            <td><p>Enum</p></td>
+            <td>The range strategy of sort compaction, the default value is quantity.
+If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>sort-engine</h5></td>
+            <td style="word-wrap: break-word;">loser-tree</td>
+            <td><p>Enum</p></td>
+            <td>Specify the sort engine for table with primary key.<br /><br />Possible values:<ul><li>"min-heap": Use min-heap for multiway sorting.</li><li>"loser-tree": Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>sort-spill-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>Amount of data to spill records to disk in spilled sort.</td>
+        </tr>
+        <tr>
+            <td><h5>sort-spill-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>If the maximum number of sort readers exceeds this value, a spill will be attempted. This prevents too many readers from consuming too much memory and causing OOM.</td>
+        </tr>
+        <tr>
+            <td><h5>source.split.open-file-cost</h5></td>
+            <td style="word-wrap: break-word;">4 mb</td>
+            <td>MemorySize</td>
+            <td>Open file cost of a source file. It is used to avoid reading too many files with a source split, which can be very slow.</td>
+        </tr>
+        <tr>
+            <td><h5>source.split.target-size</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Target size of a source split when scanning a bucket.</td>
+        </tr>
+        <tr>
+            <td><h5>spill-compression</h5></td>
+            <td style="word-wrap: break-word;">"zstd"</td>
+            <td>String</td>
+            <td>Compression for spill, currently zstd, lzo and zstd are supported.</td>
+        </tr>
+        <tr>
+            <td><h5>spill-compression.zstd-level</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Default spill compression zstd level. For higher compression rates, it can be configured to 9, but the read and write speed will significantly decrease.</td>
+        </tr>
+        <tr>
+            <td><h5>streaming-read-append-overwrite</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read the delta from append table's overwrite commit in streaming mode.</td>
+        </tr>
+        <tr>
+            <td><h5>streaming-read-overwrite</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read the changes from overwrite in streaming mode. Cannot be set to true when changelog producer is full-compaction or lookup because it will read duplicated changes.</td>
+        </tr>
+        <tr>
+            <td><h5>streaming.read.snapshot.delay</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The delay duration of stream read when scan incremental snapshots.</td>
+        </tr>
+        <tr>
+            <td><h5>table-read.sequence-number.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.automatic-completion</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to automatically complete missing tags.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.automatic-creation</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Whether to create tag automatically. And how to generate tags.<br /><br />Possible values:<ul><li>"none": No automatically created tags.</li><li>"process-time": Based on the time of the machine, create TAG once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, create TAG once the watermark passes period time plus delay.</li><li>"batch": In the batch processing scenario, the tag corresponding to the current snapshot is generated after the task is completed.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.batch.customized-name</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Use customized name when creating tags in Batch mode.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.callback.#.param</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Parameter string for the constructor of class #. Callback class should parse the parameter by itself.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.callbacks</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>A list of commit callback classes to be called after a successful tag. Class names are connected with comma (example: com.test.CallbackA,com.sample.CallbackB).</td>
+        </tr>
+        <tr>
+            <td><h5>tag.create-success-file</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to create tag success file for new created tags.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-delay</h5></td>
+            <td style="word-wrap: break-word;">0 ms</td>
+            <td>Duration</td>
+            <td>How long is the delay after the period ends before creating a tag. This can allow some late data to enter the Tag.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-period</h5></td>
+            <td style="word-wrap: break-word;">daily</td>
+            <td><p>Enum</p></td>
+            <td>What frequency is used to generate tags.<br /><br />Possible values:<ul><li>"daily": Generate a tag every day.</li><li>"hourly": Generate a tag every hour.</li><li>"two-hours": Generate a tag every two hours.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-period-duration</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The period duration for tag auto create periods.If user set it, tag.creation-period would be invalid.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.default-time-retained</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The default maximum time retained for newly created tags. It affects both auto-created tags and manually created (by procedure) tags.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.num-retained-max</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of tags to retain. It only affects auto-created tags.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.period-formatter</h5></td>
+            <td style="word-wrap: break-word;">with_dashes</td>
+            <td><p>Enum</p></td>
+            <td>The date format for tag periods.<br /><br />Possible values:<ul><li>"with_dashes": Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'</li><li>"without_dashes": Dates and hours without dashes, e.g., 'yyyyMMdd HH'</li><li>"without_dashes_and_spaces": Dates and hours without dashes and spaces, e.g., 'yyyyMMddHH'</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.time-expire-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable tag expiration by retained time.</td>
+        </tr>
+        <tr>
+            <td><h5>target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a file.<ul><li>primary key table: the default value is 128 MB.</li><li>append table: the default value is 256 MB.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>type</h5></td>
+            <td style="word-wrap: break-word;">table</td>
+            <td><p>Enum</p></td>
+            <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table combines normal Paimon table and materialized SQL.</li><li>"object-table": An object table combines normal Paimon table and object location.</li><li>"lance-table": A lance table, see 'https://lancedb.github.io/lance/'.</li><li>"iceberg-table": An iceberg table, see 'https://iceberg.apache.org/'.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>upsert-key</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.inferShreddingSchema</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to automatically infer the shredding schema when writing Variant columns.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxInferBufferRow</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Integer</td>
+            <td>Maximum number of rows to buffer for schema inference.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxSchemaDepth</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>Maximum traversal depth in Variant values during schema inference.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxSchemaWidth</h5></td>
+            <td style="word-wrap: break-word;">300</td>
+            <td>Integer</td>
+            <td>Maximum number of shredded fields allowed in an inferred schema.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.minFieldCardinalityRatio</h5></td>
+            <td style="word-wrap: break-word;">0.1</td>
+            <td>Double</td>
+            <td>Minimum fraction of rows that must contain a field for it to be shredded. Fields below this threshold will remain in the un-shredded Variant binary.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shreddingSchema</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
+        </tr>
+        <tr>
+            <td><h5>vector.file.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the vector store file format.</td>
+        </tr>
+        <tr>
+            <td><h5>vector.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a vector-store file. Default is 10 * TARGET_FILE_SIZE.</td>
+        </tr>
+        <tr>
+            <td><h5>visibility-callback.check-interval</h5></td>
+            <td style="word-wrap: break-word;">10 s</td>
+            <td>Duration</td>
+            <td>The interval for checking visibility when visibility-callback enabled.</td>
+        </tr>
+        <tr>
+            <td><h5>visibility-callback.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable the visibility wait callback that waits for compaction to complete after commit. This is useful for primary key tables with deletion vectors or postpone bucket mode to ensure data visibility, only used for batch mode or bounded stream.</td>
+        </tr>
+        <tr>
+            <td><h5>visibility-callback.timeout</h5></td>
+            <td style="word-wrap: break-word;">30 min</td>
+            <td>Duration</td>
+            <td>The maximum time to wait for compaction to complete when visibility callback is enabled. If the timeout is reached, an exception will be thrown.</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-for-append</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Amount of data to build up in memory before converting to a sorted on-disk file.</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-spill.max-disk-size</h5></td>
+            <td style="word-wrap: break-word;">infinite</td>
+            <td>MemorySize</td>
+            <td>The max disk to use for write buffer spill. This only work when the write buffer spill is enabled</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-spillable</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether the write buffer can be spillable.</td>
+        </tr>
+        <tr>
+            <td><h5>write-max-writers-to-spill</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. </td>
+        </tr>
+        <tr>
+            <td><h5>write-only</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>write.batch-memory</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Write batch memory for any file format if it supports.</td>
+        </tr>
+        <tr>
+            <td><h5>write.batch-size</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>Write batch size for any file format if it supports.</td>
+        </tr>
+        <tr>
+            <td><h5>zorder.var-length-contribution</h5></td>
+            <td style="word-wrap: break-word;">8</td>
+            <td>Integer</td>
+            <td>The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.</td>
+        </tr>
+    </tbody>
+</table>
