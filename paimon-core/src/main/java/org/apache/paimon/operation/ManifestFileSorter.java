@@ -61,8 +61,6 @@ public class ManifestFileSorter {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFileSorter.class);
 
-    private ManifestFileSorter() {}
-
     /** Context object that carries shared state across compaction methods. */
     static class CompactionContext {
         final boolean fullCompaction;
