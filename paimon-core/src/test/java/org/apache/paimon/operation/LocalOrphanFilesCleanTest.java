@@ -633,17 +633,19 @@ public class LocalOrphanFilesCleanTest {
         commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
 
         Path partitionPath = new Path(tablePath, "part1=0/part2=a");
-        Path bucketPath = new Path(partitionPath, "bucket-0");
-        assertThat(fileIO.exists(bucketPath)).isTrue();
+        Path bucketPath =
+                listSubDirs(partitionPath, p -> p.getName().startsWith(BUCKET_PATH_PREFIX))
+                        .get(0);
         assertThat(fileIO.listStatus(bucketPath)).isNotEmpty();
 
         Path subdirInBucket = new Path(bucketPath, "orphan-subdir");
         fileIO.mkdirs(subdirInBucket);
         fileIO.tryToWriteAtomic(new Path(subdirInBucket, "stale-file.tmp"), "data");
 
+        String bucketName = bucketPath.getName();
         long oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2);
         Files.setLastModifiedTime(
-                tempDir.resolve("part1=0/part2=a/bucket-0/orphan-subdir"),
+                tempDir.resolve("part1=0/part2=a/" + bucketName + "/orphan-subdir"),
                 FileTime.fromMillis(oldTime));
 
         LocalOrphanFilesClean orphanFilesClean =

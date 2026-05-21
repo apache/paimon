@@ -398,10 +398,9 @@ public abstract class OrphanFilesClean implements Serializable {
 
         for (FileStatus status : statuses) {
             Path path = status.getPath();
-            if (filter.test(path)) {
+            if (status.isDir() && filter.test(path)) {
                 filtered.add(path);
             }
-            // ignore unknown dirs
         }
 
         return filtered;
