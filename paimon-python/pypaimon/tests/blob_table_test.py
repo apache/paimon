@@ -3233,5 +3233,96 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertIn('Cannot rename BLOB column', str(ctx.exception))
 
 
+class GetBlobTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.warehouse = os.path.join(cls.temp_dir, 'warehouse')
+        cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
+        cls.catalog.create_database('test_db', False)
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        cls.catalog.create_table('test_db.get_blob_test', schema, False)
+        cls.table = cls.catalog.get_table('test_db.get_blob_test')
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+            'picture': [b'img_data_1', b'img_data_2', b'img_data_3'],
+        }, schema=pa_schema)
+
+        write_builder = cls.table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_get_blob_lazy_access(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        results = []
+        for row in read.to_blob_iterator(splits):
+            blob = row.get_blob(2)
+            self.assertIsNotNone(blob)
+            results.append((row.get_field(0), blob.to_data()))
+
+        self.assertEqual(len(results), 3)
+        results.sort(key=lambda x: x[0])
+        self.assertEqual(results[0], (1, b'img_data_1'))
+        self.assertEqual(results[1], (2, b'img_data_2'))
+        self.assertEqual(results[2], (3, b'img_data_3'))
+
+    def test_get_blob_streaming(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        for row in read.to_blob_iterator(splits):
+            blob = row.get_blob(2)
+            with blob.new_input_stream() as stream:
+                data = stream.read()
+            self.assertTrue(data.startswith(b'img_data_'))
+            break
+
+    def test_get_blob_non_blob_field_raises(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        for row in read.to_blob_iterator(splits):
+            with self.assertRaises(TypeError):
+                row.get_blob(0)
+            break
+
+    def test_to_iterator_unchanged(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        count = 0
+        for row in read.to_iterator(splits):
+            self.assertIsNotNone(row.get_field(0))
+            self.assertIsNotNone(row.get_field(1))
+            count += 1
+        self.assertEqual(count, 3)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -134,6 +134,43 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(descriptor.offset, 0)
         self.assertEqual(descriptor.length, -1)
 
+    def test_from_bytes_with_raw_data(self):
+        raw = b"hello blob"
+        blob = Blob.from_bytes(raw)
+        self.assertIsInstance(blob, BlobData)
+        self.assertEqual(blob.to_data(), raw)
+
+    def test_from_bytes_with_none(self):
+        self.assertIsNone(Blob.from_bytes(None))
+
+    def test_from_bytes_with_descriptor(self):
+        import tempfile
+        import os
+        data = b"actual blob content"
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(data)
+        tmp.close()
+
+        descriptor = BlobDescriptor(tmp.name, 0, len(data))
+        serialized = descriptor.serialize()
+
+        from pypaimon.common.file_io import FileIO
+        file_io = FileIO.get(f"file://{os.path.dirname(tmp.name)}", {})
+        blob = Blob.from_bytes(serialized, file_io)
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_data(), data)
+        os.unlink(tmp.name)
+
+    def test_from_bytes_descriptor_without_file_io_raises(self):
+        descriptor = BlobDescriptor("/tmp/fake", 0, 10)
+        serialized = descriptor.serialize()
+        with self.assertRaises(ValueError):
+            Blob.from_bytes(serialized)
+
+    def test_from_bytes_invalid_type_raises(self):
+        with self.assertRaises(TypeError):
+            Blob.from_bytes(12345)
+
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
         test_data = b"interface test data"

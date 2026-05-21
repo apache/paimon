@@ -25,7 +25,7 @@ from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.blob import Blob, BlobDescriptor
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -178,28 +178,10 @@ class DataFileBatchReader(RecordBatchReader):
         value = self._normalize_blob_cell(value)
         if value is None:
             return None
-
         if not isinstance(value, bytes):
             return value
-
-        descriptor = self._deserialize_descriptor_or_none(value)
-        if descriptor is None:
-            return value
-
-        try:
-            uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
-            blob = Blob.from_descriptor(uri_reader, descriptor)
-            return blob.to_data()
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to read blob bytes from descriptor URI while converting blob value."
-            ) from e
-
-    @staticmethod
-    def _deserialize_descriptor_or_none(raw: bytes):
-        if not BlobDescriptor.is_blob_descriptor(raw):
-            return None
-        return BlobDescriptor.deserialize(raw)
+        blob = Blob.from_bytes(value, self.file_io)
+        return blob.to_data() if blob is not None else None
 
     def _assign_row_tracking(self, record_batch: RecordBatch) -> RecordBatch:
         """Assign row tracking meta fields (_ROW_ID and _SEQUENCE_NUMBER)."""
