@@ -16,7 +16,7 @@
 # under the License.
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from pypaimon.table.row.row_kind import RowKind
 
@@ -44,6 +44,15 @@ class InternalRow(ABC):
         Returns the number of fields in this row.
         The number does not include RowKind. It is kept separately.
         """
+
+    def get_blob(self, pos: int) -> Optional[Any]:
+        """Returns the Blob at the given position, or None if null.
+
+        Requires a blob-aware row context. Use TableRead.to_blob_iterator().
+        """
+        raise NotImplementedError(
+            "get_blob() requires a blob-aware row. Use TableRead.to_blob_iterator()."
+        )
 
     def __str__(self) -> str:
         fields = []

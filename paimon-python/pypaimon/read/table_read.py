@@ -74,6 +74,55 @@ class TableRead:
 
         return _record_generator()
 
+    def to_blob_iterator(self, splits: List[Split]) -> Iterator:
+        """Iterator where blob fields are accessible via row.get_blob(pos).
+
+        Unlike to_iterator() which eagerly resolves blobs to bytes,
+        this returns rows with lazy Blob access supporting streaming.
+        """
+        from pypaimon.common.options.core_options import CoreOptions
+
+        blob_field_indices = {
+            i for i, field in enumerate(self.read_type)
+            if hasattr(field.type, 'type') and field.type.type == 'BLOB'
+        }
+        file_io = self.table.file_io
+        limit = self.limit
+
+        # Force blob-as-descriptor=true so descriptors are preserved
+        original_value = self.table.options.blob_as_descriptor()
+        self.table.options.set(CoreOptions.BLOB_AS_DESCRIPTOR, True)
+
+        def _blob_record_generator():
+            try:
+                count = 0
+                for split in splits:
+                    if limit is not None and count >= limit:
+                        return
+                    reader = self._create_split_read(split).create_reader()
+                    try:
+                        for batch in iter(
+                            lambda: reader.read_batch(file_io, blob_field_indices),
+                            None
+                        ):
+                            for row in iter(batch.next, None):
+                                yield row
+                                count += 1
+                                if limit is not None and count >= limit:
+                                    return
+                    finally:
+                        reader.close()
+            finally:
+                # Restore original option
+                if original_value is not None:
+                    self.table.options.set(
+                        CoreOptions.BLOB_AS_DESCRIPTOR, original_value)
+                else:
+                    self.table.options.options.data.pop(
+                        CoreOptions.BLOB_AS_DESCRIPTOR.key(), None)
+
+        return _blob_record_generator()
+
     def to_arrow_batch_reader(self, splits: List[Split]) -> pyarrow.ipc.RecordBatchReader:
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
