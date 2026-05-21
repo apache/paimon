@@ -327,6 +327,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                 while (!dryRun && !emptyDirs.isEmpty()) {
                                     Set<Path> newEmptyDir = new HashSet<>();
                                     for (Path emptyDir : emptyDirs) {
+                                        if (table.location().equals(emptyDir)) {
+                                            continue;
+                                        }
                                         try {
                                             if (fileIO.delete(emptyDir, false)) {
                                                 LOG.info("Clean empty dir: {}", emptyDir);
