@@ -27,7 +27,7 @@ public class RTreeNode {
     private final List<RTreeNode> children;
     private final List<Integer> leafRowIds;
     private final List<LeafEntry> leafEntries;
-    private final boolean isLeaf;
+    private boolean isLeaf;
     private final int maxEntries;
     private RTreeNode parent;
 
@@ -86,6 +86,10 @@ public class RTreeNode {
 
     public void setParent(RTreeNode parent) {
         this.parent = parent;
+    }
+
+    public void setLeaf(boolean leaf) {
+        this.isLeaf = leaf;
     }
 
     public int getEntryCount() {
