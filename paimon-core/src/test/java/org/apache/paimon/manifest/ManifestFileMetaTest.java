@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -86,7 +87,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // no trigger Full Compaction
         List<ManifestFileMeta> actual =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, Long.MAX_VALUE, getPartitionType(), null);
+                        input,
+                        manifestFile,
+                        500,
+                        3,
+                        Long.MAX_VALUE,
+                        getPartitionType(),
+                        null,
+                        true);
         assertThat(actual).hasSameSizeAs(expected);
 
         // these two manifest files are merged from the input
@@ -125,7 +133,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                     3,
                     fullCompactionThreshold,
                     getPartitionType(),
-                    null);
+                    null,
+                    true);
         } catch (Throwable e) {
             assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             // old files should be kept untouched, while new files should be cleaned up
@@ -158,7 +167,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         // trigger full compaction
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input, manifestFile, 500, 3, 200, getPartitionType(), null, true);
 
         // 1st Manifest don't need to Merge
         assertSameContent(input.get(0), merged.get(0), manifestFile);
@@ -175,7 +184,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input, manifestFile, 500, 3, 200, getPartitionType(), null, true);
 
         assertEquivalentEntries(input, merged);
         assertThat(merged).hasSameElementsAs(input);
@@ -188,7 +197,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> merged1 =
                 ManifestFileMerger.merge(
-                        input1, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input1, manifestFile, 500, 3, 200, getPartitionType(), null, true);
 
         assertThat(base).hasSameElementsAs(merged1);
         assertEquivalentEntries(input1, merged1);
@@ -200,7 +209,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         addDeltaManifests(input, true);
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input, manifestFile, 500, 3, 200, getPartitionType(), null, true);
         assertEquivalentEntries(input, merged);
     }
 
@@ -227,7 +236,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input, manifestFile, 500, 3, 200, getPartitionType(), null, true);
         assertEquivalentEntries(input, merged);
     }
 
@@ -272,7 +281,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         500,
                         Long.MAX_VALUE,
                         getPartitionType(),
-                        null);
+                        null,
+                        true);
         assertThat(fullCompacted1).isEmpty();
         assertThat(newMetas1).isEmpty();
 
@@ -282,7 +292,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas2 = new ArrayList<>();
         Optional<List<ManifestFileMeta>> fullCompacted2 =
                 ManifestFileMerger.tryFullCompaction(
-                        input, newMetas1, manifestFile, 500, 100, getPartitionType(), null);
+                        input, newMetas1, manifestFile, 500, 100, getPartitionType(), null, true);
         assertThat(fullCompacted2).isEmpty();
         assertThat(newMetas2).isEmpty();
 
@@ -293,7 +303,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas3 = new ArrayList<>();
         Optional<List<ManifestFileMeta>> fullCompacted3 =
                 ManifestFileMerger.tryFullCompaction(
-                        input, newMetas3, manifestFile, 500, 100, getPartitionType(), null);
+                        input, newMetas3, manifestFile, 500, 100, getPartitionType(), null, true);
         assertThat(fullCompacted3).isEmpty();
         assertThat(newMetas3).isEmpty();
 
@@ -304,7 +314,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas4 = new ArrayList<>();
         List<ManifestFileMeta> fullCompacted4 =
                 ManifestFileMerger.tryFullCompaction(
-                                input, newMetas4, manifestFile, 5000, 100, getPartitionType(), null)
+                                input,
+                                newMetas4,
+                                manifestFile,
+                                5000,
+                                100,
+                                getPartitionType(),
+                                null,
+                                true)
                         .get();
         assertThat(fullCompacted4.size()).isEqualTo(1);
         assertThat(newMetas4.size()).isEqualTo(1);
@@ -316,7 +333,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas5 = new ArrayList<>();
         List<ManifestFileMeta> fullCompacted5 =
                 ManifestFileMerger.tryFullCompaction(
-                                input, newMetas5, manifestFile, 1800, 100, getPartitionType(), null)
+                                input,
+                                newMetas5,
+                                manifestFile,
+                                1800,
+                                100,
+                                getPartitionType(),
+                                null,
+                                true)
                         .get();
         assertThat(fullCompacted5.size()).isEqualTo(3);
         assertThat(newMetas5.size()).isEqualTo(1);
@@ -332,7 +356,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas6 = new ArrayList<>();
         List<ManifestFileMeta> fullCompacted6 =
                 ManifestFileMerger.tryFullCompaction(
-                                input, newMetas6, manifestFile, 500, 100, getPartitionType(), null)
+                                input,
+                                newMetas6,
+                                manifestFile,
+                                500,
+                                100,
+                                getPartitionType(),
+                                null,
+                                true)
                         .get();
 
         List<String> entryFileNameExptected = new ArrayList<>(Arrays.asList("ADD-G", "ADD-I"));
@@ -347,7 +378,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 IllegalArgumentException.class,
                 () -> {
                     ManifestFileMerger.tryFullCompaction(
-                            input, newMetas7, manifestFile, 500, 0, getPartitionType(), null);
+                            input, newMetas7, manifestFile, 500, 0, getPartitionType(), null, true);
                 });
 
         // case8: manifest file is deleted when reading
@@ -357,7 +388,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 Exception.class,
                 () -> {
                     ManifestFileMerger.tryFullCompaction(
-                            input, newMetas8, manifestFile, 500, 100, getPartitionType(), null);
+                            input,
+                            newMetas8,
+                            manifestFile,
+                            500,
+                            100,
+                            getPartitionType(),
+                            null,
+                            true);
                 });
         assertThat(newMetas8).isEmpty();
     }
@@ -373,7 +411,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         List<ManifestFileMeta> mergedManifest =
                 ManifestFileMerger.tryFullCompaction(
-                                input, newMetas, manifestFile, 500, 100, getPartitionType(), null)
+                                input,
+                                newMetas,
+                                manifestFile,
+                                500,
+                                100,
+                                getPartitionType(),
+                                null,
+                                true)
                         .get();
 
         List<String> expected = Lists.newArrayList("ADD-C2", "ADD-D2", "ADD-G");
@@ -395,6 +440,102 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertThat(newMetas.size()).isEqualTo(1);
 
         containSameEntryFile(mergedManifest, expected);
+    }
+
+    @Test
+    public void testFullCompactionSortedByPartition() throws Exception {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(makeManifest(makeEntry(true, "p2-1", 2), makeEntry(true, "p1-1", 1)));
+        input.add(makeManifest(makeEntry(true, "p1-2", 1), makeEntry(true, "p0-1", 0)));
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        ManifestFileMerger.tryFullCompaction(
+                        input, newMetas, manifestFile, 5000, 1, getPartitionType(), null, true)
+                .get();
+
+        assertThat(newMetas).hasSize(1);
+        ManifestFileMeta output = newMetas.get(0);
+        List<Integer> partitions =
+                manifestFile.read(output.fileName(), output.fileSize()).stream()
+                        .map(e -> e.partition().getInt(0))
+                        .collect(Collectors.toList());
+        assertThat(partitions).isSorted();
+    }
+
+    @Test
+    public void testFullCompactionSortedByPartitionWithExternalSortSpill() throws Exception {
+        // Use small buffer size (three pages) + large payload to ensure the sort buffer spills.
+        long pageSize = CoreOptions.PAGE_SIZE.defaultValue().getBytes();
+        long bufferSize = 3 * pageSize;
+        byte[] embeddedIndex = new byte[4 * 1024];
+        int entryCount = 200;
+
+        List<ManifestEntry> entries1 = new ArrayList<>();
+        List<ManifestEntry> entries2 = new ArrayList<>();
+        for (int partition = entryCount - 1; partition >= 0; partition--) {
+            ManifestEntry entry =
+                    makeEntry(
+                            true,
+                            "p" + partition,
+                            partition,
+                            0,
+                            Lists.newArrayList("extra-" + partition),
+                            embeddedIndex);
+            if ((partition & 1) == 0) {
+                entries1.add(entry);
+            } else {
+                entries2.add(entry);
+            }
+        }
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(makeManifest(entries1.toArray(new ManifestEntry[0])));
+        input.add(makeManifest(entries2.toArray(new ManifestEntry[0])));
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        ManifestFileMerger.tryFullCompaction(
+                        input,
+                        newMetas,
+                        manifestFile,
+                        Long.MAX_VALUE,
+                        1,
+                        getPartitionType(),
+                        null,
+                        true,
+                        bufferSize)
+                .get();
+
+        assertThat(newMetas).hasSize(1);
+        ManifestFileMeta output = newMetas.get(0);
+        List<Integer> partitions =
+                manifestFile.read(output.fileName(), output.fileSize()).stream()
+                        .map(e -> e.partition().getInt(0))
+                        .collect(Collectors.toList());
+        assertThat(partitions)
+                .hasSize(entryCount)
+                .isSorted()
+                .containsExactlyElementsOf(
+                        IntStream.range(0, entryCount).boxed().collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testFullCompactionNotSortedWhenDisabled() throws Exception {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(makeManifest(makeEntry(true, "p2-1", 2), makeEntry(true, "p1-1", 1)));
+        input.add(makeManifest(makeEntry(true, "p1-2", 1), makeEntry(true, "p0-1", 0)));
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        ManifestFileMerger.tryFullCompaction(
+                        input, newMetas, manifestFile, 5000, 1, getPartitionType(), null, false)
+                .get();
+
+        assertThat(newMetas).hasSize(1);
+        ManifestFileMeta output = newMetas.get(0);
+        List<Integer> partitions =
+                manifestFile.read(output.fileName(), output.fileSize()).stream()
+                        .map(e -> e.partition().getInt(0))
+                        .collect(Collectors.toList());
+        assertThat(partitions).containsExactly(2, 1, 1, 0);
     }
 
     @Test
@@ -447,7 +588,14 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         List<ManifestFileMeta> fullCompacted =
                 ManifestFileMerger.tryFullCompaction(
-                                input, newMetas, manifestFile, 500, 100, getPartitionType(), null)
+                                input,
+                                newMetas,
+                                manifestFile,
+                                500,
+                                100,
+                                getPartitionType(),
+                                null,
+                                true)
                         .get();
         assertThat(fullCompacted.size()).isEqualTo(1);
         assertThat(newMetas.size()).isEqualTo(1);
@@ -491,7 +639,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, threshold, 3, 200, getPartitionType(), null);
+                        input, manifestFile, threshold, 3, 200, getPartitionType(), null, true);
         assertEquivalentEntries(
                 input.stream()
                         .filter(f -> !baseFiles.contains(f.fileName()))
@@ -513,22 +661,17 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         Optional<List<ManifestFileMeta>> fullCompacted;
-        fileIO.blockManifestReads();
-        try {
-            fullCompacted =
-                    ManifestFileMerger.tryFullCompaction(
-                            input,
-                            newMetas,
-                            manifestFile,
-                            Long.MAX_VALUE,
-                            1,
-                            getPartitionType(),
-                            2);
-        } finally {
-            fileIO.stopBlockingManifestReads();
-        }
+        fullCompacted =
+                ManifestFileMerger.tryFullCompaction(
+                        input,
+                        newMetas,
+                        manifestFile,
+                        Long.MAX_VALUE,
+                        1,
+                        getPartitionType(),
+                        2,
+                        false);
 
-        assertThat(fileIO.maxConcurrentManifestReads()).isGreaterThanOrEqualTo(2);
         assertThat(fullCompacted).isPresent();
         assertEquivalentEntries(input, fullCompacted.get());
     }
@@ -558,7 +701,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         suggerstSize,
                         sizeTrigger,
                         getPartitionType(),
-                        null);
+                        null,
+                        true);
 
         // *****verify result*****
         List<ManifestFileMeta> mustMergedFiles =

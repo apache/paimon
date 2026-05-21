@@ -51,7 +51,7 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, 500, 3, 200, getPartitionType(), null);
+                        input, manifestFile, 500, 3, 200, getPartitionType(), null, true);
         assertEquivalentEntries(input, merged);
 
         // the first one is not deleted, it should not be merged
@@ -91,7 +91,7 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
-                        input, manifestFile, threshold, 3, 200, getPartitionType(), null);
+                        input, manifestFile, threshold, 3, 200, getPartitionType(), null, true);
         assertEquivalentEntries(
                 input.stream()
                         .filter(f -> !baseFiles.contains(f.fileName()))

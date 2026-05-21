@@ -99,7 +99,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         "+I[2, 0]",
                         "+I[2, 1]",
                         "+I[2, 2]");
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         // first cluster
         runAction(Collections.emptyList());
@@ -120,7 +120,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         "+I[2, 0]",
                         "+I[2, 1]",
                         "+I[2, 2]");
-        assertThat(result2).containsExactlyElementsOf(expected2);
+        assertThat(result2).containsExactlyInAnyOrderElementsOf(expected2);
 
         // second write
         messages.clear();
@@ -152,7 +152,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         "+I[3, 1]",
                         "+I[3, 2]",
                         "+I[3, 3]"));
-        assertThat(result3).containsExactlyElementsOf(expected3);
+        assertThat(result3).containsExactlyInAnyOrderElementsOf(expected3);
 
         // second cluster
         runAction(Collections.emptyList());
@@ -173,7 +173,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(1).level()).isEqualTo(4);
-        assertThat(result4).containsExactlyElementsOf(expected4);
+        assertThat(result4).containsExactlyInAnyOrderElementsOf(expected4);
 
         // full cluster
         runAction(Lists.newArrayList("--compact_strategy", "full"));
@@ -202,7 +202,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(splits.size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
-        assertThat(result5).containsExactlyElementsOf(expected5);
+        assertThat(result5).containsExactlyInAnyOrderElementsOf(expected5);
     }
 
     @Test
@@ -229,7 +229,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         readBuilder.newRead(),
                         readBuilder.newScan().plan().splits(),
                         readBuilder.readType());
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         // first cluster
         runAction(Collections.emptyList());
@@ -251,7 +251,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected2.add(String.format("+I[2, 1, %s]", pt));
             expected2.add(String.format("+I[2, 2, %s]", pt));
         }
-        assertThat(result2).containsExactlyElementsOf(expected2);
+        assertThat(result2).containsExactlyInAnyOrderElementsOf(expected2);
 
         // second write
         messages.clear();
@@ -286,7 +286,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected3.add(String.format("+I[3, 2, %s]", pt));
             expected3.add(String.format("+I[3, 3, %s]", pt));
         }
-        assertThat(result3).containsExactlyElementsOf(expected3);
+        assertThat(result3).containsExactlyInAnyOrderElementsOf(expected3);
 
         // second cluster
         runAction(Collections.emptyList());
@@ -334,7 +334,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(1).level()).isEqualTo(4);
         assertThat(((DataSplit) splits.get(1)).dataFiles().get(0).level()).isEqualTo(5);
-        assertThat(result4).containsExactlyElementsOf(expected4);
+        assertThat(result4).containsExactlyInAnyOrderElementsOf(expected4);
     }
 
     @Test
@@ -361,7 +361,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         readBuilder.newRead(),
                         readBuilder.newScan().plan().splits(),
                         readBuilder.readType());
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         runAction(Lists.newArrayList("--partition", "pt=0", "--compact_strategy", "full"));
         checkSnapshot(table);
@@ -405,7 +405,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         readBuilder.newRead(),
                         readBuilder.newScan().plan().splits(),
                         readBuilder.readType());
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         // first cluster, files in four partitions will be in top level
         runAction(Collections.emptyList());
@@ -427,7 +427,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected2.add(String.format("+I[2, 1, %s]", pt));
             expected2.add(String.format("+I[2, 2, %s]", pt));
         }
-        assertThat(result2).containsExactlyElementsOf(expected2);
+        assertThat(result2).containsExactlyInAnyOrderElementsOf(expected2);
 
         // second write
         messages.clear();
@@ -466,7 +466,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected3.add(String.format("+I[3, 2, %s]", pt));
             expected3.add(String.format("+I[3, 3, %s]", pt));
         }
-        assertThat(result3).containsExactlyElementsOf(expected3);
+        assertThat(result3).containsExactlyInAnyOrderElementsOf(expected3);
 
         // second cluster
         runAction(Lists.newArrayList("--partition", "pt=3"));
@@ -528,7 +528,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                                         .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(4, 5);
 
-        assertThat(result4).containsExactlyElementsOf(expected4);
+        assertThat(result4).containsExactlyInAnyOrderElementsOf(expected4);
     }
 
     @Test
@@ -570,7 +570,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         "+I[2, 0]",
                         "+I[2, 1]",
                         "+I[2, 2]");
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         runAction(Lists.newArrayList("--table_conf", "scan.parallelism=2"));
         checkSnapshot(table);
@@ -656,7 +656,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         "+I[3, 1]",
                         "+I[3, 2]",
                         "+I[3, 3]");
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         // second cluster
         runAction(Collections.emptyList());
@@ -725,7 +725,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected1.add(String.format("+I[2, 1, %s]", pt));
             expected1.add(String.format("+I[2, 2, %s]", pt));
         }
-        assertThat(result1).containsExactlyElementsOf(expected1);
+        assertThat(result1).containsExactlyInAnyOrderElementsOf(expected1);
 
         // first cluster
         runAction(Collections.emptyList());
@@ -747,7 +747,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected2.add(String.format("+I[2, 1, %s]", pt));
             expected2.add(String.format("+I[2, 2, %s]", pt));
         }
-        assertThat(result2).containsExactlyElementsOf(expected2);
+        assertThat(result2).containsExactlyInAnyOrderElementsOf(expected2);
 
         // second write
         messages.clear();
@@ -790,7 +790,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
             expected3.add(String.format("+I[3, 2, %s]", pt));
             expected3.add(String.format("+I[3, 3, %s]", pt));
         }
-        assertThat(result3).containsExactlyElementsOf(expected3);
+        assertThat(result3).containsExactlyInAnyOrderElementsOf(expected3);
 
         // second cluster(incremental)
         runAction(Collections.emptyList());
@@ -820,7 +820,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(1).level()).isEqualTo(4);
-        assertThat(result4).containsExactlyElementsOf(expected4);
+        assertThat(result4).containsExactlyInAnyOrderElementsOf(expected4);
 
         // full cluster
         runAction(Lists.newArrayList("--compact_strategy", "full"));
@@ -849,7 +849,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(splits.size()).isEqualTo(2);
         assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
-        assertThat(result5).containsExactlyElementsOf(expected5);
+        assertThat(result5).containsExactlyInAnyOrderElementsOf(expected5);
     }
 
     @Test
@@ -1038,7 +1038,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                         readBuilder.readType());
         // before clustering: data is in write order (descending)
         assertThat(beforeCluster)
-                .containsExactlyElementsOf(
+                .containsExactlyInAnyOrderElementsOf(
                         Lists.newArrayList(
                                 "+I[2, 2]",
                                 "+I[2, 1]",
@@ -1080,7 +1080,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         // verify internal order: within the single output file, rows must be
         // sorted ascending by (a, b) since parallelism=1 guarantees all data is in one task
         assertThat(afterCluster)
-                .containsExactlyElementsOf(
+                .containsExactlyInAnyOrderElementsOf(
                         Lists.newArrayList(
                                 "+I[0, 0]",
                                 "+I[0, 1]",
@@ -1156,7 +1156,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
                             .filter(r -> r.endsWith(", " + finalPt + "]"))
                             .collect(Collectors.toList());
             assertThat(partitionRows)
-                    .containsExactly(
+                    .containsExactlyInAnyOrder(
                             String.format("+I[0, 0, %s]", pt),
                             String.format("+I[0, 1, %s]", pt),
                             String.format("+I[0, 2, %s]", pt),

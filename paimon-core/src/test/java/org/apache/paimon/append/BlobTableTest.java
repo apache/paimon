@@ -993,6 +993,8 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.MANIFEST_MERGE_SORTED.key(), "false");
+        schemaBuilder.option(CoreOptions.MANIFEST_DELTA_SORTED.key(), "false");
         return schemaBuilder.build();
     }
 

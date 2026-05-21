@@ -959,7 +959,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             options.manifestMergeMinCount(),
                             options.manifestFullCompactionThresholdSize().getBytes(),
                             partitionType,
-                            options.scanManifestParallelism());
+                            options.scanManifestParallelism(),
+                            options.manifestMergeSorted() && options.manifestMergeSortOnCommit(),
+                            options.manifestMergeSortBufferSize());
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -984,8 +986,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             // write new delta files into manifest files
             deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
-            deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
-
+            List<ManifestEntry> deltaFilesForWrite = deltaFiles;
+            if (options.manifestDeltaSorted() && deltaFiles.size() > 1) {
+                deltaFilesForWrite = new ArrayList<>(deltaFiles);
+                deltaFilesForWrite.sort(
+                        ManifestFileMerger.createManifestEntryComparator(partitionType));
+            }
+            List<ManifestFileMeta> deltaManifests = manifestFile.write(deltaFilesForWrite);
+            deltaManifestList = manifestList.write(deltaManifests);
             // write changelog into manifest files
             if (!changelogFiles.isEmpty()) {
                 changelogManifestList = manifestList.write(manifestFile.write(changelogFiles));
@@ -1188,7 +1196,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         1,
                         1,
                         partitionType,
-                        options.scanManifestParallelism());
+                        options.scanManifestParallelism(),
+                        options.manifestMergeSorted(),
+                        options.manifestMergeSortBufferSize());
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
