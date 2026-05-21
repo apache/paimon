@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /** A factory to create Mosaic {@link FormatWriter}. */
@@ -57,7 +58,18 @@ public class MosaicWriterFactory implements FormatWriterFactory {
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) {
-        // only support zstd, ignore compression
+        validateCompression(compression);
         return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames, numBuckets);
+    }
+
+    private static void validateCompression(String compression) {
+        if (compression == null) {
+            return;
+        }
+        String normalized = compression.toLowerCase(Locale.ROOT);
+        if (!normalized.equals("zstd")) {
+            throw new UnsupportedOperationException(
+                    "Mosaic format only supports zstd compression, but got: " + compression);
+        }
     }
 }

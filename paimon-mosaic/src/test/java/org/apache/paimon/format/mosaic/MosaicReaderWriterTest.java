@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Integration tests for Mosaic reader and writer. */
@@ -262,6 +263,19 @@ class MosaicReaderWriterTest {
         assertThat(result.get(0).isNullAt(1)).isTrue();
         assertThat(result.get(1).isNullAt(0)).isTrue();
         assertThat(result.get(1).isNullAt(1)).isTrue();
+    }
+
+    @Test
+    void testUnsupportedCompressionThrows() {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+        MosaicFileFormat format = createFormat();
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+        LocalFileIO fileIO = new LocalFileIO();
+
+        assertThatThrownBy(() -> writerFactory.create(fileIO.newOutputStream(path, false), "lz4"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("lz4");
     }
 
     @Test
