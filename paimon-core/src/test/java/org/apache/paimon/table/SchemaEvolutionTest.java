@@ -608,6 +608,93 @@ public class SchemaEvolutionTest {
         assertThat(newSchema.options()).contains(entries);
     }
 
+    @Test
+    public void testAlterAddBlobFieldOptionBeforeAddingColumn() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.STRING()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        optionsForBlobTable(),
+                        "");
+        schemaManager.createTable(schema);
+
+        TableSchema schemaWithOption =
+                schemaManager.commitChanges(
+                        SchemaChange.setOption(CoreOptions.BLOB_FIELD.key(), "picture"));
+        assertThat(schemaWithOption.fieldNames()).doesNotContain("picture");
+
+        TableSchema schemaWithBlobColumn =
+                schemaManager.commitChanges(SchemaChange.addColumn("picture", DataTypes.BLOB()));
+        assertThat(schemaWithBlobColumn.fields().get(2).type()).isEqualTo(DataTypes.BLOB());
+    }
+
+    @Test
+    public void testAlterBlobFieldOptionCannotConvertExistingColumn() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BYTES()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        optionsForBlobTable(),
+                        "");
+        schemaManager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        SchemaChange.setOption(CoreOptions.BLOB_FIELD.key(), "f1")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot configure existing field 'f1' as a BLOB field.");
+    }
+
+    @Test
+    public void testAlterBlobFieldOptionCanRemoveNonExistingField() throws Exception {
+        Map<String, String> options = optionsForBlobTable();
+        options.put(CoreOptions.BLOB_FIELD.key(), "picture");
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.STRING()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        schemaManager.createTable(schema);
+
+        TableSchema newSchema =
+                schemaManager.commitChanges(
+                        SchemaChange.setOption(CoreOptions.BLOB_FIELD.key(), "avatar"));
+        assertThat(CoreOptions.blobField(newSchema.options())).containsExactly("avatar");
+    }
+
+    @Test
+    public void testAlterBlobFieldOptionCannotRemoveExistingField() throws Exception {
+        Map<String, String> options = optionsForBlobTable();
+        options.put(CoreOptions.BLOB_FIELD.key(), "f1");
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BLOB()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        schemaManager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        SchemaChange.setOption(CoreOptions.BLOB_FIELD.key(), "")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot remove an existing field 'f1' from 'blob-field'.");
+    }
+
+    private Map<String, String> optionsForBlobTable() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return options;
+    }
+
     private List<String> readRecords(FileStoreTable table, Predicate filter) throws IOException {
         List<String> results = new ArrayList<>();
         forEachRemaining(

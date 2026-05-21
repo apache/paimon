@@ -38,6 +38,7 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
@@ -85,6 +86,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -346,9 +348,15 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public org.apache.spark.sql.connector.catalog.Table alterTable(
             Identifier ident, TableChange... changes) throws NoSuchTableException {
-        List<SchemaChange> schemaChanges =
-                Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
         try {
+            Table table = catalog.getTable(toIdentifier(ident, catalogName));
+            // We have to get the new table options by merging current options with changes,
+            // in case that altering blob fields and adding blob columns come together
+            Map<String, String> newOptions = newTableOptions(table.options(), changes);
+            List<SchemaChange> schemaChanges = new ArrayList<>();
+            for (TableChange change : changes) {
+                schemaChanges.add(toSchemaChange(change, newOptions));
+            }
             catalog.alterTable(toIdentifier(ident, catalogName), schemaChanges, false);
             return loadTable(ident);
         } catch (Catalog.TableNotExistException e) {
@@ -471,7 +479,7 @@ public class SparkCatalog extends SparkBaseCatalog
         return new RollbackStagedTable(loadTable(ident), () -> {});
     }
 
-    private SchemaChange toSchemaChange(TableChange change) {
+    private SchemaChange toSchemaChange(TableChange change, Map<String, String> newOptions) {
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
             validateAlterProperty(set.property());
@@ -494,7 +502,7 @@ public class SparkCatalog extends SparkBaseCatalog
             checkNoDefaultValue(add);
             return SchemaChange.addColumn(
                     add.fieldNames(),
-                    toPaimonType(add.dataType()).copy(add.isNullable()),
+                    resolveDataType(add, newOptions).copy(add.isNullable()),
                     add.comment(),
                     move);
         } else if (change instanceof TableChange.RenameColumn) {
@@ -524,6 +532,46 @@ public class SparkCatalog extends SparkBaseCatalog
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());
         }
+    }
+
+    private static Map<String, String> newTableOptions(
+            Map<String, String> currentOptions, TableChange[] changes) {
+        Map<String, String> options = new HashMap<>(currentOptions);
+        for (TableChange change : changes) {
+            if (change instanceof TableChange.SetProperty) {
+                TableChange.SetProperty set = (TableChange.SetProperty) change;
+                if (!set.property().equals(TableCatalog.PROP_COMMENT)) {
+                    options.put(set.property(), set.value());
+                }
+            } else if (change instanceof TableChange.RemoveProperty) {
+                TableChange.RemoveProperty remove = (TableChange.RemoveProperty) change;
+                if (!remove.property().equals(TableCatalog.PROP_COMMENT)) {
+                    options.remove(remove.property());
+                }
+            }
+        }
+        return options;
+    }
+
+    private static DataType resolveDataType(
+            TableChange.AddColumn add, Map<String, String> finalOptions) {
+        if (add.fieldNames().length == 1
+                && blobTypeFields(finalOptions).contains(add.fieldNames()[0])) {
+            checkArgument(
+                    add.dataType() instanceof org.apache.spark.sql.types.BinaryType,
+                    "The type of blob field must be binary");
+            return new BlobType().copy(add.isNullable());
+        }
+        return toPaimonType(add.dataType()).copy(add.isNullable());
+    }
+
+    private static Set<String> blobTypeFields(Map<String, String> options) {
+        Set<String> blobTypeFields = new HashSet<>(CoreOptions.blobField(options));
+        CoreOptions coreOptions = new CoreOptions(options);
+        blobTypeFields.addAll(coreOptions.blobDescriptorField());
+        blobTypeFields.addAll(coreOptions.blobViewField());
+        blobTypeFields.addAll(coreOptions.blobExternalStorageField());
+        return blobTypeFields;
     }
 
     private static SchemaChange.Move getMove(
@@ -560,9 +608,7 @@ public class SparkCatalog extends SparkBaseCatalog
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
-        List<String> blobFields = CoreOptions.blobField(properties);
-        Set<String> blobDescriptorFields = new CoreOptions(properties).blobDescriptorField();
-        List<String> blobViewFields = CoreOptions.blobViewField(properties);
+        Set<String> blobTypeFields = blobTypeFields(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -596,9 +642,7 @@ public class SparkCatalog extends SparkBaseCatalog
         for (StructField field : schema.fields()) {
             String name = field.name();
             DataType type;
-            if (blobFields.contains(name)
-                    || blobDescriptorFields.contains(name)
-                    || blobViewFields.contains(name)) {
+            if (blobTypeFields.contains(name)) {
                 checkArgument(
                         field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                         "The type of blob field must be binary");

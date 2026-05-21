@@ -2299,7 +2299,6 @@ public class CoreOptions implements Serializable {
                                     + "Fields listed in blob-descriptor-field or blob-view-field "
                                     + "are also treated as BLOB fields.");
 
-    @Immutable
     public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
             key("blob-descriptor-field")
                     .stringType()

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -108,6 +109,44 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "[+I[null, aaa, 1.2, null, 3.4, null, null, null], +I[null, bbb, 4.5, null, 5.6, 5, null, null],"
                                 + " +I[null, ccc, 2.3, 6, 5.6, 5, null, null], +I[flink, fff, 45.34, 4, 2.45, 12, null, null],"
                                 + " +I[ggg, hhh, 23.43, 6, 2.34, 34, 23, true]]");
+    }
+
+    @Test
+    public void testAlterAddBlobColumn() throws Exception {
+        sql(
+                "CREATE TABLE T_BLOB (id INT, data STRING) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+        sql("INSERT INTO T_BLOB VALUES (1, 'old')");
+
+        sql("ALTER TABLE T_BLOB SET ('blob-field'='picture')");
+        sql("ALTER TABLE T_BLOB ADD picture BYTES");
+
+        assertThat(paimonTable("T_BLOB").rowType().getField("picture").type().is(DataTypeRoot.BLOB))
+                .isTrue();
+        sql("INSERT INTO T_BLOB VALUES (2, 'new', X'4869')");
+        List<Row> result = sql("SELECT * FROM T_BLOB ORDER BY id");
+        assertThat(result.get(0).getField(2)).isNull();
+        assertThat((byte[]) result.get(1).getField(2)).containsExactly((byte) 72, (byte) 105);
+    }
+
+    @Test
+    public void testAlterAddBlobDescriptorColumn() throws Exception {
+        sql(
+                "CREATE TABLE T_BLOB_DESCRIPTOR (id INT, data STRING) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+
+        sql("ALTER TABLE T_BLOB_DESCRIPTOR SET ('blob-descriptor-field'='picture')");
+        sql("ALTER TABLE T_BLOB_DESCRIPTOR ADD picture BYTES");
+
+        assertThat(
+                        paimonTable("T_BLOB_DESCRIPTOR")
+                                .rowType()
+                                .getField("picture")
+                                .type()
+                                .is(DataTypeRoot.BLOB))
+                .isTrue();
     }
 
     @Test

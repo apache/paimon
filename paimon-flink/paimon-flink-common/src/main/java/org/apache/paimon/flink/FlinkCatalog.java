@@ -47,6 +47,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -566,20 +567,23 @@ public class FlinkCatalog extends AbstractCatalog {
     private List<SchemaChange> toSchemaChange(
             TableChange change,
             Map<String, Integer> oldTableNonPhysicalColumnIndex,
-            @Nullable String primaryKeyConstraintName) {
+            @Nullable String primaryKeyConstraintName,
+            Set<String> blobTypeFields,
+            Map<String, String> options) {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             if (((AddColumn) change).getColumn().isPhysical()) {
                 AddColumn add = (AddColumn) change;
                 String comment = add.getColumn().getComment().orElse(null);
                 SchemaChange.Move move = getMove(add.getPosition(), add.getColumn().getName());
-                schemaChanges.add(
-                        SchemaChange.addColumn(
+                DataType type =
+                        resolveDataType(
                                 add.getColumn().getName(),
-                                LogicalTypeConversion.toDataType(
-                                        add.getColumn().getDataType().getLogicalType()),
-                                comment,
-                                move));
+                                add.getColumn().getDataType().getLogicalType(),
+                                options,
+                                blobTypeFields);
+                schemaChanges.add(
+                        SchemaChange.addColumn(add.getColumn().getName(), type, comment, move));
             }
             return schemaChanges;
         } else if (change instanceof AddWatermark) {
@@ -847,7 +851,9 @@ public class FlinkCatalog extends AbstractCatalog {
                                             toSchemaChange(
                                                     tableChange,
                                                     oldTableNonPhysicalColumnIndex,
-                                                    primaryKeyConstraintName)
+                                                    primaryKeyConstraintName,
+                                                    blobTypeFields(newTable.getOptions()),
+                                                    newTable.getOptions())
                                                     .stream())
                             .collect(Collectors.toList());
             changes.addAll(schemaChanges);
@@ -1133,8 +1139,10 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private static Set<String> blobTypeFields(Map<String, String> options) {
         Set<String> blobTypeFields = new HashSet<>(CoreOptions.blobField(options));
-        blobTypeFields.addAll(new CoreOptions(options).blobDescriptorField());
+        CoreOptions coreOptions = new CoreOptions(options);
+        blobTypeFields.addAll(coreOptions.blobDescriptorField());
         blobTypeFields.addAll(CoreOptions.blobViewField(options));
+        blobTypeFields.addAll(coreOptions.blobExternalStorageField());
         return blobTypeFields;
     }
 
