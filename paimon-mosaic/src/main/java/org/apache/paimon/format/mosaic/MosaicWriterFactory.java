@@ -56,6 +56,7 @@ public class MosaicWriterFactory implements FormatWriterFactory {
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames, numBuckets);
+        return new MosaicRecordsWriter(
+                out, rowType, formatContext, statsColumnNames, numBuckets, compression);
     }
 }
