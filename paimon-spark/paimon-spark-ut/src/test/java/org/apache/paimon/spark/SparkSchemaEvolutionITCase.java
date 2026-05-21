@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.AnalysisException;
@@ -93,6 +94,34 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
         assertThat(spark.table("testAddColumn").collectAsList().toString())
                 .isEqualTo("[[1,2,1,null], [5,6,3,null]]");
+    }
+
+    @Test
+    public void testAlterAddBlobColumn() {
+        spark.sql(
+                "CREATE TABLE testAlterAddBlobColumn (id INT, data STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+        spark.sql("INSERT INTO testAlterAddBlobColumn VALUES (1, 'old')");
+
+        spark.sql(
+                "ALTER TABLE testAlterAddBlobColumn "
+                        + "SET TBLPROPERTIES ('blob-field'='picture')");
+        spark.sql("ALTER TABLE testAlterAddBlobColumn ADD COLUMN picture BINARY");
+        spark.sql("INSERT INTO testAlterAddBlobColumn VALUES (2, 'new', X'4869')");
+
+        assertThat(
+                        getTable("testAlterAddBlobColumn")
+                                .rowType()
+                                .getField("picture")
+                                .type()
+                                .is(DataTypeRoot.BLOB))
+                .isTrue();
+        List<Row> rows =
+                spark.sql("SELECT * FROM testAlterAddBlobColumn ORDER BY id").collectAsList();
+        assertThat(rows.get(0).get(2)).isNull();
+        assertThat((byte[]) rows.get(1).get(2)).containsExactly((byte) 72, (byte) 105);
     }
 
     @Test
