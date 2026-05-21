@@ -220,14 +220,6 @@ public abstract class OrphanFilesClean implements Serializable {
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
-                    String name = path.getName();
-                    if (name.startsWith(BUCKET_PATH_PREFIX) || name.contains("=")) {
-                        LOG.warn(
-                                "Skipping deletion of data structure directory that was mistakenly "
-                                        + "identified as orphan: {}",
-                                path);
-                        return;
-                    }
                     fileIO.deleteDirectoryQuietly(path);
                 } else {
                     fileIO.deleteQuietly(path);
@@ -461,19 +453,6 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected boolean oldEnough(FileStatus status) {
         return status.getModificationTime() < olderThanMillis;
-    }
-
-    /**
-     * Returns true if the given status represents a structural data directory (bucket or partition)
-     * that should never be treated as an orphan file candidate. Other directories (e.g. unknown
-     * temp dirs) are still eligible for orphan cleanup.
-     */
-    protected static boolean isDataStructureDirectory(FileStatus status) {
-        if (!status.isDir()) {
-            return false;
-        }
-        String name = status.getPath().getName();
-        return name.startsWith(BUCKET_PATH_PREFIX) || name.contains("=");
     }
 
     public static long olderThanMillis(@Nullable String olderThan) {

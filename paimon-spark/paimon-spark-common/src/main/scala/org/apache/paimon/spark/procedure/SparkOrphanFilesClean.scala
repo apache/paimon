@@ -126,7 +126,7 @@ case class SparkOrphanFilesClean(
       .flatMap {
         dir =>
           tryBestListingDirs(new Path(dir)).asScala
-            .filter(file => !isDataStructureDirectory(file))
+            .filter(file => !file.isDir())
             .filter(oldEnough).map {
             file =>
               val path = file.getPath
