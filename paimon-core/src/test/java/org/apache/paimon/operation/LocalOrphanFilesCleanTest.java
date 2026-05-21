@@ -634,8 +634,7 @@ public class LocalOrphanFilesCleanTest {
 
         Path partitionPath = new Path(tablePath, "part1=0/part2=a");
         Path bucketPath =
-                listSubDirs(partitionPath, p -> p.getName().startsWith(BUCKET_PATH_PREFIX))
-                        .get(0);
+                listSubDirs(partitionPath, p -> p.getName().startsWith(BUCKET_PATH_PREFIX)).get(0);
         assertThat(fileIO.listStatus(bucketPath)).isNotEmpty();
 
         Path subdirInBucket = new Path(bucketPath, "orphan-subdir");
