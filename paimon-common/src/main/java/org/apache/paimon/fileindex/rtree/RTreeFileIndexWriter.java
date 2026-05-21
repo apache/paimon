@@ -27,15 +27,17 @@ import org.apache.paimon.types.DoubleType;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Writer for R-Tree file index. */
 public class RTreeFileIndexWriter extends FileIndexWriter {
 
     private final DataType dataType;
     private final Options options;
-    private final RTree rtree;
     private final int dimensions;
     private final int maxEntries;
+    private final List<LeafEntry> entries;
     private int rowNumber;
 
     public RTreeFileIndexWriter(DataType dataType, Options options) {
@@ -45,7 +47,7 @@ public class RTreeFileIndexWriter extends FileIndexWriter {
                 options.getInteger(RTreeFileIndex.DIMENSIONS, RTreeFileIndex.DEFAULT_DIMENSIONS);
         this.maxEntries =
                 options.getInteger(RTreeFileIndex.MAX_ENTRIES, RTreeFileIndex.DEFAULT_MAX_ENTRIES);
-        this.rtree = new RTree(dimensions, maxEntries);
+        this.entries = new ArrayList<>();
         this.rowNumber = 0;
 
         validateDataType();
@@ -74,7 +76,8 @@ public class RTreeFileIndexWriter extends FileIndexWriter {
                 throw new RuntimeException(
                         String.format("Expected %d dimensions, got %d", dimensions, point.length));
             }
-            rtree.insert(point, rowNumber);
+            BoundingBox bbox = BoundingBox.fromPoint(point);
+            entries.add(new LeafEntry(rowNumber, bbox));
             rowNumber++;
         } catch (Exception e) {
             throw new RuntimeException("Error writing R-Tree index: " + e.getMessage(), e);
@@ -107,7 +110,8 @@ public class RTreeFileIndexWriter extends FileIndexWriter {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             DataOutputStream dos = new DataOutputStream(output);
 
-            serializeRTree(dos);
+            RTree rtree = buildRTreeWithSTRBulkLoader();
+            serializeRTree(dos, rtree);
 
             dos.flush();
             return output.toByteArray();
@@ -116,7 +120,15 @@ public class RTreeFileIndexWriter extends FileIndexWriter {
         }
     }
 
-    private void serializeRTree(DataOutputStream dos) throws IOException {
+    private RTree buildRTreeWithSTRBulkLoader() {
+        if (entries.isEmpty()) {
+            return new RTree(dimensions, maxEntries);
+        }
+        STRBulkLoader loader = new STRBulkLoader(dimensions, maxEntries);
+        return loader.bulkLoad(entries);
+    }
+
+    private void serializeRTree(DataOutputStream dos, RTree rtree) throws IOException {
         dos.writeInt(dimensions);
         dos.writeInt(maxEntries);
         dos.writeInt(rtree.getSize());
