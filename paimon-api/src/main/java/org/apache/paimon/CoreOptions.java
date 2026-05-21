@@ -469,6 +469,30 @@ public class CoreOptions implements Serializable {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLED =
+            key("manifest-sort.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to invoke manifest sort rewrite during commit.");
+
+    public static final ConfigOption<String> MANIFEST_SORT_PARTITION_FIELD =
+            key("manifest-sort.partition-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Partition field name to sort manifest entries by. Validated by"
+                                    + " schema validation, if not configured, defaults to the first partition field.");
+
+    public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
+            key("manifest-sort.max-rewrite-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Maximum total size of manifest files to rewrite in a single"
+                                    + " sort rewrite pass. Sections exceeding this limit are"
+                                    + " skipped. Set to a larger value to allow more aggressive"
+                                    + " sort rewriting.");
+
     public static final ConfigOption<String> UPSERT_KEY =
             key("upsert-key")
                     .stringType()
@@ -2571,6 +2595,19 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
+    }
+
+    public boolean manifestSortEnabled() {
+        return options.get(MANIFEST_SORT_ENABLED);
+    }
+
+    @Nullable
+    public String manifestSortPartitionField() {
+        return options.get(MANIFEST_SORT_PARTITION_FIELD);
+    }
+
+    public long manifestSortMaxRewriteSize() {
+        return options.get(MANIFEST_SORT_MAX_REWRITE_SIZE).getBytes();
     }
 
     public String partitionDefaultName() {
