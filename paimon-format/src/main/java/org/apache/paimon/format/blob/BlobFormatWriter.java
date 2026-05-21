@@ -43,9 +43,11 @@ import static org.apache.paimon.utils.StreamUtils.longToLittleEndian;
 /** {@link FormatWriter} for blob file. */
 public class BlobFormatWriter implements FileAwareFormatWriter {
 
-    public static final byte VERSION = 1;
+    public static final byte VERSION = 2;
     public static final int MAGIC_NUMBER = 1481511375;
     public static final byte[] MAGIC_NUMBER_BYTES = intToLittleEndian(MAGIC_NUMBER);
+    public static final long NULL_LENGTH = -1L;
+    public static final long PLACE_HOLDER_LENGTH = -2L;
 
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
@@ -81,13 +83,17 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     public void addElement(InternalRow element) throws IOException {
         checkArgument(element.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         if (element.isNullAt(0)) {
-            lengths.add(-1L);
+            lengths.add(NULL_LENGTH);
             if (writeConsumer != null) {
                 writeConsumer.accept(blobFieldName, null);
             }
             return;
         }
         Blob blob = element.getBlob(0);
+        if (blob == Blob.PLACE_HOLDER) {
+            lengths.add(PLACE_HOLDER_LENGTH);
+            return;
+        }
 
         long previousPos = out.getPos();
         crc32.reset();

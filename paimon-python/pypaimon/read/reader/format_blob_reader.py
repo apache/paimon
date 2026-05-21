@@ -32,6 +32,8 @@ from pypaimon.table.row.row_kind import RowKind
 
 
 class FormatBlobReader(RecordBatchReader):
+    NULL_LENGTH = -1
+    PLACE_HOLDER_LENGTH = -2
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
@@ -97,6 +99,10 @@ class FormatBlobReader(RecordBatchReader):
                 for field_name in self._fields:
                     if blob is None:
                         pydict_data[field_name].append(None)
+                    elif blob is Blob.PLACE_HOLDER:
+                        raise RuntimeError(
+                            "Blob placeholder is not supported by FormatBlobReader yet."
+                        )
                     elif self._blob_as_descriptor:
                         pydict_data[field_name].append(blob.to_descriptor().serialize())
                     else:
@@ -148,7 +154,7 @@ class FormatBlobReader(RecordBatchReader):
             index_length = struct.unpack('<I', header[:4])[0]  # Little endian
             version = header[4]
 
-            if version != 1:
+            if version not in (1, 2):
                 raise IOError(f"Unsupported blob file version: {version}")
 
             # Read index data
@@ -163,7 +169,7 @@ class FormatBlobReader(RecordBatchReader):
             blob_offsets = []
             offset = 0
             for length in blob_lengths:
-                if length == -1:
+                if length < 0:
                     blob_offsets.append(-1)
                 else:
                     blob_offsets.append(offset)
@@ -175,6 +181,8 @@ class FormatBlobReader(RecordBatchReader):
 class BlobRecordIterator:
     MAGIC_NUMBER_SIZE = 4
     METADATA_OVERHEAD = 16
+    NULL_LENGTH = -1
+    PLACE_HOLDER_LENGTH = -2
 
     def __init__(self, file_io: FileIO, file_path: str, blob_lengths: List[int],
                  blob_offsets: List[int], field_name: str):
@@ -192,13 +200,17 @@ class BlobRecordIterator:
         if self.current_position >= len(self.blob_lengths):
             raise StopIteration
         fields = [DataField(0, self.field_name, AtomicType("BLOB"))]
-        if self.blob_lengths[self.current_position] == -1:
+        length = self.blob_lengths[self.current_position]
+        if length == self.NULL_LENGTH:
             self.current_position += 1
             return GenericRow([None], fields, RowKind.INSERT)
+        if length == self.PLACE_HOLDER_LENGTH:
+            self.current_position += 1
+            return GenericRow([Blob.PLACE_HOLDER], fields, RowKind.INSERT)
         # Create blob reference for the current blob
         # Skip magic number (4 bytes) and exclude length (8 bytes) + CRC (4 bytes) = 12 bytes
         blob_offset = self.blob_offsets[self.current_position] + self.MAGIC_NUMBER_SIZE  # Skip magic number
-        blob_length = self.blob_lengths[self.current_position] - self.METADATA_OVERHEAD
+        blob_length = length - self.METADATA_OVERHEAD
         blob = Blob.from_file(self.file_io, self.file_path, blob_offset, blob_length)
         self.current_position += 1
         return GenericRow([blob], fields, RowKind.INSERT)

@@ -277,6 +277,21 @@ class Blob(ABC):
         return BlobRef(uri_reader, descriptor)
 
 
+class _PlaceholderBlob(Blob):
+
+    def to_data(self) -> bytes:
+        raise RuntimeError("Should never call this method for placeholder blob.")
+
+    def to_descriptor(self) -> BlobDescriptor:
+        raise RuntimeError("Should never call this method for placeholder blob.")
+
+    def new_input_stream(self) -> BinaryIO:
+        raise RuntimeError("Should never call this method for placeholder blob.")
+
+
+Blob.PLACE_HOLDER = _PlaceholderBlob()
+
+
 class BlobData(Blob):
 
     def __init__(self, data: Optional[Union[bytes, bytearray]] = None):
