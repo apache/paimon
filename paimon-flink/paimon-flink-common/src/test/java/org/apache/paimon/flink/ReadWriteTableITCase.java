@@ -1394,11 +1394,13 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         insertInto(table, "('US Dollar', 102, '2022-06-20')");
 
-        // increase bucket num from 2 to 3
-        assertChangeBucketWithoutRescale(table, 3);
+        // For partitioned tables, changing the bucket num and writing is allowed.
+        // The partition's existing bucket count takes precedence, supporting
+        // per-partition rescale operations.
 
-        // decrease bucket num from 3 to 1
-        assertChangeBucketWithoutRescale(table, 1);
+        assertChangeBucketWithoutRescale(table, 3, 1);
+
+        assertChangeBucketWithoutRescale(table, 1, 2);
     }
 
     @Test
@@ -1938,7 +1940,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // 3. assert parallelism from transformation
         DataStream<RowData> mockSource =
-                bExeEnv.fromCollection(Collections.singletonList(GenericRowData.of()));
+                bExeEnv.fromData(Collections.singletonList(GenericRowData.of()));
         mockSource.getTransformation().setParallelism(mockSource.getParallelism(), false);
         DataStreamSink<?> sink = sinkProvider.consumeDataStream(null, mockSource);
 
@@ -1987,21 +1989,15 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         return parameters.stream();
     }
 
-    private void assertChangeBucketWithoutRescale(String table, int bucketNum) throws Exception {
+    private void assertChangeBucketWithoutRescale(
+            String table, int bucketNum, int expectedRowsBefore) throws Exception {
         bEnv.executeSql(String.format("ALTER TABLE `%s` SET ('bucket' = '%d')", table, bucketNum));
-        // read is ok
-        assertThat(
-                        BlockingIterator.of(bEnv.executeSql(buildSimpleQuery(table)).collect())
-                                .collect())
-                .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L, "2022-06-20"));
-        assertThatThrownBy(() -> insertInto(table, "('US Dollar', 102, '2022-06-20')"))
-                .rootCause()
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage(
-                        String.format(
-                                "Try to write partition {dt=2022-06-20} with a new bucket num %d, but the previous bucket num is 2. "
-                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                                bucketNum));
+        // read existing data is ok after changing bucket num
+        List<Row> rows =
+                BlockingIterator.of(bEnv.executeSql(buildSimpleQuery(table)).collect()).collect();
+        assertThat(rows).hasSize(expectedRowsBefore);
+        // writing with a different bucket num is allowed for partitioned tables
+        insertInto(table, "('US Dollar', 102, '2022-06-20')");
     }
 
     private void validateSchemaOptionResult() {

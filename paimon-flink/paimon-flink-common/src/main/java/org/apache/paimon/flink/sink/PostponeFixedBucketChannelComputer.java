@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import java.util.Map;
 
@@ -36,20 +37,24 @@ public class PostponeFixedBucketChannelComputer implements ChannelComputer<Inter
 
     private final TableSchema schema;
     private final Map<BinaryRow, Integer> knownNumBuckets;
+    private final PartitionBucketMapping partitionBucketMapping;
 
     private transient int numChannels;
     private transient FixedBucketRowKeyExtractor keyExtractor;
 
     public PostponeFixedBucketChannelComputer(
-            TableSchema schema, Map<BinaryRow, Integer> knownNumBuckets) {
+            TableSchema schema,
+            Map<BinaryRow, Integer> knownNumBuckets,
+            PartitionBucketMapping partitionBucketMapping) {
         this.schema = schema;
         this.knownNumBuckets = knownNumBuckets;
+        this.partitionBucketMapping = partitionBucketMapping;
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.keyExtractor = new FixedBucketRowKeyExtractor(schema);
+        this.keyExtractor = new FixedBucketRowKeyExtractor(schema, partitionBucketMapping);
     }
 
     @Override

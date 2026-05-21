@@ -28,13 +28,13 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +62,7 @@ public class TableWriteCoordinator {
     private final Cache<CoordinationKey, byte[]> pagedCoordination;
 
     private volatile Snapshot snapshot;
+    private volatile PartitionBucketMapping partitionBucketMapping;
 
     public TableWriteCoordinator(FileStoreTable table) {
         this.table = table;
@@ -93,6 +94,7 @@ public class TableWriteCoordinator {
         }
         this.snapshot = latestSnapshot.get();
         this.scan.withSnapshot(snapshot);
+        loadPartitionBucketMapping();
     }
 
     public synchronized PagedCoordinationResponse scan(PagedCoordinationRequest request)
@@ -148,9 +150,10 @@ public class TableWriteCoordinator {
         BinaryRow partition = deserializeBinaryRow(request.partition());
         int bucket = request.bucket();
 
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
         List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
+        Integer totalBuckets =
+                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (request.scanDynamicBucketIndex()) {
@@ -182,6 +185,7 @@ public class TableWriteCoordinator {
         if (snapshot == null || latestSnapshotOfUser.id() > snapshot.id()) {
             snapshot = latestSnapshotOfUser;
             scan.withSnapshot(snapshot);
+            loadPartitionBucketMapping();
         }
         return latestSnapshotOfUser.commitIdentifier();
     }
@@ -191,6 +195,11 @@ public class TableWriteCoordinator {
         refresh();
         // refresh latest committed identifiers for all users
         latestCommittedIdentifiers.clear();
+    }
+
+    private void loadPartitionBucketMapping() {
+        int defaultNumBuckets = table.schema().numBuckets();
+        this.partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, defaultNumBuckets);
     }
 
     private static class CoordinationKey {
