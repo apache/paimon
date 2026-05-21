@@ -307,8 +307,6 @@ class ConflictDetectionTest {
                 EMPTY_ROW,
                 null,
                 0L,
-                null,
-                0L,
                 null);
     }
 

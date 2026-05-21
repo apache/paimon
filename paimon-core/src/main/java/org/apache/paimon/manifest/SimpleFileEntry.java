@@ -45,8 +45,6 @@ public class SimpleFileEntry implements FileEntry {
     @Nullable private final String externalPath;
     private final long rowCount;
     @Nullable private final Long firstRowId;
-    private final long schemaId;
-    @Nullable private final List<String> writeCols;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -61,9 +59,7 @@ public class SimpleFileEntry implements FileEntry {
             BinaryRow maxKey,
             @Nullable String externalPath,
             long rowCount,
-            @Nullable Long firstRowId,
-            long schemaId,
-            @Nullable List<String> writeCols) {
+            @Nullable Long firstRowId) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -77,8 +73,6 @@ public class SimpleFileEntry implements FileEntry {
         this.externalPath = externalPath;
         this.rowCount = rowCount;
         this.firstRowId = firstRowId;
-        this.schemaId = schemaId;
-        this.writeCols = writeCols;
     }
 
     public static SimpleFileEntry from(ManifestEntry entry) {
@@ -95,9 +89,7 @@ public class SimpleFileEntry implements FileEntry {
                 entry.maxKey(),
                 entry.externalPath(),
                 entry.file().rowCount(),
-                entry.firstRowId(),
-                entry.file().schemaId(),
-                entry.file().writeCols());
+                entry.firstRowId());
     }
 
     public SimpleFileEntry toDelete() {
@@ -114,9 +106,7 @@ public class SimpleFileEntry implements FileEntry {
                 maxKey,
                 externalPath,
                 rowCount,
-                firstRowId,
-                schemaId,
-                writeCols);
+                firstRowId);
     }
 
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
@@ -195,17 +185,6 @@ public class SimpleFileEntry implements FileEntry {
         return firstRowId;
     }
 
-    @Override
-    public long schemaId() {
-        return schemaId;
-    }
-
-    @Nullable
-    @Override
-    public List<String> writeCols() {
-        return writeCols;
-    }
-
     public long nonNullFirstRowId() {
         Long firstRowId = firstRowId();
         checkArgument(firstRowId != null, "First row id of '%s' should not be null.", fileName());
@@ -237,9 +216,7 @@ public class SimpleFileEntry implements FileEntry {
                 && Objects.equals(maxKey, that.maxKey)
                 && Objects.equals(externalPath, that.externalPath)
                 && rowCount == that.rowCount
-                && Objects.equals(firstRowId, that.firstRowId)
-                && schemaId == that.schemaId
-                && Objects.equals(writeCols, that.writeCols);
+                && Objects.equals(firstRowId, that.firstRowId);
     }
 
     @Override
@@ -256,9 +233,7 @@ public class SimpleFileEntry implements FileEntry {
                 maxKey,
                 externalPath,
                 rowCount,
-                firstRowId,
-                schemaId,
-                writeCols);
+                firstRowId);
     }
 
     @Override
@@ -288,10 +263,6 @@ public class SimpleFileEntry implements FileEntry {
                 + rowCount
                 + ", firstRowId="
                 + firstRowId
-                + ", schemaId="
-                + schemaId
-                + ", writeCols="
-                + writeCols
                 + '}';
     }
 }

@@ -58,17 +58,6 @@ public interface ManifestEntry extends FileEntry {
 
     DataFileMeta file();
 
-    @Override
-    default long schemaId() {
-        return file().schemaId();
-    }
-
-    @Nullable
-    @Override
-    default List<String> writeCols() {
-        return file().writeCols();
-    }
-
     ManifestEntry copyWithoutStats();
 
     ManifestEntry assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);

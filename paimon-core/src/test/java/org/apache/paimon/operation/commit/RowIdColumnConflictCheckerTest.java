@@ -19,10 +19,10 @@
 package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase.TestingSchemaManager;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -37,7 +37,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -115,32 +114,31 @@ class RowIdColumnConflictCheckerTest {
                 .hasMessageContaining("Cannot find write column 'missing'");
     }
 
-    private RowIdColumnConflictChecker checker(SimpleFileEntry... entries) {
-        return RowIdColumnConflictChecker.fromDeltaEntries(
-                createSchemaManager(), Arrays.asList(entries));
+    private RowIdColumnConflictChecker checker(DataFileMeta... files) {
+        return RowIdColumnConflictChecker.fromDataFiles(
+                createSchemaManager(), Arrays.asList(files));
     }
 
-    private SimpleFileEntry file(
+    private DataFileMeta file(
             String fileName,
             @Nullable Long firstRowId,
             long rowCount,
             long schemaId,
             @Nullable List<String> writeCols) {
-        return new SimpleFileEntry(
-                FileKind.ADD,
-                EMPTY_ROW,
-                0,
-                1,
-                0,
+        return DataFileMeta.forAppend(
                 fileName,
+                0L,
+                rowCount,
+                SimpleStats.EMPTY_STATS,
+                0L,
+                0L,
+                schemaId,
                 Collections.emptyList(),
                 null,
-                EMPTY_ROW,
-                EMPTY_ROW,
                 null,
-                rowCount,
+                null,
+                null,
                 firstRowId,
-                schemaId,
                 writeCols);
     }
 

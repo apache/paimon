@@ -45,9 +45,7 @@ public class ExpireFileEntry extends SimpleFileEntry {
             @Nullable FileSource fileSource,
             @Nullable String externalPath,
             long rowCount,
-            @Nullable Long firstRowId,
-            long schemaId,
-            @Nullable List<String> writeCols) {
+            @Nullable Long firstRowId) {
         super(
                 kind,
                 partition,
@@ -61,9 +59,7 @@ public class ExpireFileEntry extends SimpleFileEntry {
                 maxKey,
                 externalPath,
                 rowCount,
-                firstRowId,
-                schemaId,
-                writeCols);
+                firstRowId);
         this.fileSource = fileSource;
     }
 
@@ -86,9 +82,7 @@ public class ExpireFileEntry extends SimpleFileEntry {
                 entry.file().fileSource().orElse(null),
                 entry.externalPath(),
                 entry.rowCount(),
-                entry.firstRowId(),
-                entry.file().schemaId(),
-                entry.file().writeCols());
+                entry.firstRowId());
     }
 
     @Override

@@ -77,7 +77,6 @@ public class ConflictDetection {
     private final String tableName;
     private final String commitUser;
     private final RowType partitionType;
-    private final SchemaManager schemaManager;
     private final FileStorePathFactory pathFactory;
     private final @Nullable Comparator<InternalRow> keyComparator;
     private final BucketMode bucketMode;
@@ -115,7 +114,6 @@ public class ConflictDetection {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
-        this.schemaManager = schemaManager;
         this.pathFactory = pathFactory;
         this.keyComparator = keyComparator;
         this.bucketMode = bucketMode;
@@ -164,6 +162,7 @@ public class ConflictDetection {
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
+            @Nullable RowIdColumnConflictChecker rowIdColumnConflictChecker,
             CommitKind commitKind) {
         String baseCommitUser = latestSnapshot.commitUser();
         if (deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE)) {
@@ -232,7 +231,8 @@ public class ConflictDetection {
             return exception;
         }
 
-        return checkForRowIdFromSnapshot(latestSnapshot, deltaEntries, deltaIndexEntries);
+        return checkForRowIdFromSnapshot(
+                latestSnapshot, deltaEntries, deltaIndexEntries, rowIdColumnConflictChecker);
     }
 
     public <T extends FileEntry> Map<BinaryRow, Integer> collectUncheckedBucketPartitions(
@@ -495,20 +495,19 @@ public class ConflictDetection {
     private Optional<RuntimeException> checkForRowIdFromSnapshot(
             Snapshot latestSnapshot,
             List<SimpleFileEntry> deltaEntries,
-            List<IndexManifestEntry> deltaIndexEntries) {
+            List<IndexManifestEntry> deltaIndexEntries,
+            @Nullable RowIdColumnConflictChecker columnChecker) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
         if (rowIdCheckFromSnapshot == null) {
             return Optional.empty();
         }
-
-        List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
-        RowIdColumnConflictChecker columnChecker =
-                RowIdColumnConflictChecker.fromDeltaEntries(schemaManager, deltaEntries);
-        if (columnChecker.isEmpty()) {
+        if (columnChecker == null || columnChecker.isEmpty()) {
             return Optional.empty();
         }
+
+        List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
 
         // check history row id ranges
         Long checkNextRowId = snapshotManager.snapshot(rowIdCheckFromSnapshot).nextRowId();
@@ -527,7 +526,7 @@ public class ConflictDetection {
                 DataFileMeta file = entry.file();
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
-                        && columnChecker.conflictsWith(entry)) {
+                        && columnChecker.conflictsWith(file)) {
                     return Optional.of(
                             new RuntimeException(
                                     "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"

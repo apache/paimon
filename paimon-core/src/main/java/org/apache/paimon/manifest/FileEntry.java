@@ -72,11 +72,6 @@ public interface FileEntry {
     @Nullable
     Long firstRowId();
 
-    long schemaId();
-
-    @Nullable
-    List<String> writeCols();
-
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.

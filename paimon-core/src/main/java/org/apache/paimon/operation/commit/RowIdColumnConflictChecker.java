@@ -18,8 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
@@ -47,42 +46,40 @@ import java.util.stream.Collectors;
  *       columns also overlaps, return conflicting result.
  * </ol>
  */
-class RowIdColumnConflictChecker {
+public class RowIdColumnConflictChecker {
 
     private final SchemaManager schemaManager;
     private final List<WriteRange> writeRanges;
     private final Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
 
-    private RowIdColumnConflictChecker(
-            SchemaManager schemaManager, List<SimpleFileEntry> deltaEntries) {
+    private RowIdColumnConflictChecker(SchemaManager schemaManager, List<DataFileMeta> deltaFiles) {
         this.schemaManager = schemaManager;
-        this.writeRanges = buildWriteRanges(deltaEntries);
+        this.writeRanges = buildWriteRanges(deltaFiles);
     }
 
-    static RowIdColumnConflictChecker fromDeltaEntries(
-            SchemaManager schemaManager, List<SimpleFileEntry> deltaEntries) {
-        return new RowIdColumnConflictChecker(schemaManager, deltaEntries);
+    public static RowIdColumnConflictChecker fromDataFiles(
+            SchemaManager schemaManager, List<DataFileMeta> deltaFiles) {
+        return new RowIdColumnConflictChecker(schemaManager, deltaFiles);
     }
 
-    private List<WriteRange> buildWriteRanges(List<SimpleFileEntry> deltaEntries) {
-        List<SimpleFileEntry> rowIdEntries =
-                deltaEntries.stream()
-                        .filter(entry -> entry.firstRowId() != null)
+    private List<WriteRange> buildWriteRanges(List<DataFileMeta> deltaFiles) {
+        List<DataFileMeta> rowIdFiles =
+                deltaFiles.stream()
+                        .filter(file -> file.firstRowId() != null)
                         .collect(Collectors.toList());
 
-        if (rowIdEntries.isEmpty()) {
+        if (rowIdFiles.isEmpty()) {
             return Collections.emptyList();
         }
 
         // 1. merge overlapping ranges and calculate [Range, Set<FieldId>] tuples.
-        RangeHelper<SimpleFileEntry> rangeHelper =
-                new RangeHelper<>(SimpleFileEntry::nonNullRowIdRange);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<WriteRange> writeRanges = new ArrayList<>();
-        for (List<SimpleFileEntry> group : rangeHelper.mergeOverlappingRanges(rowIdEntries)) {
+        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(rowIdFiles)) {
             Range range = mergeRange(group);
             Set<Integer> fieldIds = new HashSet<>();
-            for (SimpleFileEntry entry : group) {
-                addWriteFieldIds(fieldIds, entry);
+            for (DataFileMeta file : group) {
+                addWriteFieldIds(fieldIds, file);
             }
 
             writeRanges.add(new WriteRange(range, fieldIds));
@@ -96,29 +93,29 @@ class RowIdColumnConflictChecker {
         return writeRanges;
     }
 
-    private void addWriteFieldIds(Set<Integer> fieldIds, FileEntry entry) {
-        List<String> writeCols = entry.writeCols();
+    private void addWriteFieldIds(Set<Integer> fieldIds, DataFileMeta file) {
+        List<String> writeCols = file.writeCols();
         if (writeCols == null) {
             fieldIds.addAll(
                     fieldIdByNameCache
-                            .computeIfAbsent(entry.schemaId(), this::fieldIdByName)
+                            .computeIfAbsent(file.schemaId(), this::fieldIdByName)
                             .values());
             return;
         }
 
         for (String writeCol : writeCols) {
-            Integer fieldId = fieldId(entry, writeCol);
+            Integer fieldId = fieldId(file, writeCol);
             if (fieldId != null) {
                 fieldIds.add(fieldId);
             }
         }
     }
 
-    private static Range mergeRange(List<SimpleFileEntry> entries) {
+    private static Range mergeRange(List<DataFileMeta> files) {
         long from = Long.MAX_VALUE;
         long to = Long.MIN_VALUE;
-        for (SimpleFileEntry entry : entries) {
-            Range range = entry.nonNullRowIdRange();
+        for (DataFileMeta file : files) {
+            Range range = file.nonNullRowIdRange();
             from = Math.min(from, range.from);
             to = Math.max(to, range.to);
         }
@@ -134,16 +131,16 @@ class RowIdColumnConflictChecker {
      * files. If an existing file has both overlapping row range and overlapping write fields, then
      * it conflicts.
      *
-     * @param entry committed incremental file entry
+     * @param file committed incremental data file
      * @return true if conflict
      */
-    boolean conflictsWith(FileEntry entry) {
-        Long firstRowId = entry.firstRowId();
+    boolean conflictsWith(DataFileMeta file) {
+        Long firstRowId = file.firstRowId();
         if (firstRowId == null) {
             return false;
         }
 
-        Range range = new Range(firstRowId, firstRowId + entry.rowCount() - 1);
+        Range range = new Range(firstRowId, firstRowId + file.rowCount() - 1);
         int index = firstPossibleRange(range);
         while (index < writeRanges.size()) {
             WriteRange writeRange = writeRanges.get(index);
@@ -152,7 +149,7 @@ class RowIdColumnConflictChecker {
             }
             // overlapping row range and overlapping write fields
             if (writeRange.range.hasIntersection(range)
-                    && containsAnyWriteField(writeRange.fieldIds, entry)) {
+                    && containsAnyWriteField(writeRange.fieldIds, file)) {
                 return true;
             }
             index++;
@@ -180,15 +177,15 @@ class RowIdColumnConflictChecker {
         return low;
     }
 
-    private boolean containsAnyWriteField(Set<Integer> fieldIds, FileEntry entry) {
-        List<String> writeCols = entry.writeCols();
+    private boolean containsAnyWriteField(Set<Integer> fieldIds, DataFileMeta file) {
+        List<String> writeCols = file.writeCols();
         // If write cols == null, it's a full-schema write
         if (writeCols == null) {
             return true;
         }
 
         for (String writeCol : writeCols) {
-            Integer fieldId = fieldId(entry, writeCol);
+            Integer fieldId = fieldId(file, writeCol);
             if (fieldId != null && fieldIds.contains(fieldId)) {
                 return true;
             }
@@ -196,10 +193,10 @@ class RowIdColumnConflictChecker {
         return false;
     }
 
-    private Integer fieldId(FileEntry entry, String writeCol) {
+    private Integer fieldId(DataFileMeta file, String writeCol) {
         Integer fieldId =
                 fieldIdByNameCache
-                        .computeIfAbsent(entry.schemaId(), this::fieldIdByName)
+                        .computeIfAbsent(file.schemaId(), this::fieldIdByName)
                         .get(writeCol);
         if (fieldId == null) {
             if (SpecialFields.isSystemField(writeCol)) {
@@ -208,7 +205,7 @@ class RowIdColumnConflictChecker {
             throw new RuntimeException(
                     String.format(
                             "Cannot find write column '%s' in schema %s.",
-                            writeCol, entry.schemaId()));
+                            writeCol, file.schemaId()));
         }
         return fieldId;
     }
