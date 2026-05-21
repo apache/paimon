@@ -282,7 +282,8 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         Path dirPath = new Path(dir);
                                         List<FileStatus> files = tryBestListingDirs(dirPath);
                                         for (FileStatus file : files) {
-                                            if (oldEnough(file)) {
+                                            if (!isDataStructureDirectory(file)
+                                                    && oldEnough(file)) {
                                                 out.collect(
                                                         Tuple2.of(
                                                                 file.getPath().toString(),
@@ -324,7 +325,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                             @Override
                             public void endInput() throws IOException {
                                 // delete empty dir
-                                while (!emptyDirs.isEmpty()) {
+                                while (!dryRun && !emptyDirs.isEmpty()) {
                                     Set<Path> newEmptyDir = new HashSet<>();
                                     for (Path emptyDir : emptyDirs) {
                                         try {
