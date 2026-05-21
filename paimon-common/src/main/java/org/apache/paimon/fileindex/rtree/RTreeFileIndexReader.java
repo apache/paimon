@@ -73,6 +73,11 @@ public class RTreeFileIndexReader extends FileIndexReader {
         boolean isLeaf = dis.readBoolean();
         int entryCount = dis.readInt();
 
+        // Fix for Issue #1: Update root node's leaf flag if it differs
+        if (isRoot) {
+            node.setLeaf(isLeaf);
+        }
+
         BoundingBox bbox = BoundingBox.deserialize(dis, dimensions);
         node.getBoundingBox().expand(bbox);
 
