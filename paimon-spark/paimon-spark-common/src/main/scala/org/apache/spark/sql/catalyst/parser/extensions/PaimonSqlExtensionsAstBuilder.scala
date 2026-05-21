@@ -33,6 +33,7 @@ import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical._
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -151,6 +152,101 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       typedVisit[Seq[String]](ctx.multipartIdentifier),
       ctx.identifier(0).getText,
       ctx.identifier(1).getText)
+  }
+
+  /** Create a COPY INTO TABLE (import) logical command. */
+  override def visitCopyIntoTable(ctx: CopyIntoTableContext): logical.CopyIntoTableCommand =
+    withOrigin(ctx) {
+      val table = typedVisit[Seq[String]](ctx.multipartIdentifier)
+      val columns = Option(ctx.columnList()).map(_.identifier().asScala.map(_.getText).toSeq)
+      val sourcePath = unquoteString(ctx.sourcePath.getText)
+      val fileFormat = buildFileFormat(ctx.fileFormatClause())
+      val pattern = Option(ctx.patternClause()).map(p => unquoteString(p.STRING().getText))
+      val force = Option(ctx.forceClause()).exists(_.booleanValue().TRUE() != null)
+      logical.CopyIntoTableCommand(table, columns, sourcePath, fileFormat, pattern, force)
+    }
+
+  /** Create a COPY INTO LOCATION (export) logical command. */
+  override def visitCopyIntoLocation(
+      ctx: CopyIntoLocationContext): logical.CopyIntoLocationCommand = withOrigin(ctx) {
+    val targetPath = unquoteString(ctx.targetPath.getText)
+    val table = typedVisit[Seq[String]](ctx.multipartIdentifier)
+    val fileFormat = buildFileFormat(ctx.fileFormatClause())
+    val overwrite = Option(ctx.overwriteClause()).exists(_.booleanValue().TRUE() != null)
+    logical.CopyIntoLocationCommand(targetPath, table, fileFormat, overwrite)
+  }
+
+  private def buildFileFormat(ctx: FileFormatClauseContext): CopyFileFormat = {
+    val opts = ctx.fileFormatOption().asScala.toSeq
+    val seen = mutable.Set[String]()
+    val optionsBuilder = mutable.LinkedHashMap[String, String]()
+
+    opts.foreach {
+      opt =>
+        val key = opt.key.getText.toUpperCase
+        if (!seen.add(key)) {
+          throw new IllegalArgumentException(s"Duplicate FILE_FORMAT option: $key")
+        }
+        val value = extractFormatValue(opt.fileFormatValue())
+        optionsBuilder(key) = value
+    }
+
+    val typeValue = optionsBuilder.remove("TYPE")
+    if (typeValue.isEmpty) {
+      throw new IllegalArgumentException("FILE_FORMAT must include TYPE")
+    }
+
+    val formatType = CopyFileFormat.parseFormatType(typeValue.get)
+
+    CopyFileFormat(formatType, optionsBuilder.toMap)
+  }
+
+  private def extractFormatValue(ctx: FileFormatValueContext): String = {
+    ctx match {
+      case c: StringFormatValueContext =>
+        unquoteString(c.STRING().getText)
+      case c: IdentFormatValueContext =>
+        c.identifier().getText
+      case c: BoolFormatValueContext =>
+        if (c.booleanValue().TRUE() != null) "TRUE" else "FALSE"
+      case c: IntFormatValueContext =>
+        c.INTEGER_VALUE().getText
+      case c: ListFormatValueContext =>
+        c.STRING()
+          .asScala
+          .map(s => unquoteString(s.getText))
+          .mkString(CopyFileFormat.LIST_SEPARATOR)
+    }
+  }
+
+  private def unquoteString(s: String): String = {
+    if (s == null || s.length < 2) return s
+    val first = s.charAt(0)
+    if ((first == '\'' || first == '"') && s.charAt(s.length - 1) == first) {
+      val inner = s.substring(1, s.length - 1)
+      val sb = new StringBuilder
+      var i = 0
+      while (i < inner.length) {
+        val c = inner.charAt(i)
+        if (c == '\\' && i + 1 < inner.length) {
+          inner.charAt(i + 1) match {
+            case 'n' => sb.append('\n'); i += 2
+            case 't' => sb.append('\t'); i += 2
+            case 'r' => sb.append('\r'); i += 2
+            case '\\' => sb.append('\\'); i += 2
+            case q if q == first => sb.append(q); i += 2
+            case other => sb.append('\\'); sb.append(other); i += 2
+          }
+        } else if (c == first && i + 1 < inner.length && inner.charAt(i + 1) == first) {
+          sb.append(first); i += 2
+        } else {
+          sb.append(c); i += 1
+        }
+      }
+      sb.toString()
+    } else {
+      s
+    }
   }
 
   private def toBuffer[T](list: java.util.List[T]) = list.asScala

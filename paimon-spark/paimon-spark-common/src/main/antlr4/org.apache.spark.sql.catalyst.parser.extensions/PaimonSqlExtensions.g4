@@ -74,6 +74,16 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
+    | COPY INTO multipartIdentifier ('(' columnList ')')?
+      FROM sourcePath=STRING
+      fileFormatClause
+      patternClause?
+      forceClause?
+      onErrorClause?                                                                        #copyIntoTable
+    | COPY INTO targetPath=STRING
+      FROM multipartIdentifier
+      fileFormatClause
+      overwriteClause?                                                                      #copyIntoLocation
   ;
 
 callArgument
@@ -102,6 +112,42 @@ timeUnit
   : DAYS
   | HOURS
   | MINUTES
+  ;
+
+columnList
+  : identifier (',' identifier)*
+  ;
+
+fileFormatClause
+  : FILE_FORMAT '=' '(' fileFormatOption (',' fileFormatOption)* ')'
+  ;
+
+fileFormatOption
+  : key=identifier '=' fileFormatValue
+  ;
+
+fileFormatValue
+  : STRING                                                             #stringFormatValue
+  | identifier                                                         #identFormatValue
+  | booleanValue                                                       #boolFormatValue
+  | INTEGER_VALUE                                                      #intFormatValue
+  | '(' STRING (',' STRING)* ')'                                       #listFormatValue
+  ;
+
+patternClause
+  : PATTERN '=' STRING
+  ;
+
+forceClause
+  : FORCE '=' booleanValue
+  ;
+
+onErrorClause
+  : ON_ERROR '=' ABORT_STATEMENT
+  ;
+
+overwriteClause
+  : OVERWRITE '=' booleanValue
   ;
 
 expression
@@ -155,6 +201,8 @@ nonReserved
     | REPLACE | RETAIN | VERSION | TAG
     | TRUE | FALSE
     | MAP
+    | COPY | INTO | FROM | FILE_FORMAT | PATTERN | FORCE | ON_ERROR | ABORT_STATEMENT | OVERWRITE
+    | CSV
     ;
 
 ALTER: 'ALTER';
@@ -184,6 +232,17 @@ TRUE: 'TRUE';
 FALSE: 'FALSE';
 
 MAP: 'MAP';
+
+COPY: 'COPY';
+INTO: 'INTO';
+FROM: 'FROM';
+FILE_FORMAT: 'FILE_FORMAT';
+PATTERN: 'PATTERN';
+FORCE: 'FORCE';
+ON_ERROR: 'ON_ERROR';
+ABORT_STATEMENT: 'ABORT_STATEMENT';
+OVERWRITE: 'OVERWRITE';
+CSV: 'CSV';
 
 PLUS: '+';
 MINUS: '-';
