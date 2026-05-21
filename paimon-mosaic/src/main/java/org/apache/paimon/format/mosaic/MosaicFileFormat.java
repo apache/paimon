@@ -72,10 +72,8 @@ public class MosaicFileFormat extends FileFormat {
     public static final ConfigOption<Integer> NUM_BUCKETS =
             ConfigOptions.key("mosaic.num-buckets")
                     .intType()
-                    .defaultValue(0)
-                    .withDescription(
-                            "Number of column buckets for parallel IO. "
-                                    + "0 means auto (defaults to number of columns).");
+                    .noDefaultValue()
+                    .withDescription("Number of column buckets for parallel IO.");
 
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");

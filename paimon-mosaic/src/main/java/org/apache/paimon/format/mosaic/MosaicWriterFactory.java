@@ -24,7 +24,8 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 
-import java.io.IOException;
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -36,7 +37,7 @@ public class MosaicWriterFactory implements FormatWriterFactory {
     private final RowType rowType;
     private final FileFormatFactory.FormatContext formatContext;
     private final List<String> statsColumnNames;
-    private final int numBuckets;
+    private final @Nullable Integer numBuckets;
 
     public MosaicWriterFactory(RowType rowType, FileFormatFactory.FormatContext formatContext) {
         this.rowType = rowType;
@@ -55,8 +56,8 @@ public class MosaicWriterFactory implements FormatWriterFactory {
     }
 
     @Override
-    public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        return new MosaicRecordsWriter(
-                out, rowType, formatContext, statsColumnNames, numBuckets, compression);
+    public FormatWriter create(PositionOutputStream out, String compression) {
+        // only support zstd, ignore compression
+        return new MosaicRecordsWriter(out, rowType, formatContext, statsColumnNames, numBuckets);
     }
 }
