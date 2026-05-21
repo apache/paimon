@@ -193,6 +193,24 @@ class LineageUtilsTest {
     }
 
     @Test
+    void testScanProviderGetParallelism() throws Exception {
+        FileStoreTable table =
+                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
+
+        PaimonDataStreamScanProvider noOverride =
+                new PaimonDataStreamScanProvider(true, env -> null, "paimon.db.src", table);
+        assertThat(noOverride.getParallelism()).isEmpty();
+
+        PaimonDataStreamScanProvider explicit =
+                new PaimonDataStreamScanProvider(true, env -> null, "paimon.db.src", table, 16);
+        assertThat(explicit.getParallelism()).contains(16);
+
+        PaimonDataStreamScanProvider nullValue =
+                new PaimonDataStreamScanProvider(true, env -> null, "paimon.db.src", table, null);
+        assertThat(nullValue.getParallelism()).isEmpty();
+    }
+
+    @Test
     void testSinkProviderImplementsLineageVertexProvider() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));

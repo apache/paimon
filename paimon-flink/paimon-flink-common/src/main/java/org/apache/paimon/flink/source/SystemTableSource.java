@@ -132,7 +132,8 @@ public class SystemTableSource extends FlinkTableSource {
                     return dataStreamSource;
                 },
                 tableIdentifier.asSummaryString(),
-                table);
+                table,
+                options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
     }
 
     @Override
