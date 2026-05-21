@@ -1,0 +1,64 @@
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Configuration</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>--warehouse</h5></td>
+        <td>The path to Paimon warehouse.</td>
+    </tr>
+    <tr>
+        <td><h5>--database</h5></td>
+        <td>The database name in Paimon catalog.</td>
+    </tr>
+    <tr>
+        <td><h5>--table_prefix</h5></td>
+        <td>The prefix of all Paimon tables to be synchronized. For example, if you want all synchronized tables to have "ods_" as prefix, you can specify "--table_prefix ods_".</td>
+    </tr>
+    <tr>
+        <td><h5>--table_suffix</h5></td>
+        <td>The suffix of all Paimon tables to be synchronized. The usage is same as "--table_prefix".</td>
+    </tr>
+    <tr>
+        <td><h5>--including_tables</h5></td>
+        <td>It is used to specify which source tables are to be synchronized. You must use '|' to separate multiple tables.Because '|' is a special character, a comma is required, for example: 'a|b|c'.Regular expression is supported, for example, specifying "--including_tables test|paimon.*" means to synchronize table 'test' and all tables start with 'paimon'.</td>
+    </tr>
+    <tr>
+        <td><h5>--excluding_tables</h5></td>
+        <td>It is used to specify which source tables are not to be synchronized. The usage is same as "--including_tables". "--excluding_tables" has higher priority than "--including_tables" if you specified both.</td>
+    </tr>
+    <tr>
+        <td><h5>--partition_keys</h5></td>
+        <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".
+            If the keys are not in source table, the sink table won't set partition keys.</td>
+    </tr>
+    <tr>
+        <td><h5>--primary_keys</h5></td>
+        <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".
+            If the keys are not provided, but the source has primary keys, the sink table will use source's primary keys.
+            Otherwise, the sink table won't set primary keys.
+            If the keys are not provided, but the source has primary keys, and you don't want to use source's primary keys,
+            use --sync_primary_keys_from_source_schema.</td>
+    </tr>
+    <tr>
+        <td><h5>--sync_primary_keys_from_source_schema</h5></td>
+        <td>This is used to specify if primary keys from source should be used in paimon schema if primary keys using --primary_keys are not specified. The default is true.</td>
+    </tr>
+    <tr>
+        <td><h5>--mongodb_conf</h5></td>
+        <td>The configuration for Flink CDC MongoDB sources. Each configuration should be specified in the format "key=value". hosts, username, password, database are required configurations, others are optional. See its <a href="https://nightlies.apache.org/flink/flink-cdc-docs-release-3.1/docs/connectors/flink-sources/mongodb-cdc/#connector-options">document</a> for a complete list of configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--catalog_conf</h5></td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}#catalogoptions">here</a> for a complete list of catalog configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--table_conf</h5></td>
+        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
+    </tr>
+    </tbody>
+</table>
