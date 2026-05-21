@@ -78,9 +78,8 @@ public class ManifestFileMerger {
             // If manifest-sort.enabled is enabled and there are partition fields, use
             // trySortRewrite
             if (options.manifestSortEnabled() && partitionType.getFieldCount() > 0) {
-                ManifestFileSorter sorter =
-                        new ManifestFileSorter(manifestFile, partitionType, options);
-                return sorter.trySortRewrite(input, newFilesForAbort);
+                return ManifestFileSorter.trySortRewrite(
+                        input, newFilesForAbort, manifestFile, partitionType, options);
             } else {
                 // Otherwise try full compaction first, then minor compaction if needed
                 Optional<List<ManifestFileMeta>> fullCompacted =
