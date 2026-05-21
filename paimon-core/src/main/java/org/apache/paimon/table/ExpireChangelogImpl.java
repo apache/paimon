@@ -161,7 +161,6 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                         .fileIO()
                         .deleteQuietly(changelogManager.longLivedChangelogPath(id));
             }
-            writeEarliestHintFile(endExclusiveId);
             return (int) (endExclusiveId - earliestId);
         }
         skippingSnapshots.add(snapshotManager.earliestSnapshot());
