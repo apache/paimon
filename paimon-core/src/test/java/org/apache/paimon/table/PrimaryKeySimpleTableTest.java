@@ -144,6 +144,7 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -2671,5 +2672,22 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 options.toMap(),
                                 ""));
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    @Test
+    public void testMergeBranchPrimaryKeyTable() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(anyCauseMatches(IllegalArgumentException.class, "append-only tables"));
     }
 }
