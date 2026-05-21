@@ -125,6 +125,28 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testAlterAddBlobDescriptorColumn() {
+        spark.sql(
+                "CREATE TABLE testAlterAddBlobDescriptorColumn (id INT, data STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+
+        spark.sql(
+                "ALTER TABLE testAlterAddBlobDescriptorColumn "
+                        + "SET TBLPROPERTIES ('blob-descriptor-field'='picture')");
+        spark.sql("ALTER TABLE testAlterAddBlobDescriptorColumn ADD COLUMN picture BINARY");
+
+        assertThat(
+                        getTable("testAlterAddBlobDescriptorColumn")
+                                .rowType()
+                                .getField("picture")
+                                .type()
+                                .is(DataTypeRoot.BLOB))
+                .isTrue();
+    }
+
+    @Test
     public void testAddNotNullColumn() {
         createTable("testAddNotNullColumn");
 

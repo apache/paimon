@@ -121,13 +121,32 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         sql("ALTER TABLE T_BLOB SET ('blob-field'='picture')");
         sql("ALTER TABLE T_BLOB ADD picture BYTES");
-        sql("INSERT INTO T_BLOB VALUES (2, 'new', X'4869')");
 
         assertThat(paimonTable("T_BLOB").rowType().getField("picture").type().is(DataTypeRoot.BLOB))
                 .isTrue();
+        sql("INSERT INTO T_BLOB VALUES (2, 'new', X'4869')");
         List<Row> result = sql("SELECT * FROM T_BLOB ORDER BY id");
         assertThat(result.get(0).getField(2)).isNull();
         assertThat((byte[]) result.get(1).getField(2)).containsExactly((byte) 72, (byte) 105);
+    }
+
+    @Test
+    public void testAlterAddBlobDescriptorColumn() throws Exception {
+        sql(
+                "CREATE TABLE T_BLOB_DESCRIPTOR (id INT, data STRING) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+
+        sql("ALTER TABLE T_BLOB_DESCRIPTOR SET ('blob-descriptor-field'='picture')");
+        sql("ALTER TABLE T_BLOB_DESCRIPTOR ADD picture BYTES");
+
+        assertThat(
+                        paimonTable("T_BLOB_DESCRIPTOR")
+                                .rowType()
+                                .getField("picture")
+                                .type()
+                                .is(DataTypeRoot.BLOB))
+                .isTrue();
     }
 
     @Test
