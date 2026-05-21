@@ -127,11 +127,12 @@ case class SparkOrphanFilesClean(
         dir =>
           tryBestListingDirs(new Path(dir)).asScala
             .filter(file => !file.isDir())
-            .filter(oldEnough).map {
-            file =>
-              val path = file.getPath
-              (path.getName, path.toString, file.getLen, path.getParent.toString)
-          }
+            .filter(oldEnough)
+            .map {
+              file =>
+                val path = file.getPath
+                (path.getName, path.toString, file.getLen, path.getParent.toString)
+            }
       }
       .toDF("name", "path", "len", "dataDir")
       .repartition(parallelism)
