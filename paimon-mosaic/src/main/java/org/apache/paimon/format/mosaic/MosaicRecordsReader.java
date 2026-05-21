@@ -36,14 +36,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
 
@@ -52,12 +51,10 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
     private final MosaicReader reader;
     private final ArrowBatchReader arrowBatchReader;
-    private final int[] columnIndices;
     private final Path filePath;
     private final BufferAllocator allocator;
     private final int numRowGroups;
     private final RowType dataSchemaRowType;
-    private final Schema fileSchema;
     @Nullable private final List<Predicate> predicates;
 
     private int currentRowGroup;
@@ -83,8 +80,9 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             throw e;
         }
 
-        this.fileSchema = reader.getSchema();
-        this.columnIndices = computeColumnIndices(fileSchema, projectedRowType);
+        List<String> projectedNames = projectedRowType.getFieldNames();
+        reader.project(projectedNames.toArray(new String[0]));
+
         this.numRowGroups = reader.numRowGroups();
         this.currentRowGroup = 0;
         this.arrowBatchReader = new ArrowBatchReader(projectedRowType, true);
@@ -103,12 +101,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
             releaseCurrentVsr();
 
-            VectorSchemaRoot vsr;
-            if (columnIndices != null) {
-                vsr = reader.readRowGroup(currentRowGroup, columnIndices, allocator);
-            } else {
-                vsr = reader.readRowGroup(currentRowGroup, allocator);
-            }
+            VectorSchemaRoot vsr = reader.readRowGroup(currentRowGroup, allocator);
             currentRowGroup++;
             this.currentVsr = vsr;
 
@@ -149,8 +142,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             return true;
         }
 
-        List<ColumnStatistics> statsList = reader.getRowGroupStatistics(rowGroupIndex);
-        if (statsList.isEmpty()) {
+        Map<String, ColumnStatistics> statsMap = reader.getRowGroupStatistics(rowGroupIndex);
+        if (statsMap.isEmpty()) {
             return true;
         }
 
@@ -159,24 +152,21 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         GenericRow maxValues = new GenericRow(fieldCount);
         long[] nullCounts = new long[fieldCount];
 
-        for (ColumnStatistics stats : statsList) {
-            int fileColIdx = stats.getColumnIndex();
-            if (fileColIdx < 0 || fileColIdx >= fileSchema.getFields().size()) {
-                continue;
-            }
-            String colName = fileSchema.getFields().get(fileColIdx).getName();
-            int schemaIdx = findFieldIndex(dataSchemaRowType, colName);
-            if (schemaIdx < 0) {
+        List<DataField> fields = dataSchemaRowType.getFields();
+        for (int i = 0; i < fieldCount; i++) {
+            String colName = fields.get(i).name();
+            ColumnStatistics stats = statsMap.get(colName);
+            if (stats == null) {
                 continue;
             }
 
-            nullCounts[schemaIdx] = stats.getNullCount();
+            nullCounts[i] = stats.getNullCount();
             if (stats.hasMinMax()) {
-                DataType dataType = dataSchemaRowType.getFields().get(schemaIdx).type();
+                DataType dataType = fields.get(i).type();
                 Object min = convertStatsValue(stats.getMin(), dataType);
                 Object max = convertStatsValue(stats.getMax(), dataType);
-                minValues.setField(schemaIdx, min);
-                maxValues.setField(schemaIdx, max);
+                minValues.setField(i, min);
+                maxValues.setField(i, max);
             }
         }
 
@@ -186,16 +176,6 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             }
         }
         return true;
-    }
-
-    private static int findFieldIndex(RowType rowType, String name) {
-        List<DataField> fields = rowType.getFields();
-        for (int i = 0; i < fields.size(); i++) {
-            if (fields.get(i).name().equals(name)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private void releaseCurrentVsr() {
@@ -210,34 +190,5 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         releaseCurrentVsr();
         reader.close();
         allocator.close();
-    }
-
-    @Nullable
-    private static int[] computeColumnIndices(Schema fileSchema, RowType projectedRowType) {
-        List<Field> fileFields = fileSchema.getFields();
-        if (fileFields.size() == projectedRowType.getFieldCount()) {
-            return null;
-        }
-
-        int[] indices = new int[projectedRowType.getFieldCount()];
-        for (int i = 0; i < projectedRowType.getFieldCount(); i++) {
-            String name = projectedRowType.getFields().get(i).name();
-            int pos = findArrowFieldIndex(fileFields, name);
-            if (pos < 0) {
-                throw new IllegalArgumentException(
-                        "Projected field '" + name + "' not found in Mosaic file schema");
-            }
-            indices[i] = pos;
-        }
-        return indices;
-    }
-
-    private static int findArrowFieldIndex(List<Field> fields, String name) {
-        for (int i = 0; i < fields.size(); i++) {
-            if (fields.get(i).getName().equals(name)) {
-                return i;
-            }
-        }
-        return -1;
     }
 }

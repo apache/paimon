@@ -21,17 +21,18 @@ package org.apache.paimon.format.mosaic;
 import org.apache.paimon.mosaic.ColumnStatistics;
 
 import java.util.List;
+import java.util.Map;
 
 /** In-memory metadata captured from MosaicWriter after close. */
 public class MosaicWriterMetadata {
 
     private final int numRowGroups;
-    private final List<List<ColumnStatistics>> rowGroupStats;
+    private final List<Map<String, ColumnStatistics>> rowGroupStats;
     private final List<String> statsColumnNames;
 
     public MosaicWriterMetadata(
             int numRowGroups,
-            List<List<ColumnStatistics>> rowGroupStats,
+            List<Map<String, ColumnStatistics>> rowGroupStats,
             List<String> statsColumnNames) {
         this.numRowGroups = numRowGroups;
         this.rowGroupStats = rowGroupStats;
@@ -42,7 +43,7 @@ public class MosaicWriterMetadata {
         return numRowGroups;
     }
 
-    public List<ColumnStatistics> getRowGroupStatistics(int rowGroupIndex) {
+    public Map<String, ColumnStatistics> getRowGroupStatistics(int rowGroupIndex) {
         return rowGroupStats.get(rowGroupIndex);
     }
 
