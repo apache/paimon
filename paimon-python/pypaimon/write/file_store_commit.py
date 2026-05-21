@@ -39,6 +39,7 @@ from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import ConflictDetection
+from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
@@ -77,12 +78,14 @@ class FileStoreCommit:
     org.apache.paimon.operation.FileStoreCommitImpl in Java.
     """
 
-    def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str):
+    def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
+                 commit_callbacks: Optional[List[CommitCallback]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.snapshot_commit = snapshot_commit
         self.table: FileStoreTable = table
         self.commit_user = commit_user
+        self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
 
         self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
@@ -436,6 +439,16 @@ class FileStoreCommit:
             commit_identifier,
             commit_kind,
         )
+
+        if self.commit_callbacks:
+            context = CommitCallbackContext(
+                snapshot=snapshot_data,
+                commit_entries=commit_entries,
+                identifier=commit_identifier,
+            )
+            for callback in self.commit_callbacks:
+                callback.call(context)
+
         return SuccessResult()
 
     def _write_manifest_file(self, commit_entries, new_manifest_file):
@@ -626,6 +639,11 @@ class FileStoreCommit:
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
+        for callback in self.commit_callbacks:
+            try:
+                callback.close()
+            except Exception:
+                pass
         if hasattr(self.snapshot_commit, 'close'):
             self.snapshot_commit.close()
 
