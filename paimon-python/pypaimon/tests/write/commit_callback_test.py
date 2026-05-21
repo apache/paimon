@@ -194,7 +194,6 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-
     def test_data_evolution_callback_sees_row_id(self):
         table = self._create_table('test_de_row_id', options={
             'row-tracking.enabled': 'true',
