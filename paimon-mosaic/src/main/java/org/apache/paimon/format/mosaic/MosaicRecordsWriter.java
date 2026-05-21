@@ -27,6 +27,7 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.mosaic.ColumnStatistics;
 import org.apache.paimon.mosaic.MosaicWriter;
 import org.apache.paimon.mosaic.WriterOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -56,8 +57,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             RowType rowType,
             FileFormatFactory.FormatContext formatContext,
             List<String> statsColumnNames,
-            int numBuckets,
-            String compression) {
+            @Nullable Integer numBuckets) {
         this.statsColumnNames = statsColumnNames;
         this.allocator = new RootAllocator();
 
@@ -67,32 +67,20 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         this.arrowFormatWriter =
                 new ArrowFormatWriter(rowType, writeBatchSize, true, allocator, writeBatchMemory);
 
-        Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
-        WriterOptions options =
-                new WriterOptions()
-                        .compression(resolveCompression(compression))
-                        .zstdLevel(formatContext.zstdLevel())
-                        .numBuckets(numBuckets)
-                        .rowGroupMaxSize(writeBatchMemory);
+        WriterOptions options = new WriterOptions().zstdLevel(formatContext.zstdLevel());
+        if (numBuckets != null) {
+            options = options.numBuckets(numBuckets);
+        }
+        MemorySize blockSize = formatContext.blockSize();
+        if (blockSize != null) {
+            options = options.rowGroupMaxSize(blockSize.getBytes());
+        }
         if (!statsColumnNames.isEmpty()) {
             options.statsColumns(statsColumnNames.toArray(new String[0]));
         }
 
+        Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
         this.nativeWriter = new MosaicWriter(outputStream, arrowSchema, options, allocator);
-    }
-
-    private static int resolveCompression(String compression) {
-        if (compression == null) {
-            return WriterOptions.COMPRESSION_ZSTD;
-        }
-        switch (compression) {
-            case "none":
-                // return WriterOptions.COMPRESSION_NONE;
-                return 0;
-            case "zstd":
-            default:
-                return WriterOptions.COMPRESSION_ZSTD;
-        }
     }
 
     @Override
