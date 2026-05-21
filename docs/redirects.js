@@ -169,10 +169,6 @@ module.exports = [
     "to": "/ecosystem/trino"
   },
   {
-    "from": "/flink/procedures.html",
-    "to": "/flink/action-jars"
-  },
-  {
     "from": "/flink/consumer-id.html",
     "to": "/flink/consumer-id"
   },
