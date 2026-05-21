@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 
 logger = logging.getLogger(__name__)
+from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -50,7 +51,14 @@ class TableCommit:
         if snapshot_commit is None:
             raise RuntimeError("Table does not provide a SnapshotCommit instance")
 
-        self.file_store_commit = FileStoreCommit(snapshot_commit, table, commit_user)
+        self._commit_callbacks: List[CommitCallback] = []
+        self.file_store_commit = FileStoreCommit(
+            snapshot_commit, table, commit_user,
+            commit_callbacks=self._commit_callbacks)
+
+    def add_commit_callback(self, callback: CommitCallback) -> None:
+        """Register a callback to be invoked after each successful commit."""
+        self._commit_callbacks.append(callback)
 
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]

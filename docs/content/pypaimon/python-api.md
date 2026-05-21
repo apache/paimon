@@ -285,6 +285,45 @@ write_builder = table.new_batch_write_builder().overwrite()
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
 
+### Commit Callback
+
+You can register `CommitCallback` instances on a `TableCommit` to be notified after each successful
+snapshot commit. This is useful for post-commit actions such as syncing metadata to external systems.
+
+Implementations must be **idempotent** — a callback may be invoked more than once for the same commit
+if a failure occurs right after the commit succeeds.
+
+```python
+from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
+
+class MyCallback(CommitCallback):
+    def call(self, context: CommitCallbackContext) -> None:
+        print(f"Committed snapshot {context.snapshot.id}, "
+              f"{len(context.commit_entries)} entries, "
+              f"identifier {context.identifier}")
+
+    def close(self) -> None:
+        pass  # release resources if needed
+
+write_builder = table.new_batch_write_builder()
+table_write = write_builder.new_write()
+table_commit = write_builder.new_commit()
+table_commit.add_commit_callback(MyCallback())
+
+table_write.write_arrow(data)
+table_commit.commit(table_write.prepare_commit())
+table_write.close()
+table_commit.close()
+```
+
+`CommitCallbackContext` provides:
+
+| Field            | Type                | Description                              |
+|------------------|---------------------|------------------------------------------|
+| `snapshot`       | `Snapshot`          | The committed snapshot (id, commit_kind, time_millis, next_row_id, …) |
+| `commit_entries` | `List[ManifestEntry]` | Delta manifest entries in this commit (each carries `file.first_row_id` when row-tracking is enabled) |
+| `identifier`     | `int`               | Commit identifier                        |
+
 ## Batch Read
 
 ### Predicate pushdown
