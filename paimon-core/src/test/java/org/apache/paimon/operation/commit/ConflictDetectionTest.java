@@ -381,7 +381,6 @@ class ConflictDetectionTest {
                 RowType.of(),
                 null,
                 null,
-                null,
                 BucketMode.HASH_FIXED,
                 false,
                 true,

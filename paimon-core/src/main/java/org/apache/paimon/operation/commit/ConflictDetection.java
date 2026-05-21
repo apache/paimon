@@ -33,7 +33,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.operation.PartitionExpire;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -101,7 +100,6 @@ public class ConflictDetection {
             String tableName,
             String commitUser,
             RowType partitionType,
-            SchemaManager schemaManager,
             FileStorePathFactory pathFactory,
             @Nullable Comparator<InternalRow> keyComparator,
             BucketMode bucketMode,

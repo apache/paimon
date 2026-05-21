@@ -1106,7 +1106,6 @@ public class FileStoreCommitTest {
                                 tableName,
                                 commitUser,
                                 store.partitionType(),
-                                new SchemaManager(store.fileIO(), store.options().path()),
                                 store.pathFactory(),
                                 store.newKeyComparator(),
                                 store.bucketMode(),
