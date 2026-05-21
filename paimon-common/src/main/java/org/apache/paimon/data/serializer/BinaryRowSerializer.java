@@ -80,6 +80,13 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
         return row;
     }
 
+    /**
+     * Threshold above which we consider a reuse buffer "oversized" and eligible for shrinking. This
+     * prevents accumulation of large byte arrays when a few large records inflate the reuse buffer
+     * and subsequent small records never trigger reallocation.
+     */
+    private static final int REUSE_SHRINK_THRESHOLD = 4 * 1024 * 1024; // 4MB
+
     public BinaryRow deserialize(BinaryRow reuse, DataInputView source) throws IOException {
         MemorySegment[] segments = reuse.getSegments();
         checkArgument(
@@ -88,6 +95,12 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
 
         int length = source.readInt();
         if (segments == null || segments[0].size() < length) {
+            // Need a larger buffer
+            segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
+        } else if (segments[0].size() > REUSE_SHRINK_THRESHOLD) {
+            // The existing buffer is oversized (> 4MB). Shrink it to avoid holding onto large
+            // byte arrays indefinitely, which can cause OOM when many merge channels each
+            // retain a bloated reuse buffer.
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
         }
         source.readFully(segments[0].getArray(), 0, length);
