@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
@@ -96,19 +97,21 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
             RowGroupStatsProvider statsProvider,
             @Nullable Set<Integer> statsFieldIndices) {
         int fieldCount = rowType.getFieldCount();
+        List<String> fieldNames = rowType.getFieldNames();
         Object[] minValues = new Object[fieldCount];
         Object[] maxValues = new Object[fieldCount];
         long[] nullCounts = new long[fieldCount];
         Set<Integer> seenColumns = new HashSet<>();
 
         for (int rg = 0; rg < numRowGroups; rg++) {
-            List<ColumnStatistics> stats = statsProvider.getRowGroupStatistics(rg);
-            for (ColumnStatistics stat : stats) {
-                int colIdx = stat.getColumnIndex();
-                if (colIdx < 0 || colIdx >= fieldCount) {
+            Map<String, ColumnStatistics> statsMap = statsProvider.getRowGroupStatistics(rg);
+            for (Map.Entry<String, ColumnStatistics> entry : statsMap.entrySet()) {
+                int colIdx = fieldNames.indexOf(entry.getKey());
+                if (colIdx < 0) {
                     continue;
                 }
 
+                ColumnStatistics stat = entry.getValue();
                 seenColumns.add(colIdx);
                 nullCounts[colIdx] += stat.getNullCount();
 
@@ -167,6 +170,6 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
 
     @FunctionalInterface
     private interface RowGroupStatsProvider {
-        List<ColumnStatistics> getRowGroupStatistics(int rowGroupIndex);
+        Map<String, ColumnStatistics> getRowGroupStatistics(int rowGroupIndex);
     }
 }

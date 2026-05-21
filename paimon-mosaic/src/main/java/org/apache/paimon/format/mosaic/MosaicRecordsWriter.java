@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** Mosaic records writer. */
 public class MosaicRecordsWriter implements BundleFormatWriter {
@@ -67,29 +68,10 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
         WriterOptions options = new WriterOptions().zstdLevel(formatContext.zstdLevel());
         if (!statsColumnNames.isEmpty()) {
-            int[] statsIndices = resolveColumnIndices(arrowSchema, statsColumnNames);
-            options.statsColumns(statsIndices);
+            options.statsColumns(statsColumnNames.toArray(new String[0]));
         }
 
         this.nativeWriter = new MosaicWriter(outputStream, arrowSchema, options, allocator);
-    }
-
-    private static int[] resolveColumnIndices(Schema schema, List<String> columnNames) {
-        List<org.apache.arrow.vector.types.pojo.Field> fields = schema.getFields();
-        List<Integer> indices = new ArrayList<>();
-        for (String name : columnNames) {
-            for (int i = 0; i < fields.size(); i++) {
-                if (fields.get(i).getName().equals(name)) {
-                    indices.add(i);
-                    break;
-                }
-            }
-        }
-        int[] result = new int[indices.size()];
-        for (int i = 0; i < indices.size(); i++) {
-            result[i] = indices.get(i);
-        }
-        return result;
     }
 
     @Override
@@ -169,7 +151,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
     private void collectMetadata() {
         int numRowGroups = nativeWriter.numRowGroups();
-        List<List<ColumnStatistics>> allStats = new ArrayList<>(numRowGroups);
+        List<Map<String, ColumnStatistics>> allStats = new ArrayList<>(numRowGroups);
         for (int i = 0; i < numRowGroups; i++) {
             allStats.add(nativeWriter.getRowGroupStatistics(i));
         }
