@@ -1,10 +1,5 @@
-.bundle/
-.jekyll-metadata
-.jekyll-cache/
-.rubydeps/
-ruby2/.bundle/
-ruby2/.rubydeps/
-public/
-resources/
-.hugo_build.lock
-.DS_Store
+node_modules/
+build/
+.docusaurus/
+.cache-loader/
+package-lock.json

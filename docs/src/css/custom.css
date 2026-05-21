@@ -1,0 +1,213 @@
+:root {
+  --ifm-color-primary: #1677ff;
+  --ifm-color-primary-dark: #0e6ae6;
+  --ifm-color-primary-darker: #0d64d9;
+  --ifm-color-primary-darkest: #0b52b3;
+  --ifm-color-primary-light: #3385ff;
+  --ifm-color-primary-lighter: #408cff;
+  --ifm-color-primary-lightest: #6da8ff;
+  --ifm-code-font-size: 95%;
+  --ifm-font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  --ifm-heading-font-weight: 700;
+  --ifm-navbar-height: 3.5rem;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #4ba3ff;
+  --ifm-color-primary-dark: #2891ff;
+  --ifm-color-primary-darker: #1788ff;
+  --ifm-color-primary-darkest: #006de0;
+  --ifm-color-primary-light: #6eb5ff;
+  --ifm-color-primary-lighter: #7fbdff;
+  --ifm-color-primary-lightest: #b3d9ff;
+  --ifm-background-color: #1b1b1d;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+/* ===== Hero Section ===== */
+.hero-section {
+  text-align: center;
+  padding: 2rem 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.hero-section h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, var(--ifm-color-primary), #7c3aed);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-subtitle {
+  font-size: 1.15rem;
+  color: var(--ifm-color-emphasis-700);
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* ===== Navigation Cards ===== */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+@media (max-width: 996px) {
+  .card-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 576px) {
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.nav-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  background: var(--ifm-background-surface-color);
+  text-decoration: none !important;
+  color: inherit !important;
+  transition: all 0.2s ease;
+}
+
+.nav-card:hover {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+[data-theme='dark'] .nav-card:hover {
+  box-shadow: 0 4px 12px rgba(75, 163, 255, 0.15);
+}
+
+.nav-card-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.nav-card-body h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.nav-card-body p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ifm-color-emphasis-600);
+  line-height: 1.4;
+}
+
+/* ===== Feature Grid ===== */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+@media (max-width: 768px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.feature-item {
+  padding: 1.25rem;
+  border-radius: 8px;
+  background: var(--ifm-color-emphasis-50);
+  border: 1px solid var(--ifm-color-emphasis-100);
+}
+
+[data-theme='dark'] .feature-item {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.feature-item h3 {
+  margin-top: 0;
+  font-size: 1rem;
+  color: var(--ifm-color-primary);
+}
+
+.feature-item p {
+  margin-bottom: 0;
+  font-size: 0.88rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* ===== Config Table ===== */
+.config-table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.config-table-wrapper table th {
+  background-color: var(--ifm-color-emphasis-100);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.config-table-wrapper table td {
+  padding: 0.75rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  vertical-align: top;
+}
+
+.config-table-wrapper table td h5 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-color-primary);
+}
+
+/* ===== Label Badge ===== */
+.paimon-label {
+  display: inline-block;
+  padding: 0.15em 0.5em;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--ifm-color-primary);
+  border-radius: 3px;
+  vertical-align: middle;
+  margin: 0 0.2em;
+}
+
+/* ===== Two-column Layout ===== */
+.columns-wrapper {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 768px) {
+  .columns-wrapper {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ===== Sidebar Tweaks ===== */
+.menu__link {
+  font-size: 0.88rem;
+}
+
+.theme-doc-sidebar-menu > .menu__list-item > .menu__link,
+.theme-doc-sidebar-menu > .menu__list-item > .menu__list-item-collapsible > .menu__link {
+  font-weight: 600;
+}
