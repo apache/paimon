@@ -181,6 +181,7 @@ public abstract class OrphanFilesClean implements Serializable {
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         List<FileStatus> statuses = tryBestListingDirs(directory);
         return statuses.stream()
+                .filter(status -> !status.isDir())
                 .filter(fileStatusFilter)
                 .filter(status -> fileFilter.test(status.getPath()))
                 .map(status -> Pair.of(status.getPath(), status.getLen()))

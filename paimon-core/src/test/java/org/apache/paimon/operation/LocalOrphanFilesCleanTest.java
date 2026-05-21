@@ -656,6 +656,29 @@ public class LocalOrphanFilesCleanTest {
         assertThat(fileIO.listStatus(bucketPath).length).isGreaterThanOrEqualTo(1);
     }
 
+    @Test
+    void testDirectoryInSnapshotDirNotTreatedAsCandidate() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+
+        Path snapshotDir = new Path(tablePath, "snapshot");
+        assertThat(fileIO.exists(snapshotDir)).isTrue();
+
+        Path unknownDir = new Path(snapshotDir, "UNKNOWN-stale-dir");
+        fileIO.mkdirs(unknownDir);
+
+        long oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2);
+        Files.setLastModifiedTime(
+                tempDir.resolve("snapshot/UNKNOWN-stale-dir"), FileTime.fromMillis(oldTime));
+
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(table, System.currentTimeMillis());
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFilesPath())
+                .noneMatch(p -> p.toString().contains("UNKNOWN-stale-dir"));
+        assertThat(fileIO.exists(unknownDir)).isTrue();
+    }
+
     private void writeData(
             SnapshotManager snapshotManager,
             List<List<TestPojo>> committedData,
