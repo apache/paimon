@@ -56,7 +56,8 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             RowType rowType,
             FileFormatFactory.FormatContext formatContext,
             List<String> statsColumnNames,
-            int numBuckets) {
+            int numBuckets,
+            String compression) {
         this.statsColumnNames = statsColumnNames;
         this.allocator = new RootAllocator();
 
@@ -69,6 +70,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
         WriterOptions options =
                 new WriterOptions()
+                        .compression(resolveCompression(compression))
                         .zstdLevel(formatContext.zstdLevel())
                         .numBuckets(numBuckets)
                         .rowGroupMaxSize(writeBatchMemory);
@@ -77,6 +79,20 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
         }
 
         this.nativeWriter = new MosaicWriter(outputStream, arrowSchema, options, allocator);
+    }
+
+    private static int resolveCompression(String compression) {
+        if (compression == null) {
+            return WriterOptions.COMPRESSION_ZSTD;
+        }
+        switch (compression) {
+            case "none":
+                // return WriterOptions.COMPRESSION_NONE;
+                return 0;
+            case "zstd":
+            default:
+                return WriterOptions.COMPRESSION_ZSTD;
+        }
     }
 
     @Override

@@ -124,7 +124,7 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
                     DataType dataType = rowType.getFields().get(colIdx).type();
                     Object min = convertStatsValue(stat.getMin(), dataType);
                     Object max = convertStatsValue(stat.getMax(), dataType);
-                    if (min != null) {
+                    if (min instanceof Comparable) {
                         if (minValues[colIdx] == null) {
                             minValues[colIdx] = min;
                         } else {
@@ -133,7 +133,7 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
                             }
                         }
                     }
-                    if (max != null) {
+                    if (max instanceof Comparable) {
                         if (maxValues[colIdx] == null) {
                             maxValues[colIdx] = max;
                         } else {
@@ -150,7 +150,7 @@ public class MosaicSimpleStatsExtractor implements SimpleStatsExtractor {
         SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         SimpleColStats[] result = new SimpleColStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            if (!trackedColumns.contains(i)) {
+            if (!trackedColumns.contains(i) || !seenColumns.contains(i)) {
                 result[i] = collectors[i].convert(new SimpleColStats(null, null, null));
             } else {
                 SimpleColStats fieldStats =
