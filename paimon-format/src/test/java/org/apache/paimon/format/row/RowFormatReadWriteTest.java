@@ -1188,6 +1188,114 @@ public class RowFormatReadWriteTest {
         assertThat(results.get(1)).isEqualTo(new int[] {60, 40});
     }
 
+    @Test
+    public void testArrayElementProjection() throws IOException {
+        // data: ROW<arr ARRAY<ROW<a INT, b INT>>>
+        RowType elementType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(Arrays.asList(new DataField(0, "arr", new ArrayType(elementType))));
+
+        Path path = new Path(tempDir.toUri().toString(), "array_elem_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(
+                GenericRow.of(
+                        new GenericArray(
+                                new Object[] {GenericRow.of(1, 100), GenericRow.of(2, 200)})));
+        rows.add(GenericRow.of(new GenericArray(new Object[] {GenericRow.of(3, 300)})));
+        writeRows(format, dataSchema, path, rows);
+
+        // projected: ROW<arr ARRAY<ROW<b INT>>>
+        RowType projectedElementType =
+                new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "arr", new ArrayType(projectedElementType))));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<Integer> results = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    InternalRow.FieldGetter arrayGetter =
+                            InternalRow.createFieldGetter(new ArrayType(projectedElementType), 0);
+                    org.apache.paimon.data.InternalArray arr = row.getArray(0);
+                    for (int i = 0; i < arr.size(); i++) {
+                        results.add(arr.getRow(i, 1).getInt(0));
+                    }
+                });
+        reader.close();
+
+        // Should get 'b' values (100, 200, 300), not 'a' values (1, 2, 3)
+        assertThat(results).containsExactly(100, 200, 300);
+    }
+
+    @Test
+    public void testMapValueProjection() throws IOException {
+        // data: ROW<m MAP<INT, ROW<a INT, b INT>>>
+        RowType valueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "m", new MapType(new IntType(), valueType))));
+
+        Path path = new Path(tempDir.toUri().toString(), "map_value_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        Map<Object, Object> mapData = new java.util.HashMap<>();
+        mapData.put(1, GenericRow.of(10, 100));
+        mapData.put(2, GenericRow.of(20, 200));
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of(new GenericMap(mapData)));
+        writeRows(format, dataSchema, path, rows);
+
+        // projected: ROW<m MAP<INT, ROW<b INT>>>
+        RowType projectedValueType =
+                new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0, "m", new MapType(new IntType(), projectedValueType))));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<Integer> results = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    org.apache.paimon.data.InternalMap m = row.getMap(0);
+                    org.apache.paimon.data.InternalArray keys = m.keyArray();
+                    org.apache.paimon.data.InternalArray values = m.valueArray();
+                    for (int i = 0; i < m.size(); i++) {
+                        results.add(values.getRow(i, 1).getInt(0));
+                    }
+                });
+        reader.close();
+
+        // Should get 'b' values (100, 200), not 'a' values (10, 20)
+        assertThat(results).containsExactlyInAnyOrder(100, 200);
+    }
+
     // ======================== Helpers ========================
 
     private void writeRows(FileFormat format, RowType rowType, Path path, List<InternalRow> rows)

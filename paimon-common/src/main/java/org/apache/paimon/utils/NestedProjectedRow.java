@@ -27,8 +27,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
@@ -41,22 +44,41 @@ import java.util.List;
  *
  * <p>Unlike {@link ProjectedRow} which only handles top-level projection, this class recursively
  * projects nested ROW fields. It maps each projected field to the corresponding position in the
- * data schema by name, and for ROW-typed fields, recursively applies sub-projections.
+ * data schema by field ID, and for ROW-typed fields, recursively applies sub-projections. It also
+ * handles projection through ARRAY and MAP types whose elements contain ROW fields.
  */
 public class NestedProjectedRow implements InternalRow {
 
     private final int[] indexMapping;
     @Nullable private final NestedProjectedRow[] nestedProjections;
     @Nullable private final int[] nestedArity;
+    @Nullable private final NestedProjectedRow[] arrayElementProjections;
+    @Nullable private final int[] arrayElementArity;
+    @Nullable private final NestedProjectedRow[] mapKeyProjections;
+    @Nullable private final int[] mapKeyArity;
+    @Nullable private final NestedProjectedRow[] mapValueProjections;
+    @Nullable private final int[] mapValueArity;
     private InternalRow row;
 
     private NestedProjectedRow(
             int[] indexMapping,
             @Nullable NestedProjectedRow[] nestedProjections,
-            @Nullable int[] nestedArity) {
+            @Nullable int[] nestedArity,
+            @Nullable NestedProjectedRow[] arrayElementProjections,
+            @Nullable int[] arrayElementArity,
+            @Nullable NestedProjectedRow[] mapKeyProjections,
+            @Nullable int[] mapKeyArity,
+            @Nullable NestedProjectedRow[] mapValueProjections,
+            @Nullable int[] mapValueArity) {
         this.indexMapping = indexMapping;
         this.nestedProjections = nestedProjections;
         this.nestedArity = nestedArity;
+        this.arrayElementProjections = arrayElementProjections;
+        this.arrayElementArity = arrayElementArity;
+        this.mapKeyProjections = mapKeyProjections;
+        this.mapKeyArity = mapKeyArity;
+        this.mapValueProjections = mapValueProjections;
+        this.mapValueArity = mapValueArity;
     }
 
     public NestedProjectedRow replaceRow(InternalRow row) {
@@ -84,7 +106,12 @@ public class NestedProjectedRow implements InternalRow {
         int[] indexMapping = new int[projectedSize];
         NestedProjectedRow[] nestedProjections = null;
         int[] nestedArity = null;
-        boolean hasNested = false;
+        NestedProjectedRow[] arrayElementProjections = null;
+        int[] arrayElementArity = null;
+        NestedProjectedRow[] mapKeyProjections = null;
+        int[] mapKeyArity = null;
+        NestedProjectedRow[] mapValueProjections = null;
+        int[] mapValueArity = null;
 
         for (int i = 0; i < projectedSize; i++) {
             DataField projected = projectedFields.get(i);
@@ -98,8 +125,9 @@ public class NestedProjectedRow implements InternalRow {
                     projected.name());
             indexMapping[i] = dataIdx;
 
-            if (projected.type().getTypeRoot() == DataTypeRoot.ROW) {
-                RowType dataNestedType = (RowType) dataFields.get(dataIdx).type();
+            DataTypeRoot typeRoot = projected.type().getTypeRoot();
+            if (typeRoot == DataTypeRoot.ROW) {
+                RowType dataNestedType = (RowType) dataField.type();
                 RowType projectedNestedType = (RowType) projected.type();
                 NestedProjectedRow sub = create(dataNestedType, projectedNestedType);
                 if (sub != null) {
@@ -109,15 +137,69 @@ public class NestedProjectedRow implements InternalRow {
                     }
                     nestedProjections[i] = sub;
                     nestedArity[i] = dataNestedType.getFieldCount();
-                    hasNested = true;
+                }
+            } else if (typeRoot == DataTypeRoot.ARRAY) {
+                DataType projectedElement = ((ArrayType) projected.type()).getElementType();
+                DataType dataElement = ((ArrayType) dataField.type()).getElementType();
+                if (projectedElement.getTypeRoot() == DataTypeRoot.ROW) {
+                    RowType dataElementRow = (RowType) dataElement;
+                    RowType projectedElementRow = (RowType) projectedElement;
+                    NestedProjectedRow sub = create(dataElementRow, projectedElementRow);
+                    if (sub != null) {
+                        if (arrayElementProjections == null) {
+                            arrayElementProjections = new NestedProjectedRow[projectedSize];
+                            arrayElementArity = new int[projectedSize];
+                        }
+                        arrayElementProjections[i] = sub;
+                        arrayElementArity[i] = dataElementRow.getFieldCount();
+                    }
+                }
+            } else if (typeRoot == DataTypeRoot.MAP || typeRoot == DataTypeRoot.MULTISET) {
+                MapType projectedMapType = (MapType) projected.type();
+                MapType dataMapType = (MapType) dataField.type();
+                DataType projectedKey = projectedMapType.getKeyType();
+                DataType dataKey = dataMapType.getKeyType();
+                if (projectedKey.getTypeRoot() == DataTypeRoot.ROW) {
+                    RowType dataKeyRow = (RowType) dataKey;
+                    RowType projectedKeyRow = (RowType) projectedKey;
+                    NestedProjectedRow sub = create(dataKeyRow, projectedKeyRow);
+                    if (sub != null) {
+                        if (mapKeyProjections == null) {
+                            mapKeyProjections = new NestedProjectedRow[projectedSize];
+                            mapKeyArity = new int[projectedSize];
+                        }
+                        mapKeyProjections[i] = sub;
+                        mapKeyArity[i] = dataKeyRow.getFieldCount();
+                    }
+                }
+                DataType projectedValue = projectedMapType.getValueType();
+                DataType dataValue = dataMapType.getValueType();
+                if (projectedValue.getTypeRoot() == DataTypeRoot.ROW) {
+                    RowType dataValueRow = (RowType) dataValue;
+                    RowType projectedValueRow = (RowType) projectedValue;
+                    NestedProjectedRow sub = create(dataValueRow, projectedValueRow);
+                    if (sub != null) {
+                        if (mapValueProjections == null) {
+                            mapValueProjections = new NestedProjectedRow[projectedSize];
+                            mapValueArity = new int[projectedSize];
+                        }
+                        mapValueProjections[i] = sub;
+                        mapValueArity[i] = dataValueRow.getFieldCount();
+                    }
                 }
             }
         }
 
-        if (!hasNested) {
-            return new NestedProjectedRow(indexMapping, null, null);
-        }
-        return new NestedProjectedRow(indexMapping, nestedProjections, nestedArity);
+        return new NestedProjectedRow(
+                indexMapping,
+                nestedProjections,
+                nestedArity,
+                arrayElementProjections,
+                arrayElementArity,
+                mapKeyProjections,
+                mapKeyArity,
+                mapValueProjections,
+                mapValueArity);
     }
 
     @Override
@@ -207,7 +289,12 @@ public class NestedProjectedRow implements InternalRow {
 
     @Override
     public InternalArray getArray(int pos) {
-        return row.getArray(indexMapping[pos]);
+        InternalArray array = row.getArray(indexMapping[pos]);
+        if (arrayElementProjections != null && arrayElementProjections[pos] != null) {
+            return new ProjectedInternalArray(
+                    array, arrayElementProjections[pos], arrayElementArity[pos]);
+        }
+        return array;
     }
 
     @Override
@@ -217,7 +304,17 @@ public class NestedProjectedRow implements InternalRow {
 
     @Override
     public InternalMap getMap(int pos) {
-        return row.getMap(indexMapping[pos]);
+        InternalMap map = row.getMap(indexMapping[pos]);
+        if ((mapKeyProjections != null && mapKeyProjections[pos] != null)
+                || (mapValueProjections != null && mapValueProjections[pos] != null)) {
+            NestedProjectedRow keyProj = mapKeyProjections != null ? mapKeyProjections[pos] : null;
+            int keyAr = mapKeyArity != null ? mapKeyArity[pos] : 0;
+            NestedProjectedRow valueProj =
+                    mapValueProjections != null ? mapValueProjections[pos] : null;
+            int valueAr = mapValueArity != null ? mapValueArity[pos] : 0;
+            return new ProjectedInternalMap(map, keyProj, keyAr, valueProj, valueAr);
+        }
+        return map;
     }
 
     @Override
@@ -227,5 +324,199 @@ public class NestedProjectedRow implements InternalRow {
             return nestedProjections[pos].replaceRow(inner);
         }
         return row.getRow(indexMapping[pos], numFields);
+    }
+
+    // ======================== ProjectedInternalArray ========================
+
+    private static class ProjectedInternalArray implements InternalArray {
+
+        private final InternalArray array;
+        private final NestedProjectedRow elementProjection;
+        private final int elementArity;
+
+        ProjectedInternalArray(
+                InternalArray array, NestedProjectedRow elementProjection, int elementArity) {
+            this.array = array;
+            this.elementProjection = elementProjection;
+            this.elementArity = elementArity;
+        }
+
+        @Override
+        public int size() {
+            return array.size();
+        }
+
+        @Override
+        public boolean isNullAt(int pos) {
+            return array.isNullAt(pos);
+        }
+
+        @Override
+        public InternalRow getRow(int pos, int numFields) {
+            InternalRow inner = array.getRow(pos, elementArity);
+            return elementProjection.replaceRow(inner);
+        }
+
+        @Override
+        public boolean getBoolean(int pos) {
+            return array.getBoolean(pos);
+        }
+
+        @Override
+        public byte getByte(int pos) {
+            return array.getByte(pos);
+        }
+
+        @Override
+        public short getShort(int pos) {
+            return array.getShort(pos);
+        }
+
+        @Override
+        public int getInt(int pos) {
+            return array.getInt(pos);
+        }
+
+        @Override
+        public long getLong(int pos) {
+            return array.getLong(pos);
+        }
+
+        @Override
+        public float getFloat(int pos) {
+            return array.getFloat(pos);
+        }
+
+        @Override
+        public double getDouble(int pos) {
+            return array.getDouble(pos);
+        }
+
+        @Override
+        public BinaryString getString(int pos) {
+            return array.getString(pos);
+        }
+
+        @Override
+        public Decimal getDecimal(int pos, int precision, int scale) {
+            return array.getDecimal(pos, precision, scale);
+        }
+
+        @Override
+        public Timestamp getTimestamp(int pos, int precision) {
+            return array.getTimestamp(pos, precision);
+        }
+
+        @Override
+        public byte[] getBinary(int pos) {
+            return array.getBinary(pos);
+        }
+
+        @Override
+        public Variant getVariant(int pos) {
+            return array.getVariant(pos);
+        }
+
+        @Override
+        public Blob getBlob(int pos) {
+            return array.getBlob(pos);
+        }
+
+        @Override
+        public InternalArray getArray(int pos) {
+            return array.getArray(pos);
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            return array.getVector(pos);
+        }
+
+        @Override
+        public InternalMap getMap(int pos) {
+            return array.getMap(pos);
+        }
+
+        @Override
+        public boolean[] toBooleanArray() {
+            return array.toBooleanArray();
+        }
+
+        @Override
+        public byte[] toByteArray() {
+            return array.toByteArray();
+        }
+
+        @Override
+        public short[] toShortArray() {
+            return array.toShortArray();
+        }
+
+        @Override
+        public int[] toIntArray() {
+            return array.toIntArray();
+        }
+
+        @Override
+        public long[] toLongArray() {
+            return array.toLongArray();
+        }
+
+        @Override
+        public float[] toFloatArray() {
+            return array.toFloatArray();
+        }
+
+        @Override
+        public double[] toDoubleArray() {
+            return array.toDoubleArray();
+        }
+    }
+
+    // ======================== ProjectedInternalMap ========================
+
+    private static class ProjectedInternalMap implements InternalMap {
+
+        private final InternalMap map;
+        @Nullable private final NestedProjectedRow keyProjection;
+        private final int keyArity;
+        @Nullable private final NestedProjectedRow valueProjection;
+        private final int valueArity;
+
+        ProjectedInternalMap(
+                InternalMap map,
+                @Nullable NestedProjectedRow keyProjection,
+                int keyArity,
+                @Nullable NestedProjectedRow valueProjection,
+                int valueArity) {
+            this.map = map;
+            this.keyProjection = keyProjection;
+            this.keyArity = keyArity;
+            this.valueProjection = valueProjection;
+            this.valueArity = valueArity;
+        }
+
+        @Override
+        public int size() {
+            return map.size();
+        }
+
+        @Override
+        public InternalArray keyArray() {
+            InternalArray keys = map.keyArray();
+            if (keyProjection != null) {
+                return new ProjectedInternalArray(keys, keyProjection, keyArity);
+            }
+            return keys;
+        }
+
+        @Override
+        public InternalArray valueArray() {
+            InternalArray values = map.valueArray();
+            if (valueProjection != null) {
+                return new ProjectedInternalArray(values, valueProjection, valueArity);
+            }
+            return values;
+        }
     }
 }

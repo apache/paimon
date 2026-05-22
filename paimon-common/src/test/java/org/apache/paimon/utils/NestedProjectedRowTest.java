@@ -19,14 +19,20 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
@@ -36,6 +42,8 @@ import org.apache.paimon.types.VarCharType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -446,5 +454,151 @@ public class NestedProjectedRowTest {
                 .hasMessageContaining("Field name mismatch")
                 .hasMessageContaining("'y'")
                 .hasMessageContaining("'wrong_name'");
+    }
+
+    @Test
+    void testArrayElementProjection() {
+        // data: ROW<arr ARRAY<ROW<a INT(10), b INT(11)>>(0)>
+        RowType elementType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(Arrays.asList(new DataField(0, "arr", new ArrayType(elementType))));
+
+        // projected: ROW<arr ARRAY<ROW<b INT(11)>>(0)>
+        RowType projectedElementType =
+                new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "arr", new ArrayType(projectedElementType))));
+
+        NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
+        assertThat(projection).isNotNull();
+
+        // arr = [ROW<a=1, b=100>, ROW<a=2, b=200>]
+        GenericArray array =
+                new GenericArray(new Object[] {GenericRow.of(1, 100), GenericRow.of(2, 200)});
+        GenericRow row = GenericRow.of(array);
+        InternalRow projected = projection.replaceRow(row);
+
+        InternalArray projectedArray = projected.getArray(0);
+        assertThat(projectedArray.size()).isEqualTo(2);
+        assertThat(projectedArray.getRow(0, 1).getInt(0)).isEqualTo(100);
+        assertThat(projectedArray.getRow(1, 1).getInt(0)).isEqualTo(200);
+    }
+
+    @Test
+    void testArrayElementProjectionWithNull() {
+        // data: ROW<arr ARRAY<ROW<a INT(10), b INT(11)>>(0)>
+        RowType elementType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(Arrays.asList(new DataField(0, "arr", new ArrayType(elementType))));
+
+        // projected: ROW<arr ARRAY<ROW<b INT(11)>>(0)>
+        RowType projectedElementType =
+                new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "arr", new ArrayType(projectedElementType))));
+
+        NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
+        assertThat(projection).isNotNull();
+
+        // arr = [ROW<a=1, b=100>, null]
+        GenericArray array = new GenericArray(new Object[] {GenericRow.of(1, 100), null});
+        GenericRow row = GenericRow.of(array);
+        InternalRow projected = projection.replaceRow(row);
+
+        InternalArray projectedArray = projected.getArray(0);
+        assertThat(projectedArray.size()).isEqualTo(2);
+        assertThat(projectedArray.getRow(0, 1).getInt(0)).isEqualTo(100);
+        assertThat(projectedArray.isNullAt(1)).isTrue();
+    }
+
+    @Test
+    void testMapValueProjection() {
+        // data: ROW<m MAP<INT, ROW<a INT(10), b INT(11)>>(0)>
+        RowType valueType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "m", new MapType(new IntType(), valueType))));
+
+        // projected: ROW<m MAP<INT, ROW<b INT(11)>>(0)>
+        RowType projectedValueType =
+                new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0, "m", new MapType(new IntType(), projectedValueType))));
+
+        NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
+        assertThat(projection).isNotNull();
+
+        // m = {1 -> ROW<a=10, b=100>, 2 -> ROW<a=20, b=200>}
+        Map<Object, Object> mapData = new HashMap<>();
+        mapData.put(1, GenericRow.of(10, 100));
+        mapData.put(2, GenericRow.of(20, 200));
+        GenericRow row = GenericRow.of(new GenericMap(mapData));
+        InternalRow projected = projection.replaceRow(row);
+
+        InternalMap projectedMap = projected.getMap(0);
+        assertThat(projectedMap.size()).isEqualTo(2);
+        InternalArray values = projectedMap.valueArray();
+        InternalArray keys = projectedMap.keyArray();
+        for (int i = 0; i < 2; i++) {
+            int key = keys.getInt(i);
+            int b = values.getRow(i, 1).getInt(0);
+            if (key == 1) {
+                assertThat(b).isEqualTo(100);
+            } else {
+                assertThat(b).isEqualTo(200);
+            }
+        }
+    }
+
+    @Test
+    void testArrayWithNoProjectionNeeded() {
+        // data: ROW<arr ARRAY<ROW<a INT(10), b INT(11)>>(0), id INT(1)>
+        RowType elementType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "arr", new ArrayType(elementType)),
+                                new DataField(1, "id", new IntType())));
+
+        // projected: ROW<arr ARRAY<ROW<a INT(10), b INT(11)>>(0)> - full element, just drop id
+        RowType projectedSchema =
+                new RowType(Arrays.asList(new DataField(0, "arr", new ArrayType(elementType))));
+
+        NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
+        assertThat(projection).isNotNull();
+
+        GenericArray array = new GenericArray(new Object[] {GenericRow.of(1, 2)});
+        GenericRow row = GenericRow.of(array, 99);
+        InternalRow projected = projection.replaceRow(row);
+
+        InternalArray projectedArray = projected.getArray(0);
+        assertThat(projectedArray.size()).isEqualTo(1);
+        InternalRow element = projectedArray.getRow(0, 2);
+        assertThat(element.getInt(0)).isEqualTo(1);
+        assertThat(element.getInt(1)).isEqualTo(2);
     }
 }
