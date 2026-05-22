@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -37,6 +38,7 @@ import org.apache.paimon.utils.Range;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -74,26 +76,66 @@ public class GlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
+
+        // Single-column indexes: fieldId -> indexType -> range -> files
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
+        // Multi-column indexes: fieldIds -> indexType -> range -> files
+        Map<List<Integer>, Map<String, Map<Range, List<IndexFileMeta>>>> multiColumnMetas =
+                new HashMap<>();
+        // Reverse lookup: fieldId -> its multi-column group
+        Map<Integer, List<Integer>> fieldToGroup = new HashMap<>();
+
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            int fieldId = meta.indexFieldId();
             String indexType = indexFile.indexType();
-            indexMetas
-                    .computeIfAbsent(fieldId, k -> new HashMap<>())
-                    .computeIfAbsent(indexType, k -> new HashMap<>())
-                    .computeIfAbsent(
-                            new Range(meta.rowRangeStart(), meta.rowRangeEnd()),
-                            k -> new ArrayList<>())
-                    .add(indexFile);
+            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
+
+            if (meta.indexFieldId() == GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID
+                    && meta.extraFieldIds() != null) {
+                // Multi-column index: all participating fields share the same IndexFileMeta,
+                // so looking up from any fieldId returns identical index files.
+                List<Integer> fieldIds =
+                        Arrays.stream(meta.extraFieldIds())
+                                .boxed()
+                                .collect(Collectors.toList());
+                multiColumnMetas
+                        .computeIfAbsent(fieldIds, k -> new HashMap<>())
+                        .computeIfAbsent(indexType, k -> new HashMap<>())
+                        .computeIfAbsent(range, k -> new ArrayList<>())
+                        .add(indexFile);
+                for (int id : fieldIds) {
+                    fieldToGroup.put(id, fieldIds);
+                }
+            } else {
+                // Single-column index
+                int fieldId = meta.indexFieldId();
+                indexMetas
+                        .computeIfAbsent(fieldId, k -> new HashMap<>())
+                        .computeIfAbsent(indexType, k -> new HashMap<>())
+                        .computeIfAbsent(range, k -> new ArrayList<>())
+                        .add(indexFile);
+            }
         }
 
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
-                fieldId ->
-                        createReaders(
+                fId -> {
+                    List<Integer> group = fieldToGroup.get(fId);
+                    if (group != null) {
+                        // Multi-column: resolve full field list
+                        List<DataField> fields =
+                                group.stream()
+                                        .map(rowType::getField)
+                                        .collect(Collectors.toList());
+                        return createReaders(
+                                indexFileReader, multiColumnMetas.get(group), fields);
+                    } else {
+                        // Single-column
+                        return createReaders(
                                 indexFileReader,
-                                indexMetas.get(fieldId),
-                                rowType.getField(fieldId));
+                                indexMetas.get(fId),
+                                Collections.singletonList(rowType.getField(fId)));
+                    }
+                };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
@@ -127,7 +169,17 @@ public class GlobalIndexScanner implements Closeable {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return filterFieldIds.contains(globalIndex.indexFieldId());
+                    if (filterFieldIds.contains(globalIndex.indexFieldId())) {
+                        return true;
+                    }
+                    if (globalIndex.extraFieldIds() != null) {
+                        for (int id : globalIndex.extraFieldIds()) {
+                            if (filterFieldIds.contains(id)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
                 };
 
         List<IndexFileMeta> indexFiles =
@@ -145,7 +197,7 @@ public class GlobalIndexScanner implements Closeable {
     private Collection<GlobalIndexReader> createReaders(
             GlobalIndexFileReader indexFileReadWrite,
             Map<String, Map<Range, List<IndexFileMeta>>> indexMetas,
-            DataField dataField) {
+            List<DataField> fields) {
         if (indexMetas == null) {
             return Collections.emptyList();
         }
@@ -155,7 +207,7 @@ public class GlobalIndexScanner implements Closeable {
             String indexType = entry.getKey();
             Map<Range, List<IndexFileMeta>> metas = entry.getValue();
             GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(indexType);
-            GlobalIndexer globalIndexer = globalIndexerFactory.create(dataField, options);
+            GlobalIndexer globalIndexer = globalIndexerFactory.create(fields, options);
 
             List<CompletableFuture<GlobalIndexReader>> futures = new ArrayList<>(metas.size());
             for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {

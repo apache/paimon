@@ -475,7 +475,7 @@ class GenericIndexTopoBuilderTest {
                 GenericIndexTopoBuilder.filterEntriesBefore(
                         entries,
                         GenericIndexTopoBuilder.findMinNonIndexableRowId(
-                                schemaManager, entries, "vec"));
+                                schemaManager, entries, Collections.singletonList("vec")));
 
         assertThat(result).hasSize(2);
         assertThat(result.get(0).file().nonNullFirstRowId()).isEqualTo(0L);

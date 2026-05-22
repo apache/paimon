@@ -29,6 +29,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,12 +47,54 @@ public class GlobalIndexBuilderUtils {
             String indexType,
             List<ResultEntry> entries)
             throws IOException {
+        return toIndexFileMetas(
+                fileIO, indexPathFactory, options, range, indexFieldId, null, indexType, entries);
+    }
+
+    public static List<IndexFileMeta> toIndexFileMetas(
+            FileIO fileIO,
+            IndexPathFactory indexPathFactory,
+            CoreOptions options,
+            Range range,
+            List<DataField> fields,
+            String indexType,
+            List<ResultEntry> entries)
+            throws IOException {
+        int indexFieldId = fields.get(0).id();
+        int[] extraFieldIds =
+                fields.size() > 1
+                        ? fields.subList(1, fields.size()).stream()
+                                .mapToInt(DataField::id)
+                                .toArray()
+                        : null;
+        return toIndexFileMetas(
+                fileIO,
+                indexPathFactory,
+                options,
+                range,
+                indexFieldId,
+                extraFieldIds,
+                indexType,
+                entries);
+    }
+
+    private static List<IndexFileMeta> toIndexFileMetas(
+            FileIO fileIO,
+            IndexPathFactory indexPathFactory,
+            CoreOptions options,
+            Range range,
+            int indexFieldId,
+            @Nullable int[] extraFieldIds,
+            String indexType,
+            List<ResultEntry> entries)
+            throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
             String fileName = entry.fileName();
             long fileSize = fileIO.getFileSize(indexPathFactory.toPath(fileName));
             GlobalIndexMeta globalIndexMeta =
-                    new GlobalIndexMeta(range.from, range.to, indexFieldId, null, entry.meta());
+                    new GlobalIndexMeta(
+                            range.from, range.to, indexFieldId, extraFieldIds, entry.meta());
 
             Path externalPathDir = options.globalIndexExternalPath();
             String externalPathString = null;
@@ -75,6 +119,13 @@ public class GlobalIndexBuilderUtils {
             FileStoreTable table, String indexType, DataField indexField, Options options)
             throws IOException {
         GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexField, options);
+        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
+    }
+
+    public static GlobalIndexWriter createIndexWriter(
+            FileStoreTable table, String indexType, List<DataField> fields, Options options)
+            throws IOException {
+        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, fields, options);
         return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
     }
 
