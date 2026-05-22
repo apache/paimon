@@ -222,7 +222,7 @@ public class DataEvolutionCompactCoordinator {
             this.schemaFetcher =
                     schemaId ->
                             schemaCache.computeIfAbsent(
-                                    schemaId, id -> schemaFetcher.apply(id));
+                                    schemaId, schemaFetcher::apply);
             this.currentBlobFieldIds = currentBlobFieldIds;
         }
 
