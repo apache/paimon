@@ -106,7 +106,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>(none)</td>
       <td>String</td>
-      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in <code>blob-descriptor-field</code>, <code>blob-view-field</code>, or <code>blob-external-storage-field</code> are also treated as BLOB fields.</td>
+      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in <code>blob-descriptor-field</code>, <code>blob-view-field</code> are also treated as BLOB fields.</td>
     </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
@@ -303,15 +303,7 @@ because existing fields cannot be newly configured as blob fields:
 
 ```sql
 ALTER TABLE image_table ADD image BYTES; -- or ADD COLUMN image BINARY in Spark SQL
-ALTER TABLE image_table SET ('blob-field' = 'image');
-```
-
-For descriptor BLOB columns, set `blob-descriptor-field` before adding the column. The following example uses Flink
-SQL; in Spark SQL, use `SET TBLPROPERTIES` and `ADD COLUMN image BINARY`.
-
-```sql
-ALTER TABLE image_table SET ('blob-descriptor-field' = 'image');
-ALTER TABLE image_table ADD image BYTES;
+ALTER TABLE image_table SET ('blob-field' = 'image'); -- error, existing column cannot be configured as blob
 ```
 
 When using the Paimon API, you can add a BLOB column directly because Paimon has a native `BLOB` type:
