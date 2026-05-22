@@ -106,7 +106,7 @@ class V2WriteMergeSchemaTest extends PaimonSparkTestBase {
         val error = intercept[RuntimeException] {
           spark.sql("INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c")
         }.getMessage
-        assert(error.contains("the number of data columns don't match with the table schema's"))
+        assert(error.contains("extra columns: `c`"))
       }
     }
   }

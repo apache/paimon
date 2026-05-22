@@ -132,6 +132,10 @@ object PaimonUtils {
     left.sameType(right)
   }
 
+  def equalsIgnoreCompatibleNullability(from: DataType, to: DataType): Boolean = {
+    DataType.equalsIgnoreCompatibleNullability(from, to)
+  }
+
   def classIsLoadable(clazz: String): Boolean = {
     SparkUtils.classIsLoadable(clazz)
   }

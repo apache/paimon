@@ -26,30 +26,39 @@ import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, Paimon
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.{NamedRelation, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateStruct, Expression, GetArrayItem, GetStructField, If, IsNull, LambdaFunction, Literal, NamedExpression, NamedLambdaVariable}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
-import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
-import org.apache.spark.sql.types._
-
-import scala.collection.mutable
 
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   import DataSourceV2Implicits._
+  import PaimonAnalysis._
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
-    case a @ PaimonV2WriteCommand(table) if !paimonWriteResolved(a.query, table, a.isByName) =>
+    case a @ PaimonV2WriteCommand(table)
+        if !paimonWriteResolved(a.query, table) &&
+          a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
       val mergeSchemaEnabled =
         writeOptions(a).get(SparkConnectorOptions.MERGE_SCHEMA.key()).contains("true") ||
           OptionUtils.writeMergeSchemaEnabled()
-      resolveQueryColumns(a.query, table, a.isByName, mergeSchemaEnabled) match {
-        case Some(newQuery) if newQuery != a.query => Compatibility.withNewQuery(a, newQuery)
-        case _ => a
+      val newQuery = PaimonOutputResolver.resolveOutputColumns(
+        table.name,
+        table.output,
+        a.query,
+        a.isByName,
+        conf,
+        mergeSchemaEnabled)
+      if (newQuery ne a.query) {
+        // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.
+        newQuery.setTagValue(PAIMON_WRITE_RESOLVED, ())
+        Compatibility.withNewQuery(a, newQuery)
+      } else {
+        a
       }
 
     case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
@@ -77,337 +86,25 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     }
   }
 
-  private def paimonWriteResolved(
-      query: LogicalPlan,
-      table: NamedRelation,
-      isByName: Boolean): Boolean = {
+  // Mirrors Spark's V2WriteCommand `outputResolved` strictness: query and table outputs must match
+  // by name, position, type (ignoring nullable compatibility), and nullability. Any nested
+  // structural differences also have to be reconciled before we declare the write resolved.
+  private def paimonWriteResolved(query: LogicalPlan, table: NamedRelation): Boolean = {
     query.output.size == table.output.size &&
     query.output.zip(table.output).forall {
       case (inAttr, outAttr) =>
         val inType = CharVarcharUtils.getRawType(inAttr.metadata).getOrElse(inAttr.dataType)
         val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
-        inAttr.name == outAttr.name && schemaCompatible(inType, outType, isByName)
+        inAttr.name == outAttr.name &&
+        PaimonUtils.equalsIgnoreCompatibleNullability(inType, outType) &&
+        (outAttr.nullable || !inAttr.nullable)
     }
   }
 
-  private def resolveQueryColumns(
-      query: LogicalPlan,
-      table: NamedRelation,
-      byName: Boolean,
-      mergeSchemaEnabled: Boolean = false): Option[LogicalPlan] = {
-    // More details see: `TableOutputResolver#resolveOutputColumns`
-    if (byName) {
-      try {
-        Option.apply(resolveQueryColumnsByName(query, table))
-      } catch {
-        case e: Exception =>
-          // Merge schema is effective only when using byName mode.
-          // Schema validation is skipped here, because schema validation or merging will be
-          // done during insertion when mergeSchemaEnabled.
-          if (mergeSchemaEnabled) {
-            Option.empty
-          } else {
-            throw e
-          }
-      }
-    } else {
-      Option.apply(resolveQueryColumnsByPosition(query, table))
-    }
-  }
+}
 
-  private def resolveQueryColumnsByName(query: LogicalPlan, table: NamedRelation): LogicalPlan = {
-    val inputCols = query.output
-    val expectedCols = table.output
-    if (inputCols.size > expectedCols.size) {
-      throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, " +
-          "the number of data columns don't match with the table schema's.")
-    }
-
-    val matchedCols = mutable.HashSet.empty[String]
-    val reorderedCols = expectedCols.map {
-      expectedCol =>
-        val matched = inputCols.filter(col => conf.resolver(col.name, expectedCol.name))
-        if (matched.isEmpty) {
-          // TODO: Support Spark default value framework if Paimon supports to change default values.
-          if (!expectedCol.nullable) {
-            throw new RuntimeException(
-              s"Cannot write incompatible data for the table `${table.name}`, " +
-                s"due to non-nullable column `${expectedCol.name}` has no specified value.")
-          }
-          Alias(Literal(null, expectedCol.dataType), expectedCol.name)()
-        } else if (matched.length > 1) {
-          throw new RuntimeException(
-            s"Cannot write incompatible data for the table `${table.name}`, due to column name conflicts: ${matched
-                .mkString(", ")}.")
-        } else {
-          matchedCols += matched.head.name
-          val matchedCol = matched.head
-          addCastToColumn(matchedCol, expectedCol, isByName = true)
-        }
-    }
-
-    assert(reorderedCols.length == expectedCols.length)
-    if (matchedCols.size < inputCols.length) {
-      val extraCols = inputCols
-        .filterNot(col => matchedCols.contains(col.name))
-        .map(col => s"${toSQLId(col.name)}")
-        .mkString(", ")
-      // There are seme unknown column names
-      throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, due to unknown column names: $extraCols.")
-    }
-    Project(reorderedCols, query)
-  }
-
-  private def resolveQueryColumnsByPosition(
-      query: LogicalPlan,
-      table: NamedRelation): LogicalPlan = {
-    val expectedCols = table.output
-    val queryCols = query.output
-    if (queryCols.size != expectedCols.size) {
-      throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, " +
-          "the number of data columns don't match with the table schema's.")
-    }
-
-    val project = queryCols.zipWithIndex.map {
-      case (attr, i) =>
-        val targetAttr = expectedCols(i)
-        addCastToColumn(attr, targetAttr, isByName = false)
-    }
-    Project(project, query)
-  }
-
-  private def schemaCompatible(
-      dataSchema: DataType,
-      tableSchema: DataType,
-      checkFieldNames: Boolean): Boolean = {
-    (dataSchema, tableSchema) match {
-      case (s1: StructType, s2: StructType) =>
-        s1.length == s2.length &&
-        (!checkFieldNames ||
-          (!hasResolverConflicts(s1) &&
-            !hasResolverConflicts(s2) &&
-            structFieldsResolved(s1, s2))) &&
-        s1.zip(s2).forall {
-          case (d1, d2) => schemaCompatible(d1.dataType, d2.dataType, checkFieldNames)
-        }
-      case (a1: ArrayType, a2: ArrayType) =>
-        // todo: support array type nullable evaluation
-        schemaCompatible(a1.elementType, a2.elementType, checkFieldNames)
-      case (m1: MapType, m2: MapType) =>
-        m1.valueContainsNull == m2.valueContainsNull &&
-        schemaCompatible(m1.keyType, m2.keyType, checkFieldNames) &&
-        schemaCompatible(m1.valueType, m2.valueType, checkFieldNames)
-      case (d1, d2) => d1 == d2
-    }
-  }
-
-  private def structFieldsResolved(source: StructType, target: StructType): Boolean = {
-    source.zip(target).forall {
-      case (sourceField, targetField) =>
-        conf.resolver(sourceField.name, targetField.name)
-    }
-  }
-
-  private def hasResolverConflicts(struct: StructType): Boolean = {
-    struct.fields.combinations(2).exists { case Array(a, b) => conf.resolver(a.name, b.name) }
-  }
-
-  private def addCastToColumn(
-      attr: Attribute,
-      targetAttr: Attribute,
-      isByName: Boolean): NamedExpression = {
-    val expr = (attr.dataType, targetAttr.dataType) match {
-      case (s, t) if s == t =>
-        attr
-      case (s: StructType, t: StructType) if s != t =>
-        if (isByName) {
-          addCastToStructByName(attr, s, t)
-        } else {
-          addCastToStructByPosition(attr, s, t)
-        }
-      case (ArrayType(s: StructType, sNull: Boolean), ArrayType(t: StructType, _: Boolean))
-          if s != t =>
-        val castToStructFunc = if (isByName) {
-          addCastToStructByName _
-        } else {
-          addCastToStructByPosition _
-        }
-        castToArrayStruct(attr, s, t, sNull, castToStructFunc)
-      case _ =>
-        cast(attr, targetAttr.dataType)
-    }
-    Alias(stringLengthCheck(expr, targetAttr.metadata), targetAttr.name)(explicitMetadata =
-      Option(targetAttr.metadata))
-  }
-
-  private def addCastToStructByName(
-      parent: NamedExpression,
-      source: StructType,
-      target: StructType): NamedExpression = {
-    // Reject target fields that collide under the current resolver
-    // (e.g. `name` and `Name` with case-insensitive resolution), otherwise
-    // we would silently map both target fields to the same source field.
-    val targetConflicts = target.fields
-      .combinations(2)
-      .collect {
-        case Array(a, b) if conf.resolver(a.name, b.name) => (a.name, b.name)
-      }
-      .toSeq
-    if (targetConflicts.nonEmpty) {
-      throw new RuntimeException(
-        "Cannot write incompatible data: nested struct has conflicting target field names: " +
-          targetConflicts.map { case (a, b) => s"`$a` vs `$b`" }.mkString(", ") + ".")
-    }
-
-    // Single pass: resolve each target field to its source match(es) and track
-    // which source indices were consumed, so we can detect extras without
-    // rescanning source and target repeatedly.
-    val sourceWithIndex = source.fields.zipWithIndex
-    val consumed = mutable.BitSet.empty
-    val resolved = target.fields.map {
-      tgt =>
-        val matches = sourceWithIndex.filter { case (f, _) => conf.resolver(f.name, tgt.name) }
-        matches.foreach { case (_, i) => consumed += i }
-        (tgt, matches)
-    }
-
-    // If source struct has fields not in target, reject so that merge-schema
-    // can handle the evolution instead of silently dropping the extra fields.
-    val extraFields = sourceWithIndex.collect {
-      case (f, i) if !consumed(i) => f.name
-    }
-    if (extraFields.nonEmpty) {
-      throw new RuntimeException(
-        s"Cannot write incompatible data: nested struct has extra fields: ${extraFields.mkString(", ")}.")
-    }
-
-    val fields = resolved.map {
-      case (targetField, matches) =>
-        val (sourceIndex, sourceField) = resolveSingleSourceField(matches, targetField.name, source)
-        (targetField.dataType, sourceField.dataType) match {
-          case (nested: StructType, s: StructType) =>
-            val subField = extractStructField(parent, sourceIndex, sourceField.name, targetField)
-            addCastToStructByName(subField, s, nested)
-          case (_: StructType, o) =>
-            throw new RuntimeException(s"Can not support to cast $o to StructType.")
-          case _ =>
-            castStructField(parent, sourceIndex, sourceField.name, targetField)
-        }
-    }
-    structAlias(fields, parent)
-  }
-
-  private def resolveSingleSourceField(
-      matches: Array[(StructField, Int)],
-      name: String,
-      source: StructType): (Int, StructField) = {
-    if (matches.length == 1) {
-      val (field, index) = matches(0)
-      (index, field)
-    } else if (matches.isEmpty) {
-      throw new RuntimeException(
-        s"""Field "$name" does not exist in source struct type: ${source.simpleString}.""")
-    } else {
-      throw new RuntimeException(
-        s"""Cannot resolve nested field "$name" due to name conflicts: """ +
-          matches.map(_._1.name).mkString(", ") + ".")
-    }
-  }
-
-  private def addCastToStructByPosition(
-      parent: NamedExpression,
-      source: StructType,
-      target: StructType): NamedExpression = {
-    if (source.length != target.length) {
-      throw new RuntimeException("The number of fields in source and target is not same.")
-    }
-
-    val fields = target.zipWithIndex.map {
-      case (targetField @ StructField(_, nested: StructType, _, _), i) =>
-        val sourceField = source(i)
-        sourceField.dataType match {
-          case s: StructType =>
-            val subField = castStructField(parent, i, sourceField.name, targetField)
-            addCastToStructByPosition(subField, s, nested)
-          case o =>
-            throw new RuntimeException(s"Can not support to cast $o to StructType.")
-        }
-      case (targetField, i) =>
-        val sourceField = source(i)
-        castStructField(parent, i, sourceField.name, targetField)
-    }
-    structAlias(fields, parent)
-  }
-
-  private def structAlias(
-      fields: Seq[NamedExpression],
-      parent: NamedExpression): NamedExpression = {
-    val struct = CreateStruct(fields)
-    val res = if (parent.nullable) {
-      If(IsNull(parent), Literal(null, struct.dataType), struct)
-    } else {
-      struct
-    }
-    Alias(res, parent.name)(parent.exprId, parent.qualifier, Option(parent.metadata))
-  }
-
-  private def castStructField(
-      parent: NamedExpression,
-      i: Int,
-      sourceFieldName: String,
-      targetField: StructField): NamedExpression = {
-    Alias(
-      stringLengthCheck(
-        cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
-        targetField.metadata),
-      targetField.name)(explicitMetadata = Option(targetField.metadata))
-  }
-
-  private def extractStructField(
-      parent: NamedExpression,
-      i: Int,
-      sourceFieldName: String,
-      targetField: StructField): NamedExpression = {
-    Alias(GetStructField(parent, i, Option(sourceFieldName)), targetField.name)(
-      explicitMetadata = Option(targetField.metadata))
-  }
-
-  private def castToArrayStruct(
-      parent: NamedExpression,
-      source: StructType,
-      target: StructType,
-      sourceNullable: Boolean,
-      castToStructFunc: (NamedExpression, StructType, StructType) => NamedExpression
-  ): Expression = {
-    val structConverter: (Expression, Expression) => Expression = (_, i) =>
-      castToStructFunc(Alias(GetArrayItem(parent, i), i.toString)(), source, target)
-    val transformLambdaFunc = {
-      val elementVar = NamedLambdaVariable("elementVar", source, sourceNullable)
-      val indexVar = NamedLambdaVariable("indexVar", IntegerType, false)
-      LambdaFunction(structConverter(elementVar, indexVar), Seq(elementVar, indexVar))
-    }
-    ArrayTransform(parent, transformLambdaFunc)
-  }
-
-  private def cast(expr: Expression, dataType: DataType): Expression = {
-    val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
-    cast.setTagValue(Compatibility.castByTableInsertionTag, ())
-    cast
-  }
-
-  private def stringLengthCheck(expr: Expression, metadata: Metadata): Expression = {
-    if (!conf.charVarcharAsString) {
-      CharVarcharUtils
-        .getRawType(metadata)
-        .map(rawType => CharVarcharUtils.stringLengthCheck(expr, rawType))
-        .getOrElse(expr)
-    } else {
-      expr
-    }
-  }
+object PaimonAnalysis {
+  val PAIMON_WRITE_RESOLVED: TreeNodeTag[Unit] = TreeNodeTag[Unit]("paimon.write.resolved")
 }
 
 case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {

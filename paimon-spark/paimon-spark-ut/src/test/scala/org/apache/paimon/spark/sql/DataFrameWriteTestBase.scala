@@ -22,7 +22,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.DecimalType
+import org.apache.spark.sql.types.{DecimalType, StructType}
 import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
@@ -364,6 +364,130 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
           )
         }
       }
+  }
+
+  test("Paimon: DataFrameWrite.saveAsTable should recursively align nested fields by name") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("source", "target") {
+          sql("""
+                |CREATE TABLE source (
+                |  id INT,
+                |  outer STRUCT<inner_arr: ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+                |  nested_arr ARRAY<ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+                |  nested_map MAP<STRING, STRUCT<flag: BOOLEAN, label: STRING>>
+                |) USING paimon
+                |""".stripMargin)
+
+          sql("""
+                |CREATE TABLE target (
+                |  id INT,
+                |  outer STRUCT<inner_arr: ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+                |  nested_arr ARRAY<ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+                |  nested_map MAP<STRING, STRUCT<label: STRING, flag: BOOLEAN>>
+                |) USING paimon
+                |""".stripMargin)
+
+          sql("""
+                |INSERT INTO source VALUES (
+                |  1,
+                |  named_struct('inner_arr', array(named_struct('flag', true, 'label', 'outer'))),
+                |  array(array(named_struct('flag', false, 'label', 'array'))),
+                |  map('k', named_struct('flag', true, 'label', 'map'))
+                |)
+                |""".stripMargin)
+
+          spark.table("source").write.format("paimon").mode("append").saveAsTable("target")
+
+          checkAnswer(
+            sql("""
+                  |SELECT
+                  |  outer.inner_arr[0].label,
+                  |  outer.inner_arr[0].flag,
+                  |  nested_arr[0][0].label,
+                  |  nested_arr[0][0].flag,
+                  |  nested_map['k'].label,
+                  |  nested_map['k'].flag
+                  |FROM target
+                  |""".stripMargin),
+            Seq(Row("outer", true, "array", false, "map", true))
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon: SQL insert should recursively keep nested fields by-position semantics") {
+    withSparkSQLConf("spark.sql.ansi.enabled" -> "false") {
+      withTable("source", "target") {
+        sql("""
+              |CREATE TABLE source (
+              |  id INT,
+              |  outer STRUCT<inner_arr: ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+              |  nested_arr ARRAY<ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+              |  nested_map MAP<STRING, STRUCT<flag: BOOLEAN, label: STRING>>
+              |) USING paimon
+              |""".stripMargin)
+
+        sql("""
+              |CREATE TABLE target (
+              |  id INT,
+              |  outer STRUCT<inner_arr: ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+              |  nested_arr ARRAY<ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+              |  nested_map MAP<STRING, STRUCT<label: STRING, flag: BOOLEAN>>
+              |) USING paimon
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO source VALUES (
+              |  1,
+              |  named_struct('inner_arr', array(named_struct('flag', true, 'label', 'outer'))),
+              |  array(array(named_struct('flag', false, 'label', 'array'))),
+              |  map('k', named_struct('flag', true, 'label', 'map'))
+              |)
+              |""".stripMargin)
+
+        sql("INSERT INTO target SELECT * FROM source")
+
+        checkAnswer(
+          sql("""
+                |SELECT
+                |  outer.inner_arr[0].label,
+                |  outer.inner_arr[0].flag,
+                |  nested_arr[0][0].label,
+                |  nested_arr[0][0].flag,
+                |  nested_map['k'].label,
+                |  nested_map['k'].flag
+                |FROM target
+                |""".stripMargin),
+          Seq(Row("true", null, "false", null, "true", null))
+        )
+      }
+    }
+  }
+
+  test("Paimon: DataFrameWrite.saveAsTable should reject incompatible struct casts") {
+    withTable("source", "target") {
+      sql("CREATE TABLE source (id INT, payload STRUCT<value: INT>) USING paimon")
+      sql("CREATE TABLE target (id INT, payload INT) USING paimon")
+      sql("INSERT INTO source VALUES (1, named_struct('value', 1))")
+
+      val message = intercept[Exception] {
+        spark.table("source").write.format("paimon").mode("append").saveAsTable("target")
+      }.getMessage
+      assert(message.toLowerCase.contains("cast"))
+    }
+
+    withTable("source", "target") {
+      sql("CREATE TABLE source (id INT, payload INT) USING paimon")
+      sql("CREATE TABLE target (id INT, payload STRUCT<value: INT>) USING paimon")
+      sql("INSERT INTO source VALUES (1, 1)")
+
+      val message = intercept[Exception] {
+        spark.table("source").write.format("paimon").mode("append").saveAsTable("target")
+      }.getMessage
+      assert(message.toLowerCase.contains("cast"))
+    }
   }
 
   withPk.foreach {
@@ -783,5 +907,149 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
         56.7d,
         null) :: Nil
     checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+  }
+
+  test("Paimon write merge-schema conflict: deep nested array element bigint -> string") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf(
+        "spark.paimon.write.use-v2-write" -> useV2Write,
+        "spark.paimon.write.merge-schema.explicit-cast" -> "true") {
+        withTable("target") {
+          sql("""
+                |CREATE TABLE target (
+                |  id STRING,
+                |  data STRUCT<wind: STRUCT<impactPrts: ARRAY<STRING>>>
+                |) USING paimon
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO target VALUES (
+                |  'r0',
+                |  named_struct('wind', named_struct('impactPrts', array('p0', 'p1')))
+                |)
+                |""".stripMargin)
+
+          val sourceSchema =
+            StructType.fromDDL("id STRING, data STRUCT<wind: STRUCT<impactPrts: ARRAY<BIGINT>>>")
+          val sourceDf = spark.createDataFrame(
+            java.util.Arrays.asList(Row("r1", Row(Row(java.util.Arrays.asList(10L, 20L))))),
+            sourceSchema)
+          sourceDf.write
+            .format("paimon")
+            .mode("append")
+            .option("write.merge-schema", "true")
+            .saveAsTable("target")
+
+          checkAnswer(
+            sql("SELECT id, data.wind.impactPrts FROM target ORDER BY id"),
+            Seq(
+              Row("r0", Array("p0", "p1")),
+              Row("r1", Array("10", "20"))
+            )
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon write merge-schema conflict: top-level same-name column string vs bigint") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf(
+        "spark.paimon.write.use-v2-write" -> useV2Write,
+        "spark.paimon.write.merge-schema.explicit-cast" -> "true") {
+        withTable("target") {
+          sql("CREATE TABLE target (id STRING, value BIGINT) USING paimon")
+          sql("INSERT INTO target VALUES ('r0', 1000L)")
+
+          val sourceSchema = StructType.fromDDL("id STRING, value STRING")
+          val sourceDf =
+            spark.createDataFrame(java.util.Arrays.asList(Row("r1", "2000")), sourceSchema)
+          sourceDf.write
+            .format("paimon")
+            .mode("append")
+            .option("write.merge-schema", "true")
+            .saveAsTable("target")
+
+          checkAnswer(
+            sql("SELECT id, value FROM target ORDER BY id"),
+            Seq(Row("r0", 1000L), Row("r1", 2000L))
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon write merge-schema conflict: deep nested struct widening int -> bigint") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("target") {
+          sql("""
+                |CREATE TABLE target (
+                |  id STRING,
+                |  payload STRUCT<
+                |    inner: STRUCT<
+                |      items: ARRAY<STRUCT<
+                |        prtId: BIGINT,
+                |        seqNum: BIGINT,
+                |        missing: ARRAY<STRUCT<
+                |          port: BIGINT,
+                |          terminal: BIGINT
+                |        >>
+                |      >>
+                |    >
+                |  >
+                |) USING paimon
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO target VALUES (
+                |  'r0',
+                |  named_struct('inner', named_struct('items', array(named_struct(
+                |    'prtId', 10L,
+                |    'seqNum', 1L,
+                |    'missing', array(named_struct('port', 100L, 'terminal', 200L))
+                |  ))))
+                |)
+                |""".stripMargin)
+
+          val sourceSchema = StructType.fromDDL(
+            "id STRING, " +
+              "payload STRUCT<" +
+              "  inner: STRUCT<" +
+              "    items: ARRAY<STRUCT<" +
+              "      prtId: INT, " +
+              "      seqNum: INT, " +
+              "      missing: ARRAY<STRUCT<port: INT, terminal: INT>>" +
+              "    >>" +
+              "  >" +
+              ">")
+          val sourceDf = spark.createDataFrame(
+            java.util.Arrays.asList(Row(
+              "r1",
+              Row(
+                Row(java.util.Arrays.asList(Row(20, 2, java.util.Arrays.asList(Row(300, 400)))))))),
+            sourceSchema)
+          sourceDf.write
+            .format("paimon")
+            .mode("append")
+            .option("write.merge-schema", "true")
+            .saveAsTable("target")
+
+          checkAnswer(
+            sql("""
+                  |SELECT
+                  |  id,
+                  |  payload.inner.items[0].prtId,
+                  |  payload.inner.items[0].seqNum,
+                  |  payload.inner.items[0].missing[0].port,
+                  |  payload.inner.items[0].missing[0].terminal
+                  |FROM target ORDER BY id
+                  |""".stripMargin),
+            Seq(
+              Row("r0", 10L, 1L, 100L, 200L),
+              Row("r1", 20L, 2L, 300L, 400L)
+            )
+          )
+        }
+      }
+    }
   }
 }
