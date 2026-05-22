@@ -59,9 +59,9 @@ public class BlobTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         String externalStoragePath = warehouse.resolve("external-storage-blob-path").toString();
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')",
+                "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='picture')",
                 "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
-                "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pic1,pic2')",
+                "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pic1,pic2')",
                 String.format(
                         "CREATE TABLE IF NOT EXISTS copy_blob_table (id INT, data STRING, picture BYTES)"
                                 + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
@@ -106,6 +106,118 @@ public class BlobTableITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(new byte[] {89, 69}));
         assertThat(batchSql("SELECT file_path FROM `multiple_blob_table$files`").size())
                 .isEqualTo(3);
+    }
+
+    @Test
+    public void testBlobCompaction() throws Exception {
+        for (int i = 1; i <= 10; i++) {
+            batchSql("INSERT INTO blob_table VALUES (%s, 'paimon', X'48656C6C6F')", i);
+        }
+        batchSql("INSERT INTO blob_table VALUES (1, 'paimon', X'48656C6C6F')");
+
+        assertThat(batchSql("SELECT COUNT(*) FROM `blob_table$files`"))
+                .containsExactly(Row.of(22L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+
+        tEnv.getConfig().set("table.dml-sync", "true");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.blob_table')").await();
+
+        assertThat(batchSql("SELECT COUNT(*) FROM `blob_table$files`")).containsExactly(Row.of(2L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(1L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(1L));
+        assertThat(batchSql("SELECT COUNT(*) FROM blob_table")).containsExactly(Row.of(11L));
+        assertThat(batchSql("SELECT picture FROM blob_table WHERE id = 1"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new byte[] {72, 101, 108, 108, 111}),
+                        Row.of(new byte[] {72, 101, 108, 108, 111}));
+    }
+
+    @Test
+    public void testMultipleBlobCompaction() throws Exception {
+        for (int i = 1; i <= 10; i++) {
+            batchSql(
+                    "INSERT INTO multiple_blob_table VALUES (%s, 'paimon', X'48656C6C6F', X'5945')",
+                    i);
+        }
+        batchSql("INSERT INTO multiple_blob_table VALUES (1, 'paimon', X'48656C6C6F', X'5945')");
+
+        assertThat(batchSql("SELECT COUNT(*) FROM `multiple_blob_table$files`"))
+                .containsExactly(Row.of(33L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `multiple_blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(22L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `multiple_blob_table$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+
+        tEnv.getConfig().set("table.dml-sync", "true");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.multiple_blob_table')").await();
+
+        assertThat(batchSql("SELECT COUNT(*) FROM `multiple_blob_table$files`"))
+                .containsExactly(Row.of(3L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `multiple_blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(2L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `multiple_blob_table$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(1L));
+        assertThat(batchSql("SELECT COUNT(*) FROM multiple_blob_table"))
+                .containsExactly(Row.of(11L));
+        assertThat(batchSql("SELECT pic1, pic2 FROM multiple_blob_table WHERE id = 1"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new byte[] {72, 101, 108, 108, 111}, new byte[] {89, 69}),
+                        Row.of(new byte[] {72, 101, 108, 108, 111}, new byte[] {89, 69}));
+    }
+
+    @Test
+    public void testBlobCompactionDisabledByDefault() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE blob_compaction_disabled (id INT, data STRING, picture BYTES) "
+                        + "WITH ('row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true', "
+                        + "'blob-field'='picture')");
+
+        for (int i = 1; i <= 10; i++) {
+            batchSql(
+                    "INSERT INTO blob_compaction_disabled VALUES (%s, 'paimon', X'48656C6C6F')", i);
+        }
+        batchSql("INSERT INTO blob_compaction_disabled VALUES (1, 'paimon', X'48656C6C6F')");
+
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_compaction_disabled$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+
+        tEnv.getConfig().set("table.dml-sync", "true");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.blob_compaction_disabled')").await();
+
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_compaction_disabled$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_compaction_disabled$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(1L));
+        assertThat(batchSql("SELECT COUNT(*) FROM blob_compaction_disabled"))
+                .containsExactly(Row.of(11L));
     }
 
     @Test
