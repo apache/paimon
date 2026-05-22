@@ -40,7 +40,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +47,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.LongFunction;
+import java.util.stream.Collectors;
 
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -93,15 +93,12 @@ public class DataEvolutionCompactCoordinator {
                         openFileCost,
                         compactMinFileNum,
                         schemaId -> table.schemaManager().schema(schemaId).logicalRowType(),
-                        compactBlob ? currentBlobFieldIds(table.rowType(), options) : null);
-    }
-
-    private static Set<Integer> currentBlobFieldIds(RowType rowType, CoreOptions options) {
-        Set<Integer> fieldIds = new HashSet<>();
-        for (String fieldName : fieldNamesInBlobFile(rowType, options.blobInlineField())) {
-            fieldIds.add(rowType.getField(fieldName).id());
-        }
-        return fieldIds;
+                        compactBlob
+                                ? fieldNamesInBlobFile(table.rowType(), options.blobInlineField())
+                                        .stream()
+                                        .map(fieldName -> table.rowType().getField(fieldName).id())
+                                        .collect(Collectors.toSet())
+                                : null);
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -221,9 +218,7 @@ public class DataEvolutionCompactCoordinator {
             this.compactMinFileNum = compactMinFileNum;
             Map<Long, RowType> schemaCache = new HashMap<>();
             this.schemaFetcher =
-                    schemaId ->
-                            schemaCache.computeIfAbsent(
-                                    schemaId, schemaFetcher::apply);
+                    schemaId -> schemaCache.computeIfAbsent(schemaId, schemaFetcher::apply);
             this.currentBlobFieldIds = currentBlobFieldIds;
         }
 
@@ -454,7 +449,8 @@ public class DataEvolutionCompactCoordinator {
             for (DataFileMeta file : continuousFiles) {
                 taskFiles.add(file);
                 fileSize += file.fileSize();
-                if (fileSize >= blobTargetFileSize && taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
+                if (fileSize >= blobTargetFileSize
+                        && taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
                     result.add(taskFiles);
                     taskFiles = new ArrayList<>();
                     fileSize = 0L;

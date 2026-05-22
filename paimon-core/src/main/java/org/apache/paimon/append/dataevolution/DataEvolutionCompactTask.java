@@ -296,8 +296,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             RowType fileRowType =
                     schemaCache.computeIfAbsent(
                             file.schemaId(),
-                            schemaId ->
-                                    table.schemaManager().schema(schemaId).logicalRowType());
+                            schemaId -> table.schemaManager().schema(schemaId).logicalRowType());
             int currentFieldId = fileRowType.getField(file.writeCols().get(0)).id();
             if (blobFieldId == null) {
                 blobFieldId = currentFieldId;
