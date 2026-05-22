@@ -440,7 +440,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             if (isBlobFile(file.fileName())) {
                 RowType rowType = fileToRowType.apply(file);
                 int fieldId = rowType.getField(file.writeCols().get(0)).id();
-                final long expectedRowCount = rowCount < 0 ? Long.MAX_VALUE : rowCount;
+                final long expectedRowCount = rowCount;
                 blobBunchMap
                         .computeIfAbsent(
                                 fieldId,
@@ -452,7 +452,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 VectorStoreBunchKey vectorStoreKey =
                         new VectorStoreBunchKey(
                                 file.schemaId(), fileFormat, file.writeCols(), rowType);
-                final long expectedRowCount = rowCount < 0 ? Long.MAX_VALUE : rowCount;
+                final long expectedRowCount = rowCount;
                 vectorStoreBunchMap
                         .computeIfAbsent(
                                 vectorStoreKey,
