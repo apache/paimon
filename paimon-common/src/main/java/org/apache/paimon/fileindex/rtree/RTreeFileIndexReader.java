@@ -72,8 +72,7 @@ public class RTreeFileIndexReader extends FileIndexReader {
             throws IOException {
         boolean isLeaf = dis.readBoolean();
         int entryCount = dis.readInt();
-
-        // Fix for Issue #1 & #5: Update leaf flag for all nodes, not just root
+ 
         node.setLeaf(isLeaf);
 
         BoundingBox bbox = BoundingBox.deserialize(dis, dimensions);
