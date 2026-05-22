@@ -863,6 +863,331 @@ public class RowFormatReadWriteTest {
         }
     }
 
+    @Test
+    public void testBlobAndVectorTypes() throws IOException {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "data", new org.apache.paimon.types.BlobType()),
+                                new DataField(
+                                        2,
+                                        "embedding",
+                                        new org.apache.paimon.types.VectorType(
+                                                4, new FloatType()))));
+
+        Path path = new Path(tempDir.toUri().toString(), "blob_vector.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        LocalFileIO fileIO = new LocalFileIO();
+        PositionOutputStream out = fileIO.newOutputStream(path, false);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+        writer.addElement(
+                GenericRow.of(
+                        1,
+                        org.apache.paimon.data.Blob.fromData(new byte[] {10, 20, 30}),
+                        org.apache.paimon.data.BinaryVector.fromPrimitiveArray(
+                                new float[] {1.0f, 2.0f, 3.0f, 4.0f})));
+        writer.addElement(GenericRow.of(2, null, null));
+        writer.close();
+
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<InternalRow> result = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    GenericRow copy = new GenericRow(3);
+                    copy.setField(0, row.getInt(0));
+                    copy.setField(1, row.isNullAt(1) ? null : row.getBlob(1));
+                    copy.setField(2, row.isNullAt(2) ? null : row.getVector(2));
+                    result.add(copy);
+                });
+        reader.close();
+
+        assertThat(result.size()).isEqualTo(2);
+        InternalRow row1 = result.get(0);
+        assertThat(row1.getInt(0)).isEqualTo(1);
+        assertThat(row1.getBlob(1).toData()).isEqualTo(new byte[] {10, 20, 30});
+        org.apache.paimon.data.InternalVector vec = row1.getVector(2);
+        assertThat(vec.size()).isEqualTo(4);
+        assertThat(vec.getFloat(0)).isEqualTo(1.0f);
+        assertThat(vec.getFloat(1)).isEqualTo(2.0f);
+        assertThat(vec.getFloat(2)).isEqualTo(3.0f);
+        assertThat(vec.getFloat(3)).isEqualTo(4.0f);
+
+        InternalRow row2 = result.get(1);
+        assertThat(row2.getInt(0)).isEqualTo(2);
+        assertThat(row2.isNullAt(1)).isTrue();
+        assertThat(row2.isNullAt(2)).isTrue();
+    }
+
+    @Test
+    public void testNestedRowProjection() throws IOException {
+        RowType innerType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", innerType)));
+
+        Path path = new Path(tempDir.toUri().toString(), "nested_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        List<InternalRow> expected = new ArrayList<>();
+        expected.add(GenericRow.of(1, GenericRow.of(10, 100)));
+        expected.add(GenericRow.of(2, GenericRow.of(20, 200)));
+        writeRows(format, dataSchema, path, expected);
+
+        // Read with projected type: only top-level 'r', nested only 'b'
+        RowType projectedInner = new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "r", projectedInner)));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<InternalRow> result = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    // projectedSchema is ROW<r ROW<b>>
+                    // row.getRow(0, 1) should return the projected nested row with only 'b'
+                    InternalRow nested = row.getRow(0, 1);
+                    result.add(GenericRow.of(nested.getInt(0)));
+                });
+        reader.close();
+
+        // nested.getInt(0) should be 'b' value (100, 200), not 'a' value (10, 20)
+        assertThat(result.size()).isEqualTo(2);
+        assertThat(result.get(0).getInt(0)).isEqualTo(100);
+        assertThat(result.get(1).getInt(0)).isEqualTo(200);
+    }
+
+    @Test
+    public void testDeeplyNestedProjection() throws IOException {
+        // data: ROW<id INT, l1 ROW<x INT, l2 ROW<a INT, b INT, c INT>>>
+        RowType level2 =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(20, "a", new IntType()),
+                                new DataField(21, "b", new IntType()),
+                                new DataField(22, "c", new IntType())));
+        RowType level1 =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "x", new IntType()),
+                                new DataField(11, "l2", level2)));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "l1", level1)));
+
+        Path path = new Path(tempDir.toUri().toString(), "deep_nested_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of(1, GenericRow.of(10, GenericRow.of(100, 200, 300))));
+        rows.add(GenericRow.of(2, GenericRow.of(20, GenericRow.of(400, 500, 600))));
+        writeRows(format, dataSchema, path, rows);
+
+        // projected: ROW<l1 ROW<l2 ROW<c INT>>>
+        RowType projLevel2 = new RowType(Arrays.asList(new DataField(22, "c", new IntType())));
+        RowType projLevel1 = new RowType(Arrays.asList(new DataField(11, "l2", projLevel2)));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "l1", projLevel1)));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<Integer> results = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    InternalRow l1 = row.getRow(0, 1);
+                    InternalRow l2 = l1.getRow(0, 1);
+                    results.add(l2.getInt(0));
+                });
+        reader.close();
+
+        assertThat(results).containsExactly(300, 600);
+    }
+
+    @Test
+    public void testNestedProjectionWithNullRows() throws IOException {
+        // data: ROW<id INT, r ROW<a INT, b INT>>
+        RowType innerType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", innerType)));
+
+        Path path = new Path(tempDir.toUri().toString(), "nested_null_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of(1, GenericRow.of(10, 100)));
+        rows.add(GenericRow.of(2, null));
+        rows.add(GenericRow.of(3, GenericRow.of(30, 300)));
+        writeRows(format, dataSchema, path, rows);
+
+        // projected: ROW<r ROW<b INT>>
+        RowType projectedInner = new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "r", projectedInner)));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<boolean[]> nullFlags = new ArrayList<>();
+        List<Integer> values = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    boolean isNull = row.isNullAt(0);
+                    nullFlags.add(new boolean[] {isNull});
+                    if (!isNull) {
+                        values.add(row.getRow(0, 1).getInt(0));
+                    }
+                });
+        reader.close();
+
+        assertThat(nullFlags.size()).isEqualTo(3);
+        assertThat(nullFlags.get(0)[0]).isFalse();
+        assertThat(nullFlags.get(1)[0]).isTrue();
+        assertThat(nullFlags.get(2)[0]).isFalse();
+        assertThat(values).containsExactly(100, 300);
+    }
+
+    @Test
+    public void testMultipleNestedRowsProjection() throws IOException {
+        // data: ROW<r1 ROW<a INT, b INT>, r2 ROW<x INT, y INT>, id INT>
+        RowType nested1 =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
+        RowType nested2 =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(20, "x", new IntType()),
+                                new DataField(21, "y", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "r1", nested1),
+                                new DataField(1, "r2", nested2),
+                                new DataField(2, "id", new IntType())));
+
+        Path path = new Path(tempDir.toUri().toString(), "multi_nested_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of(GenericRow.of(1, 2), GenericRow.of(3, 4), 100));
+        rows.add(GenericRow.of(GenericRow.of(5, 6), GenericRow.of(7, 8), 200));
+        writeRows(format, dataSchema, path, rows);
+
+        // projected: ROW<r1 ROW<b INT>, r2 ROW<x INT>>
+        RowType projNested1 = new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projNested2 = new RowType(Arrays.asList(new DataField(20, "x", new IntType())));
+        RowType projectedSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "r1", projNested1),
+                                new DataField(1, "r2", projNested2)));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<int[]> results = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    int b = row.getRow(0, 1).getInt(0);
+                    int x = row.getRow(1, 1).getInt(0);
+                    results.add(new int[] {b, x});
+                });
+        reader.close();
+
+        assertThat(results.size()).isEqualTo(2);
+        assertThat(results.get(0)).isEqualTo(new int[] {2, 3});
+        assertThat(results.get(1)).isEqualTo(new int[] {6, 7});
+    }
+
+    @Test
+    public void testNestedProjectionWithFieldReordering() throws IOException {
+        // data: ROW<id INT, r ROW<a INT, b INT, c INT>>
+        RowType innerType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType()),
+                                new DataField(12, "c", new IntType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", innerType)));
+
+        Path path = new Path(tempDir.toUri().toString(), "nested_reorder_proj.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.of(1, GenericRow.of(10, 20, 30)));
+        rows.add(GenericRow.of(2, GenericRow.of(40, 50, 60)));
+        writeRows(format, dataSchema, path, rows);
+
+        // projected: ROW<r ROW<c INT, a INT>> (reversed order, skip 'b')
+        RowType projectedInner =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(12, "c", new IntType()),
+                                new DataField(10, "a", new IntType())));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "r", projectedInner)));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
+        FileRecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+
+        List<int[]> results = new ArrayList<>();
+        reader.forEachRemaining(
+                row -> {
+                    InternalRow nested = row.getRow(0, 2);
+                    results.add(new int[] {nested.getInt(0), nested.getInt(1)});
+                });
+        reader.close();
+
+        // c, a order
+        assertThat(results.size()).isEqualTo(2);
+        assertThat(results.get(0)).isEqualTo(new int[] {30, 10});
+        assertThat(results.get(1)).isEqualTo(new int[] {60, 40});
+    }
+
     // ======================== Helpers ========================
 
     private void writeRows(FileFormat format, RowType rowType, Path path, List<InternalRow> rows)

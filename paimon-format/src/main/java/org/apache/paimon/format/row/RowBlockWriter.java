@@ -22,6 +22,7 @@ import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -29,6 +30,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.IntArrayList;
 
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
@@ -145,6 +147,11 @@ class RowBlockWriter {
                 return new TimestampFieldWriter(getPrecision(type));
             case VARIANT:
                 return new VariantFieldWriter();
+            case BLOB:
+                return new BlobFieldWriter();
+            case VECTOR:
+                return new VectorFieldWriter(
+                        createFieldWriter(((VectorType) type).getElementType()));
             case ARRAY:
                 return new ArrayFieldWriter(createFieldWriter(((ArrayType) type).getElementType()));
             case MULTISET:
@@ -297,6 +304,31 @@ class RowBlockWriter {
             Variant v = data.getVariant(i);
             buf.writeBytes(v.value());
             buf.writeBytes(v.metadata());
+        }
+    }
+
+    private class BlobFieldWriter implements FieldWriter {
+        @Override
+        public void write(DataGetters data, int i) {
+            buf.writeBytes(data.getBlob(i).toData());
+        }
+    }
+
+    private class VectorFieldWriter implements FieldWriter {
+        private final FieldWriter elemWriter;
+
+        VectorFieldWriter(FieldWriter elemWriter) {
+            this.elemWriter = elemWriter;
+        }
+
+        @Override
+        public void write(DataGetters data, int i) {
+            InternalVector vector = data.getVector(i);
+            int size = vector.size();
+            buf.writeVarInt(size);
+            for (int j = 0; j < size; j++) {
+                elemWriter.write(vector, j);
+            }
         }
     }
 

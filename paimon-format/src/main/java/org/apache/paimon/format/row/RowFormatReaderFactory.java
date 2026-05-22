@@ -26,6 +26,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -37,11 +38,11 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
     private static final int TAIL_PREFETCH_SIZE = 64 * 1024;
 
     private final RowType rowType;
-    @Nullable private final int[] projectionMapping;
+    @Nullable private final NestedProjectedRow projection;
 
-    public RowFormatReaderFactory(RowType rowType, @Nullable int[] projectionMapping) {
+    public RowFormatReaderFactory(RowType rowType, @Nullable NestedProjectedRow projection) {
         this.rowType = rowType;
-        this.projectionMapping = projectionMapping;
+        this.projection = projection;
     }
 
     @Override
@@ -72,6 +73,6 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
         }
 
         return new RowFormatReader(
-                in, path, footer, blockIndex, rowType, projectionMapping, context.selection());
+                in, path, footer, blockIndex, rowType, projection, context.selection());
     }
 }

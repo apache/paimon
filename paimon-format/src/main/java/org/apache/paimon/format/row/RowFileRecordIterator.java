@@ -21,7 +21,7 @@ package org.apache.paimon.format.row;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
-import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -32,7 +32,7 @@ class RowFileRecordIterator implements FileRecordIterator<InternalRow> {
 
     private final Path filePath;
     private final RowBlockReader blockReader;
-    @Nullable private final ProjectedRow projectedRow;
+    @Nullable private final NestedProjectedRow projection;
     private final long blockStartRow;
     @Nullable private final int[] selectedLocalIndices;
 
@@ -42,20 +42,20 @@ class RowFileRecordIterator implements FileRecordIterator<InternalRow> {
     RowFileRecordIterator(
             Path filePath,
             RowBlockReader blockReader,
-            @Nullable int[] projectionMapping,
+            @Nullable NestedProjectedRow projection,
             long blockStartRow) {
-        this(filePath, blockReader, projectionMapping, blockStartRow, null);
+        this(filePath, blockReader, projection, blockStartRow, null);
     }
 
     RowFileRecordIterator(
             Path filePath,
             RowBlockReader blockReader,
-            @Nullable int[] projectionMapping,
+            @Nullable NestedProjectedRow projection,
             long blockStartRow,
             @Nullable int[] selectedLocalIndices) {
         this.filePath = filePath;
         this.blockReader = blockReader;
-        this.projectedRow = projectionMapping != null ? ProjectedRow.from(projectionMapping) : null;
+        this.projection = projection;
         this.blockStartRow = blockStartRow;
         this.selectedLocalIndices = selectedLocalIndices;
         this.cursor = 0;
@@ -106,9 +106,8 @@ class RowFileRecordIterator implements FileRecordIterator<InternalRow> {
     }
 
     private InternalRow applyProjection(InternalRow row) {
-        if (projectedRow != null) {
-            projectedRow.replaceRow(row);
-            return projectedRow;
+        if (projection != null) {
+            return projection.replaceRow(row);
         }
         return row;
     }

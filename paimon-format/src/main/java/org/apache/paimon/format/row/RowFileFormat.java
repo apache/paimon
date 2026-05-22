@@ -24,12 +24,11 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /** Row-store file format with block-level ZSTD compression and O(1) row-number lookup. */
@@ -52,8 +51,9 @@ public class RowFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        int[] projectionMapping = computeProjectionMapping(dataSchemaRowType, projectedRowType);
-        return new RowFormatReaderFactory(dataSchemaRowType, projectionMapping);
+        NestedProjectedRow projection =
+                NestedProjectedRow.create(dataSchemaRowType, projectedRowType);
+        return new RowFormatReaderFactory(dataSchemaRowType, projection);
     }
 
     @Override
@@ -63,33 +63,6 @@ public class RowFileFormat extends FileFormat {
 
     @Override
     public void validateDataFields(RowType rowType) {
-        // RowCompactedSerializer supports all Paimon data types
-    }
-
-    @Nullable
-    private static int[] computeProjectionMapping(
-            RowType dataSchemaRowType, RowType projectedRowType) {
-        if (dataSchemaRowType.equals(projectedRowType)) {
-            return null;
-        }
-
-        List<DataField> dataFields = dataSchemaRowType.getFields();
-        List<DataField> projectedFields = projectedRowType.getFields();
-
-        List<Integer> mapping = new ArrayList<>();
-        for (DataField projected : projectedFields) {
-            for (int i = 0; i < dataFields.size(); i++) {
-                if (dataFields.get(i).id() == projected.id()) {
-                    mapping.add(i);
-                    break;
-                }
-            }
-        }
-
-        int[] result = new int[mapping.size()];
-        for (int i = 0; i < mapping.size(); i++) {
-            result[i] = mapping.get(i);
-        }
-        return result;
+        // Row format supports all Paimon data types
     }
 }

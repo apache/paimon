@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.row;
 
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -31,6 +33,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -120,6 +123,13 @@ class RowBlockReader {
                 return new TimestampFieldReader(getPrecision(type));
             case VARIANT:
                 return new VariantFieldReader();
+            case BLOB:
+                return new BlobFieldReader();
+            case VECTOR:
+                {
+                    VectorType vectorType = (VectorType) type;
+                    return new VectorFieldReader(vectorType.getElementType());
+                }
             case ARRAY:
                 {
                     DataType elementType = ((ArrayType) type).getElementType();
@@ -286,6 +296,92 @@ class RowBlockReader {
             byte[] value = buf.readBytes();
             byte[] metadata = buf.readBytes();
             return new GenericVariant(value, metadata);
+        }
+    }
+
+    private class BlobFieldReader implements FieldReader {
+        @Override
+        public Object read() {
+            return Blob.fromData(buf.readBytes());
+        }
+    }
+
+    private class VectorFieldReader implements FieldReader {
+        private final DataType elementType;
+
+        VectorFieldReader(DataType elementType) {
+            this.elementType = elementType;
+        }
+
+        @Override
+        public Object read() {
+            int size = buf.readVarInt();
+            InternalArray array = readVectorElements(size);
+            return BinaryVector.fromInternalArray(array, elementType);
+        }
+
+        private InternalArray readVectorElements(int size) {
+            switch (elementType.getTypeRoot()) {
+                case BOOLEAN:
+                    {
+                        boolean[] arr = new boolean[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readBoolean();
+                        }
+                        return new GenericArray(arr);
+                    }
+                case TINYINT:
+                    {
+                        byte[] arr = new byte[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readByte();
+                        }
+                        return new GenericArray(arr);
+                    }
+                case SMALLINT:
+                    {
+                        short[] arr = new short[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readShort();
+                        }
+                        return new GenericArray(arr);
+                    }
+                case INTEGER:
+                    {
+                        int[] arr = new int[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readInt();
+                        }
+                        return new GenericArray(arr);
+                    }
+                case BIGINT:
+                    {
+                        long[] arr = new long[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readLong();
+                        }
+                        return new GenericArray(arr);
+                    }
+                case FLOAT:
+                    {
+                        float[] arr = new float[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readFloat();
+                        }
+                        return new GenericArray(arr);
+                    }
+                case DOUBLE:
+                    {
+                        double[] arr = new double[size];
+                        for (int i = 0; i < size; i++) {
+                            arr[i] = buf.readDouble();
+                        }
+                        return new GenericArray(arr);
+                    }
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported vector element type: " + elementType);
+            }
         }
     }
 

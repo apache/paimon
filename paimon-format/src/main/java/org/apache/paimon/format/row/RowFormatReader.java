@@ -24,6 +24,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.NestedProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
@@ -37,7 +38,7 @@ public class RowFormatReader implements FileRecordReader<InternalRow> {
     private final RowFileFooter footer;
     private final RowBlockIndex blockIndex;
     private final RowType rowType;
-    @Nullable private final int[] projectionMapping;
+    @Nullable private final NestedProjectedRow projection;
     @Nullable private final RoaringBitmap32 selection;
     private final BlockPrefetcher prefetcher;
 
@@ -47,13 +48,13 @@ public class RowFormatReader implements FileRecordReader<InternalRow> {
             RowFileFooter footer,
             RowBlockIndex blockIndex,
             RowType rowType,
-            @Nullable int[] projectionMapping,
+            @Nullable NestedProjectedRow projection,
             @Nullable RoaringBitmap32 selection) {
         this.filePath = filePath;
         this.footer = footer;
         this.blockIndex = blockIndex;
         this.rowType = rowType;
-        this.projectionMapping = projectionMapping;
+        this.projection = projection;
         this.selection = selection;
         this.prefetcher =
                 new BlockPrefetcher(
@@ -78,10 +79,9 @@ public class RowFormatReader implements FileRecordReader<InternalRow> {
             long blockEndRow = blockEndRow(blockIdx);
             int[] localIndices = computeSelectedLocalIndices(selection, blockStartRow, blockEndRow);
             return new RowFileRecordIterator(
-                    filePath, blockReader, projectionMapping, blockStartRow, localIndices);
+                    filePath, blockReader, projection, blockStartRow, localIndices);
         } else {
-            return new RowFileRecordIterator(
-                    filePath, blockReader, projectionMapping, blockStartRow);
+            return new RowFileRecordIterator(filePath, blockReader, projection, blockStartRow);
         }
     }
 
