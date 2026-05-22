@@ -24,9 +24,10 @@ under the License.
 
 # File Format
 
-Currently, supports Parquet, Avro, ORC, CSV, JSON, and Lance file formats.
+Currently, supports Parquet, Avro, ORC, CSV, JSON, Lance, and Row file formats.
 - Recommended column format is Parquet, which has a high compression rate and fast column projection queries.
-- Recommended row based format is Avro, which has good performance n reading and writing full row (all columns).
+- Recommended row based format is Avro, which has good performance on reading and writing full row (all columns).
+- Recommended format for row-number based O(1) lookups is Row, which stores data in row-oriented blocks with ZSTD compression and supports fast random access by row number.
 - Recommended testing format is CSV, which has better readability but the worst read-write performance.
 - Recommended format for ML workloads is Lance, which is optimized for vector search and machine learning use cases.
 
@@ -753,6 +754,20 @@ The following table lists the type mapping from Paimon type to Lance (Arrow) typ
 Limitations:
 1. Lance file format does not support `MAP` type.
 2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.
+
+## ROW
+
+The Row format is a row-oriented storage format designed for O(1) random access by row number. Data is organized in blocks with ZSTD Level 1 compression. Each block contains complete rows serialized in a compact binary format with an offset array for direct row positioning.
+
+Key features:
+- **O(1) Row Lookup**: Block index + in-block offset array enables direct access to any row by its global row number
+- **Block-level ZSTD Compression**: Each block is independently compressed for good compression ratio with fast decompression
+- **Compact Serialization**: Rows are serialized with a null bitmap followed by field values in sequence, minimizing overhead
+- **Selection Pushdown**: Supports RoaringBitmap-based row selection, skipping entire blocks that contain no selected rows
+
+The Row format supports all Paimon data types: BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE, CHAR, VARCHAR, BINARY, VARBINARY, DECIMAL, DATE, TIME, TIMESTAMP, TIMESTAMP_LOCAL_ZONE, VARIANT, ARRAY, MAP, ROW.
+
+For detailed file layout and binary format specification, see [Row Format](./rowformat).
 
 ## BLOB
 

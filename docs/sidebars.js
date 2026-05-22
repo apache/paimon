@@ -49,6 +49,7 @@ const sidebars = {
           "concepts/spec/manifest",
           "concepts/spec/datafile",
           "concepts/spec/fileformat",
+          "concepts/spec/rowformat",
           "concepts/spec/tableindex",
           "concepts/spec/fileindex"
         ]
