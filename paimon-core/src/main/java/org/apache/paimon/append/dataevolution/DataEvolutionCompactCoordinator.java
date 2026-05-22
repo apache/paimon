@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -52,7 +53,7 @@ import java.util.stream.Collectors;
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
-import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -79,6 +80,7 @@ public class DataEvolutionCompactCoordinator {
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
         long compactMinFileNum = options.compactionMinFileNum();
+        Set<String> blobInlineFields = options.blobInlineField();
 
         this.scanner =
                 new CompactScanner(
@@ -94,9 +96,13 @@ public class DataEvolutionCompactCoordinator {
                         compactMinFileNum,
                         schemaId -> table.schemaManager().schema(schemaId).logicalRowType(),
                         compactBlob
-                                ? fieldNamesInBlobFile(table.rowType(), options.blobInlineField())
-                                        .stream()
-                                        .map(fieldName -> table.rowType().getField(fieldName).id())
+                                ? table.rowType().getFields().stream()
+                                        .filter(
+                                                field ->
+                                                        field.type().is(BLOB)
+                                                                && !blobInlineFields.contains(
+                                                                        field.name()))
+                                        .map(DataField::id)
                                         .collect(Collectors.toSet())
                                 : null);
     }
