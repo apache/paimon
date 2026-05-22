@@ -28,7 +28,7 @@
 /* ===== Hero Section ===== */
 .hero-section {
   text-align: center;
-  padding: 2rem 1rem 1.5rem;
+  padding: 0 1rem 1.5rem;
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--ifm-color-emphasis-200);
 }
