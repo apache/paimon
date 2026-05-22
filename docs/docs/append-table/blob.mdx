@@ -263,9 +263,10 @@ column (`BYTES` in Flink SQL, `BINARY` in Spark SQL) and configure the blob fiel
 column. Currently, `ALTER TABLE` supports adding BLOB columns through `blob-field` or `blob-descriptor-field`.
 `blob-view-field` and `blob-external-storage-field` are immutable and should be configured when creating the table.
 
-{{< tabs "blob-add-column" >}}
+<Tabs groupId="blob-add-column">
 
-{{< tab "Flink SQL" >}}
+<TabItem value="flink-sql" label="Flink SQL">
+
 ```sql
 CREATE TABLE image_table (
     id INT,
@@ -278,9 +279,11 @@ CREATE TABLE image_table (
 ALTER TABLE image_table SET ('blob-field' = 'image');
 ALTER TABLE image_table ADD image BYTES;
 ```
-{{< /tab >}}
 
-{{< tab "Spark SQL" >}}
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
 ```sql
 CREATE TABLE image_table (
     id INT,
@@ -293,9 +296,10 @@ CREATE TABLE image_table (
 ALTER TABLE image_table SET TBLPROPERTIES ('blob-field' = 'image');
 ALTER TABLE image_table ADD COLUMN image BINARY;
 ```
-{{< /tab >}}
 
-{{< /tabs >}}
+</TabItem>
+
+</Tabs>
 
 Do not add the binary column first and set `blob-field` later. For example, the following order creates a normal
 `BYTES` / `BINARY` column. The later option change will not convert the existing column to BLOB, and may be rejected
