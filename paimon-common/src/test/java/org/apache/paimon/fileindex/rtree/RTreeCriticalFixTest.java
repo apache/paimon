@@ -31,11 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Test for critical Issue #1 and #3 fixes. */
+/** Test for deserialization correctness and range query precision. */
 public class RTreeCriticalFixTest {
 
     @Test
-    public void testIssue1RootNodeLeafFlagAfterDeserialization() throws IOException {
+    public void testRootNodeLeafFlagAfterDeserialization() throws IOException {
         RTree originalTree = new RTree(2, 4);
 
         for (int i = 0; i < 20; i++) {
@@ -50,19 +50,17 @@ public class RTreeCriticalFixTest {
 
         assertFalse(
                 deserializedTree.getRoot().isLeaf(),
-                "Issue #1: Root leaf flag should be corrected during deserialization");
+                "Root leaf flag should be corrected during deserialization");
 
         for (int i = 0; i < 20; i++) {
             BoundingBox bbox = BoundingBox.fromPoint(new double[] {i, i});
             List<Integer> results = deserializedTree.search(bbox);
-            assertTrue(
-                    results.contains(i),
-                    "Issue #1: Should find rowId " + i + " after deserialization");
+            assertTrue(results.contains(i), "Should find rowId " + i + " after deserialization");
         }
     }
 
     @Test
-    public void testIssue3RangeQueryNoPrecisionLoss() {
+    public void testRangeQueryPrecision() {
         RTree rtree = new RTree(2, 4);
 
         rtree.insert(new double[] {35, 35}, 1);
@@ -72,13 +70,13 @@ public class RTreeCriticalFixTest {
         BoundingBox query = new BoundingBox(new double[] {30, 30}, new double[] {40, 40});
         List<Integer> results = rtree.search(query);
 
-        assertEquals(1, results.size(), "Issue #3: Should have only 1 result");
-        assertTrue(results.contains(1), "Issue #3: Should contain rowId 1 (35,35)");
-        assertFalse(results.contains(2), "Issue #3: Should NOT contain rowId 2 (45,45)");
+        assertEquals(1, results.size(), "Should have only 1 result");
+        assertTrue(results.contains(1), "Should contain rowId 1 (35,35)");
+        assertFalse(results.contains(2), "Should NOT contain rowId 2 (45,45)");
     }
 
     @Test
-    public void testIssue3RangeQueryWithMultipleEntries() {
+    public void testRangeQueryWithMultipleEntries() {
         RTree rtree = new RTree(2, 8);
 
         for (int i = 0; i < 100; i++) {
@@ -90,12 +88,12 @@ public class RTreeCriticalFixTest {
 
         for (Integer rowId : results) {
             double[] point = new double[] {Math.sin(rowId * 0.1) * 50, Math.cos(rowId * 0.1) * 50};
-            assertTrue(query.contains(point), "Issue #3: All results should be within query box");
+            assertTrue(query.contains(point), "All results should be within query box");
         }
     }
 
     @Test
-    public void testIssue1And3CombinedAfterRoundTrip() throws IOException {
+    public void testSerializationRoundTripCorrectness() throws IOException {
         RTree originalTree = new RTree(2, 16);
 
         for (int i = 0; i < 500; i++) {
@@ -114,18 +112,18 @@ public class RTreeCriticalFixTest {
         assertEquals(
                 originalResults.size(),
                 deserializedResults.size(),
-                "Issue #1 + #3: Range query results should match after round-trip");
+                "Range query results should match after round-trip");
 
         for (Integer rowId : deserializedResults) {
             double[] point = new double[] {Math.sin(rowId * 0.1), Math.cos(rowId * 0.1)};
             assertTrue(
                     smallQuery.contains(point),
-                    "Issue #3: Deserialized tree should return only points within query box");
+                    "Deserialized tree should return only points within query box");
         }
     }
 
     @Test
-    public void testIssue1DeepTreeDeserialization() throws IOException {
+    public void testDeepTreeDeserialization() throws IOException {
         RTree originalTree = new RTree(2, 8);
 
         for (int i = 0; i < 5000; i++) {
@@ -141,7 +139,7 @@ public class RTreeCriticalFixTest {
         assertEquals(
                 5000,
                 results.size(),
-                "Issue #1: All 5000 records should be recoverable after deserialization");
+                "All 5000 records should be recoverable after deserialization");
     }
 
     private byte[] serializeTree(RTree tree) throws IOException {

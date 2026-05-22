@@ -26,7 +26,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Test for Issue #2: Quadratic split optimization. */
+/** Test for quadratic split optimization to reduce bbox overlap. */
 public class RTreeQuadraticSplitTest {
 
     @Test

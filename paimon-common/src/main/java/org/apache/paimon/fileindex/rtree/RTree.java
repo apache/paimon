@@ -127,7 +127,7 @@ public class RTree {
 
         RTreeNode newNode = new RTreeNode(dimensions, maxEntries, true);
 
-        // Fix for Issue #2: Use quadratic split instead of linear split
+        // Use quadratic split instead of linear split
         QuadraticSplit split = new QuadraticSplit(entries, dimensions);
 
         for (LeafEntry entry : split.getGroup1()) {
@@ -154,7 +154,7 @@ public class RTree {
 
         RTreeNode newNode = new RTreeNode(dimensions, maxEntries, false);
 
-        // Fix for Issue #2: Use quadratic split for internal nodes too
+        // Use quadratic split for internal nodes too
         QuadraticSplitInternal split = new QuadraticSplitInternal(children, dimensions);
 
         for (RTreeNode child : split.getGroup1()) {
@@ -199,7 +199,7 @@ public class RTree {
         }
 
         if (node.isLeaf()) {
-            // Fix for Issue #3: Check entry bbox precisely, not just node bbox
+            // Check entry bbox precisely, not just node bbox
             for (LeafEntry entry : node.getLeafEntries()) {
                 if (entry.getBbox().intersects(searchBox)) {
                     results.add(entry.getRowId());

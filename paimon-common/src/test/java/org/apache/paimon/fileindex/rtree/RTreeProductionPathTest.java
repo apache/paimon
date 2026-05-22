@@ -25,7 +25,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
-/** Regression test for production FileIndex path (Issue #5 & #6). */
+/**
+ * Regression test for production FileIndex path with InternalArray support and leaf flag
+ * preservation.
+ */
 public class RTreeProductionPathTest {
 
     @Test

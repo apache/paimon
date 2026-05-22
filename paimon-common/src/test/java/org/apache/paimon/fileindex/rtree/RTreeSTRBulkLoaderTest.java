@@ -26,7 +26,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Test for Issue #4: STR bulk loading optimization. */
+/** Test for STR bulk loading optimization for efficient tree construction. */
 public class RTreeSTRBulkLoaderTest {
 
     @Test
