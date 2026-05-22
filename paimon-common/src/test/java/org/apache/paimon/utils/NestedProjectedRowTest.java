@@ -21,38 +21,54 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link NestedProjectedRow}. */
 public class NestedProjectedRowTest {
 
     @Test
     void testReturnNullWhenSchemasAreEqual() {
-        RowType schema = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        RowType schema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new VarCharType())));
         assertThat(NestedProjectedRow.create(schema, schema)).isNull();
     }
 
     @Test
     void testTopLevelProjection() {
-        // data: ROW<a INT, b STRING, c BIGINT>
+        // data: ROW<a INT(id=0), b STRING(id=1), c BIGINT(id=2)>
         RowType dataSchema =
-                RowType.builder()
-                        .field("a", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("c", DataTypes.BIGINT())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new VarCharType()),
+                                new DataField(2, "c", new BigIntType())));
 
-        // projected: ROW<c BIGINT, a INT>
+        // projected: ROW<c BIGINT(id=2), a INT(id=0)>
         RowType projectedSchema =
-                RowType.builder()
-                        .field("c", DataTypes.BIGINT())
-                        .field("a", DataTypes.INT())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(2, "c", new BigIntType()),
+                                new DataField(0, "a", new IntType())));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -67,16 +83,17 @@ public class NestedProjectedRowTest {
 
     @Test
     void testTopLevelFieldSubset() {
-        // data: ROW<a INT, b STRING, c DOUBLE>
+        // data: ROW<a INT(id=0), b STRING(id=1), c DOUBLE(id=2)>
         RowType dataSchema =
-                RowType.builder()
-                        .field("a", DataTypes.INT())
-                        .field("b", DataTypes.STRING())
-                        .field("c", DataTypes.DOUBLE())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new VarCharType()),
+                                new DataField(2, "c", new DoubleType())));
 
-        // projected: ROW<b STRING>
-        RowType projectedSchema = RowType.builder().field("b", DataTypes.STRING()).build();
+        // projected: ROW<b STRING(id=1)>
+        RowType projectedSchema =
+                new RowType(Arrays.asList(new DataField(1, "b", new VarCharType())));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -90,19 +107,24 @@ public class NestedProjectedRowTest {
 
     @Test
     void testNestedRowProjection() {
-        // data: ROW<id INT, r ROW<x INT, y INT, z INT>>
+        // data: ROW<id INT(0), r ROW<x INT(10), y INT(11), z INT(12)>(1)>
         RowType nestedType =
-                RowType.builder()
-                        .field("x", DataTypes.INT())
-                        .field("y", DataTypes.INT())
-                        .field("z", DataTypes.INT())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "x", new IntType()),
+                                new DataField(11, "y", new IntType()),
+                                new DataField(12, "z", new IntType())));
         RowType dataSchema =
-                RowType.builder().field("id", DataTypes.INT()).field("r", nestedType).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", nestedType)));
 
-        // projected: ROW<r ROW<z INT>>
-        RowType projectedNestedType = RowType.builder().field("z", DataTypes.INT()).build();
-        RowType projectedSchema = RowType.builder().field("r", projectedNestedType).build();
+        // projected: ROW<r ROW<z INT(12)>(1)>
+        RowType projectedNestedType =
+                new RowType(Arrays.asList(new DataField(12, "z", new IntType())));
+        RowType projectedSchema =
+                new RowType(Arrays.asList(new DataField(1, "r", projectedNestedType)));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -119,24 +141,30 @@ public class NestedProjectedRowTest {
 
     @Test
     void testNestedRowProjectionMultipleFields() {
-        // data: ROW<id INT, r ROW<a INT, b INT, c INT>>
+        // data: ROW<id INT(0), r ROW<a INT(10), b INT(11), c INT(12)>(1)>
         RowType nestedType =
-                RowType.builder()
-                        .field("a", DataTypes.INT())
-                        .field("b", DataTypes.INT())
-                        .field("c", DataTypes.INT())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType()),
+                                new DataField(12, "c", new IntType())));
         RowType dataSchema =
-                RowType.builder().field("id", DataTypes.INT()).field("r", nestedType).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", nestedType)));
 
-        // projected: ROW<id INT, r ROW<c INT, a INT>>
+        // projected: ROW<id INT(0), r ROW<c INT(12), a INT(10)>(1)>
         RowType projectedNestedType =
-                RowType.builder().field("c", DataTypes.INT()).field("a", DataTypes.INT()).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(12, "c", new IntType()),
+                                new DataField(10, "a", new IntType())));
         RowType projectedSchema =
-                RowType.builder()
-                        .field("id", DataTypes.INT())
-                        .field("r", projectedNestedType)
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", projectedNestedType)));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -154,20 +182,20 @@ public class NestedProjectedRowTest {
 
     @Test
     void testDeeplyNestedProjection() {
-        // data: ROW<a ROW<b ROW<x INT, y INT, z INT>>>
+        // data: ROW<a(0) ROW<b(5) ROW<x INT(10), y INT(11), z INT(12)>>>
         RowType level2 =
-                RowType.builder()
-                        .field("x", DataTypes.INT())
-                        .field("y", DataTypes.INT())
-                        .field("z", DataTypes.INT())
-                        .build();
-        RowType level1 = RowType.builder().field("b", level2).build();
-        RowType dataSchema = RowType.builder().field("a", level1).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "x", new IntType()),
+                                new DataField(11, "y", new IntType()),
+                                new DataField(12, "z", new IntType())));
+        RowType level1 = new RowType(Arrays.asList(new DataField(5, "b", level2)));
+        RowType dataSchema = new RowType(Arrays.asList(new DataField(0, "a", level1)));
 
-        // projected: ROW<a ROW<b ROW<y INT>>>
-        RowType projLevel2 = RowType.builder().field("y", DataTypes.INT()).build();
-        RowType projLevel1 = RowType.builder().field("b", projLevel2).build();
-        RowType projectedSchema = RowType.builder().field("a", projLevel1).build();
+        // projected: ROW<a(0) ROW<b(5) ROW<y INT(11)>>>
+        RowType projLevel2 = new RowType(Arrays.asList(new DataField(11, "y", new IntType())));
+        RowType projLevel1 = new RowType(Arrays.asList(new DataField(5, "b", projLevel2)));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(0, "a", projLevel1)));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -183,15 +211,22 @@ public class NestedProjectedRowTest {
     }
 
     @Test
-    void testNestedRowWithoutProjection() {
-        // data: ROW<id INT, r ROW<x INT, y INT>>
+    void testNestedRowWithoutInnerProjection() {
+        // data: ROW<id INT(0), r ROW<x INT(10), y INT(11)>(1)>
         RowType nestedType =
-                RowType.builder().field("x", DataTypes.INT()).field("y", DataTypes.INT()).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "x", new IntType()),
+                                new DataField(11, "y", new IntType())));
         RowType dataSchema =
-                RowType.builder().field("id", DataTypes.INT()).field("r", nestedType).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "r", nestedType)));
 
-        // projected: ROW<r ROW<x INT, y INT>> (nested is unchanged, only top-level pruned)
-        RowType projectedSchema = RowType.builder().field("r", nestedType).build();
+        // projected: ROW<r ROW<x INT(10), y INT(11)>(1)> (nested is unchanged, only top-level
+        // pruned)
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "r", nestedType)));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -208,15 +243,23 @@ public class NestedProjectedRowTest {
 
     @Test
     void testNullHandling() {
-        // data: ROW<a INT, r ROW<x INT, y INT>>
+        // data: ROW<a INT(0), r ROW<x INT(10), y INT(11)>(1)>
         RowType nestedType =
-                RowType.builder().field("x", DataTypes.INT()).field("y", DataTypes.INT()).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "x", new IntType()),
+                                new DataField(11, "y", new IntType())));
         RowType dataSchema =
-                RowType.builder().field("a", DataTypes.INT()).field("r", nestedType).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "r", nestedType)));
 
-        // projected: ROW<r ROW<y INT>>
-        RowType projectedNestedType = RowType.builder().field("y", DataTypes.INT()).build();
-        RowType projectedSchema = RowType.builder().field("r", projectedNestedType).build();
+        // projected: ROW<r ROW<y INT(11)>(1)>
+        RowType projectedNestedType =
+                new RowType(Arrays.asList(new DataField(11, "y", new IntType())));
+        RowType projectedSchema =
+                new RowType(Arrays.asList(new DataField(1, "r", projectedNestedType)));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -238,8 +281,11 @@ public class NestedProjectedRowTest {
     @Test
     void testReplaceRowIsReusable() {
         RowType dataSchema =
-                RowType.builder().field("a", DataTypes.INT()).field("b", DataTypes.INT()).build();
-        RowType projectedSchema = RowType.builder().field("b", DataTypes.INT()).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType())));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "b", new IntType())));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -254,8 +300,11 @@ public class NestedProjectedRowTest {
     @Test
     void testRowKindPreserved() {
         RowType dataSchema =
-                RowType.builder().field("a", DataTypes.INT()).field("b", DataTypes.INT()).build();
-        RowType projectedSchema = RowType.builder().field("b", DataTypes.INT()).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType())));
+        RowType projectedSchema = new RowType(Arrays.asList(new DataField(1, "b", new IntType())));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -268,21 +317,30 @@ public class NestedProjectedRowTest {
 
     @Test
     void testMultipleNestedRows() {
-        // data: ROW<r1 ROW<a INT, b INT>, r2 ROW<x STRING, y STRING>>
+        // data: ROW<r1 ROW<a INT(10), b INT(11)>(0), r2 ROW<x STRING(20), y STRING(21)>(1)>
         RowType nested1 =
-                RowType.builder().field("a", DataTypes.INT()).field("b", DataTypes.INT()).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "a", new IntType()),
+                                new DataField(11, "b", new IntType())));
         RowType nested2 =
-                RowType.builder()
-                        .field("x", DataTypes.STRING())
-                        .field("y", DataTypes.STRING())
-                        .build();
-        RowType dataSchema = RowType.builder().field("r1", nested1).field("r2", nested2).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(20, "x", new VarCharType()),
+                                new DataField(21, "y", new VarCharType())));
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "r1", nested1), new DataField(1, "r2", nested2)));
 
-        // projected: ROW<r1 ROW<b INT>, r2 ROW<y STRING>>
-        RowType projNested1 = RowType.builder().field("b", DataTypes.INT()).build();
-        RowType projNested2 = RowType.builder().field("y", DataTypes.STRING()).build();
+        // projected: ROW<r1 ROW<b INT(11)>(0), r2 ROW<y STRING(21)>(1)>
+        RowType projNested1 = new RowType(Arrays.asList(new DataField(11, "b", new IntType())));
+        RowType projNested2 = new RowType(Arrays.asList(new DataField(21, "y", new VarCharType())));
         RowType projectedSchema =
-                RowType.builder().field("r1", projNested1).field("r2", projNested2).build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "r1", projNested1),
+                                new DataField(1, "r2", projNested2)));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -302,27 +360,28 @@ public class NestedProjectedRowTest {
 
     @Test
     void testAllDataTypes() {
+        // data with various types, each with unique field ID
         RowType dataSchema =
-                RowType.builder()
-                        .field("f_bool", DataTypes.BOOLEAN())
-                        .field("f_byte", DataTypes.TINYINT())
-                        .field("f_short", DataTypes.SMALLINT())
-                        .field("f_int", DataTypes.INT())
-                        .field("f_long", DataTypes.BIGINT())
-                        .field("f_float", DataTypes.FLOAT())
-                        .field("f_double", DataTypes.DOUBLE())
-                        .field("f_string", DataTypes.STRING())
-                        .field("f_binary", DataTypes.BYTES())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "f_bool", new BooleanType()),
+                                new DataField(1, "f_byte", new TinyIntType()),
+                                new DataField(2, "f_short", new SmallIntType()),
+                                new DataField(3, "f_int", new IntType()),
+                                new DataField(4, "f_long", new BigIntType()),
+                                new DataField(5, "f_float", new FloatType()),
+                                new DataField(6, "f_double", new DoubleType()),
+                                new DataField(7, "f_string", new VarCharType()),
+                                new DataField(8, "f_binary", new VarBinaryType())));
 
         // project a subset in different order
         RowType projectedSchema =
-                RowType.builder()
-                        .field("f_double", DataTypes.DOUBLE())
-                        .field("f_bool", DataTypes.BOOLEAN())
-                        .field("f_string", DataTypes.STRING())
-                        .field("f_byte", DataTypes.TINYINT())
-                        .build();
+                new RowType(
+                        Arrays.asList(
+                                new DataField(6, "f_double", new DoubleType()),
+                                new DataField(0, "f_bool", new BooleanType()),
+                                new DataField(7, "f_string", new VarCharType()),
+                                new DataField(1, "f_byte", new TinyIntType())));
 
         NestedProjectedRow projection = NestedProjectedRow.create(dataSchema, projectedSchema);
         assertThat(projection).isNotNull();
@@ -344,5 +403,48 @@ public class NestedProjectedRowTest {
         assertThat(projected.getBoolean(1)).isTrue();
         assertThat(projected.getString(2)).isEqualTo(BinaryString.fromString("test"));
         assertThat(projected.getByte(3)).isEqualTo((byte) 7);
+    }
+
+    @Test
+    void testFieldNameMismatchThrows() {
+        // data: ROW<a INT(id=0), b INT(id=1)>
+        RowType dataSchema =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType())));
+
+        // projected: same field id=1 but wrong name "wrong"
+        RowType projectedSchema =
+                new RowType(Arrays.asList(new DataField(1, "wrong", new IntType())));
+
+        assertThatThrownBy(() -> NestedProjectedRow.create(dataSchema, projectedSchema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Field name mismatch")
+                .hasMessageContaining("'b'")
+                .hasMessageContaining("'wrong'");
+    }
+
+    @Test
+    void testNestedFieldNameMismatchThrows() {
+        // data: ROW<r ROW<x INT(10), y INT(11)>(0)>
+        RowType nestedType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(10, "x", new IntType()),
+                                new DataField(11, "y", new IntType())));
+        RowType dataSchema = new RowType(Arrays.asList(new DataField(0, "r", nestedType)));
+
+        // projected: nested field id=11 but wrong name "wrong_name"
+        RowType projectedNestedType =
+                new RowType(Arrays.asList(new DataField(11, "wrong_name", new IntType())));
+        RowType projectedSchema =
+                new RowType(Arrays.asList(new DataField(0, "r", projectedNestedType)));
+
+        assertThatThrownBy(() -> NestedProjectedRow.create(dataSchema, projectedSchema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Field name mismatch")
+                .hasMessageContaining("'y'")
+                .hasMessageContaining("'wrong_name'");
     }
 }

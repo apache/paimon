@@ -65,8 +65,11 @@ public class NestedProjectedRow implements InternalRow {
     }
 
     /**
-     * Creates a {@link NestedProjectedRow} from the data schema and projected schema. Returns null
-     * if the two schemas are identical (no projection needed).
+     * Creates a {@link NestedProjectedRow} from the data schema and projected schema using field
+     * IDs to match fields. Returns null if the two schemas are identical (no projection needed).
+     *
+     * @param dataSchema the full schema of the underlying row data
+     * @param projectedSchema the projected schema to read
      */
     @Nullable
     public static NestedProjectedRow create(RowType dataSchema, RowType projectedSchema) {
@@ -76,7 +79,6 @@ public class NestedProjectedRow implements InternalRow {
 
         List<DataField> dataFields = dataSchema.getFields();
         List<DataField> projectedFields = projectedSchema.getFields();
-        List<String> dataFieldNames = dataSchema.getFieldNames();
 
         int projectedSize = projectedFields.size();
         int[] indexMapping = new int[projectedSize];
@@ -86,7 +88,14 @@ public class NestedProjectedRow implements InternalRow {
 
         for (int i = 0; i < projectedSize; i++) {
             DataField projected = projectedFields.get(i);
-            int dataIdx = dataFieldNames.indexOf(projected.name());
+            int dataIdx = dataSchema.getFieldIndexByFieldId(projected.id());
+            DataField dataField = dataFields.get(dataIdx);
+            Preconditions.checkArgument(
+                    dataField.name().equals(projected.name()),
+                    "Field name mismatch for field id %s: data schema has '%s' but projected schema has '%s'",
+                    projected.id(),
+                    dataField.name(),
+                    projected.name());
             indexMapping[i] = dataIdx;
 
             if (projected.type().getTypeRoot() == DataTypeRoot.ROW) {
