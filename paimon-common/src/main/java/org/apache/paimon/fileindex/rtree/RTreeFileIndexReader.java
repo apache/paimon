@@ -73,10 +73,8 @@ public class RTreeFileIndexReader extends FileIndexReader {
         boolean isLeaf = dis.readBoolean();
         int entryCount = dis.readInt();
 
-        // Fix for Issue #1: Update root node's leaf flag if it differs
-        if (isRoot) {
-            node.setLeaf(isLeaf);
-        }
+        // Fix for Issue #1 & #5: Update leaf flag for all nodes, not just root
+        node.setLeaf(isLeaf);
 
         BoundingBox bbox = BoundingBox.deserialize(dis, dimensions);
         node.getBoundingBox().expand(bbox);
@@ -89,7 +87,7 @@ public class RTreeFileIndexReader extends FileIndexReader {
             }
         } else {
             for (int i = 0; i < entryCount; i++) {
-                RTreeNode child = new RTreeNode(dimensions, maxEntries, false);
+                RTreeNode child = new RTreeNode(dimensions, maxEntries, isLeaf);
                 node.addChild(child);
                 deserializeNode(dis, child, false);
             }

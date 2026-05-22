@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex.rtree;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
@@ -85,7 +86,18 @@ public class RTreeFileIndexWriter extends FileIndexWriter {
     }
 
     private double[] extractPoint(Object key) {
-        if (key instanceof java.util.List) {
+        if (key instanceof InternalArray) {
+            InternalArray array = (InternalArray) key;
+            int size = array.size();
+            double[] point = new double[size];
+            for (int i = 0; i < size; i++) {
+                if (array.isNullAt(i)) {
+                    throw new RuntimeException("Array element at index " + i + " is null");
+                }
+                point[i] = array.getDouble(i);
+            }
+            return point;
+        } else if (key instanceof java.util.List) {
             java.util.List<?> list = (java.util.List<?>) key;
             double[] point = new double[list.size()];
             for (int i = 0; i < list.size(); i++) {
