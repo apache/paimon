@@ -190,24 +190,6 @@ public class DataEvolutionCompactCoordinator {
                 long targetFileSize,
                 long openFileCost,
                 long compactMinFileNum,
-                LongFunction<RowType> schemaFetcher) {
-            this(
-                    compactBlob,
-                    compactVector,
-                    targetFileSize,
-                    targetFileSize,
-                    openFileCost,
-                    compactMinFileNum,
-                    schemaFetcher,
-                    null);
-        }
-
-        CompactPlanner(
-                boolean compactBlob,
-                boolean compactVector,
-                long targetFileSize,
-                long openFileCost,
-                long compactMinFileNum,
                 LongFunction<RowType> schemaFetcher,
                 @Nullable Set<Integer> currentBlobFieldIds) {
             this(
@@ -236,7 +218,11 @@ public class DataEvolutionCompactCoordinator {
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
-            this.schemaFetcher = schemaFetcher;
+            Map<Long, RowType> schemaCache = new HashMap<>();
+            this.schemaFetcher =
+                    schemaId ->
+                            schemaCache.computeIfAbsent(
+                                    schemaId, id -> schemaFetcher.apply(id));
             this.currentBlobFieldIds = currentBlobFieldIds;
         }
 
@@ -415,10 +401,6 @@ public class DataEvolutionCompactCoordinator {
         }
 
         private List<List<DataFileMeta>> blobFileGroupsToCompact(List<DataFileMeta> blobFiles) {
-            if (blobFiles.size() < compactMinFileNum) {
-                return Collections.emptyList();
-            }
-
             Map<Integer, List<DataFileMeta>> fieldIdToFiles = new LinkedHashMap<>();
             for (DataFileMeta blobFile : blobFiles) {
                 int fieldId = blobFieldId(blobFile);
