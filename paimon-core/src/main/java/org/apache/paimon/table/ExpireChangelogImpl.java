@@ -132,7 +132,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
         if (maxExclusive <= earliestChangelogId) {
             // This happens when retainMin >= total changelog count
-            // (e.g. latestSnapshotId - retainMin + 1 <= earliestChangelogId),
+            // (e.g. latestSnapshotId - retainMin + 1 <= earliestChangelogId)
             return 0;
         }
 
@@ -151,7 +151,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
 
     public int expireUntil(long earliestId, long endExclusiveId) {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Changelog expire range is [" + earliestId + ", " + endExclusiveId + ")");
+            LOG.debug("Changelog expire range is [{}, {})", earliestId, endExclusiveId);
         }
 
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
@@ -171,7 +171,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete changelog files from changelog #" + id);
+                LOG.debug("Ready to delete changelog files from changelog #{}", id);
             }
             Changelog changelog;
             try {
@@ -242,13 +242,13 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = earliestChangelogId; id <= latestChangelogId; id++) {
 
-            LOG.info("Ready to delete changelog files from changelog #" + id);
+            LOG.info("Ready to delete changelog files from changelog #{}", id);
 
             Changelog changelog;
             try {
                 changelog = changelogManager.tryGetChangelog(id);
             } catch (FileNotFoundException e) {
-                LOG.info("fail to get changelog #" + id);
+                LOG.info("fail to get changelog #{}", id);
                 continue;
             }
             Predicate<ExpireFileEntry> skipper;
@@ -256,9 +256,8 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 skipper = changelogDeletion.createDataFileSkipperForTags(taggedSnapshots, id);
             } catch (Exception e) {
                 LOG.info(
-                        String.format(
-                                "Skip cleaning data files of changelog '%s' due to failed to build skipping set.",
-                                id),
+                        "Skip cleaning data files of changelog '{}' due to failed to build skipping set.",
+                        id,
                         e);
                 continue;
             }
