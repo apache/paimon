@@ -303,8 +303,7 @@ public class MultipleBlobTableTest extends TableTestBase {
         commitDefault(writeDataDefault(100, 1));
 
         // Drop f2, keep f3
-        catalog.alterTable(
-                identifier(), Arrays.asList(SchemaChange.dropColumn("f2")), false);
+        catalog.alterTable(identifier(), Arrays.asList(SchemaChange.dropColumn("f2")), false);
 
         FileStoreTable table = getTableDefault();
         AtomicInteger count = new AtomicInteger(0);
@@ -336,17 +335,9 @@ public class MultipleBlobTableTest extends TableTestBase {
         try (org.apache.paimon.table.sink.BatchTableWrite write = builder.newWrite()) {
             // Mix null and non-null blob values
             write.write(
-                    GenericRow.of(
-                            1,
-                            BinaryString.fromString("a"),
-                            new BlobData(blobBytes1),
-                            null));
+                    GenericRow.of(1, BinaryString.fromString("a"), new BlobData(blobBytes1), null));
             write.write(
-                    GenericRow.of(
-                            2,
-                            BinaryString.fromString("b"),
-                            null,
-                            new BlobData(blobBytes2)));
+                    GenericRow.of(2, BinaryString.fromString("b"), null, new BlobData(blobBytes2)));
             write.write(
                     GenericRow.of(
                             3,
@@ -422,9 +413,7 @@ public class MultipleBlobTableTest extends TableTestBase {
             for (int i = 0; i < 50; i++) {
                 write.write(
                         GenericRow.of(
-                                i,
-                                BinaryString.fromString("row" + i),
-                                new BlobData(blobBytes1)));
+                                i, BinaryString.fromString("row" + i), new BlobData(blobBytes1)));
             }
             org.apache.paimon.table.sink.BatchTableCommit commit = builder.newCommit();
             commit.commit(write.prepareCommit());
@@ -545,8 +534,7 @@ public class MultipleBlobTableTest extends TableTestBase {
         // Read with row ranges [100, 199] — only blob projection
         org.apache.paimon.table.source.ReadBuilder readBuilder = table.newReadBuilder();
         readBuilder.withProjection(new int[] {2, 3});
-        readBuilder.withRowRanges(
-                Arrays.asList(new org.apache.paimon.utils.Range(100, 199)));
+        readBuilder.withRowRanges(Arrays.asList(new org.apache.paimon.utils.Range(100, 199)));
         org.apache.paimon.reader.RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
         List<InternalRow> rows = new ArrayList<>();
