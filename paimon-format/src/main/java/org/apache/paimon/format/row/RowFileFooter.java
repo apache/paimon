@@ -58,23 +58,26 @@ class RowFileFooter {
         in.seek(fileSize - FOOTER_SIZE);
         byte[] buf = new byte[FOOTER_SIZE];
         readFully(in, buf);
+        return readFrom(buf, 0);
+    }
 
-        int magic = readIntLE(buf, 28);
+    static RowFileFooter readFrom(byte[] buf, int offset) throws IOException {
+        int magic = readIntLE(buf, offset + 28);
         if (magic != MAGIC) {
             throw new IOException(
                     String.format(
                             "Invalid row file magic: expected 0x%08X, got 0x%08X", MAGIC, magic));
         }
 
-        byte version = buf[24];
+        byte version = buf[offset + 24];
         if (version != VERSION) {
             throw new IOException("Unsupported row file version: " + version);
         }
 
-        long totalRowCount = readLongLE(buf, 0);
-        int blockCount = readIntLE(buf, 8);
-        long indexOffset = readLongLE(buf, 12);
-        int indexLength = readIntLE(buf, 20);
+        long totalRowCount = readLongLE(buf, offset);
+        int blockCount = readIntLE(buf, offset + 8);
+        long indexOffset = readLongLE(buf, offset + 12);
+        int indexLength = readIntLE(buf, offset + 20);
 
         return new RowFileFooter(totalRowCount, blockCount, indexOffset, indexLength);
     }

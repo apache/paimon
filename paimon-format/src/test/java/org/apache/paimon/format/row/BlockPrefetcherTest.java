@@ -27,7 +27,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordReader;
@@ -43,10 +42,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,8 +58,8 @@ public class BlockPrefetcherTest {
         RowBlockIndex index = new RowBlockIndex(compressedSizes, uncompressedSizes, rowStarts);
 
         int[] blocksToRead = {0, 1, 2, 3, 4};
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(blocksToRead, index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(blocksToRead, index);
 
         assertThat(ranges).hasSize(1);
         assertThat(ranges.get(0).offset).isEqualTo(0);
@@ -80,8 +75,8 @@ public class BlockPrefetcherTest {
         RowBlockIndex index = new RowBlockIndex(compressedSizes, uncompressedSizes, rowStarts);
 
         int[] blocksToRead = {0, 2};
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(blocksToRead, index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(blocksToRead, index);
 
         // gap between block 0 end (100) and block 2 start (200) is 100, within HOLE_SIZE_LIMIT
         assertThat(ranges).hasSize(1);
@@ -118,8 +113,8 @@ public class BlockPrefetcherTest {
         // blocksToRead = [0, 2]: gap between block 0 end and block 2 start
         // block 0 end = 300*1024, block 2 start = 600*1024, gap = 300*1024 > 256KB
         int[] blocksToRead = {0, 2};
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(blocksToRead, index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(blocksToRead, index);
 
         assertThat(ranges).hasSize(2);
         assertThat(ranges.get(0).blockIndices).containsExactly(0);
@@ -146,12 +141,12 @@ public class BlockPrefetcherTest {
             blocksToRead[i] = i;
         }
 
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(blocksToRead, index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(blocksToRead, index);
 
         // 2MB / 100KB = 20 blocks per range, so 30 blocks should split into 2 ranges
         assertThat(ranges.size()).isGreaterThan(1);
-        for (BlockPrefetcher.MergedRange range : ranges) {
+        for (VectoredReadStrategy.MergedRange range : ranges) {
             assertThat(range.length).isLessThanOrEqualTo(2 * 1024 * 1024);
         }
     }
@@ -163,8 +158,8 @@ public class BlockPrefetcherTest {
         long[] rowStarts = {0};
         RowBlockIndex index = new RowBlockIndex(compressedSizes, uncompressedSizes, rowStarts);
 
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(new int[0], index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(new int[0], index);
 
         assertThat(ranges).isEmpty();
     }
@@ -177,8 +172,8 @@ public class BlockPrefetcherTest {
         RowBlockIndex index = new RowBlockIndex(compressedSizes, uncompressedSizes, rowStarts);
 
         int[] blocksToRead = {0};
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(blocksToRead, index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(blocksToRead, index);
 
         assertThat(ranges).hasSize(1);
         assertThat(ranges.get(0).offset).isEqualTo(0);
@@ -194,8 +189,8 @@ public class BlockPrefetcherTest {
         RowBlockIndex index = new RowBlockIndex(compressedSizes, uncompressedSizes, rowStarts);
 
         int[] blocksToRead = {0, 2, 4};
-        List<BlockPrefetcher.MergedRange> ranges =
-                BlockPrefetcher.coalesceRanges(blocksToRead, index);
+        List<VectoredReadStrategy.MergedRange> ranges =
+                VectoredReadStrategy.coalesceRanges(blocksToRead, index);
 
         // All gaps are small (100 bytes), so everything merges into one range
         assertThat(ranges).hasSize(1);
@@ -364,97 +359,6 @@ public class BlockPrefetcherTest {
         reader.close();
 
         assertThat(result).isEmpty();
-    }
-
-    @Test
-    public void testInputStreamPoolLazyCreation() throws IOException {
-        RowType rowType = RowType.builder().fields(Arrays.asList(new IntType())).build();
-
-        Path path = new Path(tempDir.toUri().toString(), "pool_lazy.row");
-        FileFormat format = FileFormat.fromIdentifier("row", new Options());
-
-        List<InternalRow> rows = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            rows.add(GenericRow.of(i));
-        }
-        writeRows(format, rowType, path, rows);
-
-        LocalFileIO fileIO = new LocalFileIO();
-        SeekableInputStream initialStream = fileIO.newInputStream(path);
-
-        // Pool with max 4, but only initialStream is opened eagerly
-        InputStreamPool pool = new InputStreamPool(fileIO, path, 4, initialStream);
-
-        // First borrow returns the initial stream (no new stream opened)
-        SeekableInputStream s1 = pool.borrow();
-        assertThat(s1).isSameAs(initialStream);
-
-        // Second borrow creates a new stream lazily
-        SeekableInputStream s2 = pool.borrow();
-        assertThat(s2).isNotSameAs(initialStream);
-
-        // Third borrow creates another
-        SeekableInputStream s3 = pool.borrow();
-        assertThat(s3).isNotSameAs(s1);
-        assertThat(s3).isNotSameAs(s2);
-
-        // Return all
-        pool.returnStream(s1);
-        pool.returnStream(s2);
-        pool.returnStream(s3);
-
-        // Re-borrow should reuse returned streams
-        SeekableInputStream s4 = pool.borrow();
-        assertThat(s4 == s1 || s4 == s2 || s4 == s3).isTrue();
-
-        pool.returnStream(s4);
-        pool.close();
-    }
-
-    @Test
-    public void testInputStreamPoolConcurrentAccess() throws Exception {
-        RowType rowType = RowType.builder().fields(Arrays.asList(new IntType())).build();
-
-        Path path = new Path(tempDir.toUri().toString(), "pool_concurrent.row");
-        FileFormat format = FileFormat.fromIdentifier("row", new Options());
-
-        List<InternalRow> rows = new ArrayList<>();
-        for (int i = 0; i < 100; i++) {
-            rows.add(GenericRow.of(i));
-        }
-        writeRows(format, rowType, path, rows);
-
-        LocalFileIO fileIO = new LocalFileIO();
-        SeekableInputStream initialStream = fileIO.newInputStream(path);
-        InputStreamPool pool = new InputStreamPool(fileIO, path, 4, initialStream);
-
-        int numThreads = 8;
-        int opsPerThread = 50;
-        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
-        CountDownLatch latch = new CountDownLatch(numThreads);
-        AtomicInteger errors = new AtomicInteger(0);
-
-        for (int t = 0; t < numThreads; t++) {
-            executor.submit(
-                    () -> {
-                        try {
-                            for (int i = 0; i < opsPerThread; i++) {
-                                SeekableInputStream in = pool.borrow();
-                                in.seek(0);
-                                pool.returnStream(in);
-                            }
-                        } catch (Exception e) {
-                            errors.incrementAndGet();
-                        } finally {
-                            latch.countDown();
-                        }
-                    });
-        }
-
-        latch.await();
-        executor.shutdown();
-        assertThat(errors.get()).isEqualTo(0);
-        pool.close();
     }
 
     @Test

@@ -73,7 +73,10 @@ class RowBlockIndex {
         in.seek(indexOffset);
         byte[] indexData = new byte[indexLength];
         IOUtils.readFully(in, indexData);
+        return readFrom(indexData);
+    }
 
+    static RowBlockIndex readFrom(byte[] indexData) {
         int pos = 0;
         int len1 = decodeVarInt(indexData, pos);
         pos += varIntSize(len1);

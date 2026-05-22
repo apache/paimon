@@ -20,6 +20,7 @@ package org.apache.paimon.format.row;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
@@ -41,7 +42,7 @@ public class RowFormatReader implements FileRecordReader<InternalRow> {
     private final BlockPrefetcher prefetcher;
 
     RowFormatReader(
-            InputStreamPool streamPool,
+            SeekableInputStream inputStream,
             Path filePath,
             RowFileFooter footer,
             RowBlockIndex blockIndex,
@@ -56,7 +57,7 @@ public class RowFormatReader implements FileRecordReader<InternalRow> {
         this.selection = selection;
         this.prefetcher =
                 new BlockPrefetcher(
-                        streamPool,
+                        inputStream,
                         blockIndex,
                         computeBlocksToRead(blockIndex, footer.totalRowCount, selection));
     }
