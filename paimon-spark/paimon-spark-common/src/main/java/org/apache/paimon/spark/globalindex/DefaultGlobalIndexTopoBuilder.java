@@ -77,6 +77,28 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             DataField indexField,
             Options options)
             throws IOException {
+        return buildIndex(
+                spark,
+                relation,
+                partitionPredicate,
+                table,
+                indexType,
+                readType,
+                Collections.singletonList(indexField),
+                options);
+    }
+
+    @Override
+    public List<CommitMessage> buildIndex(
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            PartitionPredicate partitionPredicate,
+            FileStoreTable table,
+            String indexType,
+            RowType readType,
+            List<DataField> indexFields,
+            Options options)
+            throws IOException {
         Options tableOptions = table.coreOptions().toConfiguration();
         long rowsPerShard =
                 tableOptions
@@ -106,7 +128,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                                 table,
                                 partition,
                                 readType,
-                                indexField,
+                                indexFields,
                                 indexType,
                                 indexedSplit.rowRanges().get(0),
                                 options);
