@@ -122,7 +122,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
       .replaceAll("/\\*.*?\\*/", " ")
       .replaceAll("`", "")
       .trim()
-    isPaimonProcedure(normalized) || isTagRefDdl(normalized)
+    isPaimonProcedure(normalized) || isTagRefDdl(normalized) || isCopyInto(normalized)
   }
 
   // All builtin paimon procedures are under the 'sys' namespace
@@ -138,6 +138,10 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
         normalized.contains("replace tag") ||
         normalized.contains("rename tag") ||
         normalized.contains("delete tag")))
+  }
+
+  private def isCopyInto(normalized: String): Boolean = {
+    normalized.startsWith("copy into")
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {
