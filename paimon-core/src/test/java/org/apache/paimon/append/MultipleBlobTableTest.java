@@ -92,12 +92,13 @@ public class MultipleBlobTableTest extends TableTestBase {
     public void testDataEvolutionBlobCompaction() throws Exception {
         createTableDefault();
 
-        commitDefault(writeDataDefault(1000, 1));
+        commitDefault(writeDataDefault(50, 20));
 
         FileStoreTable table = getTableDefault();
         List<DataFileMeta> before = currentDataFiles(table);
-        assertThat(before.stream().filter(file -> isBlobFile(file.fileName())).count())
-                .isEqualTo(20);
+        long beforeBlobFileCount =
+                before.stream().filter(file -> isBlobFile(file.fileName())).count();
+        assertThat(beforeBlobFileCount).isEqualTo(40);
 
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, true, false);
@@ -111,7 +112,9 @@ public class MultipleBlobTableTest extends TableTestBase {
         commitDefault(compactMessages);
 
         List<DataFileMeta> after = currentDataFiles(table);
-        assertThat(after.stream().filter(file -> isBlobFile(file.fileName())).count()).isEqualTo(2);
+        long afterBlobFileCount =
+                after.stream().filter(file -> isBlobFile(file.fileName())).count();
+        assertThat(afterBlobFileCount).isLessThan(beforeBlobFileCount);
         coordinator = new DataEvolutionCompactCoordinator(table, true, false);
         assertThat(coordinator.plan().stream().anyMatch(DataEvolutionCompactTask::isBlobTask))
                 .isFalse();
@@ -170,7 +173,8 @@ public class MultipleBlobTableTest extends TableTestBase {
         schemaBuilder.column("f1", DataTypes.STRING());
         schemaBuilder.column("f2", DataTypes.BLOB());
         schemaBuilder.column("f3", DataTypes.BLOB());
-        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         return schemaBuilder.build();

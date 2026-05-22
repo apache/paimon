@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.LongFunction;
 
+import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
@@ -87,6 +88,7 @@ public class DataEvolutionCompactCoordinator {
                         compactBlob,
                         compactVector,
                         targetFileSize,
+                        options.blobTargetFileSize(),
                         openFileCost,
                         compactMinFileNum,
                         schemaId -> table.schemaManager().schema(schemaId).logicalRowType(),
@@ -156,6 +158,7 @@ public class DataEvolutionCompactCoordinator {
         private final boolean compactBlob;
         private final boolean compactVector;
         private final long targetFileSize;
+        private final long blobTargetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
         private final LongFunction<RowType> schemaFetcher;
@@ -170,6 +173,7 @@ public class DataEvolutionCompactCoordinator {
             this(
                     compactBlob,
                     compactVector,
+                    targetFileSize,
                     targetFileSize,
                     openFileCost,
                     compactMinFileNum,
@@ -191,6 +195,7 @@ public class DataEvolutionCompactCoordinator {
                     compactBlob,
                     compactVector,
                     targetFileSize,
+                    targetFileSize,
                     openFileCost,
                     compactMinFileNum,
                     schemaFetcher,
@@ -205,9 +210,30 @@ public class DataEvolutionCompactCoordinator {
                 long compactMinFileNum,
                 LongFunction<RowType> schemaFetcher,
                 @Nullable Set<Integer> currentBlobFieldIds) {
+            this(
+                    compactBlob,
+                    compactVector,
+                    targetFileSize,
+                    targetFileSize,
+                    openFileCost,
+                    compactMinFileNum,
+                    schemaFetcher,
+                    currentBlobFieldIds);
+        }
+
+        CompactPlanner(
+                boolean compactBlob,
+                boolean compactVector,
+                long targetFileSize,
+                long blobTargetFileSize,
+                long openFileCost,
+                long compactMinFileNum,
+                LongFunction<RowType> schemaFetcher,
+                @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
             this.targetFileSize = targetFileSize;
+            this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
             this.schemaFetcher = schemaFetcher;
@@ -403,11 +429,59 @@ public class DataEvolutionCompactCoordinator {
 
             List<List<DataFileMeta>> result = new ArrayList<>();
             for (List<DataFileMeta> files : fieldIdToFiles.values()) {
-                if (files.size() >= compactMinFileNum) {
-                    result.add(files);
-                }
+                result.addAll(fileGroupsToCompact(files));
             }
             return result;
+        }
+
+        private List<List<DataFileMeta>> fileGroupsToCompact(List<DataFileMeta> files) {
+            List<List<DataFileMeta>> result = new ArrayList<>();
+            List<DataFileMeta> sortedFiles = new ArrayList<>(files);
+            sortedFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
+
+            List<DataFileMeta> continuousFiles = new ArrayList<>();
+            long expectedFirstRowId = -1;
+            for (DataFileMeta file : sortedFiles) {
+                if (file.fileSize() >= blobTargetFileSize) {
+                    addFileGroupsToCompact(result, continuousFiles);
+                    continuousFiles.clear();
+                    expectedFirstRowId = -1;
+                    continue;
+                }
+
+                long firstRowId = file.nonNullFirstRowId();
+                if (!continuousFiles.isEmpty() && firstRowId != expectedFirstRowId) {
+                    addFileGroupsToCompact(result, continuousFiles);
+                    continuousFiles.clear();
+                }
+                continuousFiles.add(file);
+                expectedFirstRowId = firstRowId + file.rowCount();
+            }
+            addFileGroupsToCompact(result, continuousFiles);
+            return result;
+        }
+
+        private void addFileGroupsToCompact(
+                List<List<DataFileMeta>> result, List<DataFileMeta> continuousFiles) {
+            if (continuousFiles.size() < compactMinFileNum) {
+                return;
+            }
+
+            List<DataFileMeta> taskFiles = new ArrayList<>();
+            long fileSize = 0L;
+            for (DataFileMeta file : continuousFiles) {
+                taskFiles.add(file);
+                fileSize += file.fileSize();
+                if (fileSize >= blobTargetFileSize && taskFiles.size() >= compactMinFileNum) {
+                    result.add(taskFiles);
+                    taskFiles = new ArrayList<>();
+                    fileSize = 0L;
+                }
+            }
+
+            if (taskFiles.size() >= compactMinFileNum) {
+                result.add(taskFiles);
+            }
         }
 
         private int blobFieldId(DataFileMeta blobFile) {

@@ -165,11 +165,11 @@ public class DataEvolutionCompactCoordinatorTest {
         // Test blob file compaction when enabled
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
-        entries.add(makeBlobEntry("file1.blob", 0L, 100L, 100, "pic"));
-        entries.add(makeBlobEntry("file1b.blob", 0L, 100L, 100, "pic"));
+        entries.add(makeBlobEntry("file1.blob", 0L, 50L, 100, "pic"));
+        entries.add(makeBlobEntry("file1b.blob", 50L, 50L, 100, "pic"));
         entries.add(makeEntry("file2.parquet", 100L, 100L, 100));
-        entries.add(makeBlobEntry("file2.blob", 100L, 100L, 100, "pic"));
-        entries.add(makeBlobEntry("file2b.blob", 100L, 100L, 100, "pic"));
+        entries.add(makeBlobEntry("file2.blob", 100L, 50L, 100, "pic"));
+        entries.add(makeBlobEntry("file2b.blob", 150L, 50L, 100, "pic"));
 
         // Use small target to trigger compaction, with blob compaction enabled
         DataEvolutionCompactCoordinator.CompactPlanner planner =
@@ -242,11 +242,53 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerSplitsBlobFilesByTargetSizeAndRowId() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 70L, 100));
+        entries.add(makeBlobEntry("a.blob", 0L, 10L, 400, "pic"));
+        entries.add(makeBlobEntry("b.blob", 10L, 10L, 400, "pic"));
+        entries.add(makeBlobEntry("c.blob", 20L, 10L, 1024, "pic"));
+        entries.add(makeBlobEntry("d.blob", 30L, 10L, 600, "pic"));
+        entries.add(makeBlobEntry("e.blob", 40L, 10L, 600, "pic"));
+        entries.add(makeBlobEntry("f.blob", 50L, 10L, 400, "pic"));
+        entries.add(makeBlobEntry("g.blob", 60L, 10L, 500, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(3);
+        assertThat(tasks).allMatch(DataEvolutionCompactTask::isBlobTask);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(4).file(), entries.get(5).file());
+        assertThat(tasks.get(2).compactBefore())
+                .containsExactly(entries.get(6).file(), entries.get(7).file());
+    }
+
+    @Test
+    public void testCompactPlannerSkipsBlobGroupsWithTooFewSmallFiles() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 200L, 100));
+        entries.add(makeBlobEntry("large-pic.blob", 0L, 100L, 1024, "pic"));
+        entries.add(makeBlobEntry("small-pic.blob", 100L, 100L, 100, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).isEmpty();
+    }
+
+    @Test
     public void testCompactPlannerGroupsBlobFilesByFieldId() {
         List<ManifestEntry> entries = new ArrayList<>();
-        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeEntry("file1.parquet", 0L, 200L, 100));
         entries.add(makeBlobEntry("old-pic.blob", 0L, 100L, 100, 0, "old_pic"));
-        entries.add(makeBlobEntry("new-pic.blob", 0L, 100L, 100, 1, "new_pic"));
+        entries.add(makeBlobEntry("new-pic.blob", 100L, 100L, 100, 1, "new_pic"));
 
         Map<Long, RowType> schemas = new HashMap<>();
         schemas.put(0L, rowType(new DataField(1, "old_pic", DataTypes.BLOB())));
@@ -438,8 +480,7 @@ public class DataEvolutionCompactCoordinatorTest {
             long maxSeq,
             long fileSize,
             List<String> writeCols) {
-        return createDataFileMeta(
-                fileName, firstRowId, rowCount, maxSeq, fileSize, 0, writeCols);
+        return createDataFileMeta(fileName, firstRowId, rowCount, maxSeq, fileSize, 0, writeCols);
     }
 
     private DataFileMeta createDataFileMeta(
