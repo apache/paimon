@@ -211,7 +211,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 createReader(dataSplit, rowRanges, info.actualReadType), info);
     }
 
-    private RecordReader<InternalRow> createUnionReader(
+    private DataEvolutionFileReader createUnionReader(
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
