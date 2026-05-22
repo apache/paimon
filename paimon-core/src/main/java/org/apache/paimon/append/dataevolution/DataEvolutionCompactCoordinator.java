@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -44,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.TreeMap;
+import java.util.function.LongFunction;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
@@ -83,7 +85,8 @@ public class DataEvolutionCompactCoordinator {
                         compactVector,
                         targetFileSize,
                         openFileCost,
-                        compactMinFileNum);
+                        compactMinFileNum,
+                        schemaId -> table.schemaManager().schema(schemaId).logicalRowType());
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -143,6 +146,7 @@ public class DataEvolutionCompactCoordinator {
         private final long targetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
+        private final LongFunction<RowType> schemaFetcher;
 
         CompactPlanner(
                 boolean compactBlob,
@@ -150,11 +154,31 @@ public class DataEvolutionCompactCoordinator {
                 long targetFileSize,
                 long openFileCost,
                 long compactMinFileNum) {
+            this(
+                    compactBlob,
+                    compactVector,
+                    targetFileSize,
+                    openFileCost,
+                    compactMinFileNum,
+                    schemaId -> {
+                        throw new IllegalStateException(
+                                "Schema fetcher is required for blob compaction.");
+                    });
+        }
+
+        CompactPlanner(
+                boolean compactBlob,
+                boolean compactVector,
+                long targetFileSize,
+                long openFileCost,
+                long compactMinFileNum,
+                LongFunction<RowType> schemaFetcher) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
             this.targetFileSize = targetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
+            this.schemaFetcher = schemaFetcher;
         }
 
         List<DataEvolutionCompactTask> compactPlan(List<ManifestEntry> input) {
@@ -337,20 +361,28 @@ public class DataEvolutionCompactCoordinator {
                 return Collections.emptyList();
             }
 
-            Map<List<String>, List<DataFileMeta>> writeColsToFiles = new LinkedHashMap<>();
+            Map<Integer, List<DataFileMeta>> fieldIdToFiles = new LinkedHashMap<>();
             for (DataFileMeta blobFile : blobFiles) {
-                writeColsToFiles
-                        .computeIfAbsent(blobFile.writeCols(), key -> new ArrayList<>())
+                fieldIdToFiles.computeIfAbsent(blobFieldId(blobFile), key -> new ArrayList<>())
                         .add(blobFile);
             }
 
             List<DataFileMeta> result = new ArrayList<>();
-            for (List<DataFileMeta> files : writeColsToFiles.values()) {
+            for (List<DataFileMeta> files : fieldIdToFiles.values()) {
                 if (files.size() >= compactMinFileNum) {
                     result.addAll(files);
                 }
             }
             return result;
+        }
+
+        private int blobFieldId(DataFileMeta blobFile) {
+            checkArgument(
+                    blobFile.writeCols() != null && blobFile.writeCols().size() == 1,
+                    "Blob file %s should contain exactly one write column.",
+                    blobFile);
+            RowType rowType = schemaFetcher.apply(blobFile.schemaId());
+            return rowType.getField(blobFile.writeCols().get(0)).id();
         }
     }
 }

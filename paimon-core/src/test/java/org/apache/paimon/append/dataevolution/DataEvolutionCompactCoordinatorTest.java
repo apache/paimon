@@ -36,6 +36,9 @@ import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -44,7 +47,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.LongFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -157,15 +163,15 @@ public class DataEvolutionCompactCoordinatorTest {
         // Test blob file compaction when enabled
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
-        entries.add(makeBlobEntry("file1.blob", 0L, 100L, 100));
-        entries.add(makeBlobEntry("file1b.blob", 0L, 100L, 100));
+        entries.add(makeBlobEntry("file1.blob", 0L, 100L, 100, "pic"));
+        entries.add(makeBlobEntry("file1b.blob", 0L, 100L, 100, "pic"));
         entries.add(makeEntry("file2.parquet", 100L, 100L, 100));
-        entries.add(makeBlobEntry("file2.blob", 100L, 100L, 100));
-        entries.add(makeBlobEntry("file2b.blob", 100L, 100L, 100));
+        entries.add(makeBlobEntry("file2.blob", 100L, 100L, 100, "pic"));
+        entries.add(makeBlobEntry("file2b.blob", 100L, 100L, 100, "pic"));
 
         // Use small target to trigger compaction, with blob compaction enabled
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(true, false, 1024, 1024, 2);
+                blobPlanner(1024, 1024, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -190,7 +196,52 @@ public class DataEvolutionCompactCoordinatorTest {
         entries.add(makeBlobEntry("pic2.blob", 0L, 100L, 100, "pic2"));
 
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                new DataEvolutionCompactCoordinator.CompactPlanner(true, false, 1024, 1024, 2);
+                blobPlanner(
+                        1024,
+                        1024,
+                        2,
+                        rowType(
+                                new DataField(1, "pic1", DataTypes.BLOB()),
+                                new DataField(2, "pic2", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).isEmpty();
+    }
+
+    @Test
+    public void testCompactPlannerGroupsBlobFilesByFieldId() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeBlobEntry("old-pic.blob", 0L, 100L, 100, 0, "old_pic"));
+        entries.add(makeBlobEntry("new-pic.blob", 0L, 100L, 100, 1, "new_pic"));
+
+        Map<Long, RowType> schemas = new HashMap<>();
+        schemas.put(0L, rowType(new DataField(1, "old_pic", DataTypes.BLOB())));
+        schemas.put(1L, rowType(new DataField(1, "new_pic", DataTypes.BLOB())));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1024, 2, schemaId -> schemas.get(schemaId));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).isBlobTask()).isTrue();
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+    }
+
+    @Test
+    public void testCompactPlannerSeparatesBlobFilesByFieldIdWhenNameReused() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeBlobEntry("old-pic.blob", 0L, 100L, 100, 0, "pic"));
+        entries.add(makeBlobEntry("new-pic.blob", 0L, 100L, 100, 1, "pic"));
+
+        Map<Long, RowType> schemas = new HashMap<>();
+        schemas.put(0L, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+        schemas.put(1L, rowType(new DataField(2, "pic", DataTypes.BLOB())));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1024, 2, schemaId -> schemas.get(schemaId));
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -306,6 +357,16 @@ public class DataEvolutionCompactCoordinatorTest {
 
     private ManifestEntry makeBlobEntry(
             String fileName, long firstRowId, long rowCount, long fileSize, String writeCol) {
+        return makeBlobEntry(fileName, firstRowId, rowCount, fileSize, 0, writeCol);
+    }
+
+    private ManifestEntry makeBlobEntry(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long fileSize,
+            long schemaId,
+            String writeCol) {
         // Blob files have .blob extension
         String blobFileName = fileName.endsWith(".blob") ? fileName : fileName + ".blob";
         return ManifestEntry.create(
@@ -319,12 +380,13 @@ public class DataEvolutionCompactCoordinatorTest {
                         rowCount,
                         0,
                         fileSize,
+                        schemaId,
                         writeCol == null ? null : Collections.singletonList(writeCol)));
     }
 
     private DataFileMeta createDataFileMeta(
             String fileName, long firstRowId, long rowCount, long maxSeq, long fileSize) {
-        return createDataFileMeta(fileName, firstRowId, rowCount, maxSeq, fileSize, null);
+        return createDataFileMeta(fileName, firstRowId, rowCount, maxSeq, fileSize, 0, null);
     }
 
     private DataFileMeta createDataFileMeta(
@@ -333,6 +395,18 @@ public class DataEvolutionCompactCoordinatorTest {
             long rowCount,
             long maxSeq,
             long fileSize,
+            List<String> writeCols) {
+        return createDataFileMeta(
+                fileName, firstRowId, rowCount, maxSeq, fileSize, 0, writeCols);
+    }
+
+    private DataFileMeta createDataFileMeta(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSeq,
+            long fileSize,
+            long schemaId,
             List<String> writeCols) {
         return DataFileMeta.create(
                 fileName,
@@ -344,7 +418,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 StatsTestUtils.newEmptySimpleStats(),
                 0,
                 maxSeq,
-                0,
+                schemaId,
                 0,
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(System.currentTimeMillis()),
@@ -355,6 +429,24 @@ public class DataEvolutionCompactCoordinatorTest {
                 null,
                 firstRowId,
                 writeCols);
+    }
+
+    private DataEvolutionCompactCoordinator.CompactPlanner blobPlanner(
+            long targetFileSize, long openFileCost, long compactMinFileNum, RowType rowType) {
+        return blobPlanner(targetFileSize, openFileCost, compactMinFileNum, schemaId -> rowType);
+    }
+
+    private DataEvolutionCompactCoordinator.CompactPlanner blobPlanner(
+            long targetFileSize,
+            long openFileCost,
+            long compactMinFileNum,
+            LongFunction<RowType> schemaFetcher) {
+        return new DataEvolutionCompactCoordinator.CompactPlanner(
+                true, false, targetFileSize, openFileCost, compactMinFileNum, schemaFetcher);
+    }
+
+    private RowType rowType(DataField... fields) {
+        return new RowType(Arrays.asList(fields));
     }
 
     @Test
