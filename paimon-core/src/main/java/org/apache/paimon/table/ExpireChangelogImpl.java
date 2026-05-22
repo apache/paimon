@@ -130,6 +130,12 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         // Only clean the snapshot in changelog dir
         maxExclusive = Math.min(maxExclusive, latestChangelogId);
 
+        if (maxExclusive <= earliestChangelogId) {
+            // This happens when retainMin >= total changelog count
+            // (e.g. latestSnapshotId - retainMin + 1 <= earliestChangelogId),
+            return 0;
+        }
+
         for (long id = min; id <= maxExclusive; id++) {
             try {
                 if (olderThanMills <= changelogManager.tryGetChangelog(id).timeMillis()) {
@@ -155,13 +161,11 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
         try {
             skippingSnapshots.add(changelogManager.tryGetChangelog(endExclusiveId));
         } catch (FileNotFoundException e) {
-            LOG.info("Changelog #{} not found, skip expiring data files.", endExclusiveId, e);
-            for (long id = earliestId; id < endExclusiveId; id++) {
-                changelogManager
-                        .fileIO()
-                        .deleteQuietly(changelogManager.longLivedChangelogPath(id));
-            }
-            return (int) (endExclusiveId - earliestId);
+            LOG.error(
+                    "The endExclusive changelog #{} not found, skip expiration. Maybe you should use expire_changelogs to delete the separated changelogs.",
+                    endExclusiveId,
+                    e);
+            return 0;
         }
         skippingSnapshots.add(snapshotManager.earliestSnapshot());
         Set<String> manifestSkippSet = changelogDeletion.manifestSkippingSet(skippingSnapshots);
@@ -184,9 +188,6 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                         "Skip cleaning data files of changelog #{} due to failed to build skipping set.",
                         id,
                         e);
-                changelogManager
-                        .fileIO()
-                        .deleteQuietly(changelogManager.longLivedChangelogPath(id));
                 continue;
             }
 

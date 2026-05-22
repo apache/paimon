@@ -147,62 +147,6 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
     }
 
     @Test
-    public void testExpireWithEndChangelogNotFound() throws Exception {
-        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = writeBuilder.newWrite();
-        StreamTableCommit commit = writeBuilder.newCommit();
-        for (int i = 1; i <= 10; i++) {
-            write(write, createRow(1, 0, i, i * 10));
-            commit.commit(i, write.prepareCommit(true, i));
-        }
-        write.close();
-        commit.close();
-
-        SnapshotManager snapshotManager = table.snapshotManager();
-        long latestSnapshotId = snapshotManager.latestSnapshotId();
-        int changelogRetainMin = 3;
-
-        // changelogRetainMax > snapshotRetainMax to ensure changelogDecoupled=true
-        ExpireConfig expireConfig =
-                ExpireConfig.builder()
-                        .changelogRetainMax((int) latestSnapshotId)
-                        .changelogRetainMin(changelogRetainMin)
-                        .changelogTimeRetain(Duration.ofMillis(0))
-                        .snapshotRetainMax(1)
-                        .snapshotRetainMin(1)
-                        .build();
-        ExpireSnapshotsImpl expireSnapshots =
-                (ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig);
-        expireSnapshots.expire();
-
-        ChangelogManager changelogManager = table.changelogManager();
-        FileIO fileIO = table.fileIO();
-
-        // expire() will compute maxExclusive = latestSnapshotId - retainMin + 1
-        // and call expireUntil(earliest, maxExclusive)
-        // Delete that changelog to simulate concurrent deletion
-        long endExclusiveId = latestSnapshotId - changelogRetainMin + 1;
-        assertThat(fileIO.exists(changelogManager.longLivedChangelogPath(endExclusiveId))).isTrue();
-        fileIO.deleteQuietly(changelogManager.longLivedChangelogPath(endExclusiveId));
-
-        ExpireChangelogImpl expire =
-                (ExpireChangelogImpl) table.newExpireChangelog().config(expireConfig);
-
-        // should not throw
-        assertThatCode(expire::expire).doesNotThrowAnyException();
-
-        // changelog files in [earliest, endExclusiveId) should be deleted
-        long earliestChangelogId = 1;
-        for (long id = earliestChangelogId; id < endExclusiveId; id++) {
-            assertThat(fileIO.exists(changelogManager.longLivedChangelogPath(id))).isFalse();
-        }
-
-        // changelogs after endExclusiveId still exist
-        long latestChangelogId = changelogManager.latestLongLivedChangelogId();
-        assertThat(latestChangelogId).isGreaterThan(endExclusiveId);
-    }
-
-    @Test
     public void testExpireWithMiddleChangelogNotFound() throws Exception {
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
         StreamTableWrite write = writeBuilder.newWrite();
