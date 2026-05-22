@@ -530,6 +530,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 true,
                 false,
                 targetFileSize,
+                targetFileSize,
                 openFileCost,
                 compactMinFileNum,
                 schemaFetcher,

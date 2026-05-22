@@ -20,6 +20,7 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -168,6 +169,7 @@ public class DataEvolutionCompactCoordinator {
         private final LongFunction<RowType> schemaFetcher;
         @Nullable private final Set<Integer> currentBlobFieldIds;
 
+        @VisibleForTesting
         CompactPlanner(
                 boolean compactBlob,
                 boolean compactVector,
@@ -186,25 +188,6 @@ public class DataEvolutionCompactCoordinator {
                                 "Schema fetcher is required for blob compaction.");
                     },
                     null);
-        }
-
-        CompactPlanner(
-                boolean compactBlob,
-                boolean compactVector,
-                long targetFileSize,
-                long openFileCost,
-                long compactMinFileNum,
-                LongFunction<RowType> schemaFetcher,
-                @Nullable Set<Integer> currentBlobFieldIds) {
-            this(
-                    compactBlob,
-                    compactVector,
-                    targetFileSize,
-                    targetFileSize,
-                    openFileCost,
-                    compactMinFileNum,
-                    schemaFetcher,
-                    currentBlobFieldIds);
         }
 
         CompactPlanner(
