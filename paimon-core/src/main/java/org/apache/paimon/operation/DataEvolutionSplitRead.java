@@ -211,7 +211,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 createReader(dataSplit, rowRanges, info.actualReadType), info);
     }
 
-    private DataEvolutionFileReader createUnionReader(
+    private RecordReader<InternalRow> createUnionReader(
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
@@ -232,6 +232,34 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         long rowCount = fieldsFiles.get(0).rowCount();
         long firstRowId = fieldsFiles.get(0).files().get(0).nonNullFirstRowId();
+        if (fieldsFiles.size() == 1) {
+            FieldBunch bunch = fieldsFiles.get(0);
+            DataFileMeta firstFile = bunch.files().get(0);
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(firstFile.fileName());
+            long schemaId = firstFile.schemaId();
+            TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
+            List<String> readFieldNames =
+                    readRowType.getFields().stream()
+                            .map(DataField::name)
+                            .collect(Collectors.toList());
+            FormatReaderMapping formatReaderMapping =
+                    formatReaderMappings.computeIfAbsent(
+                            new FormatKey(schemaId, formatIdentifier, readFieldNames),
+                            key ->
+                                    formatBuilder.build(
+                                            formatIdentifier,
+                                            schema,
+                                            dataSchema,
+                                            readRowType.getFields(),
+                                            false));
+            return createFileReader(
+                    partition,
+                    bunch,
+                    dataFilePathFactory,
+                    formatReaderMapping,
+                    rowRanges,
+                    readRowType);
+        }
 
         if (rowRanges == null) {
             for (FieldBunch bunch : fieldsFiles) {

@@ -48,8 +48,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.LongFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -210,6 +212,36 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerCreatesOneBlobTaskPerField() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeBlobEntry("a1-1.blob", 0L, 50L, 100, "a1"));
+        entries.add(makeBlobEntry("a1-2.blob", 50L, 50L, 100, "a1"));
+        entries.add(makeBlobEntry("a2-1.blob", 0L, 30L, 100, "a2"));
+        entries.add(makeBlobEntry("a2-2.blob", 30L, 30L, 100, "a2"));
+        entries.add(makeBlobEntry("a2-3.blob", 60L, 40L, 100, "a2"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(
+                        1024,
+                        1024,
+                        2,
+                        rowType(
+                                new DataField(1, "a1", DataTypes.BLOB()),
+                                new DataField(2, "a2", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks).allMatch(DataEvolutionCompactTask::isBlobTask);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(
+                        entries.get(3).file(), entries.get(4).file(), entries.get(5).file());
+    }
+
+    @Test
     public void testCompactPlannerGroupsBlobFilesByFieldId() {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
@@ -220,7 +252,12 @@ public class DataEvolutionCompactCoordinatorTest {
         schemas.put(0L, rowType(new DataField(1, "old_pic", DataTypes.BLOB())));
         schemas.put(1L, rowType(new DataField(1, "new_pic", DataTypes.BLOB())));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                blobPlanner(1024, 1024, 2, schemaId -> schemas.get(schemaId));
+                blobPlanner(
+                        1024,
+                        1024,
+                        2,
+                        schemaId -> schemas.get(schemaId),
+                        rowType(new DataField(1, "new_pic", DataTypes.BLOB())));
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -241,7 +278,12 @@ public class DataEvolutionCompactCoordinatorTest {
         schemas.put(0L, rowType(new DataField(1, "pic", DataTypes.BLOB())));
         schemas.put(1L, rowType(new DataField(2, "pic", DataTypes.BLOB())));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
-                blobPlanner(1024, 1024, 2, schemaId -> schemas.get(schemaId));
+                blobPlanner(
+                        1024,
+                        1024,
+                        2,
+                        schemaId -> schemas.get(schemaId),
+                        rowType(new DataField(2, "pic", DataTypes.BLOB())));
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -433,20 +475,36 @@ public class DataEvolutionCompactCoordinatorTest {
 
     private DataEvolutionCompactCoordinator.CompactPlanner blobPlanner(
             long targetFileSize, long openFileCost, long compactMinFileNum, RowType rowType) {
-        return blobPlanner(targetFileSize, openFileCost, compactMinFileNum, schemaId -> rowType);
+        return blobPlanner(
+                targetFileSize, openFileCost, compactMinFileNum, schemaId -> rowType, rowType);
     }
 
     private DataEvolutionCompactCoordinator.CompactPlanner blobPlanner(
             long targetFileSize,
             long openFileCost,
             long compactMinFileNum,
-            LongFunction<RowType> schemaFetcher) {
+            LongFunction<RowType> schemaFetcher,
+            RowType currentRowType) {
         return new DataEvolutionCompactCoordinator.CompactPlanner(
-                true, false, targetFileSize, openFileCost, compactMinFileNum, schemaFetcher);
+                true,
+                false,
+                targetFileSize,
+                openFileCost,
+                compactMinFileNum,
+                schemaFetcher,
+                fieldIds(currentRowType));
     }
 
     private RowType rowType(DataField... fields) {
         return new RowType(Arrays.asList(fields));
+    }
+
+    private Set<Integer> fieldIds(RowType rowType) {
+        Set<Integer> fieldIds = new HashSet<>();
+        for (DataField field : rowType.getFields()) {
+            fieldIds.add(field.id());
+        }
+        return fieldIds;
     }
 
     @Test

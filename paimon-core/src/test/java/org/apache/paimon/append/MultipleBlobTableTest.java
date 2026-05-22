@@ -143,16 +143,11 @@ public class MultipleBlobTableTest extends TableTestBase {
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, true, false);
         List<DataEvolutionCompactTask> tasks = coordinator.plan();
-        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
-
-        List<CommitMessage> compactMessages = new ArrayList<>();
-        for (DataEvolutionCompactTask task : tasks) {
-            compactMessages.add(task.doCompact(table, commitUser));
-        }
-        commitDefault(compactMessages);
+        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isFalse();
 
         List<DataFileMeta> after = currentDataFiles(getTableDefault());
-        assertThat(after.stream().filter(file -> isBlobFile(file.fileName())).count()).isZero();
+        assertThat(after.stream().filter(file -> isBlobFile(file.fileName())).count())
+                .isEqualTo(20);
 
         AtomicInteger integer = new AtomicInteger(0);
         readDefault(

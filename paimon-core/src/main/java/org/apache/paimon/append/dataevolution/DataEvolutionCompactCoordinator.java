@@ -40,15 +40,18 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.LongFunction;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -86,7 +89,16 @@ public class DataEvolutionCompactCoordinator {
                         targetFileSize,
                         openFileCost,
                         compactMinFileNum,
-                        schemaId -> table.schemaManager().schema(schemaId).logicalRowType());
+                        schemaId -> table.schemaManager().schema(schemaId).logicalRowType(),
+                        compactBlob ? currentBlobFieldIds(table.rowType(), options) : null);
+    }
+
+    private static Set<Integer> currentBlobFieldIds(RowType rowType, CoreOptions options) {
+        Set<Integer> fieldIds = new HashSet<>();
+        for (String fieldName : fieldNamesInBlobFile(rowType, options.blobInlineField())) {
+            fieldIds.add(rowType.getField(fieldName).id());
+        }
+        return fieldIds;
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -147,6 +159,7 @@ public class DataEvolutionCompactCoordinator {
         private final long openFileCost;
         private final long compactMinFileNum;
         private final LongFunction<RowType> schemaFetcher;
+        @Nullable private final Set<Integer> currentBlobFieldIds;
 
         CompactPlanner(
                 boolean compactBlob,
@@ -163,7 +176,8 @@ public class DataEvolutionCompactCoordinator {
                     schemaId -> {
                         throw new IllegalStateException(
                                 "Schema fetcher is required for blob compaction.");
-                    });
+                    },
+                    null);
         }
 
         CompactPlanner(
@@ -173,12 +187,31 @@ public class DataEvolutionCompactCoordinator {
                 long openFileCost,
                 long compactMinFileNum,
                 LongFunction<RowType> schemaFetcher) {
+            this(
+                    compactBlob,
+                    compactVector,
+                    targetFileSize,
+                    openFileCost,
+                    compactMinFileNum,
+                    schemaFetcher,
+                    null);
+        }
+
+        CompactPlanner(
+                boolean compactBlob,
+                boolean compactVector,
+                long targetFileSize,
+                long openFileCost,
+                long compactMinFileNum,
+                LongFunction<RowType> schemaFetcher,
+                @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
             this.targetFileSize = targetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
             this.schemaFetcher = schemaFetcher;
+            this.currentBlobFieldIds = currentBlobFieldIds;
         }
 
         List<DataEvolutionCompactTask> compactPlan(List<ManifestEntry> input) {
@@ -336,8 +369,7 @@ public class DataEvolutionCompactCoordinator {
                     blobFiles.addAll(
                             dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
                 }
-                List<DataFileMeta> blobFilesToCompact = blobFilesToCompact(blobFiles);
-                if (!blobFilesToCompact.isEmpty()) {
+                for (List<DataFileMeta> blobFilesToCompact : blobFileGroupsToCompact(blobFiles)) {
                     tasks.add(new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
                 }
             }
@@ -356,21 +388,23 @@ public class DataEvolutionCompactCoordinator {
             return tasks;
         }
 
-        private List<DataFileMeta> blobFilesToCompact(List<DataFileMeta> blobFiles) {
+        private List<List<DataFileMeta>> blobFileGroupsToCompact(List<DataFileMeta> blobFiles) {
             if (blobFiles.size() < compactMinFileNum) {
                 return Collections.emptyList();
             }
 
             Map<Integer, List<DataFileMeta>> fieldIdToFiles = new LinkedHashMap<>();
             for (DataFileMeta blobFile : blobFiles) {
-                fieldIdToFiles.computeIfAbsent(blobFieldId(blobFile), key -> new ArrayList<>())
-                        .add(blobFile);
+                int fieldId = blobFieldId(blobFile);
+                if (currentBlobFieldIds == null || currentBlobFieldIds.contains(fieldId)) {
+                    fieldIdToFiles.computeIfAbsent(fieldId, key -> new ArrayList<>()).add(blobFile);
+                }
             }
 
-            List<DataFileMeta> result = new ArrayList<>();
+            List<List<DataFileMeta>> result = new ArrayList<>();
             for (List<DataFileMeta> files : fieldIdToFiles.values()) {
                 if (files.size() >= compactMinFileNum) {
-                    result.addAll(files);
+                    result.add(files);
                 }
             }
             return result;
