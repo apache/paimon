@@ -59,9 +59,9 @@ public class BlobTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         String externalStoragePath = warehouse.resolve("external-storage-blob-path").toString();
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'data-evolution.compaction.blob.enabled'='true', 'blob-field'='picture')",
+                "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='picture')",
                 "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
-                "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'data-evolution.compaction.blob.enabled'='true', 'blob-field'='pic1,pic2')",
+                "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pic1,pic2')",
                 String.format(
                         "CREATE TABLE IF NOT EXISTS copy_blob_table (id INT, data STRING, picture BYTES)"
                                 + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
