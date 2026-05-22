@@ -183,6 +183,21 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerSkipsSingleFilePerBlobField() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeBlobEntry("pic1.blob", 0L, 100L, 100, "pic1"));
+        entries.add(makeBlobEntry("pic2.blob", 0L, 100L, 100, "pic2"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(true, false, 1024, 1024, 2);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).isEmpty();
+    }
+
+    @Test
     public void testPlanWithNullManifestRowId() {
         FileStoreTable table = mock(FileStoreTable.class);
         SnapshotReader snapshotReader = mock(SnapshotReader.class);
@@ -286,6 +301,11 @@ public class DataEvolutionCompactCoordinatorTest {
 
     private ManifestEntry makeBlobEntry(
             String fileName, long firstRowId, long rowCount, long fileSize) {
+        return makeBlobEntry(fileName, firstRowId, rowCount, fileSize, null);
+    }
+
+    private ManifestEntry makeBlobEntry(
+            String fileName, long firstRowId, long rowCount, long fileSize, String writeCol) {
         // Blob files have .blob extension
         String blobFileName = fileName.endsWith(".blob") ? fileName : fileName + ".blob";
         return ManifestEntry.create(
@@ -293,11 +313,27 @@ public class DataEvolutionCompactCoordinatorTest {
                 BinaryRow.EMPTY_ROW,
                 0,
                 0,
-                createDataFileMeta(blobFileName, firstRowId, rowCount, 0, fileSize));
+                createDataFileMeta(
+                        blobFileName,
+                        firstRowId,
+                        rowCount,
+                        0,
+                        fileSize,
+                        writeCol == null ? null : Collections.singletonList(writeCol)));
     }
 
     private DataFileMeta createDataFileMeta(
             String fileName, long firstRowId, long rowCount, long maxSeq, long fileSize) {
+        return createDataFileMeta(fileName, firstRowId, rowCount, maxSeq, fileSize, null);
+    }
+
+    private DataFileMeta createDataFileMeta(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSeq,
+            long fileSize,
+            List<String> writeCols) {
         return DataFileMeta.create(
                 fileName,
                 fileSize,
@@ -318,7 +354,7 @@ public class DataEvolutionCompactCoordinatorTest {
                 null,
                 null,
                 firstRowId,
-                null);
+                writeCols);
     }
 
     @Test

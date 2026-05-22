@@ -312,8 +312,9 @@ public class DataEvolutionCompactCoordinator {
                     blobFiles.addAll(
                             dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
                 }
-                if (blobFiles.size() >= compactMinFileNum) {
-                    tasks.add(new DataEvolutionCompactTask(partition, blobFiles, true));
+                List<DataFileMeta> blobFilesToCompact = blobFilesToCompact(blobFiles);
+                if (!blobFilesToCompact.isEmpty()) {
+                    tasks.add(new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
                 }
             }
 
@@ -329,6 +330,27 @@ public class DataEvolutionCompactCoordinator {
                 }
             }
             return tasks;
+        }
+
+        private List<DataFileMeta> blobFilesToCompact(List<DataFileMeta> blobFiles) {
+            if (blobFiles.size() < compactMinFileNum) {
+                return Collections.emptyList();
+            }
+
+            Map<List<String>, List<DataFileMeta>> writeColsToFiles = new LinkedHashMap<>();
+            for (DataFileMeta blobFile : blobFiles) {
+                writeColsToFiles
+                        .computeIfAbsent(blobFile.writeCols(), key -> new ArrayList<>())
+                        .add(blobFile);
+            }
+
+            List<DataFileMeta> result = new ArrayList<>();
+            for (List<DataFileMeta> files : writeColsToFiles.values()) {
+                if (files.size() >= compactMinFileNum) {
+                    result.addAll(files);
+                }
+            }
+            return result;
         }
     }
 }

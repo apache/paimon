@@ -183,6 +183,10 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         CoreOptions options = table.coreOptions();
         RowType blobWriteType = blobWriteType(table, options);
+        if (blobWriteType.getFields().isEmpty()) {
+            return deleteOnlyCompactMessage();
+        }
+
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
         DataFilePathFactory pathFactory =
                 store.pathFactory().createDataFilePathFactory(partition, 0);
@@ -249,6 +253,18 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
                 partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
     }
 
+    private CommitMessage deleteOnlyCompactMessage() {
+        CompactIncrement compactIncrement =
+                new CompactIncrement(
+                        compactBefore,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+        return new CommitMessageImpl(
+                partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
+    }
+
     private RowType blobWriteType(FileStoreTable table, CoreOptions options) {
         Set<Integer> blobFieldIds = new HashSet<>();
         for (DataFileMeta file : compactBefore) {
@@ -265,7 +281,6 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
                         .map(table.rowType()::getField)
                         .filter(field -> blobFieldIds.contains(field.id()))
                         .collect(Collectors.toList());
-        checkArgument(!fields.isEmpty(), "Cannot find blob fields for compaction task %s.", this);
         return new RowType(fields);
     }
 

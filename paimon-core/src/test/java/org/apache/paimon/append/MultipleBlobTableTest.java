@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionSplitRead.FieldBunch;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -38,6 +39,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -110,6 +112,9 @@ public class MultipleBlobTableTest extends TableTestBase {
 
         List<DataFileMeta> after = currentDataFiles(table);
         assertThat(after.stream().filter(file -> isBlobFile(file.fileName())).count()).isEqualTo(2);
+        coordinator = new DataEvolutionCompactCoordinator(table, true, false);
+        assertThat(coordinator.plan().stream().anyMatch(DataEvolutionCompactTask::isBlobTask))
+                .isFalse();
 
         AtomicInteger integer = new AtomicInteger(0);
         readDefault(
@@ -119,6 +124,41 @@ public class MultipleBlobTableTest extends TableTestBase {
                         assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes1);
                         assertThat(row.getBlob(3).toData()).isEqualTo(blobBytes2);
                     }
+                });
+        assertThat(integer.get()).isEqualTo(1000);
+    }
+
+    @Test
+    public void testDataEvolutionBlobCompactionAfterDropBlobColumns() throws Exception {
+        createTableDefault();
+
+        commitDefault(writeDataDefault(1000, 1));
+
+        catalog.alterTable(
+                identifier(),
+                Arrays.asList(SchemaChange.dropColumn("f2"), SchemaChange.dropColumn("f3")),
+                false);
+
+        FileStoreTable table = getTableDefault();
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, true, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        List<DataFileMeta> after = currentDataFiles(getTableDefault());
+        assertThat(after.stream().filter(file -> isBlobFile(file.fileName())).count()).isZero();
+
+        AtomicInteger integer = new AtomicInteger(0);
+        readDefault(
+                row -> {
+                    integer.incrementAndGet();
+                    assertThat(row.getFieldCount()).isEqualTo(2);
                 });
         assertThat(integer.get()).isEqualTo(1000);
     }
