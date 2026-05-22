@@ -108,6 +108,44 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testBlobCompaction() throws Exception {
+        for (int i = 1; i <= 10; i++) {
+            batchSql("INSERT INTO blob_table VALUES (%s, 'paimon', X'48656C6C6F')", i);
+        }
+        batchSql("INSERT INTO blob_table VALUES (1, 'paimon', X'48656C6C6F')");
+
+        assertThat(batchSql("SELECT COUNT(*) FROM `blob_table$files`"))
+                .containsExactly(Row.of(22L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+
+        tEnv.getConfig().set("table.dml-sync", "true");
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.blob_table')").await();
+
+        assertThat(batchSql("SELECT COUNT(*) FROM `blob_table$files`"))
+                .containsExactly(Row.of(12L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path LIKE '%%.blob'"))
+                .containsExactly(Row.of(11L));
+        assertThat(
+                        batchSql(
+                                "SELECT COUNT(*) FROM `blob_table$files` WHERE file_path NOT LIKE '%%.blob'"))
+                .containsExactly(Row.of(1L));
+        assertThat(batchSql("SELECT COUNT(*) FROM blob_table")).containsExactly(Row.of(11L));
+        assertThat(batchSql("SELECT picture FROM blob_table WHERE id = 1"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new byte[] {72, 101, 108, 108, 111}),
+                        Row.of(new byte[] {72, 101, 108, 108, 111}));
+    }
+
+    @Test
     public void testWriteBlobAsDescriptor() throws Exception {
         byte[] blobData = new byte[1024 * 1024];
         RANDOM.nextBytes(blobData);
