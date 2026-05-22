@@ -287,12 +287,17 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
     private DataField blobField(
             FileStoreTable table, CoreOptions options, List<DataFileMeta> files) {
         Integer blobFieldId = null;
+        Map<Long, RowType> schemaCache = new HashMap<>();
         for (DataFileMeta file : files) {
             checkArgument(
                     file.writeCols() != null && file.writeCols().size() == 1,
                     "Blob file %s should contain exactly one write column.",
                     file);
-            RowType fileRowType = table.schemaManager().schema(file.schemaId()).logicalRowType();
+            RowType fileRowType =
+                    schemaCache.computeIfAbsent(
+                            file.schemaId(),
+                            schemaId ->
+                                    table.schemaManager().schema(schemaId).logicalRowType());
             int currentFieldId = fileRowType.getField(file.writeCols().get(0)).id();
             if (blobFieldId == null) {
                 blobFieldId = currentFieldId;
