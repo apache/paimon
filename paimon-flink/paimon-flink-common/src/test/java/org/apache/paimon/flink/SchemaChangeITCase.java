@@ -22,13 +22,21 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.Column;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -142,6 +150,44 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         assertThat(
                         paimonTable("T_BLOB_DESCRIPTOR")
+                                .rowType()
+                                .getField("picture")
+                                .type()
+                                .is(DataTypeRoot.BLOB))
+                .isTrue();
+    }
+
+    @Test
+    public void testAlterAddBlobColumnWithCombinedTableChanges() throws Exception {
+        sql(
+                "CREATE TABLE T_BLOB_COMBINED (id INT, data STRING) WITH ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+
+        CatalogTable table = table("T_BLOB_COMBINED");
+        Map<String, String> newOptions = new HashMap<>(table.getOptions());
+        newOptions.put("blob-field", "picture");
+
+        CatalogTable newTable =
+                new ResolvedCatalogTable(
+                        table.copy(newOptions),
+                        ResolvedSchema.physical(
+                                new String[] {"id", "data", "picture"},
+                                new org.apache.flink.table.types.DataType[] {
+                                    DataTypes.INT(), DataTypes.STRING(), DataTypes.BYTES()
+                                }));
+
+        flinkCatalog()
+                .alterTable(
+                        new ObjectPath(tEnv.getCurrentDatabase(), "T_BLOB_COMBINED"),
+                        newTable,
+                        Arrays.asList(
+                                TableChange.set("blob-field", "picture"),
+                                TableChange.add(Column.physical("picture", DataTypes.BYTES()))),
+                        false);
+
+        assertThat(
+                        paimonTable("T_BLOB_COMBINED")
                                 .rowType()
                                 .getField("picture")
                                 .type()

@@ -645,7 +645,8 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         SchemaChange.setOption(CoreOptions.BLOB_FIELD.key(), "f1")))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Cannot configure existing field 'f1' as a BLOB field.");
+                .hasMessageContaining("Cannot configure existing field 'f1' as a BLOB field.")
+                .hasMessageContaining("set 'blob-field' before adding the binary column");
     }
 
     @Test

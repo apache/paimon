@@ -1335,8 +1335,10 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format(
                                 "Cannot configure existing field '%s' as a BLOB field. "
-                                        + "BLOB fields can only be added by adding new columns.",
-                                field));
+                                        + "BLOB fields can only be added as new columns. "
+                                        + "If you are using SQL to ADD a blob column, set '%s' "
+                                        + "before adding the binary column.",
+                                field, key));
             }
         }
     }

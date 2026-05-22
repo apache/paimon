@@ -106,7 +106,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>(none)</td>
       <td>String</td>
-      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in <code>blob-descriptor-field</code> or <code>blob-view-field</code> are also treated as BLOB fields.</td>
+      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in <code>blob-descriptor-field</code>, <code>blob-view-field</code>, or <code>blob-external-storage-field</code> are also treated as BLOB fields.</td>
     </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
@@ -255,6 +255,73 @@ CREATE TABLE image_table (
 </TabItem>
 
 </Tabs>
+
+### Adding a Blob Column to an Existing Table
+
+Flink SQL and Spark SQL do not expose Paimon's `BLOB` type directly. To add a BLOB column with SQL, add a binary
+column (`BYTES` in Flink SQL, `BINARY` in Spark SQL) and configure the blob field option before adding the physical
+column. Currently, `ALTER TABLE` supports adding BLOB columns through `blob-field` or `blob-descriptor-field`.
+`blob-view-field` and `blob-external-storage-field` are immutable and should be configured when creating the table.
+
+{{< tabs "blob-add-column" >}}
+
+{{< tab "Flink SQL" >}}
+```sql
+CREATE TABLE image_table (
+    id INT,
+    name STRING
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+ALTER TABLE image_table SET ('blob-field' = 'image');
+ALTER TABLE image_table ADD image BYTES;
+```
+{{< /tab >}}
+
+{{< tab "Spark SQL" >}}
+```sql
+CREATE TABLE image_table (
+    id INT,
+    name STRING
+) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-field' = 'image');
+ALTER TABLE image_table ADD COLUMN image BINARY;
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
+Do not add the binary column first and set `blob-field` later. For example, the following order creates a normal
+`BYTES` / `BINARY` column. The later option change will not convert the existing column to BLOB, and may be rejected
+because existing fields cannot be newly configured as blob fields:
+
+```sql
+ALTER TABLE image_table ADD image BYTES; -- or ADD COLUMN image BINARY in Spark SQL
+ALTER TABLE image_table SET ('blob-field' = 'image');
+```
+
+For descriptor BLOB columns, set `blob-descriptor-field` before adding the column. The following example uses Flink
+SQL; in Spark SQL, use `SET TBLPROPERTIES` and `ADD COLUMN image BINARY`.
+
+```sql
+ALTER TABLE image_table SET ('blob-descriptor-field' = 'image');
+ALTER TABLE image_table ADD image BYTES;
+```
+
+When using the Paimon API, you can add a BLOB column directly because Paimon has a native `BLOB` type:
+
+```java
+catalog.alterTable(
+        identifier,
+        Collections.singletonList(SchemaChange.addColumn("image", DataTypes.BLOB())),
+        false);
+```
 
 ### Inserting Blob Data
 

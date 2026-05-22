@@ -24,6 +24,8 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.TableChange;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -143,6 +145,29 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 .getField("picture")
                                 .type()
                                 .is(DataTypeRoot.BLOB))
+                .isTrue();
+    }
+
+    @Test
+    public void testAlterAddBlobColumnWithCombinedTableChanges() throws Exception {
+        String tableName = "testAlterAddBlobColumnWithCombinedTableChanges";
+        spark.sql(
+                "CREATE TABLE "
+                        + tableName
+                        + " (id INT, data STRING) "
+                        + "TBLPROPERTIES ("
+                        + "'row-tracking.enabled'='true', "
+                        + "'data-evolution.enabled'='true')");
+
+        ((SparkCatalog) spark.sessionState().catalogManager().currentCatalog())
+                .alterTable(
+                        Identifier.of(new String[] {"default"}, tableName),
+                        TableChange.setProperty("blob-field", "picture"),
+                        TableChange.addColumn(
+                                new String[] {"picture"},
+                                org.apache.spark.sql.types.DataTypes.BinaryType));
+
+        assertThat(getTable(tableName).rowType().getField("picture").type().is(DataTypeRoot.BLOB))
                 .isTrue();
     }
 
