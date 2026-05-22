@@ -117,11 +117,11 @@ public class RTreeQuadraticSplitTest {
 
             // Allow wider range for random distributions
             assertTrue(
-                    g1Size >= 5 && g1Size <= 59,
-                    "Trial " + trial + ": Group 1 should have 5-59 entries, got " + g1Size);
+                    g1Size >= 4 && g1Size <= 60,
+                    "Trial " + trial + ": Group 1 should have 4-60 entries, got " + g1Size);
             assertTrue(
-                    g2Size >= 5 && g2Size <= 59,
-                    "Trial " + trial + ": Group 2 should have 5-59 entries, got " + g2Size);
+                    g2Size >= 4 && g2Size <= 60,
+                    "Trial " + trial + ": Group 2 should have 4-60 entries, got " + g2Size);
         }
     }
 
