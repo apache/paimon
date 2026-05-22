@@ -72,6 +72,8 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionCompactTask.class);
 
     private static final Map<String, String> DYNAMIC_WRITE_OPTIONS = dynamicWriteOptions();
+    private static final Map<String, String> BLOB_COMPACT_READ_OPTIONS =
+            Collections.singletonMap(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true");
 
     private static Map<String, String> dynamicWriteOptions() {
         Map<String, String> options = new HashMap<>();
@@ -197,7 +199,8 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
 
         RowType blobWriteType = new RowType(Collections.singletonList(blobField));
 
-        AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
+        FileStoreTable readTable = table.copy(BLOB_COMPACT_READ_OPTIONS);
+        AppendOnlyFileStore store = (AppendOnlyFileStore) readTable.store();
         DataFilePathFactory pathFactory =
                 store.pathFactory().createDataFilePathFactory(partition, 0);
 

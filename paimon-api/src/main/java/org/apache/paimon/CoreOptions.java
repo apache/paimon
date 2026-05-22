@@ -2224,6 +2224,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_BLOB_ENABLED =
+            key("data-evolution.compaction.blob.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to compact blob files when compacting a data evolution table.");
+
     public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
             key("snapshot.ignore-empty-commit")
                     .booleanType()
@@ -3688,6 +3695,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionCompactionBlobEnabled() {
+        return options.get(DATA_EVOLUTION_COMPACTION_BLOB_ENABLED);
     }
 
     public boolean prepareCommitWaitCompaction() {
