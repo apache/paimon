@@ -177,15 +177,18 @@ public class DataEvolutionCompactCoordinatorTest {
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
-        // Should have compaction tasks for data files and blob files within each data-file range
-        assertThat(tasks.size()).isEqualTo(3);
+        // Should have compaction tasks for data files and blob files within the data compaction
+        // range.
+        assertThat(tasks.size()).isEqualTo(2);
 
         assertThat(tasks.get(0).compactBefore())
                 .containsExactly(entries.get(0).file(), entries.get(3).file());
         assertThat(tasks.get(1).compactBefore())
-                .containsExactly(entries.get(1).file(), entries.get(2).file());
-        assertThat(tasks.get(2).compactBefore())
-                .containsExactly(entries.get(4).file(), entries.get(5).file());
+                .containsExactly(
+                        entries.get(1).file(),
+                        entries.get(2).file(),
+                        entries.get(4).file(),
+                        entries.get(5).file());
     }
 
     @Test

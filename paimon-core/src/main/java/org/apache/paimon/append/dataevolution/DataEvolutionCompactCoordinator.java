@@ -356,18 +356,35 @@ public class DataEvolutionCompactCoordinator {
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
+            boolean triggerNormalFile = false;
             if (dataFiles.size() >= compactMinFileNum) {
                 tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
+                triggerNormalFile = true;
             }
 
             if (compactBlob) {
-                for (DataFileMeta dataFile : dataFiles) {
+                if (triggerNormalFile) {
+                    List<DataFileMeta> blobFiles = new ArrayList<>();
+                    for (DataFileMeta dataFile : dataFiles) {
+                        blobFiles.addAll(
+                                dataFileToBlobFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
                     for (List<DataFileMeta> blobFilesToCompact :
-                            blobFileGroupsToCompact(
-                                    dataFileToBlobFiles.getOrDefault(
-                                            dataFile, Collections.emptyList()))) {
+                            blobFileGroupsToCompact(blobFiles)) {
                         tasks.add(
                                 new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                    }
+                } else {
+                    for (DataFileMeta dataFile : dataFiles) {
+                        for (List<DataFileMeta> blobFilesToCompact :
+                                blobFileGroupsToCompact(
+                                        dataFileToBlobFiles.getOrDefault(
+                                                dataFile, Collections.emptyList()))) {
+                            tasks.add(
+                                    new DataEvolutionCompactTask(
+                                            partition, blobFilesToCompact, true));
+                        }
                     }
                 }
             }
