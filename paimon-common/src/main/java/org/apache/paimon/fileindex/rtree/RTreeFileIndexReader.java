@@ -72,7 +72,7 @@ public class RTreeFileIndexReader extends FileIndexReader {
             throws IOException {
         boolean isLeaf = dis.readBoolean();
         int entryCount = dis.readInt();
- 
+
         node.setLeaf(isLeaf);
 
         BoundingBox bbox = BoundingBox.deserialize(dis, dimensions);
