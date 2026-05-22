@@ -290,6 +290,21 @@ public class DataEvolutionReadTest {
         assertThat(blobBunch.files.get(3).fileName()).contains("blob18");
     }
 
+    @Test
+    public void testBlobOnlySplitWithMultipleBlobFields() {
+        List<DataFileMeta> files = new ArrayList<>();
+        files.add(createBlobFileWithCols("blob1", 0, 100, 1, Collections.singletonList("blobc1")));
+        files.add(createBlobFileWithCols("blob2", 0, 100, 1, Collections.singletonList("blobc2")));
+
+        List<FieldBunch> fieldBunches =
+                splitFieldBunches(
+                        files, file -> makeBlobRowType(file.writeCols(), String::hashCode));
+
+        assertThat(fieldBunches).hasSize(2);
+        assertThat(fieldBunches.get(0).rowCount()).isEqualTo(100);
+        assertThat(fieldBunches.get(1).rowCount()).isEqualTo(100);
+    }
+
     /** Creates a blob file with the specified parameters. */
     private DataFileMeta createBlobFile(
             String fileName, long firstRowId, long rowCount, long maxSequenceNumber) {

@@ -566,9 +566,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
             files.add(file);
             rowCount += file.rowCount();
-            checkArgument(
-                    rowCount <= expectedRowCount,
-                    "Blob/vector-store files row count exceed the expect " + expectedRowCount);
+            if (expectedRowCount >= 0) {
+                checkArgument(
+                        rowCount <= expectedRowCount,
+                        "Blob/vector-store files row count exceed the expect " + expectedRowCount);
+            }
             this.latestMaxSequenceNumber = file.maxSequenceNumber();
             this.latestFistRowId = file.nonNullFirstRowId();
             this.expectedNextFirstRowId = latestFistRowId + file.rowCount();
