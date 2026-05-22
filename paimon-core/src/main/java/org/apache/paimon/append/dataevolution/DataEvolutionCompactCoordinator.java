@@ -60,6 +60,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataEvolutionCompactCoordinator {
 
     private static final int FILES_BATCH = 100_000;
+    private static final int BLOB_COMPACT_MIN_FILE_NUM = 2;
 
     private final CompactScanner scanner;
     private final CompactPlanner planner;
@@ -445,23 +446,22 @@ public class DataEvolutionCompactCoordinator {
 
         private void addFileGroupsToCompact(
                 List<List<DataFileMeta>> result, List<DataFileMeta> continuousFiles) {
-            if (continuousFiles.size() < compactMinFileNum) {
+            if (continuousFiles.size() < BLOB_COMPACT_MIN_FILE_NUM) {
                 return;
             }
-
             List<DataFileMeta> taskFiles = new ArrayList<>();
             long fileSize = 0L;
             for (DataFileMeta file : continuousFiles) {
                 taskFiles.add(file);
                 fileSize += file.fileSize();
-                if (fileSize >= blobTargetFileSize && taskFiles.size() >= compactMinFileNum) {
+                if (fileSize >= blobTargetFileSize && taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
                     result.add(taskFiles);
                     taskFiles = new ArrayList<>();
                     fileSize = 0L;
                 }
             }
 
-            if (taskFiles.size() >= compactMinFileNum) {
+            if (taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
                 result.add(taskFiles);
             }
         }
