@@ -361,13 +361,14 @@ public class DataEvolutionCompactCoordinator {
             }
 
             if (compactBlob) {
-                List<DataFileMeta> blobFiles = new ArrayList<>();
                 for (DataFileMeta dataFile : dataFiles) {
-                    blobFiles.addAll(
-                            dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
-                }
-                for (List<DataFileMeta> blobFilesToCompact : blobFileGroupsToCompact(blobFiles)) {
-                    tasks.add(new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                    for (List<DataFileMeta> blobFilesToCompact :
+                            blobFileGroupsToCompact(
+                                    dataFileToBlobFiles.getOrDefault(
+                                            dataFile, Collections.emptyList()))) {
+                        tasks.add(
+                                new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                    }
                 }
             }
 
