@@ -21,26 +21,34 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendCompactTask;
+import org.apache.paimon.append.MultipleBlobFileWriter;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,8 +65,14 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionCompactTask.class);
 
-    private static final Map<String, String> DYNAMIC_WRITE_OPTIONS =
-            Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
+    private static final Map<String, String> DYNAMIC_WRITE_OPTIONS = dynamicWriteOptions();
+
+    private static Map<String, String> dynamicWriteOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
+        options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "99999 G");
+        return Collections.unmodifiableMap(options);
+    }
 
     private final boolean blobTask;
 
@@ -74,8 +88,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
 
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
         if (blobTask) {
-            // TODO: support blob file compaction
-            throw new UnsupportedOperationException("Blob task is not supported");
+            return doCompactBlobFiles(table, commitUser);
         }
         if (isVectorStoreFile(compactBefore.get(0).fileName())) {
             // TODO: support vector-store file compaction
@@ -163,6 +176,117 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
                         Collections.emptyList());
         return new CommitMessageImpl(
                 partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
+    }
+
+    private CommitMessage doCompactBlobFiles(FileStoreTable table, String commitUser)
+            throws Exception {
+        table = table.copy(DYNAMIC_WRITE_OPTIONS);
+        CoreOptions options = table.coreOptions();
+        RowType blobWriteType = blobWriteType(table, options);
+        AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(partition)
+                        .withBucket(0)
+                        .withDataFiles(compactBefore)
+                        .withBucketPath(pathFactory.parent().toString())
+                        .rawConvertible(false)
+                        .build();
+        RecordReader<InternalRow> reader =
+                store.newDataEvolutionRead().withReadType(blobWriteType).createReader(dataSplit);
+        MultipleBlobFileWriter writer =
+                new MultipleBlobFileWriter(
+                        table.fileIO(),
+                        table.schema().id(),
+                        blobWriteType,
+                        pathFactory,
+                        () -> new LongCounter(0),
+                        FileSource.COMPACT,
+                        false,
+                        options.statsDenseStore(),
+                        options.blobTargetFileSize(),
+                        null,
+                        options.blobInlineField());
+
+        try {
+            reader.forEachRemaining(
+                    row -> {
+                        try {
+                            writer.write(row);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+            writer.close();
+        } catch (Exception e) {
+            writer.abort();
+            throw e;
+        }
+
+        List<DataFileMeta> compactAfter = new ArrayList<>();
+        long firstRowId = compactBefore.get(0).nonNullFirstRowId();
+        long minSequenceId = minSequenceId();
+        long maxSequenceId = maxSequenceId();
+        for (DataFileMeta file : writer.result()) {
+            compactAfter.add(
+                    file.assignFirstRowId(firstRowId)
+                            .assignSequenceNumber(minSequenceId, maxSequenceId));
+        }
+        checkArgument(
+                !compactAfter.isEmpty(), "Blob file compaction should produce at least one file.");
+
+        CompactIncrement compactIncrement =
+                new CompactIncrement(
+                        compactBefore,
+                        compactAfter,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+        return new CommitMessageImpl(
+                partition, 0, null, DataIncrement.emptyIncrement(), compactIncrement);
+    }
+
+    private RowType blobWriteType(FileStoreTable table, CoreOptions options) {
+        Set<Integer> blobFieldIds = new HashSet<>();
+        for (DataFileMeta file : compactBefore) {
+            checkArgument(
+                    file.writeCols() != null && file.writeCols().size() == 1,
+                    "Blob file %s should contain exactly one write column.",
+                    file);
+            RowType fileRowType = table.schemaManager().schema(file.schemaId()).logicalRowType();
+            blobFieldIds.add(fileRowType.getField(file.writeCols().get(0)).id());
+        }
+
+        List<DataField> fields =
+                fieldNamesInBlobFile(table.rowType(), options.blobInlineField()).stream()
+                        .map(table.rowType()::getField)
+                        .filter(field -> blobFieldIds.contains(field.id()))
+                        .collect(Collectors.toList());
+        checkArgument(!fields.isEmpty(), "Cannot find blob fields for compaction task %s.", this);
+        return new RowType(fields);
+    }
+
+    private long minSequenceId() {
+        return compactBefore.stream()
+                .mapToLong(DataFileMeta::minSequenceNumber)
+                .min()
+                .orElseThrow(
+                        () ->
+                                new IllegalStateException(
+                                        "Cannot get min sequence id from compact before files."));
+    }
+
+    private long maxSequenceId() {
+        return compactBefore.stream()
+                .mapToLong(DataFileMeta::maxSequenceNumber)
+                .max()
+                .orElseThrow(
+                        () ->
+                                new IllegalStateException(
+                                        "Cannot get max sequence id from compact before files."));
     }
 
     @Override
