@@ -759,7 +759,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             newTableName = getNewTableName(newTableCount);
             createNewTable(statement, newTableName);
 
-            Thread.sleep(5000L);
+            // wait until the Paimon table is created by CDC before inserting records,
+            // so that the CDC source is ready to capture the INSERT events
+            waitForPaimonTableToExist(newTableName);
 
             // insert records
             newTableRecords = getNewTableRecords();
@@ -860,6 +862,17 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         statement.executeUpdate(
                 String.format(
                         "CREATE TABLE %s (k INT, v1 VARCHAR(10), PRIMARY KEY (k))", newTableName));
+    }
+
+    private void waitForPaimonTableToExist(String tableName) throws Exception {
+        while (true) {
+            try {
+                getFileStoreTable(tableName);
+                return;
+            } catch (Exception e) {
+                Thread.sleep(1000);
+            }
+        }
     }
 
     private JobClient buildSyncDatabaseActionWithNewlyAddedTables(
