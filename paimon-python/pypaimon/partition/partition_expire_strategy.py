@@ -150,7 +150,14 @@ class PartitionUpdateTimeExpireStrategy(PartitionExpireStrategy):
         self, partition_entries: List[PartitionEntry], expiration_time: datetime
     ) -> List[PartitionEntry]:
         expiration_millis = int(expiration_time.timestamp() * 1000)
-        return [
-            entry for entry in partition_entries
-            if expiration_millis > entry.last_file_creation_time
-        ]
+        expired = []
+        for entry in partition_entries:
+            if entry.last_file_creation_time == 0:
+                logger.warning(
+                    "Partition %s has last_file_creation_time=0 (unknown), skipping expiration.",
+                    entry.spec,
+                )
+                continue
+            if expiration_millis > entry.last_file_creation_time:
+                expired.append(entry)
+        return expired

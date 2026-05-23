@@ -37,32 +37,41 @@ _DEFAULT_TIMESTAMP_FORMATS = [
     "%Y-%m-%d",
 ]
 
-# Java DateTimeFormatter → Python strptime conversion (order matters: longest first)
-_JAVA_TO_PYTHON_PATTERNS = [
-    ("yyyy", "%Y"),
-    ("yy", "%y"),
-    ("MM", "%m"),
-    ("dd", "%d"),
-    ("HH", "%H"),
-    ("mm", "%M"),
-    ("SSS", "%f"),
-    ("SS", "%f"),
-    ("ss", "%S"),
-]
+# Java DateTimeFormatter → Python strptime token mapping.
+# Note: Python's %f is microseconds (6 digits); Java's SSS is milliseconds (3 digits).
+# This works for parsing because strptime(%f) accepts 1-6 digits, but the semantic
+# precision differs. Callers should be aware of this when formatting output.
+_JAVA_TO_PYTHON_TOKENS = {
+    "yyyy": "%Y",
+    "yy": "%y",
+    "MM": "%m",
+    "dd": "%d",
+    "HH": "%H",
+    "mm": "%M",
+    "SSS": "%f",
+    "SS": "%f",
+    "ss": "%S",
+}
+
+# Regex that matches Java tokens (longest first) or quoted literals
+_JAVA_TOKEN_RE = re.compile(
+    r"'([^']*)'|(" + "|".join(re.escape(k) for k in sorted(_JAVA_TO_PYTHON_TOKENS, key=len, reverse=True)) + r")"
+)
 
 
 def _java_to_python_format(java_fmt: str) -> str:
     """Convert Java DateTimeFormatter pattern to Python strptime format.
 
-    Handles:
-    - Standard tokens: yyyy, MM, dd, HH, mm, ss, SSS
-    - Quoted literals: 'T' → T (strips single quotes)
+    Uses regex tokenization to avoid overlapping-replacement issues with
+    sequential str.replace().
     """
-    import re
-    # Strip Java quoted literals: 'T' → T, '' → '
-    result = re.sub(r"'([^']*)'", r"\1", java_fmt)
-    for java_pat, py_pat in _JAVA_TO_PYTHON_PATTERNS:
-        result = result.replace(java_pat, py_pat)
+    def _replace_token(m):
+        if m.group(1) is not None:
+            return m.group(1)
+        return _JAVA_TO_PYTHON_TOKENS[m.group(2)]
+
+    # Replace known tokens; leave unmatched characters (literals like '-', ' ', 'T') as-is
+    result = _JAVA_TOKEN_RE.sub(_replace_token, java_fmt)
     return result
 
 
@@ -129,12 +138,23 @@ class PartitionTimeExtractor:
 
     @staticmethod
     def _parse_with_formatter(timestamp_string: str, formatter: str) -> datetime:
-        """Parse using the converted Python strptime pattern."""
+        """Parse using the converted Python strptime pattern.
+
+        Mirrors Java behavior: tries LocalDateTime.parse first, then falls back
+        to LocalDate.parse (date-only) with the same formatter pattern.
+        """
         try:
             return datetime.strptime(timestamp_string, formatter)
         except ValueError:
-            parsed_date = datetime.strptime(timestamp_string, formatter).date()
-            return datetime.combine(parsed_date, dt_time.min)
+            # Fallback: strip time directives (%H, %M, %S, %f) and surrounding
+            # literals to get a date-only format, mirroring Java's LocalDate.parse fallback.
+            date_only_format = re.split(r'(?=%H|%M|%S|%f)', formatter)[0].rstrip()
+            # Also strip any trailing non-directive separators (e.g. trailing space or 'T')
+            date_only_format = date_only_format.rstrip(' T-:')
+            if date_only_format and date_only_format != formatter:
+                parsed_date = datetime.strptime(timestamp_string, date_only_format).date()
+                return datetime.combine(parsed_date, dt_time.min)
+            raise
 
     @staticmethod
     def _parse_default(timestamp_string: str) -> datetime:

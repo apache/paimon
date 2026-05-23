@@ -292,7 +292,7 @@ def _read_partition_entries(table) -> List[PartitionEntry]:
     ]
 
 
-def _parse_duration(duration_str: str) -> Optional[timedelta]:
+def _parse_duration(duration_str: Optional[str]) -> Optional[timedelta]:
     """
     Parse a duration string like '7d', '1h', '30m', '10s', '1d 2h'.
     Also supports ISO-like formats: '7 days', '1 hour'.

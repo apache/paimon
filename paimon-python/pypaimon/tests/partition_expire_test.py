@@ -81,6 +81,12 @@ class TestPartitionTimeExtractor(unittest.TestCase):
         result = extractor.extract(["dt"], ["2024-1-5"])
         self.assertEqual(result, datetime(2024, 1, 5, 0, 0, 0))
 
+    def test_formatter_date_only_fallback(self):
+        """Formatter with time components should fall back to date-only parsing."""
+        extractor = PartitionTimeExtractor(formatter="yyyy-MM-dd HH:mm:ss")
+        result = extractor.extract(["dt"], ["2024-03-15"])
+        self.assertEqual(result, datetime(2024, 3, 15, 0, 0, 0))
+
 
 class TestPartitionValuesTimeExpireStrategy(unittest.TestCase):
     """Tests for PartitionValuesTimeExpireStrategy."""
@@ -182,6 +188,24 @@ class TestPartitionUpdateTimeExpireStrategy(unittest.TestCase):
         expiration_time = now - timedelta(days=7)
         expired = strategy.select_expired_partitions(entries, expiration_time)
         self.assertEqual(len(expired), 0)
+
+    def test_zero_creation_time_skipped(self):
+        """Partitions with last_file_creation_time=0 should be skipped (unknown state)."""
+        strategy = PartitionUpdateTimeExpireStrategy(
+            partition_keys=["dt"],
+        )
+        now = datetime(2024, 6, 1)
+        old_time_millis = int((now - timedelta(days=30)).timestamp() * 1000)
+
+        entries = [
+            PartitionEntry(spec={"dt": "2024-05-01"}, last_file_creation_time=old_time_millis),
+            PartitionEntry(spec={"dt": "2024-04-01"}, last_file_creation_time=0),
+        ]
+
+        expiration_time = now - timedelta(days=7)
+        expired = strategy.select_expired_partitions(entries, expiration_time)
+        self.assertEqual(len(expired), 1)
+        self.assertEqual(expired[0].spec["dt"], "2024-05-01")
 
 
 class TestPartitionExpire(unittest.TestCase):
