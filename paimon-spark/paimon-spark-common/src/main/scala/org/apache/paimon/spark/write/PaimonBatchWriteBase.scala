@@ -27,7 +27,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
 
 import org.apache.spark.sql.PaimonSparkSession
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
+import org.apache.spark.sql.connector.write.{DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
 import org.apache.spark.sql.execution.SQLExecution
 import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.types.StructType
@@ -36,18 +36,30 @@ import java.util.Collections
 
 import scala.collection.JavaConverters._
 
-case class PaimonBatchWrite(
-    table: FileStoreTable,
-    writeSchema: StructType,
-    dataSchema: StructType,
-    overwritePartitions: Option[Map[String, String]],
-    copyOnWriteScan: Option[PaimonCopyOnWriteScan])
-  extends BatchWrite
-  with WriteHelper {
+/**
+ * Business logic for Paimon batch writes, deliberately *not* extending
+ * `org.apache.spark.sql.connector.write.BatchWrite`. Spark 4.1 added a default method
+ * `BatchWrite.commit(WriterCommitMessage[], WriteSummary)` whose `WriteSummary` parameter type does
+ * not exist on Spark 4.0; a class compiled against 4.1 that declares `extends BatchWrite` carries
+ * the inherited `commit(.., WriteSummary)` signature in its method table, which JVM
+ * `ObjectStreamClass.getPrivateMethod` lazy-links during Spark task serialization, crashing on 4.0
+ * with `ClassNotFoundException: WriteSummary`. Keeping this base off `BatchWrite` lets common ship
+ * the implementation once; per-version `paimon-spark{3,4}-common` modules supply a thin wrapper
+ * that mixes in `BatchWrite`, and `paimon-spark-4.0/src/main` shadows that wrapper at the 4.0.2
+ * compile target.
+ */
+abstract class PaimonBatchWriteBase(
+    val table: FileStoreTable,
+    val writeSchema: StructType,
+    val dataSchema: StructType,
+    val overwritePartitions: Option[Map[String, String]],
+    val copyOnWriteScan: Option[PaimonCopyOnWriteScan])
+  extends WriteHelper
+  with Serializable {
 
   protected val metricRegistry = SparkMetricRegistry()
 
-  @volatile private var commitStarted: Boolean = false
+  @volatile protected var commitStarted: Boolean = false
 
   protected val batchWriteBuilder: BatchWriteBuilder = {
     val builder = table.newBatchWriteBuilder()
@@ -55,7 +67,7 @@ case class PaimonBatchWrite(
     builder
   }
 
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+  protected def createPaimonDataWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     (_: Int, _: Long) =>
       {
         PaimonV2DataWriter(
@@ -67,9 +79,7 @@ case class PaimonBatchWrite(
       }
   }
 
-  override def useCommitCoordinator(): Boolean = false
-
-  override def commit(messages: Array[WriterCommitMessage]): Unit = {
+  protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
     commitStarted = true
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
@@ -91,6 +101,22 @@ case class PaimonBatchWrite(
     postCommit(commitMessages)
   }
 
+  protected def abortMessages(messages: Array[WriterCommitMessage]): Unit = {
+    if (commitStarted) {
+      logWarning(s"Skip abort cleanup for table ${table.name()} because commit has already started")
+      return
+    }
+
+    logInfo(s"Aborting write to table ${table.name()}")
+    val batchTableCommit = batchWriteBuilder.newCommit()
+    try {
+      val commitMessages = WriteTaskResult.merge(messages.filter(_ != null))
+      batchTableCommit.abort(commitMessages.asJava)
+    } finally {
+      batchTableCommit.close()
+    }
+  }
+
   // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
   // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
   protected def postDriverMetrics(): Unit = {
@@ -107,22 +133,6 @@ case class PaimonBatchWrite(
         }
     }
     SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
-  }
-
-  override def abort(messages: Array[WriterCommitMessage]): Unit = {
-    if (commitStarted) {
-      logWarning(s"Skip abort cleanup for table ${table.name()} because commit has already started")
-      return
-    }
-
-    logInfo(s"Aborting write to table ${table.name()}")
-    val batchTableCommit = batchWriteBuilder.newCommit()
-    try {
-      val commitMessages = WriteTaskResult.merge(messages.filter(_ != null))
-      batchTableCommit.abort(commitMessages.asJava)
-    } finally {
-      batchTableCommit.close()
-    }
   }
 
   private def buildDeletedCommitMessage(

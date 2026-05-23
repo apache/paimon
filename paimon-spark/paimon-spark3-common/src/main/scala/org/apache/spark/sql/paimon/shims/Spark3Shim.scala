@@ -22,6 +22,10 @@ import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark3ArrayData, Spark3InternalRow, Spark3InternalRowWithBlob, SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.format.FormatTableBatchWrite
+import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
+import org.apache.paimon.spark.write.PaimonBatchWrite
+import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.conf.Configuration
@@ -42,6 +46,7 @@ import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, ResolveDe
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.catalog.CatalogV2Util.structTypeToV2Columns
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
@@ -184,6 +189,21 @@ class Spark3Shim extends SparkShim {
   private def invalidateCache(tableCatalog: TableCatalog, table: Table, ident: Identifier): Unit = {
     tableCatalog.invalidateTable(ident)
   }
+
+  override def createPaimonBatchWrite(
+      table: FileStoreTable,
+      writeSchema: StructType,
+      dataSchema: StructType,
+      overwritePartitions: Option[Map[String, String]],
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite =
+    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+
+  override def createFormatTableBatchWrite(
+      table: FormatTable,
+      overwriteDynamic: Option[Boolean],
+      overwritePartitions: Option[Map[String, String]],
+      writeSchema: StructType): BatchWrite =
+    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,
