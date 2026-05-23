@@ -16,11 +16,14 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for ``KeyValueDataWriter._merge_pending_by_pk``.
+"""Unit tests for ``KeyValueDataWriter`` buffer behaviour.
 
-Drives the in-memory merge buffer with synthetic ``pa.Table`` inputs
-to pin down the merge-function dispatch independently of the rest of
-the catalog/write stack.
+Covers the fold algorithm (`_merge_pending_by_pk`), the flush lifecycle
+(`_flush_all` empties the buffer + clears pending_data), and the
+roll-write helper (`_roll_write` splits oversized buffers across
+multiple files). Drives a thin harness that bypasses
+``DataWriter.__init__`` so tests can exercise these paths without
+spinning up the real catalog/write stack.
 """
 
 import unittest
@@ -61,17 +64,28 @@ def _row(pk, seq, a, b):
 
 
 class _Harness(KeyValueDataWriter):
-    """Bypass ``DataWriter.__init__`` to keep the tests focused on the
-    merge step. ``_merge_pending_by_pk`` only needs ``trimmed_primary_keys``,
-    ``_merge_function``, and the ``_merge_clean`` dirty-flag attribute.
+    """Bypass ``DataWriter.__init__`` to keep tests focused.
+
+    Provides just the attributes ``_merge_pending_by_pk`` / ``_flush_all``
+    / ``_roll_write`` read, plus a recording stub for
+    ``_write_data_to_file`` so the roll-write path can be exercised
+    without touching the filesystem.
     """
 
-    def __init__(self, merge_function):
+    def __init__(self, merge_function, target_file_size: int = 10 ** 12):
         self.trimmed_primary_keys = ['id']
         self._merge_function = merge_function
-        # The real __init__ initialises this to True (no data => clean).
-        # Tests mutate it directly to assert the flag transitions.
-        self._merge_clean = True
+        # Large enough that ``_check_and_roll_if_needed`` does not
+        # trigger on its own in tests that don't care about rolling.
+        self.target_file_size = target_file_size
+        self.pending_data = None
+        self.committed_files = []
+        self.written_chunks = []
+
+    def _write_data_to_file(self, data):
+        # Record each chunk instead of writing to disk; mirrors the
+        # base writer's contract of appending to ``committed_files``.
+        self.written_chunks.append(data)
 
 
 class WriteMergeBufferTest(unittest.TestCase):
@@ -191,46 +205,6 @@ class WriteMergeBufferTest(unittest.TestCase):
         out = writer._merge_pending_by_pk(data)
         self.assertEqual(out.num_rows, 0)
 
-    # -- dirty flag -------------------------------------------------------
-
-    def test_merge_clears_dirty_flag(self):
-        writer = _Harness(DeduplicateMergeFunction())
-        writer._merge_clean = False
-        data = pa.Table.from_pylist(
-            [_row(1, 1, 'A', None), _row(1, 2, 'B', None)],
-            schema=_SCHEMA,
-        )
-        writer._merge_pending_by_pk(data)
-        self.assertTrue(writer._merge_clean)
-
-    def test_single_row_path_also_clears_dirty_flag(self):
-        # The n < 2 fast path still leaves the buffer PK-unique, so
-        # downstream prepare_commit must be told it doesn't need to
-        # re-merge.
-        writer = _Harness(DeduplicateMergeFunction())
-        writer._merge_clean = False
-        data = pa.Table.from_pylist([_row(1, 1, 'A', None)], schema=_SCHEMA)
-        writer._merge_pending_by_pk(data)
-        self.assertTrue(writer._merge_clean)
-
-    def test_process_data_marks_buffer_dirty(self):
-        # _process_data drops the clean bit so a subsequent flush knows
-        # the freshly appended batch still needs folding.
-        writer = _Harness(DeduplicateMergeFunction())
-        writer.sequence_generator = _StubSeqGen()
-        writer._merge_clean = True
-
-        batch = pa.RecordBatch.from_pylist(
-            [{'id': 1, 'a': 'X', 'b': None}],
-            schema=pa.schema([
-                pa.field('id', pa.int64(), nullable=False),
-                pa.field('a', pa.string()),
-                pa.field('b', pa.string()),
-            ]),
-        )
-        writer._process_data(batch)
-        self.assertFalse(writer._merge_clean)
-
     # -- KeyValue pooling -------------------------------------------------
 
     def test_keyvalue_pool_does_not_alias_results_across_runs(self):
@@ -254,14 +228,133 @@ class WriteMergeBufferTest(unittest.TestCase):
             [_row(1, 2, 'A1', 'B1'), _row(2, 4, 'A2', 'B2')],
         )
 
+    # -- _process_data (no longer sorts) ----------------------------------
+
+    def test_process_data_adds_system_fields_without_sorting(self):
+        # Deferred-sort design: ``_process_data`` must not pre-sort the
+        # incoming batch. The global sort happens once inside
+        # ``_flush_all`` over the concatenated buffer.
+        writer = _Harness(DeduplicateMergeFunction())
+        writer.sequence_generator = _StubSeqGen()
+        # Intentionally pass rows in descending PK order; if _process_data
+        # were still sorting, the output would come back ascending.
+        batch = pa.RecordBatch.from_pylist(
+            [{'id': 3, 'a': 'C', 'b': None},
+             {'id': 1, 'a': 'A', 'b': None},
+             {'id': 2, 'a': 'B', 'b': None}],
+            schema=pa.schema([
+                pa.field('id', pa.int64(), nullable=False),
+                pa.field('a', pa.string()),
+                pa.field('b', pa.string()),
+            ]),
+        )
+        out = writer._process_data(batch)
+        self.assertEqual(
+            [r['id'] for r in out.to_pylist()],
+            [3, 1, 2],
+        )
+
+    # -- _flush_all -------------------------------------------------------
+
+    def test_flush_all_sorts_folds_and_writes_one_file(self):
+        # Buffer with duplicate PKs in arbitrary order. _flush_all is
+        # responsible for sorting before folding, so unsorted input is
+        # the right stress case.
+        writer = _Harness(DeduplicateMergeFunction())
+        writer.pending_data = pa.Table.from_pylist(
+            [_row(2, 5, 'B2-new', None),
+             _row(1, 2, 'A1-mid', None),
+             _row(1, 1, 'A1-old', None),
+             _row(2, 4, 'B2-old', None),
+             _row(1, 3, 'A1-new', None)],
+            schema=_SCHEMA,
+        )
+        writer._flush_all()
+
+        # Buffer cleared.
+        self.assertIsNone(writer.pending_data)
+        # Exactly one file written (size well under target).
+        self.assertEqual(len(writer.written_chunks), 1)
+        flushed = writer.written_chunks[0]
+        result = sorted(flushed.to_pylist(), key=lambda r: r['id'])
+        # Dedup -> 1 row per PK, with the highest seq value retained.
+        self.assertEqual(result, [
+            _row(1, 3, 'A1-new', None),
+            _row(2, 5, 'B2-new', None),
+        ])
+
+    def test_flush_all_on_empty_buffer_is_noop(self):
+        writer = _Harness(DeduplicateMergeFunction())
+        writer.pending_data = None
+        writer._flush_all()
+        self.assertIsNone(writer.pending_data)
+        self.assertEqual(writer.written_chunks, [])
+
+    def test_flush_all_clears_buffer_even_when_fold_drops_everything(self):
+        # MergeFunction that returns None for every group; verifies
+        # ``_flush_all`` still resets ``pending_data`` so a subsequent
+        # write starts from a clean slate.
+        class DropAll:
+            def reset(self): pass
+            def add(self, _): pass
+            def get_result(self): return None
+
+        writer = _Harness(DropAll())
+        writer.pending_data = pa.Table.from_pylist(
+            [_row(1, 1, 'A', None), _row(1, 2, 'B', None)],
+            schema=_SCHEMA,
+        )
+        writer._flush_all()
+        self.assertIsNone(writer.pending_data)
+        self.assertEqual(writer.written_chunks, [])
+
+    # -- _roll_write ------------------------------------------------------
+
+    def test_roll_write_single_chunk_when_under_target(self):
+        writer = _Harness(DeduplicateMergeFunction(),
+                          target_file_size=10 ** 9)
+        data = pa.Table.from_pylist(
+            [_row(1, 1, 'A', None), _row(2, 2, 'B', None)],
+            schema=_SCHEMA,
+        )
+        writer._roll_write(data)
+        self.assertEqual(len(writer.written_chunks), 1)
+        self.assertEqual(writer.written_chunks[0].num_rows, 2)
+
+    def test_roll_write_splits_oversized_buffer_into_multiple_files(self):
+        # Build a buffer whose nbytes comfortably exceeds the chosen
+        # target. With a small target_file_size the writer should hand
+        # back at least two files. Use long strings so nbytes scales
+        # predictably with row count.
+        rows = [
+            _row(i, i, 'x' * 64, 'y' * 64) for i in range(1, 401)
+        ]
+        data = pa.Table.from_pylist(rows, schema=_SCHEMA)
+        # Target small enough that 400 rows will not fit in one file.
+        target = data.nbytes // 4
+        writer = _Harness(DeduplicateMergeFunction(),
+                          target_file_size=target)
+        writer._roll_write(data)
+
+        self.assertGreaterEqual(len(writer.written_chunks), 2)
+        total_rows = sum(c.num_rows for c in writer.written_chunks)
+        self.assertEqual(total_rows, data.num_rows)
+        # Each chunk except possibly the last should respect the target.
+        for chunk in writer.written_chunks[:-1]:
+            self.assertLessEqual(chunk.nbytes, target)
+
 
 class _StubSeqGen:
     """Stand-in for ``SequenceGenerator`` so the harness can call
     ``_process_data`` without going through the real ``DataWriter.__init__``.
     """
 
+    def __init__(self):
+        self._n = 0
+
     def next(self) -> int:
-        return 1
+        self._n += 1
+        return self._n
 
 
 if __name__ == '__main__':

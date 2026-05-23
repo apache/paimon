@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List
+from typing import List, Union
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -30,10 +30,13 @@ from pypaimon.write.writer.data_writer import DataWriter
 class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting.
 
-    On flush, applies the table's ``MergeFunction`` to fold rows that
-    share a primary key down to a single row. This is what enforces
-    the LSM "PK unique within a file" invariant the read-side
-    ``raw_convertible`` fast path relies on.
+    Accumulates incoming batches in ``pending_data`` without sorting or
+    folding on the write path. Sort and ``MergeFunction``-based fold
+    are deferred to flush time (``_flush_all``), where the result is
+    roll-written into one or more data files. This enforces the LSM
+    "PK unique within a file" invariant the read-side
+    ``raw_convertible`` fast path relies on, while keeping per-write
+    cost bounded.
     """
 
     def __init__(self, table, partition, bucket, max_seq_number,
@@ -44,52 +47,106 @@ class KeyValueDataWriter(DataWriter):
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.
         self._merge_function = merge_function or DeduplicateMergeFunction()
-        # True iff ``pending_data`` is guaranteed PK-unique (either
-        # empty/None or freshly merged). Lets ``prepare_commit`` and
-        # ``_check_and_roll_if_needed`` skip the merge on already-clean
-        # buffers, sidestepping the per-call ``to_pylist`` materialisation.
-        self._merge_clean: bool = True
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
-        # Every incoming batch may contain duplicate PKs of its own or
-        # against the existing buffer, so mark dirty here regardless of
-        # whether _merge_data runs next (first write skips _merge_data).
-        self._merge_clean = False
+        # No sort here: sorting once at flush is strictly cheaper than
+        # per-batch sort + a final global sort. ``pending_data`` ends
+        # up as a concat of unsorted batches; ``_flush_all`` sorts it
+        # exactly once before folding.
         enhanced_data = self._add_system_fields(data)
-        return pa.Table.from_batches([self._sort_by_primary_key(enhanced_data)])
+        return pa.Table.from_batches([enhanced_data])
 
     def _merge_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
-        combined = pa.concat_tables([existing_data, new_data])
-        return self._sort_by_primary_key(combined)
+        # Plain concat. Sort + fold both run inside ``_flush_all`` so
+        # N writes incur 1 sort instead of N sorts.
+        return pa.concat_tables([existing_data, new_data])
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if (not self._merge_clean
-                and self.pending_data is not None
-                and self.pending_data.num_rows > 0):
-            self.pending_data = self._merge_pending_by_pk(self.pending_data)
+        if self.pending_data is not None and self.pending_data.num_rows > 0:
+            self._flush_all()
+        # ``_flush_all`` leaves ``pending_data = None``, so super's
+        # prepare_commit just returns ``committed_files``.
         return super().prepare_commit()
 
     def _check_and_roll_if_needed(self):
-        # Collapse same-PK runs *before* slicing for size, so each
-        # flushed file individually maintains PK uniqueness even when
-        # a single buffer spans multiple files.
-        # Only run the merge when we're actually about to slice -- a
-        # buffer that still fits in one file can defer the merge to
-        # prepare_commit, which avoids the per-write to_pylist
-        # round-trip in the small-streaming-batch case.
-        if (not self._merge_clean
-                and self.pending_data is not None
+        # Buffer overflowed target_file_size: sort + fold + roll-write
+        # the whole buffer as multiple files in one pass. Unlike the
+        # base class's slice loop, we never keep a slice remainder in
+        # ``pending_data`` -- flush empties the buffer outright.
+        if (self.pending_data is not None
                 and self.pending_data.num_rows > 0
                 and self.pending_data.nbytes > self.target_file_size):
-            self.pending_data = self._merge_pending_by_pk(self.pending_data)
-        super()._check_and_roll_if_needed()
+            self._flush_all()
+
+    def close(self):
+        # Override the base ``close`` because its straight
+        # ``_write_data_to_file(pending_data)`` would land an unsorted,
+        # un-folded buffer on disk -- violating the file-internal
+        # PK-unique invariant. Route the final flush through
+        # ``_flush_all`` so the contract holds even on the
+        # close-without-prepare_commit path.
+        try:
+            if self.pending_data is not None and self.pending_data.num_rows > 0:
+                self._flush_all()
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "Exception occurs when closing writer. Cleaning up.",
+                exc_info=e)
+            self.abort()
+            raise e
+        finally:
+            self.pending_data = None
+
+    def _flush_all(self) -> None:
+        """Sort + fold the entire buffer, then roll-write as files.
+
+        On return, ``pending_data is None`` and every flushed chunk
+        has been recorded in ``committed_files``. The buffer is
+        always fully drained per flush: no slice remainder is
+        carried back into ``pending_data``.
+        """
+        if self.pending_data is None or self.pending_data.num_rows == 0:
+            self.pending_data = None
+            return
+        sorted_data = self._sort_by_primary_key(self.pending_data)
+        folded = self._merge_pending_by_pk(sorted_data)
+        self.pending_data = None
+        if folded.num_rows == 0:
+            return
+        self._roll_write(folded)
+
+    def _roll_write(self, data: pa.Table) -> None:
+        """Write ``data`` as one or more files, each <= target_file_size.
+
+        ``data`` is required to be PK-unique (the fold guarantees
+        that), so any slice of it is also PK-unique -- splitting for
+        size does not violate the LSM file-internal invariant.
+        Reuses ``_find_optimal_split_point`` / ``_write_data_to_file``
+        from the base class.
+        """
+        while data.num_rows > 0:
+            if data.nbytes <= self.target_file_size:
+                self._write_data_to_file(data)
+                return
+            split_row = self._find_optimal_split_point(
+                data, self.target_file_size)
+            if split_row <= 0:
+                # Single row already exceeds target_file_size; nothing
+                # to gain from further slicing, write it as-is.
+                self._write_data_to_file(data)
+                return
+            self._write_data_to_file(data.slice(0, split_row))
+            data = data.slice(split_row)
 
     def _merge_pending_by_pk(self, data: pa.Table) -> pa.Table:
         """Fold same-PK runs in ``data`` using ``self._merge_function``.
 
         ``data`` is required to already be sorted by
-        ``(primary_key, _SEQUENCE_NUMBER)`` -- ``_process_data`` /
-        ``_merge_data`` enforce that.
+        ``(primary_key, _SEQUENCE_NUMBER)``. ``_flush_all`` is the
+        only caller and runs ``_sort_by_primary_key`` immediately
+        before this method, so the precondition holds.
 
         NOTE(follow-up): the merge runs row-by-row over
         ``data.to_pylist()`` / ``pa.Table.from_pylist``. Arrow types
@@ -105,7 +162,6 @@ class KeyValueDataWriter(DataWriter):
         if n < 2:
             # Single-row buffer cannot have duplicates; sidestep the
             # row-by-row pyarrow round-trip in the common streaming case.
-            self._merge_clean = True
             return data
 
         rows = data.to_pylist()
@@ -148,7 +204,6 @@ class KeyValueDataWriter(DataWriter):
                                     key_arity, value_arity))
             i = j
 
-        self._merge_clean = True
         if not merged_rows:
             return data.slice(0, 0)
         return pa.Table.from_pylist(merged_rows, schema=data.schema)
@@ -202,11 +257,15 @@ class KeyValueDataWriter(DataWriter):
 
         return pa.RecordBatch.from_arrays(new_arrays, schema=pa.schema(new_fields))
 
-    def _sort_by_primary_key(self, data: pa.RecordBatch) -> pa.RecordBatch:
+    def _sort_by_primary_key(
+        self, data: Union[pa.RecordBatch, pa.Table]
+    ) -> Union[pa.RecordBatch, pa.Table]:
+        # pc.sort_indices + .take work uniformly over RecordBatch and
+        # Table, so this serves both the per-batch entry path (legacy)
+        # and the buffer-wide sort path (used by ``_flush_all``).
         sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
         if '_SEQUENCE_NUMBER' in data.schema.names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
         sorted_indices = pc.sort_indices(data, sort_keys=sort_keys)
-        sorted_batch = data.take(sorted_indices)
-        return sorted_batch
+        return data.take(sorted_indices)
