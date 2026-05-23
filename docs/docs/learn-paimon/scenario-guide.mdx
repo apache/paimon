@@ -53,7 +53,7 @@ configurations that are suited for different scenarios.
 ## Primary Key Table
 
 Use a Primary Key Table when your data has a natural unique key and you need **real-time updates** (insert, update, delete). 
-See [Primary Key Table Overview](../primary-key-table/overview).
+See [Primary Key Table Overview](../primary-key-table/).
 
 ### Scenario 1: CDC Real-Time Sync
 
@@ -93,7 +93,7 @@ CREATE TABLE orders (
   on data volume. If you are sensitive to data visibility latency, set a fixed bucket number (e.g. `'bucket' = '5'`)
   — roughly 1 bucket per 1GB of data in a partition.
 
-**CDC Ingestion Tip:** Use [Paimon CDC Ingestion](../cdc-ingestion/overview) for whole-database sync with
+**CDC Ingestion Tip:** Use [Paimon CDC Ingestion](../cdc-ingestion/) for whole-database sync with
 automatic table creation and schema evolution support.
 
 ### Scenario 2: Multi-Stream Partial Column Updates
@@ -204,7 +204,7 @@ record for each primary key and produces insert-only changelog, making it perfec
 
 Use an Append Table when your data **has no natural primary key**, or you are working with **batch ETL** pipelines
 where data is only inserted and does not need upsert semantics.
-See [Append Table Overview](../append-table/overview).
+See [Append Table Overview](../append-table/).
 
 Compared to Primary Key Tables, Append Tables have much better batch read/write performance, simpler design, and lower
 resource consumption. **We recommend using Append Tables for most batch processing scenarios.**
@@ -571,7 +571,7 @@ df = table_read.to_pandas(splits)
 arrow_table = table_read.to_arrow(splits)
 ```
 
-**Why:** [PyPaimon](../pypaimon/overview) is a pure Python SDK (no JDK required) that integrates seamlessly
+**Why:** [PyPaimon](../pypaimon/) is a pure Python SDK (no JDK required) that integrates seamlessly
 with the Python AI ecosystem:
 
 - **PyTorch**: Direct `DataLoader` integration with streaming and prefetch support.

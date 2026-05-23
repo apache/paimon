@@ -52,9 +52,9 @@ For multiple jobs to write the same table, you can refer to [dedicated compactio
 
 ### Clustering
 
-In Paimon, clustering is a feature that allows you to cluster data in your [Append Table](../append-table/overview)
+In Paimon, clustering is a feature that allows you to cluster data in your [Append Table](../append-table/)
 based on the values of certain columns during the write process. This organization of data can significantly enhance the efficiency of downstream
-tasks when reading the data, as it enables faster and more targeted data retrieval. This feature is only supported for [Append Table](../append-table/overview)(bucket = -1)
+tasks when reading the data, as it enables faster and more targeted data retrieval. This feature is only supported for [Append Table](../append-table/)(bucket = -1)
 and batch execution mode.
 
 To utilize clustering, you can specify the columns you want to cluster when creating or writing to a table. Here's a simple example of how to enable clustering:
@@ -177,8 +177,8 @@ PARTITION (k0 = 0, k1 = 0) SELECT v FROM my_table WHERE false;
 :::info
 
 Important table properties setting:
-1. Only [primary key table](../primary-key-table/overview) supports this feature.
-2. [MergeEngine](../primary-key-table/merge-engine/) needs to be [deduplicate](../primary-key-table/merge-engine/overview#deduplicate)
+1. Only [primary key table](../primary-key-table/) supports this feature.
+2. [MergeEngine](../primary-key-table/merge-engine/) needs to be [deduplicate](../primary-key-table/merge-engine/#deduplicate)
    or [partial-update](../primary-key-table/merge-engine/partial-update) to support this feature.
 3. Do not support updating primary keys.
 
@@ -215,8 +215,8 @@ UPDATE my_table SET b = 1, c = 2 WHERE a = 'myTable';
 
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, the following [MergeEngine](../primary-key-table/merge-engine/overview) support this feature:
-   * [deduplicate](../primary-key-table/merge-engine/overview#deduplicate).
+2. If the table has primary keys, the following [MergeEngine](../primary-key-table/merge-engine/) support this feature:
+   * [deduplicate](../primary-key-table/merge-engine/#deduplicate).
    * [partial-update](../primary-key-table/merge-engine/partial-update) with option 'partial-update.remove-record-on-delete' enabled.
 3. Do not support deleting from table in streaming mode.
 

@@ -21,3 +21,46 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
+# RESTCatalog
+
+## Overview
+
+Paimon REST Catalog provides a lightweight implementation to access the catalog service. Paimon could access the
+catalog service through a catalog server which implements REST API. You can see all APIs in [REST API](./rest-api).
+
+![](/img/rest-catalog.svg)
+
+## Key Features
+
+1. User Defined Technology-Specific Logic Implementation
+    - All technology-specific logic within the catalog server.
+    - This ensures that the user can define logic that could be owned by the user.
+2. Decoupled Architecture
+    - The REST Catalog interacts with the catalog server through a well-defined REST API.
+    - This decoupling allows for independent evolution and scaling of the catalog server and clients.
+3. Language Agnostic
+    - Developers can implement the catalog server in any programming language, provided that it adheres to the specified REST API.
+    - This flexibility enables teams to utilize their existing tech stacks and expertise.
+4. Support for Any Catalog Backend
+    - REST Catalog is designed to work with any catalog backend.
+    - As long as they implement the relevant APIs, they can seamlessly integrate with REST Catalog.
+
+## Conclusion
+
+REST Catalog offers adaptable solution for accessing the catalog service. According to [REST API](./rest-api) is decoupled
+from the catalog service.
+
+Technology-specific Logic is encapsulated on the catalog server. At the same time, the catalog server supports any
+backend and languages.
+
+## Token Provider
+
+RESTCatalog supports multiple access authentication methods, including the following:
+
+1. [Bear Token](./bear).
+2. [DLF Token](./dlf).
+
+## REST Open API
+
+See [REST API](./rest-api).

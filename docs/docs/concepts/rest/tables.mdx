@@ -38,7 +38,7 @@ Paimon supports tables:
 
 ### Primary Key Table
 
-See [Paimon with Primary key](../../primary-key-table/overview).
+See [Paimon with Primary key](../../primary-key-table/).
 
 Primary keys consist of a set of columns that contain unique values for each record. Paimon enforces data ordering by
 sorting the primary key within each bucket, allowing streaming update and streaming changelog read.
@@ -79,7 +79,7 @@ CREATE TABLE my_table (
 
 ### Append Table
 
-See [Append Table](../../append-table/overview).
+See [Append Table](../../append-table/).
 
 If a table does not have a primary key defined, it is an append table. Compared to the primary key table, it does not
 have the ability to directly receive changelogs. It cannot be directly updated with data through streaming upsert. It 

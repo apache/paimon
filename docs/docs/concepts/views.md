@@ -102,5 +102,5 @@ CALL sys.alter_view_dialect('view_identifier', 'drop', 'spark');
 ## See also
 
 - [Spark SQL DDL – Views](../spark/sql-ddl#view)
-- [REST Catalog Overview](./rest/overview)
+- [REST Catalog Overview](./rest/)
 - [REST Catalog View API](./rest/rest-api)

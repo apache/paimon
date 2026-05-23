@@ -52,7 +52,7 @@ CREATE CATALOG my_catalog WITH (
 ## REST Catalog
 
 By using the Paimon REST catalog, changes to the catalog will be directly stored in a remote catalog server which exposed through REST API.
-See [Paimon REST Catalog](./rest/overview).
+See [Paimon REST Catalog](./rest/).
 
 ## Hive Catalog
 

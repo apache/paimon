@@ -167,7 +167,7 @@ Its value depends on your memory size.
 
 ### Number of Sorted Runs to Trigger Compaction
 
-Paimon uses [LSM tree](./overview#lsm-trees) which supports a large number of updates. LSM organizes files in several [sorted runs](./overview#sorted-runs). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
+Paimon uses [LSM tree](./#lsm-trees) which supports a large number of updates. LSM organizes files in several [sorted runs](./#sorted-runs). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
 
 One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Paimon writers will automatically perform [compactions](./compaction). The following table property determines the minimum number of sorted runs to trigger a compaction.
 

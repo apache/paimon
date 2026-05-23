@@ -21,3 +21,24 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
+# Overview
+
+When Paimon sink receives two or more records with the same primary keys, it will merge them into one record to keep
+primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.
+
+:::info
+
+Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig, sink upsert-materialize may
+result in strange behavior. When the input is out of order, we recommend that you use
+[Sequence Field](../sequence-rowkind#sequence-field) to correct disorder.
+
+:::
+
+## Deduplicate
+
+The `deduplicate` merge engine is the default merge engine. Paimon will only keep the latest record and throw away
+other records with the same primary keys.
+
+Specifically, if the latest record is a `DELETE` record, all records with the same primary keys will be deleted.
+You can config `ignore-delete` to ignore it.

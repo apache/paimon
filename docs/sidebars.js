@@ -11,7 +11,6 @@ const sidebars = {
       "id": "concepts/index"
     },
     "items": [
-      "concepts/overview",
       "concepts/basic-concepts",
       "concepts/concurrency-control",
       "concepts/catalog",
@@ -24,10 +23,10 @@ const sidebars = {
         "label": "RESTCatalog",
         "collapsed": true,
         "link": {
-          type: "generated-index"
+          type: "doc",
+          "id": "concepts/rest/index"
         },
         "items": [
-          "concepts/rest/overview",
           "concepts/rest/bear",
           "concepts/rest/dlf",
           "concepts/rest/tables",
@@ -40,10 +39,10 @@ const sidebars = {
         "label": "Specification",
         "collapsed": true,
         "link": {
-          type: "generated-index"
+          type: "doc",
+          "id": "concepts/spec/index"
         },
         "items": [
-          "concepts/spec/overview",
           "concepts/spec/schema",
           "concepts/spec/snapshot",
           "concepts/spec/manifest",
@@ -65,7 +64,6 @@ const sidebars = {
       "id": "primary-key-table/index"
     },
     "items": [
-      "primary-key-table/overview",
       "primary-key-table/data-distribution",
       "primary-key-table/table-mode",
       "primary-key-table/changelog-producer",
@@ -79,10 +77,10 @@ const sidebars = {
         "label": "Merge Engine",
         "collapsed": true,
         "link": {
-          type: "generated-index"
+          type: "doc",
+          "id": "primary-key-table/merge-engine/index"
         },
         "items": [
-          "primary-key-table/merge-engine/overview",
           "primary-key-table/merge-engine/partial-update",
           "primary-key-table/merge-engine/aggregation",
           "primary-key-table/merge-engine/first-row"
@@ -99,7 +97,6 @@ const sidebars = {
       "id": "append-table/index"
     },
     "items": [
-      "append-table/overview",
       "append-table/incremental-clustering",
       "append-table/bucketed",
       "append-table/row-tracking",
@@ -163,7 +160,6 @@ const sidebars = {
       "id": "pypaimon/index"
     },
     "items": [
-      "pypaimon/overview",
       "pypaimon/python-api",
       "pypaimon/manage-tags",
       "pypaimon/ray-data",
@@ -187,7 +183,6 @@ const sidebars = {
       "id": "ecosystem/index"
     },
     "items": [
-      "ecosystem/overview",
       "ecosystem/starrocks",
       "ecosystem/doris",
       "ecosystem/hive",
@@ -204,7 +199,6 @@ const sidebars = {
       "id": "cdc-ingestion/index"
     },
     "items": [
-      "cdc-ingestion/overview",
       "cdc-ingestion/mysql-cdc",
       "cdc-ingestion/postgres-cdc",
       "cdc-ingestion/kafka-cdc",
@@ -276,7 +270,6 @@ const sidebars = {
       "id": "iceberg/index"
     },
     "items": [
-      "iceberg/overview",
       "iceberg/append-table",
       "iceberg/primary-key-table",
       "iceberg/iceberg-tags",
