@@ -31,12 +31,9 @@ class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting.
 
     On flush, applies the table's ``MergeFunction`` to fold rows that
-    share a primary key down to a single row, mirroring Java
-    ``SortBufferWriteBuffer.forEach`` /
-    ``MergeIterator.advanceIfNeeded`` (paimon-core/.../mergetree/
-    SortBufferWriteBuffer.java). This is what enforces the LSM "PK
-    unique within a file" invariant the read-side ``raw_convertible``
-    fast path relies on.
+    share a primary key down to a single row. This is what enforces
+    the LSM "PK unique within a file" invariant the read-side
+    ``raw_convertible`` fast path relies on.
     """
 
     def __init__(self, table, partition, bucket, max_seq_number,
@@ -47,8 +44,17 @@ class KeyValueDataWriter(DataWriter):
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.
         self._merge_function = merge_function or DeduplicateMergeFunction()
+        # True iff ``pending_data`` is guaranteed PK-unique (either
+        # empty/None or freshly merged). Lets ``prepare_commit`` and
+        # ``_check_and_roll_if_needed`` skip the merge on already-clean
+        # buffers, sidestepping the per-call ``to_pylist`` materialisation.
+        self._merge_clean: bool = True
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
+        # Every incoming batch may contain duplicate PKs of its own or
+        # against the existing buffer, so mark dirty here regardless of
+        # whether _merge_data runs next (first write skips _merge_data).
+        self._merge_clean = False
         enhanced_data = self._add_system_fields(data)
         return pa.Table.from_batches([self._sort_by_primary_key(enhanced_data)])
 
@@ -57,30 +63,49 @@ class KeyValueDataWriter(DataWriter):
         return self._sort_by_primary_key(combined)
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if self.pending_data is not None and self.pending_data.num_rows > 0:
+        if (not self._merge_clean
+                and self.pending_data is not None
+                and self.pending_data.num_rows > 0):
             self.pending_data = self._merge_pending_by_pk(self.pending_data)
         return super().prepare_commit()
 
     def _check_and_roll_if_needed(self):
-        # Mirror Java MergeTreeWriter: collapse same-PK runs *before*
-        # slicing for size, so each flushed file individually maintains
-        # PK uniqueness even when a single buffer spans multiple files.
-        if self.pending_data is not None and self.pending_data.num_rows > 0:
+        # Collapse same-PK runs *before* slicing for size, so each
+        # flushed file individually maintains PK uniqueness even when
+        # a single buffer spans multiple files.
+        # Only run the merge when we're actually about to slice -- a
+        # buffer that still fits in one file can defer the merge to
+        # prepare_commit, which avoids the per-write to_pylist
+        # round-trip in the small-streaming-batch case.
+        if (not self._merge_clean
+                and self.pending_data is not None
+                and self.pending_data.num_rows > 0
+                and self.pending_data.nbytes > self.target_file_size):
             self.pending_data = self._merge_pending_by_pk(self.pending_data)
         super()._check_and_roll_if_needed()
 
     def _merge_pending_by_pk(self, data: pa.Table) -> pa.Table:
         """Fold same-PK runs in ``data`` using ``self._merge_function``.
 
-        Mirrors Java ``MergeIterator.advanceIfNeeded``
-        (SortBufferWriteBuffer.java:241-268). ``data`` is required to
-        already be sorted by ``(primary_key, _SEQUENCE_NUMBER)`` --
-        ``_process_data`` / ``_merge_data`` enforce that.
+        ``data`` is required to already be sorted by
+        ``(primary_key, _SEQUENCE_NUMBER)`` -- ``_process_data`` /
+        ``_merge_data`` enforce that.
+
+        NOTE(follow-up): the merge runs row-by-row over
+        ``data.to_pylist()`` / ``pa.Table.from_pylist``. Arrow types
+        with non-trivial Python representations (Decimal128 with
+        specific precision/scale, timestamps with timezone or
+        sub-millisecond units, durations, deeply nested structs) can
+        drift across this round-trip. A columnar merge implementation
+        would close the gap and is tracked as a follow-up; until
+        then, partial-update on those types should be avoided in
+        pypaimon.
         """
         n = data.num_rows
         if n < 2:
             # Single-row buffer cannot have duplicates; sidestep the
             # row-by-row pyarrow round-trip in the common streaming case.
+            self._merge_clean = True
             return data
 
         rows = data.to_pylist()
@@ -90,6 +115,18 @@ class KeyValueDataWriter(DataWriter):
         # _SEQUENCE_NUMBER and _VALUE_KIND columns added by
         # _add_system_fields). Everything to the right is the value side.
         value_arity = len(col_names) - key_arity - 2
+
+        # Pool one ``KeyValue`` for the whole fold. Safe because:
+        # - ``DeduplicateMergeFunction.add`` stores the kv reference; the
+        #   reused instance always carries the most recent ``replace``,
+        #   which is exactly the "latest wins" the engine wants.
+        # - ``PartialUpdateMergeFunction.add`` also stores a reference,
+        #   but ``get_result`` snapshots key + sequence into a fresh
+        #   tuple before returning, so the consumed result is decoupled
+        #   from any later ``replace`` on the pooled kv.
+        # This drops per-row ``KeyValue``/``OffsetRow`` allocations and
+        # the resulting GC churn on large buffers.
+        pooled_kv = KeyValue(key_arity, value_arity)
 
         merged_rows: List[dict] = []
         i = 0
@@ -102,9 +139,8 @@ class KeyValueDataWriter(DataWriter):
             run = rows[i:j]
             self._merge_function.reset()
             for r in run:
-                kv = KeyValue(key_arity, value_arity)
-                kv.replace(self._row_to_tuple(r, col_names))
-                self._merge_function.add(kv)
+                pooled_kv.replace(self._row_to_tuple(r, col_names))
+                self._merge_function.add(pooled_kv)
             result_kv = self._merge_function.get_result()
             if result_kv is not None:
                 merged_rows.append(
@@ -112,6 +148,7 @@ class KeyValueDataWriter(DataWriter):
                                     key_arity, value_arity))
             i = j
 
+        self._merge_clean = True
         if not merged_rows:
             return data.slice(0, 0)
         return pa.Table.from_pylist(merged_rows, schema=data.schema)

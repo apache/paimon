@@ -15,10 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import random
 from typing import Dict, List, Tuple
 
 import pyarrow as pa
+
+
+logger = logging.getLogger(__name__)
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
@@ -162,12 +166,28 @@ class FileStoreWrite:
                 value_arity=len(self.table.table_schema.fields),
                 value_field_nullables=[
                     f.type.nullable for f in self.table.table_schema.fields],
+                value_field_names=[
+                    f.name for f in self.table.table_schema.fields],
             )
 
         # Catch the dispatch's "wholly unsupported engine" raise only
         # for the engines we know are out of scope today; any other
         # NotImplementedError is a bug we want to surface, not swallow.
         if engine in (MergeEngine.AGGREGATE, MergeEngine.FIRST_ROW):
+            # Surface the silent semantic mismatch in logs: the file
+            # will be PK-unique (better than the pre-PR multi-row
+            # corruption), but any reader that honours the declared
+            # engine will see wrong values. Users sharing tables
+            # across writers especially need to see this.
+            logger.warning(
+                "merge-engine '%s' is not implemented on the pypaimon "
+                "write path; falling back to deduplicate so the flushed "
+                "file stays PK-unique. The file contents reflect "
+                "deduplicate semantics (latest writer wins), not %s "
+                "semantics. Any reader that interprets the file under "
+                "the declared engine will return incorrect results. "
+                "Avoid the pypaimon writer for tables on this engine.",
+                engine.value, engine.value)
             return DeduplicateMergeFunction()
 
         all_value_fields = self.table.table_schema.fields
@@ -177,6 +197,7 @@ class FileStoreWrite:
             value_arity=len(all_value_fields),
             value_field_nullables=[
                 f.type.nullable for f in all_value_fields],
+            value_field_names=[f.name for f in all_value_fields],
         )
 
     def _has_blob_columns(self) -> bool:

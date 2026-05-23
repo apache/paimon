@@ -127,8 +127,8 @@ class PartialUpdateMergeFunctionTest(unittest.TestCase):
         self.assertIsNone(mf.get_result())
 
     def test_update_after_is_treated_as_insert(self):
-        # Java's PartialUpdate accepts UPDATE_AFTER alongside INSERT in
-        # non-sequence-group mode (both are "add" kinds). Mirror that.
+        # UPDATE_AFTER is treated as an "add" alongside INSERT in
+        # non-sequence-group mode, matching the upstream contract.
         mf = PartialUpdateMergeFunction(key_arity=1, value_arity=2)
         mf.reset()
         mf.add(_kv((1,), 100, RowKind.INSERT, ('a', None)))
@@ -172,28 +172,54 @@ class PartialUpdateMergeFunctionTest(unittest.TestCase):
         self.assertEqual(_result_key(result), (1,))
         self.assertEqual(_result_value(result), ('a', 'x'))
 
-    # -- NOT-NULL input validation (mirrors Java's updateNonNullFields) ----
+    # -- NOT-NULL input validation ----
 
     def test_first_insert_with_null_for_not_null_field_raises(self):
-        """If the very first row writes null to a NOT NULL field, raise —
-        same input-validation Java does in updateNonNullFields()."""
+        """If the very first row writes null to a NOT NULL field, raise --
+        the schema's NOT NULL declaration is enforced on every add()."""
         mf = PartialUpdateMergeFunction(
             key_arity=1, value_arity=2, nullables=[True, False])
         mf.reset()
         with self.assertRaises(ValueError) as cm:
             mf.add(_kv((1,), 1, RowKind.INSERT, ('a', None)))
-        self.assertIn("Field 1", str(cm.exception))
+        msg = str(cm.exception)
+        # Without field names we fall back to the index, but the
+        # actionable hint must still be there.
+        self.assertIn("at index 1", msg)
+        self.assertIn("Declare the field nullable", msg)
 
     def test_subsequent_insert_with_null_for_not_null_field_raises(self):
-        """A later null on a NOT NULL field must also raise — Java checks
-        on every add(), not just the first one."""
+        """A later null on a NOT NULL field must also raise -- the
+        NOT NULL check fires on every add(), not just the first one."""
         mf = PartialUpdateMergeFunction(
             key_arity=1, value_arity=2, nullables=[True, False])
         mf.reset()
         mf.add(_kv((1,), 1, RowKind.INSERT, ('a', 'x')))
         with self.assertRaises(ValueError) as cm:
             mf.add(_kv((1,), 2, RowKind.INSERT, (None, None)))
-        self.assertIn("Field 1", str(cm.exception))
+        self.assertIn("at index 1", str(cm.exception))
+
+    def test_not_null_error_message_uses_field_name_when_given(self):
+        """When ``value_field_names`` is supplied, the NOT-NULL error
+        names the offending field so the message is directly actionable
+        instead of citing a bare positional index."""
+        mf = PartialUpdateMergeFunction(
+            key_arity=1, value_arity=2,
+            nullables=[True, False],
+            value_field_names=['a', 'b'])
+        mf.reset()
+        with self.assertRaises(ValueError) as cm:
+            mf.add(_kv((1,), 1, RowKind.INSERT, ('a', None)))
+        msg = str(cm.exception)
+        self.assertIn("'b'", msg)
+        self.assertIn("Declare the field nullable", msg)
+
+    def test_value_field_names_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            PartialUpdateMergeFunction(
+                key_arity=1, value_arity=2,
+                nullables=[True, True],
+                value_field_names=['only_one'])
 
     def test_null_for_nullable_field_is_absorbed(self):
         """A null input on a nullable field is silently absorbed (existing

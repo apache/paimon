@@ -20,8 +20,7 @@
 
 Drives the in-memory merge buffer with synthetic ``pa.Table`` inputs
 to pin down the merge-function dispatch independently of the rest of
-the catalog/write stack. Mirrors the per-key fold loop in Java
-``SortBufferWriteBuffer.MergeIterator.advanceIfNeeded``.
+the catalog/write stack.
 """
 
 import unittest
@@ -63,13 +62,16 @@ def _row(pk, seq, a, b):
 
 class _Harness(KeyValueDataWriter):
     """Bypass ``DataWriter.__init__`` to keep the tests focused on the
-    merge step. ``_merge_pending_by_pk`` only needs ``trimmed_primary_keys``
-    and ``_merge_function``.
+    merge step. ``_merge_pending_by_pk`` only needs ``trimmed_primary_keys``,
+    ``_merge_function``, and the ``_merge_clean`` dirty-flag attribute.
     """
 
     def __init__(self, merge_function):
         self.trimmed_primary_keys = ['id']
         self._merge_function = merge_function
+        # The real __init__ initialises this to True (no data => clean).
+        # Tests mutate it directly to assert the flag transitions.
+        self._merge_clean = True
 
 
 class WriteMergeBufferTest(unittest.TestCase):
@@ -188,6 +190,78 @@ class WriteMergeBufferTest(unittest.TestCase):
         )
         out = writer._merge_pending_by_pk(data)
         self.assertEqual(out.num_rows, 0)
+
+    # -- dirty flag -------------------------------------------------------
+
+    def test_merge_clears_dirty_flag(self):
+        writer = _Harness(DeduplicateMergeFunction())
+        writer._merge_clean = False
+        data = pa.Table.from_pylist(
+            [_row(1, 1, 'A', None), _row(1, 2, 'B', None)],
+            schema=_SCHEMA,
+        )
+        writer._merge_pending_by_pk(data)
+        self.assertTrue(writer._merge_clean)
+
+    def test_single_row_path_also_clears_dirty_flag(self):
+        # The n < 2 fast path still leaves the buffer PK-unique, so
+        # downstream prepare_commit must be told it doesn't need to
+        # re-merge.
+        writer = _Harness(DeduplicateMergeFunction())
+        writer._merge_clean = False
+        data = pa.Table.from_pylist([_row(1, 1, 'A', None)], schema=_SCHEMA)
+        writer._merge_pending_by_pk(data)
+        self.assertTrue(writer._merge_clean)
+
+    def test_process_data_marks_buffer_dirty(self):
+        # _process_data drops the clean bit so a subsequent flush knows
+        # the freshly appended batch still needs folding.
+        writer = _Harness(DeduplicateMergeFunction())
+        writer.sequence_generator = _StubSeqGen()
+        writer._merge_clean = True
+
+        batch = pa.RecordBatch.from_pylist(
+            [{'id': 1, 'a': 'X', 'b': None}],
+            schema=pa.schema([
+                pa.field('id', pa.int64(), nullable=False),
+                pa.field('a', pa.string()),
+                pa.field('b', pa.string()),
+            ]),
+        )
+        writer._process_data(batch)
+        self.assertFalse(writer._merge_clean)
+
+    # -- KeyValue pooling -------------------------------------------------
+
+    def test_keyvalue_pool_does_not_alias_results_across_runs(self):
+        # Pooling reuses one KeyValue across the whole fold. If the
+        # PartialUpdateMergeFunction's get_result snapshotting were
+        # broken, run 1's result would mutate when run 2's data is
+        # written into the pooled instance. This test would catch that
+        # regression: build a buffer with two distinct PK runs and
+        # verify both results stand on their own.
+        writer = _Harness(self._partial_update())
+        data = pa.Table.from_pylist(
+            [_row(1, 1, 'A1', None),
+             _row(1, 2, None, 'B1'),
+             _row(2, 3, 'A2', None),
+             _row(2, 4, None, 'B2')],
+            schema=_SCHEMA,
+        )
+        out = writer._merge_pending_by_pk(data)
+        self.assertEqual(
+            sorted(out.to_pylist(), key=lambda r: r['id']),
+            [_row(1, 2, 'A1', 'B1'), _row(2, 4, 'A2', 'B2')],
+        )
+
+
+class _StubSeqGen:
+    """Stand-in for ``SequenceGenerator`` so the harness can call
+    ``_process_data`` without going through the real ``DataWriter.__init__``.
+    """
+
+    def next(self) -> int:
+        return 1
 
 
 if __name__ == '__main__':

@@ -102,7 +102,7 @@ class SplitRead(ABC):
         self.nested_name_paths = nested_name_paths
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
-        # flags to merge functions that mirror Java's NOT-NULL check.
+        # flags to merge functions that enforce NOT-NULL on every add().
         self.value_fields = list(read_type)
 
         self.trimmed_primary_key = self.table.trimmed_primary_keys
@@ -642,6 +642,7 @@ class MergeFileSplitRead(SplitRead):
             key_arity=len(self.trimmed_primary_key),
             value_arity=self.value_arity,
             value_field_nullables=[f.type.nullable for f in self.value_fields],
+            value_field_names=[f.name for f in self.value_fields],
         )
 
     def create_reader(self) -> RecordReader:

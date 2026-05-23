@@ -302,6 +302,23 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             rb.new_read().to_arrow(splits)
         self.assertIn('first-row', str(cm.exception))
 
+    def test_aggregation_engine_write_logs_fallback_warning(self):
+        """The write-side fallback to deduplicate for unsupported engines
+        is silent in terms of return value -- a ``logging.warning`` is
+        the only signal that file contents will not match the table's
+        declared semantics. Important when the same table is read back
+        by a reader that honours the declared engine; the pypaimon
+        read-side raise wouldn't fire there.
+        """
+        table = self._create_pk_table('agg_warning',
+                                      merge_engine='aggregation')
+        with self.assertLogs(
+                'pypaimon.write.file_store_write', level='WARNING') as cm:
+            self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
+        combined = '\n'.join(cm.output)
+        self.assertIn('aggregation', combined)
+        self.assertIn('deduplicate', combined)
+
     # -- partial-update + out-of-scope option combinations ---------------
     #
     # When a user pairs ``merge-engine: partial-update`` with any option
@@ -370,25 +387,25 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         )
 
     def test_partial_update_unsupported_options_guard_covers_raw_convertible(self):
-        """The unsupported-options guard must fire even when the scan
-        would dispatch every split through ``RawFileSplitRead`` (i.e. a
-        single-snapshot table where rows don't overlap).
+        """The read-side guard at ``TableRead.__init__`` must fire even
+        when the scan would dispatch every split through
+        ``RawFileSplitRead`` (single-snapshot, non-overlapping rows).
 
         Before the guard moved to ``TableRead.__init__`` this case
         silently bypassed validation because raw-convertible splits skip
-        ``MergeFileSplitRead`` entirely — and an option like
-        ``partial-update.remove-record-on-delete`` would be ignored on
-        the read path while the user assumed it was honoured.
+        ``MergeFileSplitRead`` entirely -- the read path's
+        ``_build_merge_function`` never ran, so an option like
+        ``partial-update.remove-record-on-delete`` was ignored on read.
+
+        The shared dispatch now also fires on the write path's first
+        flush (see ``_assert_partial_update_unsupported``), so we skip
+        ``_write`` here: the read-side guard runs at ``new_read()``
+        construction time regardless of whether data exists.
         """
         table = self._create_pk_table(
             'pu_rrod_raw_convertible',
             extra_options={'partial-update.remove-record-on-delete': 'true'},
         )
-        # Single write -> single snapshot -> splits are raw-convertible.
-        self._write(table, [
-            {'id': 1, 'a': 'A', 'b': None, 'c': None},
-            {'id': 2, 'a': 'B', 'b': None, 'c': None},
-        ])
         rb = table.new_read_builder()
         with self.assertRaises(NotImplementedError) as cm:
             rb.new_read()

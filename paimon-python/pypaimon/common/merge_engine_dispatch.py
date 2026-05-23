@@ -22,12 +22,9 @@ Both the read path (``MergeFileSplitRead``) and the write path
 (``KeyValueDataWriter``'s in-memory merge buffer) need to pick a
 ``MergeFunction`` based on the table's ``merge-engine`` option. This
 module is the single source of truth so the two sides cannot drift.
-
-Mirrors Java ``MergeFunctionFactory`` (paimon-core/.../mergetree/
-compact/MergeFunctionFactory.java).
 """
 
-from typing import List
+from typing import List, Optional
 
 from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.read.reader.deduplicate_merge_function import \
@@ -37,9 +34,9 @@ from pypaimon.read.reader.partial_update_merge_function import \
 
 
 # Boolean-valued options that, when truthy, opt the table into
-# behaviour the Python PartialUpdateMergeFunction does not implement.
-# Mirrors org.apache.paimon.CoreOptions and the fallback keys in
-# PartialUpdateMergeFunction.java.
+# behaviour the pypaimon PartialUpdateMergeFunction does not yet
+# implement. Setting any of these forces the dispatch to refuse the
+# write instead of running the simple last-non-null merge silently.
 _PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS = (
     "ignore-delete",
     "partial-update.ignore-delete",
@@ -61,6 +58,7 @@ def build_merge_function(
     key_arity: int,
     value_arity: int,
     value_field_nullables: List[bool],
+    value_field_names: Optional[List[str]] = None,
 ):
     """Pick the MergeFunction for the table's ``merge-engine`` option.
 
@@ -71,6 +69,11 @@ def build_merge_function(
     caller wants the merge function to operate on -- for the read path
     this is the projected read schema, for the write path it's the full
     table schema (minus primary keys).
+
+    ``value_field_names`` is optional and only used by
+    ``PartialUpdateMergeFunction`` to surface the offending field name
+    when a NOT NULL constraint is violated; pass ``None`` if the caller
+    doesn't have names handy.
     """
     if engine == MergeEngine.DEDUPLICATE:
         return DeduplicateMergeFunction()
@@ -83,8 +86,7 @@ def build_merge_function(
                 "supported subset is per-key last-non-null merge with "
                 "no sequence-group, no per-field aggregator override, "
                 "no ignore-delete and no partial-update.remove-record-on-* "
-                "flags. Use the Java client for the full feature set, or "
-                "open an issue to track Python support.".format(
+                "flags. Open an issue to track Python support.".format(
                     ", ".join(sorted(unsupported))
                 )
             )
@@ -92,11 +94,14 @@ def build_merge_function(
             key_arity=key_arity,
             value_arity=value_arity,
             nullables=list(value_field_nullables),
+            value_field_names=(
+                list(value_field_names)
+                if value_field_names is not None else None),
         )
     raise NotImplementedError(
         "merge-engine '{}' is not implemented in pypaimon yet "
-        "(supported: deduplicate, partial-update). Use the Java "
-        "client or open an issue to track support.".format(engine.value)
+        "(supported: deduplicate, partial-update). Open an issue to "
+        "track support.".format(engine.value)
     )
 
 
@@ -120,10 +125,18 @@ def partial_update_unsupported_options(raw_options: dict):
 
 
 def _option_is_truthy(raw):
+    """Strict ``"true"`` boolean parsing for table-option strings.
+
+    A string is truthy iff it equals ``"true"`` (case-insensitive).
+    ``"yes"``, ``"on"``, ``"1"`` and similar Python-truthy strings are
+    treated as falsey, matching the table-option parser used elsewhere
+    in Paimon so an option string the rest of the toolchain treats as
+    ``false`` is not silently elevated to ``true`` here.
+    """
     if raw is None:
         return False
     if isinstance(raw, bool):
         return raw
     if isinstance(raw, str):
-        return raw.strip().lower() in ("true", "1", "yes", "on")
-    return bool(raw)
+        return raw.strip().lower() == "true"
+    return False
