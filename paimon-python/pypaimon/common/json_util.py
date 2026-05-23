@@ -37,7 +37,7 @@ class JSON:
     @staticmethod
     def to_json(obj: Any, **kwargs) -> str:
         """Convert to JSON string"""
-        return json.dumps(JSON.__to_dict(obj), ensure_ascii=False, **kwargs)
+        return json.dumps(JSON.__serialize(obj), ensure_ascii=False, **kwargs)
 
     @staticmethod
     def from_json(json_str: str, target_class: Type[T]) -> T:
@@ -46,16 +46,19 @@ class JSON:
         return JSON.__from_dict(data, target_class)
 
     @staticmethod
-    def __to_dict(obj: Any) -> Dict[str, Any]:
-        """Convert to dictionary with custom field names"""
+    def __serialize(obj: Any) -> Any:
+        """Serialize a supported object into JSON-compatible data."""
         if isinstance(obj, list):
-            return [
-                item.to_dict() if hasattr(item, "to_dict")
-                else JSON.__to_dict(item) if is_dataclass(item)
-                else item
-                for item in obj
-            ]
+            return [JSON.__serialize(item) for item in obj]
 
+        if is_dataclass(obj) or hasattr(obj, "to_dict"):
+            return JSON.__to_dict(obj)
+
+        return obj
+
+    @staticmethod
+    def __to_dict(obj: Any) -> Dict[str, Any]:
+        """Convert a dataclass-like object to dictionary with custom field names."""
         # If object has custom to_dict method, use it
         if hasattr(obj, "to_dict") and callable(getattr(obj, "to_dict")):
             return obj.to_dict()
@@ -79,12 +82,7 @@ class JSON:
             elif is_dataclass(field_value):
                 result[json_name] = JSON.__to_dict(field_value)
             elif isinstance(field_value, list):
-                result[json_name] = [
-                    item.to_dict() if hasattr(item, "to_dict")
-                    else JSON.__to_dict(item) if is_dataclass(item)
-                    else item
-                    for item in field_value
-                ]
+                result[json_name] = JSON.__serialize(field_value)
             else:
                 result[json_name] = field_value
 

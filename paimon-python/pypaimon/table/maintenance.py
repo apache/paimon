@@ -68,6 +68,8 @@ class TableMaintenance:
         finally:
             table_commit.close()
 
+        # TODO: return the committed compaction snapshot ID directly from commit
+        # path to avoid races with concurrent writers.
         latest_snapshot = self.table.snapshot_manager().get_latest_snapshot()
         return MaintenanceResult(
             latest_snapshot.id if latest_snapshot else None,
@@ -111,6 +113,8 @@ class TableMaintenance:
         finally:
             table_commit.close()
 
+        # TODO: return the committed overwrite snapshot ID directly from commit
+        # path to avoid races with concurrent writers.
         latest_snapshot = self.table.snapshot_manager().get_latest_snapshot()
         return MaintenanceResult(
             latest_snapshot.id if latest_snapshot else None,
@@ -119,6 +123,8 @@ class TableMaintenance:
         )
 
     def _rewrite(self, write_table, partition):
+        # Read from the original table and write to the requested target table.
+        # During bucket rescale the target is a copy with a different bucket count.
         read_builder = self.table.new_read_builder()
         predicate = self._partition_predicate(partition)
         if predicate is not None:
@@ -133,6 +139,7 @@ class TableMaintenance:
         table_write = write_table.new_batch_write_builder().new_write()
 
         rewritten_record_count = 0
+        commit_messages = []
         try:
             for split in splits:
                 data = table_read.to_arrow([split])
@@ -141,12 +148,12 @@ class TableMaintenance:
                 rewritten_record_count += data.num_rows
                 table_write.write_arrow(data)
             commit_messages = table_write.prepare_commit()
-        except Exception:
+        finally:
+            if hasattr(table_read, "close"):
+                table_read.close()
             table_write.close()
-            raise
 
         rewritten_file_count = sum(len(msg.new_files) for msg in commit_messages)
-        table_write.close()
         return commit_messages, rewritten_record_count, rewritten_file_count
 
     def _partition_predicate(self, partition):

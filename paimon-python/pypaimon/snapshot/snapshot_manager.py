@@ -338,12 +338,13 @@ class SnapshotManager:
             if match:
                 snapshot_ids.append(int(match.group(1)))
 
-        snapshots = []
-        for snapshot_id in sorted(snapshot_ids):
-            snapshot = self.get_snapshot_by_id(snapshot_id)
-            if snapshot is not None:
-                snapshots.append(snapshot)
-        return snapshots
+        sorted_ids = sorted(snapshot_ids)
+        snapshots = self.get_snapshots_batch(sorted_ids)
+        return [
+            snapshots[snapshot_id]
+            for snapshot_id in sorted_ids
+            if snapshots.get(snapshot_id) is not None
+        ]
 
     def get_snapshots_batch(
         self, snapshot_ids: List[int], max_workers: int = 4

@@ -82,6 +82,47 @@ class MaintenanceTest(unittest.TestCase):
         self.assertLessEqual(max(self._buckets(table)), 1)
         self.assertEqual([1, 2, 3, 4, 5, 6], self._read_ids(table))
 
+    def test_compact_empty_table_raises(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=["dt"],
+            options={"bucket": "-1"},
+        )
+        self.catalog.create_table("default.empty_t", schema, False)
+        table = self.catalog.get_table("default.empty_t")
+
+        with self.assertRaisesRegex(ValueError, "Table has no snapshot"):
+            table.new_maintenance().compact({"dt": "p1"})
+
+    def test_rescale_bucket_requires_positive_bucket_num(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=["dt"],
+            options={"bucket": "1", "bucket-key": "id"},
+        )
+        self.catalog.create_table("default.invalid_bucket_t", schema, False)
+        table = self.catalog.get_table("default.invalid_bucket_t")
+
+        with self.assertRaisesRegex(ValueError, "bucket_num must be greater than 0"):
+            table.new_maintenance().rescale_bucket(0, {"dt": "p1"})
+
+    def test_compact_rejects_deletion_vector_table(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=["dt"],
+            primary_keys=["dt", "id"],
+            options={
+                "bucket": "1",
+                "bucket-key": "id",
+                "deletion-vectors.enabled": "true",
+            },
+        )
+        self.catalog.create_table("default.dv_t", schema, False)
+        table = self.catalog.get_table("default.dv_t")
+
+        with self.assertRaisesRegex(NotImplementedError, "deletion-vector"):
+            table.new_maintenance().compact({"dt": "p1"})
+
     def _write(self, table, ids, names, dts):
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
