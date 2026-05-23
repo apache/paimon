@@ -271,6 +271,36 @@ class CoreOptions:
         )
     )
 
+    SCAN_TIMESTAMP_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.timestamp-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp in milliseconds used for time travel to the "
+            "latest snapshot equal to or earlier than the given timestamp."
+        )
+    )
+
+    SCAN_TIMESTAMP: ConfigOption[str] = (
+        ConfigOptions.key("scan.timestamp")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp string (e.g. '2023-12-01 12:00:00') used for "
+            "time travel. Will be converted to milliseconds internally."
+        )
+    )
+
+    SCAN_WATERMARK: ConfigOption[int] = (
+        ConfigOptions.key("scan.watermark")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional watermark used for time travel to the first snapshot "
+            "with watermark greater than or equal to the given value."
+        )
+    )
+
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("source.split.target-size")
         .memory_type()
@@ -636,6 +666,15 @@ class CoreOptions:
 
     def scan_snapshot_id(self, default=None):
         return self.options.get(CoreOptions.SCAN_SNAPSHOT_ID, default)
+
+    def scan_timestamp_millis(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TIMESTAMP_MILLIS, default)
+
+    def scan_timestamp(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TIMESTAMP, default)
+
+    def scan_watermark(self, default=None):
+        return self.options.get(CoreOptions.SCAN_WATERMARK, default)
 
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()
