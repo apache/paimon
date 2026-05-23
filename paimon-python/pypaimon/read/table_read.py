@@ -81,7 +81,15 @@ class TableRead:
         nested_name_paths: Optional[List[List[str]]] = None,
         limit: Optional[int] = None,
     ):
+        from pypaimon.read.merge_engine_support import check_supported
         from pypaimon.table.file_store_table import FileStoreTable
+
+        # Validate merge-engine support before any split-level dispatch.
+        # Raw-convertible splits skip MergeFileSplitRead, so this guard
+        # has to live at the read-builder level — otherwise unsupported
+        # options (e.g. partial-update.remove-record-on-delete) get
+        # silently ignored on fresh single-snapshot tables.
+        check_supported(table)
 
         self.table: FileStoreTable = table
         self.predicate = predicate
