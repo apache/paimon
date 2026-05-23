@@ -29,7 +29,7 @@ from pypaimon.catalog.catalog_exception import (
     TableAlreadyExistException,
     TableNotExistException
 )
-from pypaimon.catalog.jdbc_catalog import JdbcCatalog
+from pypaimon.catalog.jdbc_catalog import JdbcCatalog, _convert_qmark_placeholders
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema_change import SchemaChange
@@ -65,6 +65,20 @@ class JdbcCatalogTest(unittest.TestCase):
         self.assertIn("paimon_tables", tables)
         self.assertIn("paimon_database_properties", tables)
         self.assertIn("paimon_table_properties", tables)
+
+    def test_jdbc_catalog_context_manager_closes_connection(self):
+        with CatalogFactory.create(self.options) as catalog:
+            self.assertTrue(isinstance(catalog, JdbcCatalog))
+
+        with self.assertRaises(sqlite3.ProgrammingError):
+            catalog.list_databases()
+
+    def test_placeholder_conversion_skips_string_literals(self):
+        sql = "SELECT '?' AS q, \"?\" AS quoted, col FROM tbl WHERE a = ? AND b = '?'"
+        self.assertEqual(
+            _convert_qmark_placeholders(sql, "%s"),
+            "SELECT '?' AS q, \"?\" AS quoted, col FROM tbl WHERE a = %s AND b = '?'"
+        )
 
     def test_database(self):
         catalog = CatalogFactory.create(self.options)
@@ -154,6 +168,43 @@ class JdbcCatalogTest(unittest.TestCase):
         self.assertEqual(reloaded.list_tables("test_db"), [])
         with self.assertRaises(TableNotExistException):
             reloaded.get_table("test_db.renamed_table")
+
+    def test_create_table_rolls_back_metadata_on_failure(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+
+        def fail_insert_table_properties(identifier, properties):
+            raise RuntimeError("injected failure")
+
+        catalog._insert_table_properties = fail_insert_table_properties
+        with self.assertRaises(RuntimeError):
+            catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+
+        with sqlite3.connect(self.jdbc_path) as conn:
+            table_count = conn.execute(
+                "SELECT COUNT(*) FROM paimon_tables "
+                "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
+                ("test-jdbc-catalog", "test_db", "test_table")
+            ).fetchone()[0]
+        self.assertEqual(table_count, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.warehouse, "test_db.db", "test_table")))
+
+    def test_rename_table_keeps_metadata_when_file_move_fails(self):
+        fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]
+        catalog = CatalogFactory.create(self.options)
+        catalog.create_database("test_db", False)
+        catalog.create_table("test_db.test_table", Schema(fields=fields), False)
+
+        def fail_rename(source, target):
+            raise OSError("injected failure")
+
+        catalog.file_io.rename = fail_rename
+        with self.assertRaises(OSError):
+            catalog.rename_table("test_db.test_table", "test_db.renamed_table")
+
+        self.assertEqual(catalog.list_tables("test_db"), ["test_table"])
+        self.assertTrue(os.path.exists(os.path.join(self.warehouse, "test_db.db", "test_table")))
 
     def test_drop_database_requires_cascade_for_non_empty_database(self):
         fields = [DataField.from_dict({"id": 1, "name": "f0", "type": "INT"})]

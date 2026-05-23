@@ -17,7 +17,7 @@
 #################################################################################
 
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import parse_qs, urlparse
 
@@ -35,12 +35,45 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.config import CatalogOptions, JdbcCatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.table import Table
+
+
+def _convert_qmark_placeholders(sql: str, placeholder: str) -> str:
+    if placeholder == "?":
+        return sql
+
+    result = []
+    in_single_quote = False
+    in_double_quote = False
+    index = 0
+    while index < len(sql):
+        char = sql[index]
+        if char == "'" and not in_double_quote:
+            result.append(char)
+            if in_single_quote and index + 1 < len(sql) and sql[index + 1] == "'":
+                index += 1
+                result.append(sql[index])
+            else:
+                in_single_quote = not in_single_quote
+        elif char == '"' and not in_single_quote:
+            result.append(char)
+            if in_double_quote and index + 1 < len(sql) and sql[index + 1] == '"':
+                index += 1
+                result.append(sql[index])
+            else:
+                in_double_quote = not in_double_quote
+        elif char == "?" and not in_single_quote and not in_double_quote:
+            result.append(placeholder)
+        else:
+            result.append(char)
+        index += 1
+    return "".join(result)
 
 
 class _DbApiConnection:
@@ -57,7 +90,11 @@ class _DbApiConnection:
     def execute(self, sql: str, args: Tuple = ()):
         with closing(self.connection.cursor()) as cursor:
             cursor.execute(self._sql(sql), args)
-            self.connection.commit()
+            return cursor.rowcount
+
+    def executemany(self, sql: str, args):
+        with closing(self.connection.cursor()) as cursor:
+            cursor.executemany(self._sql(sql), args)
             return cursor.rowcount
 
     def fetch_all(self, sql: str, args: Tuple = ()):
@@ -71,9 +108,16 @@ class _DbApiConnection:
             return cursor.fetchone()
 
     def _sql(self, sql: str) -> str:
-        if self.placeholder == "?":
-            return sql
-        return sql.replace("?", self.placeholder)
+        return _convert_qmark_placeholders(sql, self.placeholder)
+
+    @contextmanager
+    def transaction(self):
+        try:
+            yield
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
 
     @staticmethod
     def _jdbc_properties(options: Dict[str, str]) -> Dict[str, str]:
@@ -95,9 +139,9 @@ class _DbApiConnection:
     def _connect_sqlite(self, uri: str):
         sqlite_uri = uri[len("jdbc:sqlite:"):]
         if sqlite_uri.startswith("file:"):
-            connection = sqlite3.connect(sqlite_uri, uri=True)
+            connection = sqlite3.connect(sqlite_uri, uri=True, check_same_thread=False)
         else:
-            connection = sqlite3.connect(sqlite_uri)
+            connection = sqlite3.connect(sqlite_uri, check_same_thread=False)
         return "sqlite", "?", connection
 
     def _connect_mysql(self, uri: str, options: Dict[str, str]):
@@ -120,11 +164,14 @@ class _DbApiConnection:
         props.update(query)
         user = props.pop("user", props.pop("username", None))
         password = props.pop("password", None)
-        database = parsed.path.lstrip("/")
-        port = parsed.port or 3306
+        host = props.pop("host", parsed.hostname)
+        database = parsed.path.lstrip("/") or props.pop("database", "")
+        props.pop("database", None)
+        port_value = props.pop("port", None)
+        port = parsed.port or int(port_value or 3306)
         if connector == "pymysql":
             connection = pymysql.connect(
-                host=parsed.hostname,
+                host=host,
                 port=port,
                 user=user,
                 password=password,
@@ -134,7 +181,7 @@ class _DbApiConnection:
             )
         else:
             connection = mysql_connector.connect(
-                host=parsed.hostname,
+                host=host,
                 port=port,
                 user=user,
                 password=password,
@@ -163,10 +210,14 @@ class _DbApiConnection:
         props.update(query)
         user = props.pop("user", props.pop("username", None))
         password = props.pop("password", None)
-        database = parsed.path.lstrip("/")
-        port = parsed.port or 5432
+        host = props.pop("host", parsed.hostname)
+        database = parsed.path.lstrip("/") or props.get("database") or props.get("dbname") or ""
+        props.pop("database", None)
+        props.pop("dbname", None)
+        port_value = props.pop("port", None)
+        port = parsed.port or int(port_value or 5432)
         connect_kwargs = {
-            "host": parsed.hostname,
+            "host": host,
             "port": port,
             "user": user,
             "password": password,
@@ -207,31 +258,39 @@ class JdbcCatalog(Catalog):
     def close(self):
         self.connection.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
+
     def _initialize_catalog_tables(self):
-        self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS paimon_tables ("
-            "catalog_key VARCHAR(255) NOT NULL, "
-            "database_name VARCHAR(255) NOT NULL, "
-            "table_name VARCHAR(255) NOT NULL, "
-            "PRIMARY KEY (catalog_key, database_name, table_name))"
-        )
-        self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS paimon_database_properties ("
-            "catalog_key VARCHAR(255) NOT NULL, "
-            "database_name VARCHAR(255) NOT NULL, "
-            "property_key VARCHAR(255), "
-            "property_value VARCHAR(1000), "
-            "PRIMARY KEY (catalog_key, database_name, property_key))"
-        )
-        self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS paimon_table_properties ("
-            "catalog_key VARCHAR(255) NOT NULL, "
-            "database_name VARCHAR(255) NOT NULL, "
-            "table_name VARCHAR(255) NOT NULL, "
-            "property_key VARCHAR(255) NOT NULL, "
-            "property_value VARCHAR(1000), "
-            "PRIMARY KEY (catalog_key, database_name, table_name, property_key))"
-        )
+        with self.connection.transaction():
+            self.connection.execute(
+                "CREATE TABLE IF NOT EXISTS paimon_tables ("
+                "catalog_key VARCHAR(255) NOT NULL, "
+                "database_name VARCHAR(255) NOT NULL, "
+                "table_name VARCHAR(255) NOT NULL, "
+                "PRIMARY KEY (catalog_key, database_name, table_name))"
+            )
+            self.connection.execute(
+                "CREATE TABLE IF NOT EXISTS paimon_database_properties ("
+                "catalog_key VARCHAR(255) NOT NULL, "
+                "database_name VARCHAR(255) NOT NULL, "
+                "property_key VARCHAR(255), "
+                "property_value VARCHAR(1000), "
+                "PRIMARY KEY (catalog_key, database_name, property_key))"
+            )
+            self.connection.execute(
+                "CREATE TABLE IF NOT EXISTS paimon_table_properties ("
+                "catalog_key VARCHAR(255) NOT NULL, "
+                "database_name VARCHAR(255) NOT NULL, "
+                "table_name VARCHAR(255) NOT NULL, "
+                "property_key VARCHAR(255) NOT NULL, "
+                "property_value VARCHAR(1000), "
+                "PRIMARY KEY (catalog_key, database_name, table_name, property_key))"
+            )
 
     def list_databases(self) -> List[str]:
         table_rows = self.connection.fetch_all(
@@ -265,7 +324,8 @@ class JdbcCatalog(Catalog):
             create_props.update(properties)
         if Catalog.DB_LOCATION_PROP not in create_props:
             create_props[Catalog.DB_LOCATION_PROP] = self.get_database_path(name)
-        self._insert_database_properties(name, create_props)
+        with self.connection.transaction():
+            self._insert_database_properties(name, create_props)
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
         if not self._database_exists(name):
@@ -278,39 +338,48 @@ class JdbcCatalog(Catalog):
         if cascade:
             for table in tables:
                 self.drop_table(Identifier.create(name, table), True)
-        self.connection.execute(
-            "DELETE FROM paimon_tables WHERE catalog_key = ? AND database_name = ?",
-            (self.catalog_key, name)
-        )
-        self.connection.execute(
-            "DELETE FROM paimon_database_properties WHERE catalog_key = ? AND database_name = ?",
-            (self.catalog_key, name)
-        )
-        self.connection.execute(
-            "DELETE FROM paimon_table_properties WHERE catalog_key = ? AND database_name = ?",
-            (self.catalog_key, name)
-        )
+        with self.connection.transaction():
+            self.connection.execute(
+                "DELETE FROM paimon_tables WHERE catalog_key = ? AND database_name = ?",
+                (self.catalog_key, name)
+            )
+            self.connection.execute(
+                "DELETE FROM paimon_database_properties WHERE catalog_key = ? AND database_name = ?",
+                (self.catalog_key, name)
+            )
+            self.connection.execute(
+                "DELETE FROM paimon_table_properties WHERE catalog_key = ? AND database_name = ?",
+                (self.catalog_key, name)
+            )
 
     def alter_database(self, name: str, changes: list):
         self.get_database(name)
         from pypaimon.catalog.rest.property_change import PropertyChange
         set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
         current = self._fetch_database_properties(name)
-        for key, value in set_properties.items():
-            if key in current:
-                self.connection.execute(
+        with self.connection.transaction():
+            update_args = [
+                (value, self.catalog_key, name, key)
+                for key, value in set_properties.items()
+                if key in current
+            ]
+            insert_properties = {
+                key: value for key, value in set_properties.items() if key not in current
+            }
+            if update_args:
+                self.connection.executemany(
                     "UPDATE paimon_database_properties SET property_value = ? "
                     "WHERE catalog_key = ? AND database_name = ? AND property_key = ?",
-                    (value, self.catalog_key, name, key)
+                    update_args
                 )
-            else:
-                self._insert_database_properties(name, {key: value})
-        for key in remove_keys:
-            self.connection.execute(
-                "DELETE FROM paimon_database_properties "
-                "WHERE catalog_key = ? AND database_name = ? AND property_key = ?",
-                (self.catalog_key, name, key)
-            )
+            if insert_properties:
+                self._insert_database_properties(name, insert_properties)
+            for key in remove_keys:
+                self.connection.execute(
+                    "DELETE FROM paimon_database_properties "
+                    "WHERE catalog_key = ? AND database_name = ? AND property_key = ?",
+                    (self.catalog_key, name, key)
+                )
 
     def list_tables(self, database_name: str) -> List[str]:
         self.get_database(database_name)
@@ -356,12 +425,13 @@ class JdbcCatalog(Catalog):
         schema_manager = SchemaManager(self.file_io, table_path)
         table_schema = schema_manager.create_table(schema)
         try:
-            self.connection.execute(
-                "INSERT INTO paimon_tables (catalog_key, database_name, table_name) VALUES (?, ?, ?)",
-                (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
-            )
-            if self._sync_all_properties():
-                self._insert_table_properties(identifier, self._collect_table_properties(table_schema))
+            with self.connection.transaction():
+                self.connection.execute(
+                    "INSERT INTO paimon_tables (catalog_key, database_name, table_name) VALUES (?, ?, ?)",
+                    (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
+                )
+                if self._sync_all_properties():
+                    self._insert_table_properties(identifier, self._collect_table_properties(table_schema))
         except Exception:
             self.file_io.delete_directory_quietly(table_path)
             raise
@@ -374,14 +444,15 @@ class JdbcCatalog(Catalog):
                 raise TableNotExistException(identifier)
             return
         table_path = self.get_table_path(identifier)
-        self.connection.execute(
-            "DELETE FROM paimon_tables WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
-            (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
-        )
-        self.connection.execute(
-            "DELETE FROM paimon_table_properties WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
-            (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
-        )
+        with self.connection.transaction():
+            self.connection.execute(
+                "DELETE FROM paimon_tables WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
+                (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
+            )
+            self.connection.execute(
+                "DELETE FROM paimon_table_properties WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
+                (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
+            )
         self.file_io.delete_directory_quietly(table_path)
 
     def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
@@ -395,32 +466,40 @@ class JdbcCatalog(Catalog):
         if self._table_exists(target_identifier):
             raise TableAlreadyExistException(target_identifier)
 
-        self.connection.execute(
-            "UPDATE paimon_tables SET database_name = ?, table_name = ? "
-            "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
-            (
-                target_identifier.get_database_name(),
-                target_identifier.get_table_name(),
-                self.catalog_key,
-                source_identifier.get_database_name(),
-                source_identifier.get_table_name()
-            )
-        )
-        self.connection.execute(
-            "UPDATE paimon_table_properties SET database_name = ?, table_name = ? "
-            "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
-            (
-                target_identifier.get_database_name(),
-                target_identifier.get_table_name(),
-                self.catalog_key,
-                source_identifier.get_database_name(),
-                source_identifier.get_table_name()
-            )
-        )
         source_path = self.get_table_path(source_identifier)
         target_path = self.get_table_path(target_identifier)
+        renamed_path = False
         if self.file_io.exists(source_path):
             self.file_io.rename(source_path, target_path)
+            renamed_path = True
+        try:
+            with self.connection.transaction():
+                self.connection.execute(
+                    "UPDATE paimon_tables SET database_name = ?, table_name = ? "
+                    "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
+                    (
+                        target_identifier.get_database_name(),
+                        target_identifier.get_table_name(),
+                        self.catalog_key,
+                        source_identifier.get_database_name(),
+                        source_identifier.get_table_name()
+                    )
+                )
+                self.connection.execute(
+                    "UPDATE paimon_table_properties SET database_name = ?, table_name = ? "
+                    "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
+                    (
+                        target_identifier.get_database_name(),
+                        target_identifier.get_table_name(),
+                        self.catalog_key,
+                        source_identifier.get_database_name(),
+                        source_identifier.get_table_name()
+                    )
+                )
+        except Exception:
+            if renamed_path and self.file_io.exists(target_path):
+                self.file_io.rename(target_path, source_path)
+            raise
 
     def alter_table(
         self,
@@ -437,12 +516,13 @@ class JdbcCatalog(Catalog):
         schema_manager = SchemaManager(self.file_io, self.get_table_path(identifier))
         table_schema = schema_manager.commit_changes(changes)
         if self._sync_all_properties():
-            self.connection.execute(
-                "DELETE FROM paimon_table_properties "
-                "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
-                (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
-            )
-            self._insert_table_properties(identifier, self._collect_table_properties(table_schema))
+            with self.connection.transaction():
+                self.connection.execute(
+                    "DELETE FROM paimon_table_properties "
+                    "WHERE catalog_key = ? AND database_name = ? AND table_name = ?",
+                    (self.catalog_key, identifier.get_database_name(), identifier.get_table_name())
+                )
+                self._insert_table_properties(identifier, self._collect_table_properties(table_schema))
 
     def get_table_schema(self, identifier: Identifier):
         table_schema = SchemaManager(self.file_io, self.get_table_path(identifier)).latest()
@@ -502,26 +582,29 @@ class JdbcCatalog(Catalog):
         return {row[0]: row[1] for row in rows}
 
     def _insert_database_properties(self, database_name: str, properties: Dict[str, str]):
-        for key, value in properties.items():
-            self.connection.execute(
+        if properties:
+            self.connection.executemany(
                 "INSERT INTO paimon_database_properties "
                 "(catalog_key, database_name, property_key, property_value) VALUES (?, ?, ?, ?)",
-                (self.catalog_key, database_name, key, value)
+                [(self.catalog_key, database_name, key, value) for key, value in properties.items()]
             )
 
     def _insert_table_properties(self, identifier: Identifier, properties: Dict[str, str]):
-        for key, value in properties.items():
-            self.connection.execute(
+        if properties:
+            self.connection.executemany(
                 "INSERT INTO paimon_table_properties "
                 "(catalog_key, database_name, table_name, property_key, property_value) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (
-                    self.catalog_key,
-                    identifier.get_database_name(),
-                    identifier.get_table_name(),
-                    key,
-                    value
-                )
+                [
+                    (
+                        self.catalog_key,
+                        identifier.get_database_name(),
+                        identifier.get_table_name(),
+                        key,
+                        value
+                    )
+                    for key, value in properties.items()
+                ]
             )
 
     def _sync_all_properties(self) -> bool:
