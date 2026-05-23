@@ -356,30 +356,60 @@ public class DataEvolutionCompactCoordinator {
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-            if (dataFiles.size() >= compactMinFileNum) {
+            boolean triggerNormalFile = dataFiles.size() >= compactMinFileNum;
+            if (triggerNormalFile) {
                 tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
             }
 
             if (compactBlob) {
-                List<DataFileMeta> blobFiles = new ArrayList<>();
-                for (DataFileMeta dataFile : dataFiles) {
-                    blobFiles.addAll(
-                            dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
-                }
-                for (List<DataFileMeta> blobFilesToCompact : blobFileGroupsToCompact(blobFiles)) {
-                    tasks.add(new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                if (triggerNormalFile) {
+                    List<DataFileMeta> blobFiles = new ArrayList<>();
+                    for (DataFileMeta dataFile : dataFiles) {
+                        blobFiles.addAll(
+                                dataFileToBlobFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
+                    for (List<DataFileMeta> blobFilesToCompact :
+                            blobFileGroupsToCompact(blobFiles)) {
+                        tasks.add(
+                                new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                    }
+                } else {
+                    for (DataFileMeta dataFile : dataFiles) {
+                        for (List<DataFileMeta> blobFilesToCompact :
+                                blobFileGroupsToCompact(
+                                        dataFileToBlobFiles.getOrDefault(
+                                                dataFile, Collections.emptyList()))) {
+                            tasks.add(
+                                    new DataEvolutionCompactTask(
+                                            partition, blobFilesToCompact, true));
+                        }
+                    }
                 }
             }
 
             if (compactVector) {
-                List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
-                for (DataFileMeta dataFile : dataFiles) {
-                    vectorStoreFiles.addAll(
-                            dataFileToVectorStoreFiles.getOrDefault(
-                                    dataFile, Collections.emptyList()));
-                }
-                if (vectorStoreFiles.size() >= compactMinFileNum) {
-                    tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                if (triggerNormalFile) {
+                    List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
+                    for (DataFileMeta dataFile : dataFiles) {
+                        vectorStoreFiles.addAll(
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
+                    if (vectorStoreFiles.size() >= compactMinFileNum) {
+                        tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                    }
+                } else {
+                    for (DataFileMeta dataFile : dataFiles) {
+                        List<DataFileMeta> vectorStoreFiles =
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList());
+                        if (vectorStoreFiles.size() >= compactMinFileNum) {
+                            tasks.add(
+                                    new DataEvolutionCompactTask(
+                                            partition, vectorStoreFiles, false));
+                        }
+                    }
                 }
             }
             return tasks;
