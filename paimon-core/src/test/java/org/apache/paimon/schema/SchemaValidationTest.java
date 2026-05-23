@@ -233,6 +233,29 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testChainTableRequiresSequenceField() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.STRING()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.BIGINT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = Arrays.asList("f0", "f1");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessage("Sequence field is required for chain table.");
+    }
+
+    @Test
     public void testVectorStoreUnknownColumn() {
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), String.valueOf(-1));

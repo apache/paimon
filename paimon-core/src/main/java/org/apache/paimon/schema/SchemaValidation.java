@@ -924,7 +924,8 @@ public class SchemaValidation {
             Preconditions.checkArgument(
                     options.bucket() > 0, "Bucket number must be greater than 0 for chain table.");
             Preconditions.checkArgument(
-                    options.sequenceField() != null, "Sequence field is required for chain table.");
+                    !options.sequenceField().isEmpty(),
+                    "Sequence field is required for chain table.");
             Preconditions.checkArgument(
                     changelogProducer == ChangelogProducer.NONE
                             || changelogProducer == ChangelogProducer.INPUT,
