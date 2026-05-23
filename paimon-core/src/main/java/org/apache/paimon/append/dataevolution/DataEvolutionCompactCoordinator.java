@@ -356,10 +356,9 @@ public class DataEvolutionCompactCoordinator {
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-            boolean triggerNormalFile = false;
-            if (dataFiles.size() >= compactMinFileNum) {
+            boolean triggerNormalFile = dataFiles.size() >= compactMinFileNum;
+            if (triggerNormalFile) {
                 tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
-                triggerNormalFile = true;
             }
 
             if (compactBlob) {
@@ -390,14 +389,27 @@ public class DataEvolutionCompactCoordinator {
             }
 
             if (compactVector) {
-                List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
-                for (DataFileMeta dataFile : dataFiles) {
-                    vectorStoreFiles.addAll(
-                            dataFileToVectorStoreFiles.getOrDefault(
-                                    dataFile, Collections.emptyList()));
-                }
-                if (vectorStoreFiles.size() >= compactMinFileNum) {
-                    tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                if (triggerNormalFile) {
+                    List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
+                    for (DataFileMeta dataFile : dataFiles) {
+                        vectorStoreFiles.addAll(
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
+                    if (vectorStoreFiles.size() >= compactMinFileNum) {
+                        tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                    }
+                } else {
+                    for (DataFileMeta dataFile : dataFiles) {
+                        List<DataFileMeta> vectorStoreFiles =
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList());
+                        if (vectorStoreFiles.size() >= compactMinFileNum) {
+                            tasks.add(
+                                    new DataEvolutionCompactTask(
+                                            partition, vectorStoreFiles, false));
+                        }
+                    }
                 }
             }
             return tasks;

@@ -205,6 +205,40 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
+
+        planner = blobPlanner(1024, 1024, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+        tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(0).file(), entries.get(2).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(3).file());
+    }
+
+    @Test
+    public void testCompactPlannerDoesNotCompactVectorStoreFilesAcrossDataFiles() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
+        entries.add(makeVectorStoreEntry("file1.vector.json", 0L, 100L, 100));
+        entries.add(makeEntry("file2.parquet", 100L, 100L, 100));
+        entries.add(makeVectorStoreEntry("file2.vector.json", 100L, 100L, 100));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                vectorStorePlanner(1024, 1024, 100);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).isEmpty();
+
+        planner = vectorStorePlanner(1024, 1024, 2);
+        tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(0).file(), entries.get(2).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(3).file());
     }
 
     @Test
@@ -485,6 +519,23 @@ public class DataEvolutionCompactCoordinatorTest {
                         writeCol == null ? null : Collections.singletonList(writeCol)));
     }
 
+    private ManifestEntry makeVectorStoreEntry(
+            String fileName, long firstRowId, long rowCount, long fileSize) {
+        return ManifestEntry.create(
+                FileKind.ADD,
+                BinaryRow.EMPTY_ROW,
+                0,
+                0,
+                createDataFileMeta(
+                        fileName,
+                        firstRowId,
+                        rowCount,
+                        0,
+                        fileSize,
+                        0,
+                        Collections.singletonList("vec")));
+    }
+
     private DataFileMeta createDataFileMeta(
             String fileName, long firstRowId, long rowCount, long maxSeq, long fileSize) {
         return createDataFileMeta(fileName, firstRowId, rowCount, maxSeq, fileSize, 0, null);
@@ -552,6 +603,12 @@ public class DataEvolutionCompactCoordinatorTest {
                 compactMinFileNum,
                 schemaFetcher,
                 fieldIds(currentRowType));
+    }
+
+    private DataEvolutionCompactCoordinator.CompactPlanner vectorStorePlanner(
+            long targetFileSize, long openFileCost, long compactMinFileNum) {
+        return new DataEvolutionCompactCoordinator.CompactPlanner(
+                false, true, targetFileSize, openFileCost, compactMinFileNum);
     }
 
     private RowType rowType(DataField... fields) {
