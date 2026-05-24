@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -43,8 +42,6 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * </code></pre>
  */
 public class CompactManifestProcedure extends BaseProcedure {
-
-    private static final String COMMIT_USER = "Compact-Manifest-Procedure-Committer";
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
@@ -80,8 +77,6 @@ public class CompactManifestProcedure extends BaseProcedure {
 
         Table table = loadSparkTable(tableIdent).getTable();
         HashMap<String, String> dynamicOptions = new HashMap<>();
-        ProcedureUtils.putIfNotEmpty(
-                dynamicOptions, CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER);
         ProcedureUtils.putAllOptions(dynamicOptions, options);
         table = table.copy(dynamicOptions);
 

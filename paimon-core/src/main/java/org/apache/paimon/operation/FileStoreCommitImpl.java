@@ -1233,15 +1233,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.properties(),
                         latestSnapshot.nextRowId());
 
-        boolean success = commitSnapshotImpl(newSnapshot, emptyList());
-        if (!success) {
-            LOG.info(
-                    "Commit failed for compact manifest, clean unused legacy manifest files, commit will be retried.");
-            manifestList.delete(deltaManifestList.getLeft());
-            commitCleaner.cleanUpNoReuseTmpManifests(
-                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
-        }
-        return success;
+        return commitSnapshotImpl(newSnapshot, emptyList());
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {
