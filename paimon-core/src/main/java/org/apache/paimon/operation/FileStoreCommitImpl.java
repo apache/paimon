@@ -1238,7 +1238,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.info(
                     "Commit failed for compact manifest, clean unused legacy manifest files, commit will be retried.");
             manifestList.delete(deltaManifestList.getLeft());
-            cleanUpNoReuseTmpManifests(baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+            commitCleaner.cleanUpNoReuseTmpManifests(
+                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
         }
         return success;
     }
