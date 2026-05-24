@@ -127,8 +127,8 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
-        checkRequiredConfigurations();
         SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
+        checkRequiredConfigurations(sparkSession);
         this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(
