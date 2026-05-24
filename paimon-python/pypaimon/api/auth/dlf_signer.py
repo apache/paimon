@@ -18,10 +18,12 @@
 import base64
 import hashlib
 import hmac
+import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from urllib.parse import unquote
 
@@ -320,15 +322,21 @@ class DLFOpenApiSigner(DLFRequestSigner):
             security_token: Optional[str],
             host: str
     ) -> Dict[str, str]:
+        if now is None:
+            raise ValueError("Parameter 'now' cannot be None")
+        if host is None:
+            raise ValueError("Parameter 'host' cannot be None")
+
         headers = {}
 
-        # Date header in RFC 1123 format
-        headers[self.DATE_HEADER] = now.strftime(self.DATE_FORMAT)
+        if now.tzinfo is None:
+            gmt_time = now.replace(tzinfo=timezone.utc)
+        else:
+            gmt_time = now.astimezone(timezone.utc)
+        headers[self.DATE_HEADER] = gmt_time.strftime(self.DATE_FORMAT)
 
-        # Accept header
         headers[self.ACCEPT_HEADER] = self.ACCEPT_VALUE
 
-        # Content-MD5 (if body exists)
         if body is not None and body != "":
             try:
                 headers[self.CONTENT_MD5_HEADER] = self._md5_base64(body)
@@ -336,16 +344,15 @@ class DLFOpenApiSigner(DLFRequestSigner):
             except Exception as e:
                 raise RuntimeError(f"Failed to calculate Content-MD5: {e}")
 
-        # Host header
         headers[self.HOST_HEADER] = host
 
-        # x-acs-* headers
         headers[self.X_ACS_SIGNATURE_METHOD] = self.SIGNATURE_METHOD_VALUE
-        headers[self.X_ACS_SIGNATURE_NONCE] = str(uuid.uuid4())
+
+        nonce = self._generate_unique_nonce()
+        headers[self.X_ACS_SIGNATURE_NONCE] = nonce
         headers[self.X_ACS_SIGNATURE_VERSION] = self.SIGNATURE_VERSION_VALUE
         headers[self.X_ACS_VERSION] = self.API_VERSION
 
-        # Security token (if present)
         if security_token is not None:
             headers[self.X_ACS_SECURITY_TOKEN] = security_token
 
@@ -358,22 +365,22 @@ class DLFOpenApiSigner(DLFRequestSigner):
             host: str,
             sign_headers: Dict[str, str]
     ) -> str:
+        if rest_auth_parameter is None:
+            raise ValueError("Parameter 'rest_auth_parameter' cannot be None")
+        if token is None:
+            raise ValueError("Parameter 'token' cannot be None")
+        if host is None:
+            raise ValueError("Parameter 'host' cannot be None")
+        if sign_headers is None:
+            raise ValueError("Parameter 'sign_headers' cannot be None")
+
         try:
-            # Step 1: Build CanonicalizedHeaders (x-acs-* headers, sorted, lowercase)
             canonicalized_headers = self._build_canonicalized_headers(sign_headers)
-
-            # Step 2: Build CanonicalizedResource (path + sorted query string)
             canonicalized_resource = self._build_canonicalized_resource(rest_auth_parameter)
-
-            # Step 3: Build StringToSign
             string_to_sign = self._build_string_to_sign(
                 rest_auth_parameter, sign_headers, canonicalized_headers, canonicalized_resource
             )
-
-            # Step 4: Calculate signature
             signature = self._calculate_signature(string_to_sign, token.access_key_secret)
-
-            # Step 5: Build Authorization header
             return f"acs {token.access_key_id}:{signature}"
 
         except Exception as e:
@@ -461,6 +468,15 @@ class DLFOpenApiSigner(DLFRequestSigner):
             return base64.b64encode(signature_bytes).decode("utf-8")
         except Exception as e:
             raise RuntimeError(f"Failed to calculate signature: {e}")
+
+    def _generate_unique_nonce(self) -> str:
+        """Generate unique nonce with UUID, timestamp, and thread ID."""
+        unique_nonce = []
+        uuid_val = str(uuid.uuid4())
+        unique_nonce.append(uuid_val)
+        unique_nonce.append(str(int(time.time() * 1000)))
+        unique_nonce.append(str(threading.current_thread().ident))
+        return "".join(unique_nonce)
 
     @staticmethod
     def _md5_base64(data: str) -> str:
