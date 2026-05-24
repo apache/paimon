@@ -21,7 +21,8 @@ from decimal import Decimal
 
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import (GenericRow, GenericRowDeserializer,
-                                            GenericRowSerializer)
+                                            GenericRowSerializer,
+                                            _decimal_to_unscaled_with_check)
 from pypaimon.table.row.row_kind import RowKind
 
 
@@ -300,6 +301,55 @@ class DecimalTest(unittest.TestCase):
         serialized = GenericRowSerializer.to_bytes(row)
         result = GenericRowDeserializer.from_bytes(serialized, fields)
         self.assertEqual(result.values[0], Decimal("123"))
+
+    def test_unscaled_helper_basic(self):
+        cases = [
+            (Decimal("0.05"), 4, 2, (5, False)),
+            (Decimal("-0.05"), 4, 2, (-5, False)),
+            (Decimal("0"), 4, 2, (0, False)),
+            (Decimal("0E-10"), 38, 10, (0, False)),
+            (Decimal("42"), 10, 0, (42, False)),
+            (Decimal("-42"), 10, 0, (-42, False)),
+        ]
+        for d, precision, scale, expected in cases:
+            with self.subTest(d=d, p=precision, s=scale):
+                self.assertEqual(
+                    _decimal_to_unscaled_with_check(d, precision, scale),
+                    expected,
+                )
+
+    def test_unscaled_helper_preserves_38_digit_precision(self):
+        unscaled, overflow = _decimal_to_unscaled_with_check(
+            Decimal("12345678901234567890.1234567890"), 38, 10)
+        self.assertFalse(overflow)
+        self.assertEqual(unscaled, 123456789012345678901234567890)
+
+        unscaled_neg, overflow_neg = _decimal_to_unscaled_with_check(
+            Decimal("-99999999999999999999.9999999999"), 38, 10)
+        self.assertFalse(overflow_neg)
+        self.assertEqual(unscaled_neg, -999999999999999999999999999999)
+
+    def test_unscaled_helper_half_up_rounding(self):
+        cases = [
+            (Decimal("1.235"), 10, 2, 124),
+            (Decimal("1.234"), 10, 2, 123),
+            (Decimal("1.225"), 10, 2, 123),
+            (Decimal("-1.235"), 10, 2, -124),
+        ]
+        for d, precision, scale, expected_unscaled in cases:
+            with self.subTest(d=d):
+                unscaled, overflow = _decimal_to_unscaled_with_check(d, precision, scale)
+                self.assertFalse(overflow)
+                self.assertEqual(unscaled, expected_unscaled)
+
+    def test_unscaled_helper_overflow_flag(self):
+        _, overflow = _decimal_to_unscaled_with_check(Decimal("999.99"), 4, 2)
+        self.assertTrue(overflow)
+        _, overflow_round = _decimal_to_unscaled_with_check(Decimal("99.999"), 4, 2)
+        self.assertTrue(overflow_round)
+        unscaled_ok, overflow_ok = _decimal_to_unscaled_with_check(Decimal("99.99"), 4, 2)
+        self.assertFalse(overflow_ok)
+        self.assertEqual(unscaled_ok, 9999)
 
 
 if __name__ == '__main__':

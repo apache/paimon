@@ -35,17 +35,10 @@ def _decimal_to_unscaled_with_check(d: Decimal, precision: int, scale: int):
     """Round decimal with HALF_UP, check precision overflow, and return unscaled value.
     Returns (unscaled_int, True) on overflow, (unscaled_int, False) on success."""
     rounded = d.quantize(Decimal(10) ** -scale, context=_DECIMAL_CTX)
-    sign, digits, exponent = rounded.as_tuple()
-    # Precision overflow check
+    _, digits, _ = rounded.as_tuple()
     if rounded != 0 and len(digits) > precision:
         return 0, True
-    int_digits = int(''.join(str(x) for x in digits)) if digits != (0,) else 0
-    shift = exponent + scale
-    if shift >= 0:
-        unscaled = int_digits * (10 ** shift)
-    else:
-        unscaled = int_digits // (10 ** (-shift))
-    return (-unscaled if sign else unscaled), False
+    return int(rounded.scaleb(scale, context=_DECIMAL_CTX)), False
 
 
 def _parse_type_precision_scale(data_type):
@@ -80,7 +73,14 @@ _EPOCH = datetime(1970, 1, 1)
 
 
 def _datetime_to_millis_and_nanos(value: datetime):
-    """Convert datetime to (epoch_millis, nano_of_millisecond) without float arithmetic."""
+    """Convert datetime to (epoch_millis, nano_of_millisecond) without float arithmetic.
+
+    Python's datetime is microsecond-resolution, so nano_of_millisecond is
+    always a multiple of 1000 and sub-microsecond precision is lost. For
+    TIMESTAMP(7..9) columns the lower three nano digits will always serialise
+    as zero — round-trip through pypaimon is microsecond-faithful, not
+    nanosecond-faithful.
+    """
     epoch_seconds = calendar.timegm(value.timetuple())
     millis = epoch_seconds * 1000 + value.microsecond // 1000
     nano_of_millisecond = (value.microsecond % 1000) * 1000
@@ -309,6 +309,12 @@ class GenericRowDeserializer:
 
     @classmethod
     def _parse_decimal(cls, bytes_data: bytes, base_offset: int, field_offset: int, data_type: DataType):
+        """Parse a decimal field, returning None when the on-disk value exceeds
+        the declared precision. Mirrors Java's `BinaryRow.getDecimal()`, which
+        returns null on overflow; callers must treat the field as a regular
+        nullable cell (the surrounding GenericRow API already does this — None
+        flows out as a null column value, no further handling required).
+        """
         precision, scale = _parse_type_precision_scale(data_type)
         if precision <= 0:
             raise ValueError(f"Decimal requires precision > 0, got {precision}")
@@ -324,7 +330,6 @@ class GenericRowDeserializer:
             var_offset = base_offset + cursor
             unscaled_bytes = bytes_data[var_offset:var_offset + byte_length]
             unscaled_value = int.from_bytes(unscaled_bytes, byteorder='big', signed=True)
-            # Precision overflow returns null
             result = cls._unscaled_to_decimal(unscaled_value, scale)
             _, digits, _ = result.as_tuple()
             if result != 0 and len(digits) > precision:
@@ -404,7 +409,6 @@ class GenericRowSerializer:
             is_high_precision_decimal = is_decimal_type and precision > 18
             is_non_compact_timestamp = is_timestamp_type and precision > 3
 
-            # Precision overflow -> null
             if is_decimal_type and value is not None:
                 d = value if isinstance(value, Decimal) else Decimal(str(value))
                 unscaled_value, overflow = _decimal_to_unscaled_with_check(d, precision, scale)
