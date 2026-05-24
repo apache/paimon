@@ -429,8 +429,12 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 rowData(1, 101, 15, BinaryString.fromString("20221208"), 1),
                 rowData(1, 101, 16, BinaryString.fromString("20221208"), 1),
                 rowData(2, 101, 15, BinaryString.fromString("20221209"), 2));
-        checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT, 60_000);
 
+        // The old streaming compact job will fail because it detects files with a newer schema.
+        // Run a new compact action to compact with the new schema.
+        runAction(false);
+
+        table = getFileStoreTable(tableName);
         List<String> res =
                 getResult(
                         table.newRead(),
