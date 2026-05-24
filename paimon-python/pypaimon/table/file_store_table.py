@@ -298,6 +298,23 @@ class FileStoreTable(Table):
         return RollbackHelper(
             self.snapshot_manager(), self.tag_manager(), self.file_io)
 
+    def rollback_to_timestamp(self, timestamp_millis: int) -> None:
+        """Rollback table to the latest snapshot with commit time <= the given timestamp.
+
+        Args:
+            timestamp_millis: The timestamp in milliseconds to rollback to.
+
+        Raises:
+            ValueError: If no snapshot exists at or before the given timestamp.
+        """
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
+        if snapshot is None:
+            raise ValueError(
+                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+            )
+        self.rollback_to(snapshot.id)
+
     def rename_tag(self, old_name: str, new_name: str) -> None:
         """
         Rename a tag.
