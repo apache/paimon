@@ -50,7 +50,6 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Nullable private final Pattern dbIncludingPattern;
     @Nullable private final Pattern dbExcludingPattern;
     private final TableNameConverter tableNameConverter;
-    private final Set<String> createdTables;
 
     private final Map<String, RichEventParser> parsers = new HashMap<>();
     private final Set<String> includedTables = new HashSet<>();
@@ -66,7 +65,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private RichEventParser currentParser;
 
     public RichCdcMultiplexRecordEventParser(boolean caseSensitive) {
-        this(null, null, null, null, null, new TableNameConverter(caseSensitive), new HashSet<>());
+        this(null, null, null, null, null, new TableNameConverter(caseSensitive));
     }
 
     public RichCdcMultiplexRecordEventParser(
@@ -75,15 +74,13 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
             @Nullable Pattern tblExcludingPattern,
             @Nullable Pattern dbIncludingPattern,
             @Nullable Pattern dbExcludingPattern,
-            TableNameConverter tableNameConverter,
-            Set<String> createdTables) {
+            TableNameConverter tableNameConverter) {
         this.schemaBuilder = schemaBuilder;
         this.tblIncludingPattern = tblIncludingPattern;
         this.tblExcludingPattern = tblExcludingPattern;
         this.dbIncludingPattern = dbIncludingPattern;
         this.dbExcludingPattern = dbExcludingPattern;
         this.tableNameConverter = tableNameConverter;
-        this.createdTables = createdTables;
     }
 
     @Override
@@ -201,8 +198,6 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     private boolean shouldCreateCurrentTable() {
-        return shouldSynchronizeCurrentTable
-                && !record.cdcSchema().fields().isEmpty()
-                && createdTables.add(parseTableName());
+        return shouldSynchronizeCurrentTable && !record.cdcSchema().fields().isEmpty();
     }
 }
