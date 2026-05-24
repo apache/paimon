@@ -378,3 +378,172 @@ class TableRepair:
                         message=f"Data file missing (referenced by {manifest_file_name})",
                         path=data_file_path,
                     ))
+
+    def repair(self, check_data_files: bool = False, dry_run: bool = True) -> RepairReport:
+        """
+        Verify and optionally repair the metadata chain.
+
+        Args:
+            check_data_files: If True, also verify data files exist.
+            dry_run: If True, only report issues without making changes.
+                     If False, apply fixes where possible.
+
+        Returns:
+            RepairReport with issues found and fixes applied.
+        """
+        report = self.verify(check_data_files=check_data_files)
+
+        if report.is_healthy:
+            return report
+
+        if dry_run:
+            return report
+
+        # Apply fixes
+        self._fix_latest_file(report, check_data_files)
+
+        return report
+
+    def _fix_latest_file(self, report: RepairReport, check_data_files: bool = False):
+        """Fix the LATEST file to point to the newest valid snapshot.
+
+        This operation is idempotent: it performs a single atomic write of the
+        LATEST file. If interrupted before writing, LATEST is unchanged and
+        re-running will retry the fix. If interrupted after writing, LATEST is
+        already correct. Re-running on an already-fixed table is a no-op.
+        """
+        snapshot_ids = self._list_snapshot_ids()
+        if not snapshot_ids:
+            return
+
+        # Find the newest snapshot whose full manifest chain is healthy
+        for sid in sorted(snapshot_ids, reverse=True):
+            if not self._is_snapshot_healthy(sid, check_data_files):
+                continue
+
+            current_latest = self._read_latest_id()
+            if current_latest == sid:
+                return
+
+            # Write LATEST atomically
+            latest_content = str(sid)
+            try:
+                success = self.file_io.try_to_write_atomic(self.latest_file, latest_content)
+                if not success:
+                    self.file_io.delete(self.latest_file)
+                    self.file_io.overwrite_file_utf8(self.latest_file, latest_content)
+                report.fixes_applied.append(
+                    f"Updated LATEST file to point to snapshot-{sid}"
+                )
+            except Exception as e:
+                report.issues.append(RepairIssue(
+                    level="error",
+                    category="snapshot",
+                    message=f"Failed to write LATEST file: {e}",
+                    path=self.latest_file,
+                ))
+            return
+
+    def _is_snapshot_healthy(self, snapshot_id: int, check_data_files: bool = False) -> bool:
+        """Check whether a snapshot and its manifest chain are intact."""
+        tmp_report = RepairReport(table_path=self.table_path)
+        self._verify_snapshot(snapshot_id, tmp_report, check_data_files=check_data_files)
+        return not tmp_report.has_errors
+
+
+def repair_table(file_io: FileIO, table_path: str, branch: Optional[str] = None,
+                 check_data_files: bool = False, dry_run: bool = True) -> RepairReport:
+    """
+    Repair a single Paimon table.
+
+    This is the main entry point for repairing a table's metadata chain.
+    It verifies the consistency of:
+      snapshot -> manifest list -> manifest files -> data files
+
+    Args:
+        file_io: FileIO instance for accessing the table's storage.
+        table_path: Root path of the table.
+        branch: Branch name (None for main branch).
+        check_data_files: Whether to verify data file existence (slow).
+        dry_run: If True, only report issues without fixing.
+
+    Returns:
+        RepairReport with all findings and any fixes applied.
+    """
+    repairer = TableRepair(file_io, table_path, branch)
+    return repairer.repair(check_data_files=check_data_files, dry_run=dry_run)
+
+
+def repair_database(file_io: FileIO, warehouse: str, database_name: str,
+                    check_data_files: bool = False, dry_run: bool = True) -> List[RepairReport]:
+    """
+    Repair all tables in a database.
+
+    Args:
+        file_io: FileIO instance for accessing storage.
+        warehouse: Warehouse root path.
+        database_name: Database name to repair.
+        check_data_files: Whether to verify data file existence.
+        dry_run: If True, only report issues without fixing.
+
+    Returns:
+        List of RepairReport, one per table.
+    """
+    import pyarrow.fs as pafs
+
+    db_path = f"{warehouse.rstrip('/')}/{database_name}.db"
+    if not file_io.exists(db_path):
+        raise ValueError(f"Database directory does not exist: {db_path}")
+
+    reports = []
+    statuses = file_io.list_status(db_path)
+    for status in statuses:
+        is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+        name = status.base_name if hasattr(status, 'base_name') else ""
+        if is_directory and name and not name.startswith("."):
+            table_path = f"{db_path}/{name}"
+            try:
+                report = repair_table(file_io, table_path, check_data_files=check_data_files,
+                                      dry_run=dry_run)
+                reports.append(report)
+            except Exception as e:
+                logger.warning(f"Failed to repair table '{name}' in database '{database_name}': {e}")
+
+    return reports
+
+
+def repair_catalog(file_io: FileIO, warehouse: str,
+                   check_data_files: bool = False, dry_run: bool = True) -> List[RepairReport]:
+    """
+    Repair all tables in all databases in the catalog.
+
+    Args:
+        file_io: FileIO instance for accessing storage.
+        warehouse: Warehouse root path.
+        check_data_files: Whether to verify data file existence.
+        dry_run: If True, only report issues without fixing.
+
+    Returns:
+        List of RepairReport, one per table.
+    """
+    import pyarrow.fs as pafs
+
+    warehouse = warehouse.rstrip('/')
+    reports = []
+
+    statuses = file_io.list_status(warehouse)
+    for status in statuses:
+        is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+        name = status.base_name if hasattr(status, 'base_name') else ""
+        if is_directory and name and name.endswith(".db"):
+            database_name = name[:-3]
+            try:
+                db_reports = repair_database(
+                    file_io, warehouse, database_name,
+                    check_data_files=check_data_files, dry_run=dry_run
+                )
+                reports.extend(db_reports)
+            except Exception as e:
+                logger.warning(f"Failed to repair database '{database_name}': {e}")
+
+    return reports

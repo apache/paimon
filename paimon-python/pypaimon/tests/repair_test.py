@@ -28,6 +28,9 @@ from pypaimon.operation.repair import (
     RepairIssue,
     RepairReport,
     TableRepair,
+    repair_table,
+    repair_database,
+    repair_catalog,
 )
 from pypaimon.schema.data_types import AtomicType, DataField
 
@@ -645,6 +648,292 @@ class TestTableRepairVerify(unittest.TestCase):
         from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
         row = GenericRow(values, fields)
         return GenericRowSerializer.to_bytes(row)
+
+
+class TestTableRepairFixMode(unittest.TestCase):
+    """Tests for TableRepair fix mode and catalog integration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="repair_fix_test_")
+        self.warehouse = os.path.join(self.temp_dir, "warehouse")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _create_catalog_and_table(self):
+        """Helper to create a catalog with a test table."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+        schema = Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT")),
+                DataField(1, "name", AtomicType("STRING")),
+            ],
+            partition_keys=[],
+            primary_keys=["id"],
+            options={},
+            comment=""
+        )
+        catalog.create_table("test_db.test_table", schema, False)
+        return catalog
+
+    def _write_empty_avro(self, path: str):
+        """Write an empty Avro file (valid manifest list with no records)."""
+        import fastavro
+        from io import BytesIO
+        from pypaimon.manifest.schema.manifest_file_meta import MANIFEST_FILE_META_SCHEMA
+        buffer = BytesIO()
+        fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, [])
+        with open(path, 'wb') as f:
+            f.write(buffer.getvalue())
+
+    def _write_manifest_list_with_entry(self, path: str, manifest_file_name: str):
+        """Write a manifest list Avro referencing a single manifest file."""
+        import fastavro
+        from io import BytesIO
+        from pypaimon.manifest.schema.manifest_file_meta import MANIFEST_FILE_META_SCHEMA
+        record = {
+            "_VERSION": 1,
+            "_FILE_NAME": manifest_file_name,
+            "_FILE_SIZE": 100,
+            "_NUM_ADDED_FILES": 1,
+            "_NUM_DELETED_FILES": 0,
+            "_PARTITION_STATS": {"_MIN_VALUES": b"", "_MAX_VALUES": b"", "_NULL_COUNTS": None},
+            "_SCHEMA_ID": 0,
+            "_MIN_ROW_ID": None,
+            "_MAX_ROW_ID": None,
+        }
+        buffer = BytesIO()
+        fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, [record])
+        with open(path, 'wb') as f:
+            f.write(buffer.getvalue())
+
+    def _write_manifest_with_data_file(self, path: str, partition_bytes: bytes,
+                                       bucket: int, file_name: str,
+                                       external_path=None, kind=0):
+        """Write a manifest Avro with a single data file entry."""
+        import fastavro
+        from io import BytesIO
+        from pypaimon.manifest.schema.manifest_entry import MANIFEST_ENTRY_SCHEMA
+        record = {
+            "_VERSION": 1,
+            "_KIND": kind,
+            "_PARTITION": partition_bytes,
+            "_BUCKET": bucket,
+            "_TOTAL_BUCKETS": 1,
+            "_FILE": {
+                "_FILE_NAME": file_name,
+                "_FILE_SIZE": 1024,
+                "_ROW_COUNT": 10,
+                "_MIN_KEY": b"",
+                "_MAX_KEY": b"",
+                "_KEY_STATS": {"_MIN_VALUES": b"", "_MAX_VALUES": b"", "_NULL_COUNTS": None},
+                "_VALUE_STATS": {"_MIN_VALUES": b"", "_MAX_VALUES": b"", "_NULL_COUNTS": None},
+                "_MIN_SEQUENCE_NUMBER": 0,
+                "_MAX_SEQUENCE_NUMBER": 0,
+                "_SCHEMA_ID": 0,
+                "_LEVEL": 0,
+                "_EXTRA_FILES": [],
+                "_CREATION_TIME": None,
+                "_DELETE_ROW_COUNT": None,
+                "_EMBEDDED_FILE_INDEX": None,
+                "_FILE_SOURCE": None,
+                "_VALUE_STATS_COLS": None,
+                "_EXTERNAL_PATH": external_path,
+                "_FIRST_ROW_ID": None,
+                "_WRITE_COLS": None,
+            }
+        }
+        buffer = BytesIO()
+        fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, [record])
+        with open(path, 'wb') as f:
+            f.write(buffer.getvalue())
+
+    def _serialize_partition(self, values, fields):
+        from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+        row = GenericRow(values, fields)
+        return GenericRowSerializer.to_bytes(row)
+
+    def test_repair_fix_dangling_latest(self):
+        """Should fix LATEST to point to the newest valid snapshot."""
+        catalog = self._create_catalog_and_table()
+
+        table_path = os.path.join(self.warehouse, "test_db.db", "test_table")
+        snapshot_dir = os.path.join(table_path, "snapshot")
+        manifest_dir = os.path.join(table_path, "manifest")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        os.makedirs(manifest_dir, exist_ok=True)
+
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-base-1"))
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-delta-1"))
+
+        snapshot_data = {
+            "version": 3, "id": 1, "schemaId": 0,
+            "baseManifestList": "manifest-list-base-1",
+            "deltaManifestList": "manifest-list-delta-1",
+            "totalRecordCount": 0, "deltaRecordCount": 0,
+            "commitUser": "test", "commitIdentifier": 1,
+            "commitKind": "APPEND", "timeMillis": 1000000
+        }
+        with open(os.path.join(snapshot_dir, "snapshot-1"), 'w') as f:
+            json.dump(snapshot_data, f)
+        with open(os.path.join(snapshot_dir, "LATEST"), 'w') as f:
+            f.write("99")
+
+        report = catalog.repair_table("test_db.test_table", dry_run=False)
+        self.assertTrue(len(report.fixes_applied) > 0)
+        self.assertIn("snapshot-1", report.fixes_applied[0])
+
+        with open(os.path.join(snapshot_dir, "LATEST"), 'r') as f:
+            self.assertEqual(f.read().strip(), "1")
+
+    def test_dry_run_does_not_modify(self):
+        """Dry run should not change any files."""
+        catalog = self._create_catalog_and_table()
+
+        table_path = os.path.join(self.warehouse, "test_db.db", "test_table")
+        snapshot_dir = os.path.join(table_path, "snapshot")
+        os.makedirs(snapshot_dir, exist_ok=True)
+
+        with open(os.path.join(snapshot_dir, "LATEST"), 'w') as f:
+            f.write("99")
+
+        report = catalog.repair_table("test_db.test_table", dry_run=True)
+        self.assertEqual(len(report.fixes_applied), 0)
+
+        with open(os.path.join(snapshot_dir, "LATEST"), 'r') as f:
+            self.assertEqual(f.read().strip(), "99")
+
+    def test_repair_database_level(self):
+        """Should repair all tables in a database."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("mydb", False)
+
+        schema = Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))],
+            partition_keys=[],
+            primary_keys=["id"],
+            options={},
+            comment=""
+        )
+        catalog.create_table("mydb.t1", schema, False)
+        catalog.create_table("mydb.t2", schema, False)
+
+        reports = catalog.repair_database("mydb")
+        self.assertEqual(len(reports), 2)
+
+    def test_repair_catalog_level(self):
+        """Should repair all tables in all databases."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("db1", False)
+        catalog.create_database("db2", False)
+
+        schema = Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))],
+            partition_keys=[],
+            primary_keys=["id"],
+            options={},
+            comment=""
+        )
+        catalog.create_table("db1.t1", schema, False)
+        catalog.create_table("db2.t2", schema, False)
+
+        reports = catalog.repair_catalog()
+        self.assertEqual(len(reports), 2)
+
+    def test_fix_latest_respects_check_data_files(self):
+        """_fix_latest_file should not select a snapshot with missing data files
+        when check_data_files=True."""
+        catalog = self._create_catalog_and_table()
+
+        table_path = os.path.join(self.warehouse, "test_db.db", "test_table")
+        snapshot_dir = os.path.join(table_path, "snapshot")
+        manifest_dir = os.path.join(table_path, "manifest")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        os.makedirs(manifest_dir, exist_ok=True)
+
+        partition_bytes = self._serialize_partition([], [])
+
+        # Snapshot 1: healthy (empty manifests)
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-base-1"))
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-delta-1"))
+        snapshot1 = {
+            "version": 3, "id": 1, "schemaId": 0,
+            "baseManifestList": "manifest-list-base-1",
+            "deltaManifestList": "manifest-list-delta-1",
+            "totalRecordCount": 0, "deltaRecordCount": 0,
+            "commitUser": "test", "commitIdentifier": 1,
+            "commitKind": "APPEND", "timeMillis": 1000000
+        }
+        with open(os.path.join(snapshot_dir, "snapshot-1"), 'w') as f:
+            json.dump(snapshot1, f)
+
+        # Snapshot 2: references a missing data file
+        self._write_manifest_with_data_file(
+            os.path.join(manifest_dir, "manifest-2"),
+            partition_bytes, bucket=0, file_name="missing-file.orc"
+        )
+        self._write_manifest_list_with_entry(
+            os.path.join(manifest_dir, "manifest-list-base-2"), "manifest-2"
+        )
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-delta-2"))
+        snapshot2 = {
+            "version": 3, "id": 2, "schemaId": 0,
+            "baseManifestList": "manifest-list-base-2",
+            "deltaManifestList": "manifest-list-delta-2",
+            "totalRecordCount": 10, "deltaRecordCount": 10,
+            "commitUser": "test", "commitIdentifier": 2,
+            "commitKind": "APPEND", "timeMillis": 2000000
+        }
+        with open(os.path.join(snapshot_dir, "snapshot-2"), 'w') as f:
+            json.dump(snapshot2, f)
+
+        # LATEST points to non-existent snapshot-99
+        with open(os.path.join(snapshot_dir, "LATEST"), 'w') as f:
+            f.write("99")
+
+        # Repair with check_data_files=True: should skip snapshot-2 and pick snapshot-1
+        report = catalog.repair_table("test_db.test_table",
+                                      check_data_files=True, dry_run=False)
+        self.assertTrue(any("snapshot-1" in fix for fix in report.fixes_applied))
+
+        with open(os.path.join(snapshot_dir, "LATEST"), 'r') as f:
+            self.assertEqual(f.read().strip(), "1")
+
+    def test_repair_is_idempotent(self):
+        """Running repair twice should converge: second run is a no-op."""
+        catalog = self._create_catalog_and_table()
+
+        table_path = os.path.join(self.warehouse, "test_db.db", "test_table")
+        snapshot_dir = os.path.join(table_path, "snapshot")
+        manifest_dir = os.path.join(table_path, "manifest")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        os.makedirs(manifest_dir, exist_ok=True)
+
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-base-1"))
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-delta-1"))
+
+        snapshot_data = {
+            "version": 3, "id": 1, "schemaId": 0,
+            "baseManifestList": "manifest-list-base-1",
+            "deltaManifestList": "manifest-list-delta-1",
+            "totalRecordCount": 0, "deltaRecordCount": 0,
+            "commitUser": "test", "commitIdentifier": 1,
+            "commitKind": "APPEND", "timeMillis": 1000000
+        }
+        with open(os.path.join(snapshot_dir, "snapshot-1"), 'w') as f:
+            json.dump(snapshot_data, f)
+        with open(os.path.join(snapshot_dir, "LATEST"), 'w') as f:
+            f.write("99")
+
+        # First repair fixes the issue
+        report1 = catalog.repair_table("test_db.test_table", dry_run=False)
+        self.assertTrue(len(report1.fixes_applied) > 0)
+
+        # Second repair finds no issues — idempotent
+        report2 = catalog.repair_table("test_db.test_table", dry_run=False)
+        self.assertTrue(report2.is_healthy)
+        self.assertEqual(len(report2.fixes_applied), 0)
 
 
 if __name__ == '__main__':

@@ -401,3 +401,52 @@ class Catalog(ABC):
         raise NotImplementedError(
             "list_tags_paged is not supported by this catalog."
         )
+
+    def repair_table(self, identifier: Union[str, Identifier],
+                     check_data_files: bool = False, dry_run: bool = True) -> 'RepairReport':
+        """Repair the metadata of a single table.
+
+        Verifies the consistency of the snapshot -> manifest list -> manifest
+        -> data file chain and optionally fixes issues found.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            check_data_files: If True, verify data file existence (slow).
+            dry_run: If True, only report issues without fixing.
+
+        Returns:
+            RepairReport describing issues found and fixes applied.
+        """
+        raise NotImplementedError(
+            "repair_table is not supported by this catalog."
+        )
+
+    def repair_database(self, database_name: str,
+                        check_data_files: bool = False, dry_run: bool = True) -> 'List[RepairReport]':
+        """Repair all tables in a database.
+
+        Args:
+            database_name: Name of the database.
+            check_data_files: If True, verify data file existence (slow).
+            dry_run: If True, only report issues without fixing.
+
+        Returns:
+            List of RepairReport, one per table.
+        """
+        raise NotImplementedError(
+            "repair_database is not supported by this catalog."
+        )
+
+    def repair_catalog(self, check_data_files: bool = False, dry_run: bool = True) -> 'List[RepairReport]':
+        """Repair all tables in all databases in the catalog.
+
+        Args:
+            check_data_files: If True, verify data file existence (slow).
+            dry_run: If True, only report issues without fixing.
+
+        Returns:
+            List of RepairReport, one per table.
+        """
+        raise NotImplementedError(
+            "repair_catalog is not supported by this catalog."
+        )
