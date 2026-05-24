@@ -295,9 +295,14 @@ class WriteMergeBufferTest(unittest.TestCase):
         # ``_flush_all`` still resets ``pending_data`` so a subsequent
         # write starts from a clean slate.
         class DropAll:
-            def reset(self): pass
-            def add(self, _): pass
-            def get_result(self): return None
+            def reset(self):
+                pass
+
+            def add(self, _):
+                pass
+
+            def get_result(self):
+                return None
 
         writer = _Harness(DropAll())
         writer.pending_data = pa.Table.from_pylist(
