@@ -54,12 +54,7 @@ public class DeleteAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        CoreOptions coreOptions = CoreOptions.fromMap(table.options());
-        if (coreOptions.writeOnly()) {
-            throw new UnsupportedOperationException(
-                    "DELETE is not supported when 'write-only'='true'. Remove the hint or set it to false for the target table.");
-        }
-        CoreOptions.MergeEngine mergeEngine = coreOptions.mergeEngine();
+        CoreOptions.MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
         if (mergeEngine != DEDUPLICATE) {
             throw new UnsupportedOperationException(
                     String.format(
