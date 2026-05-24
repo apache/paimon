@@ -250,12 +250,12 @@ class SnapshotManager:
                 ids.append(int(match.group(1)))
         ids.sort()
 
-        snapshots: List[Snapshot] = []
-        for snapshot_id in ids:
-            snapshot = self.get_snapshot_by_id(snapshot_id)
-            if snapshot is not None:
-                snapshots.append(snapshot)
-        return snapshots
+        snapshots = self.get_snapshots_batch(ids)
+        return [
+            snapshots[snapshot_id]
+            for snapshot_id in ids
+            if snapshots.get(snapshot_id) is not None
+        ]
 
     def later_or_equal_watermark(self, watermark: int) -> Optional[Snapshot]:
         """
@@ -322,29 +322,6 @@ class SnapshotManager:
             return None
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
         return JSON.from_json(snapshot_content, Snapshot)
-
-    def list_snapshots(self) -> List[Snapshot]:
-        """List available snapshots ordered by snapshot ID."""
-        import re
-
-        if not self.file_io.exists(self.snapshot_dir):
-            return []
-
-        snapshot_pattern = re.compile(r'^snapshot-(\d+)$')
-        snapshot_ids = []
-        for file_info in self.file_io.list_status(self.snapshot_dir):
-            filename = file_info.path.split('/')[-1]
-            match = snapshot_pattern.match(filename)
-            if match:
-                snapshot_ids.append(int(match.group(1)))
-
-        sorted_ids = sorted(snapshot_ids)
-        snapshots = self.get_snapshots_batch(sorted_ids)
-        return [
-            snapshots[snapshot_id]
-            for snapshot_id in sorted_ids
-            if snapshots.get(snapshot_id) is not None
-        ]
 
     def get_snapshots_batch(
         self, snapshot_ids: List[int], max_workers: int = 4
