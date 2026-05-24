@@ -1879,6 +1879,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(2))
                     .withDescription("The target size of deletion vector index file.");
 
+    public static final ConfigOption<Boolean> DELETION_VECTORS_MERGE_ON_READ =
+            key("deletion-vectors.merge-on-read")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When deletion vectors are enabled, uncompacted files are not visible by default. "
+                                    + "Set this to true to enable merge-on-read, which makes uncompacted data "
+                                    + "visible at the cost of read performance. "
+                                    + "This option only affects batch scan visibility of DV level-0 files, "
+                                    + "it does not change streaming scan or changelog behavior.");
+
     public static final ConfigOption<Boolean> DELETION_VECTOR_BITMAP64 =
             key("deletion-vectors.bitmap64")
                     .booleanType()
@@ -3649,7 +3660,10 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean batchScanSkipLevel0() {
-        return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
+        if (deletionVectorsEnabled()) {
+            return !options.get(DELETION_VECTORS_MERGE_ON_READ);
+        }
+        return mergeEngine() == FIRST_ROW;
     }
 
     public MemorySize dvIndexFileTargetSize() {

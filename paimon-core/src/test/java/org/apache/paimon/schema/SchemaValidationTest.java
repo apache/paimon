@@ -508,4 +508,15 @@ class SchemaValidationTest {
         validateTableSchema(
                 new TableSchema(1, fields, 10, emptyList(), singletonList("k"), options, ""));
     }
+
+    @Test
+    public void testMergeOnReadConflictWithVisibilityCallback() {
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.enabled", "true");
+        options.put("deletion-vectors.merge-on-read", "true");
+        options.put("visibility-callback.enabled", "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "Cannot enable deletion-vectors.merge-on-read together with visibility-callback.enabled");
+    }
 }

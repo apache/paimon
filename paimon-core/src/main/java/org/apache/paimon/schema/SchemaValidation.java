@@ -620,6 +620,13 @@ public class SchemaValidation {
                     !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                     "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
         }
+
+        checkArgument(
+                !(options.toConfiguration().get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)
+                        && options.visibilityCallbackEnabled()),
+                "Cannot enable deletion-vectors.merge-on-read together with visibility-callback.enabled. "
+                        + "The former makes DV level-0 files visible at read time, "
+                        + "while the latter waits for compaction before returning commits.");
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
