@@ -50,6 +50,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Nullable private final Pattern dbIncludingPattern;
     @Nullable private final Pattern dbExcludingPattern;
     private final TableNameConverter tableNameConverter;
+    private final Set<String> createdTables = new HashSet<>();
 
     private final Map<String, RichEventParser> parsers = new HashMap<>();
     private final Set<String> includedTables = new HashSet<>();
@@ -198,6 +199,8 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     private boolean shouldCreateCurrentTable() {
-        return shouldSynchronizeCurrentTable && !record.cdcSchema().fields().isEmpty();
+        return shouldSynchronizeCurrentTable
+                && !record.cdcSchema().fields().isEmpty()
+                && createdTables.add(parseTableName());
     }
 }

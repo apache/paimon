@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -104,16 +103,12 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                         schema -> {
                             Identifier identifier = new Identifier(database, tableName);
                             try {
-                                Table ignore = catalog.getTable(identifier);
-                            } catch (Catalog.TableNotExistException e) {
-                                try {
-                                    catalog.createTable(identifier, schema, true);
-                                } catch (Exception ex) {
-                                    LOG.error(
-                                            "Cannot create newly added Paimon table {}",
-                                            identifier.getFullName(),
-                                            ex);
-                                }
+                                catalog.createTable(identifier, schema, true);
+                            } catch (Exception e) {
+                                LOG.error(
+                                        "Cannot create newly added Paimon table {}",
+                                        identifier.getFullName(),
+                                        e);
                             }
                         });
 
