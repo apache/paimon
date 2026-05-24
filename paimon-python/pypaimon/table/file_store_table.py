@@ -202,7 +202,7 @@ class FileStoreTable(Table):
         snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
         if snapshot is None:
             raise ValueError(
-                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+                f"No snapshot found at or before {timestamp_millis}ms."
             )
 
         tag_mgr = self.tag_manager()
@@ -336,7 +336,7 @@ class FileStoreTable(Table):
         snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
         if snapshot is None:
             raise ValueError(
-                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+                f"No snapshot found at or before {timestamp_millis}ms."
             )
         self.rollback_to(snapshot.id)
 

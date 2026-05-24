@@ -234,6 +234,35 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
             table.replace_tag("exists_tag", snapshot_id=999)
         self.assertIn("doesn't exist", str(cm.exception))
 
+    # -- create_tag_from_timestamp ---------------------------------------------
+
+    def test_create_tag_from_timestamp(self):
+        table = self.catalog.get_table(self.identifier)
+        # Create a second snapshot
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"id": [10, 11], "value": ["x", "y"]},
+            schema=self.pa_schema,
+        ))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        # Use a timestamp far in the future to capture the latest snapshot
+        import time
+        future_ts = int(time.time() * 1000) + 100_000
+        table.create_tag_from_timestamp("ts_tag", future_ts)
+
+        tag = table.tag_manager().get("ts_tag")
+        self.assertEqual(tag.trim_to_snapshot().id, 2)
+
+    def test_create_tag_from_timestamp_no_snapshot_raises(self):
+        table = self.catalog.get_table(self.identifier)
+        # Use timestamp 0 — no snapshot can be at or before epoch
+        with self.assertRaises(ValueError) as cm:
+            table.create_tag_from_timestamp("never", 0)
+        self.assertIn("at or before", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
