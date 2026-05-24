@@ -32,8 +32,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -116,7 +114,6 @@ public class RenamingSnapshotCommitTest {
         long commitIdentifier = id;
         Snapshot.CommitKind commitKind = Snapshot.CommitKind.APPEND;
         long timeMillis = System.currentTimeMillis();
-        Map<Integer, Long> logOffsets = new HashMap<>();
         Long totalRecordCount = 100L;
         Long deltaRecordCount = 100L;
 
@@ -134,7 +131,6 @@ public class RenamingSnapshotCommitTest {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
                 null,
