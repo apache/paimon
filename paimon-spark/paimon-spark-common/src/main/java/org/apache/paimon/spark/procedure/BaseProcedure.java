@@ -76,22 +76,17 @@ abstract class BaseProcedure implements Procedure {
 
     protected <T> T modifyPaimonTable(
             Identifier ident, Function<org.apache.paimon.table.Table, T> func) {
-        return execute(ident, true, func);
-    }
-
-    private <T> T execute(
-            Identifier ident,
-            boolean refreshSparkCache,
-            Function<org.apache.paimon.table.Table, T> func) {
         SparkTable sparkTable = loadSparkTable(ident);
         org.apache.paimon.table.Table table = sparkTable.getTable();
-
         T result = func.apply(table);
+        refreshSparkCache(ident, sparkTable);
+        return result;
+    }
 
-        if (refreshSparkCache) {
-            refreshSparkCache(ident, sparkTable);
-        }
-
+    protected <T> T modifySparkTable(Identifier ident, Function<SparkTable, T> func) {
+        SparkTable sparkTable = loadSparkTable(ident);
+        T result = func.apply(sparkTable);
+        refreshSparkCache(ident, sparkTable);
         return result;
     }
 
@@ -112,6 +107,10 @@ abstract class BaseProcedure implements Procedure {
     protected DataSourceV2Relation createRelation(Identifier ident) {
         return DataSourceV2Relation.create(
                 loadSparkTable(ident), Option.apply(tableCatalog), Option.apply(ident));
+    }
+
+    protected DataSourceV2Relation createRelation(Identifier ident, Table table) {
+        return DataSourceV2Relation.create(table, Option.apply(tableCatalog), Option.apply(ident));
     }
 
     protected void refreshSparkCache(Identifier ident, Table table) {
