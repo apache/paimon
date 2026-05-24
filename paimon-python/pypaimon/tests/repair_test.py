@@ -565,6 +565,71 @@ class TestTableRepairVerify(unittest.TestCase):
         error_messages = [i.message for i in report_branch.issues if i.level == "error"]
         self.assertTrue(any("snapshot-99" in m for m in error_messages))
 
+    def test_check_data_files_shared_manifests_no_double_count(self):
+        """Multiple snapshots sharing manifest files should not double-count data files."""
+        self._create_catalog_and_table()
+
+        table_path = os.path.join(self.warehouse, "test_db.db", "test_table")
+        snapshot_dir = os.path.join(table_path, "snapshot")
+        manifest_dir = os.path.join(table_path, "manifest")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        os.makedirs(manifest_dir, exist_ok=True)
+
+        partition_bytes = self._serialize_partition([], [])
+
+        # Create one manifest file referenced by both snapshots
+        self._write_manifest_with_data_file(
+            os.path.join(manifest_dir, "manifest-shared"),
+            partition_bytes, bucket=0, file_name="data-shared.orc"
+        )
+
+        # Snapshot 1: base uses shared manifest
+        self._write_manifest_list_with_entry(
+            os.path.join(manifest_dir, "manifest-list-base-1"), "manifest-shared"
+        )
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-delta-1"))
+        snapshot_1 = {
+            "version": 3, "id": 1, "schemaId": 0,
+            "baseManifestList": "manifest-list-base-1",
+            "deltaManifestList": "manifest-list-delta-1",
+            "totalRecordCount": 10, "deltaRecordCount": 0,
+            "commitUser": "test", "commitIdentifier": 1,
+            "commitKind": "APPEND", "timeMillis": 1000000
+        }
+        with open(os.path.join(snapshot_dir, "snapshot-1"), 'w') as f:
+            json.dump(snapshot_1, f)
+
+        # Snapshot 2: base also uses the same shared manifest
+        self._write_manifest_list_with_entry(
+            os.path.join(manifest_dir, "manifest-list-base-2"), "manifest-shared"
+        )
+        self._write_empty_avro(os.path.join(manifest_dir, "manifest-list-delta-2"))
+        snapshot_2 = {
+            "version": 3, "id": 2, "schemaId": 0,
+            "baseManifestList": "manifest-list-base-2",
+            "deltaManifestList": "manifest-list-delta-2",
+            "totalRecordCount": 10, "deltaRecordCount": 0,
+            "commitUser": "test", "commitIdentifier": 2,
+            "commitKind": "APPEND", "timeMillis": 2000000
+        }
+        with open(os.path.join(snapshot_dir, "snapshot-2"), 'w') as f:
+            json.dump(snapshot_2, f)
+        with open(os.path.join(snapshot_dir, "LATEST"), 'w') as f:
+            f.write("2")
+
+        # Create the data file
+        data_file_dir = os.path.join(table_path, "bucket-0")
+        os.makedirs(data_file_dir, exist_ok=True)
+        with open(os.path.join(data_file_dir, "data-shared.orc"), 'wb') as f:
+            f.write(b"fake data")
+
+        repairer = self._get_table_repair(table_path)
+        report = repairer.verify(check_data_files=True)
+        self.assertFalse(report.has_errors)
+        self.assertEqual(report.snapshots_checked, 2)
+        # Data file should only be counted once despite being referenced by both snapshots
+        self.assertEqual(report.data_files_checked, 1)
+
     def _write_empty_avro(self, path: str):
         """Write an empty Avro file (valid manifest list with no records)."""
         import fastavro

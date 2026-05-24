@@ -181,8 +181,9 @@ class TableRepair:
             ))
 
         # Step 4: Verify each snapshot and its manifest chain
+        checked_files = set()
         for sid in sorted(snapshot_ids):
-            self._verify_snapshot(sid, report, check_data_files)
+            self._verify_snapshot(sid, report, check_data_files, checked_files)
 
         return report
 
@@ -196,7 +197,7 @@ class TableRepair:
         snapshot_pattern = re.compile(r'^snapshot-(\d+)$')
         ids = []
         for status in statuses:
-            name = status.base_name if hasattr(status, 'base_name') else ""
+            name = status.base_name
             match = snapshot_pattern.match(name)
             if match:
                 ids.append(int(match.group(1)))
@@ -223,7 +224,8 @@ class TableRepair:
         except Exception:
             return None
 
-    def _verify_snapshot(self, snapshot_id: int, report: RepairReport, check_data_files: bool):
+    def _verify_snapshot(self, snapshot_id: int, report: RepairReport,
+                         check_data_files: bool, checked_files: set):
         """Verify a single snapshot and its downstream manifest chain."""
         report.snapshots_checked += 1
         snapshot_path = f"{self.snapshot_dir}/snapshot-{snapshot_id}"
@@ -241,13 +243,13 @@ class TableRepair:
         # Verify base manifest list
         self._verify_manifest_list(
             snapshot.base_manifest_list, f"snapshot-{snapshot_id}/baseManifestList",
-            report, check_data_files
+            report, check_data_files, checked_files
         )
 
         # Verify delta manifest list
         self._verify_manifest_list(
             snapshot.delta_manifest_list, f"snapshot-{snapshot_id}/deltaManifestList",
-            report, check_data_files
+            report, check_data_files, checked_files
         )
 
         # Verify changelog manifest list (optional)
@@ -255,11 +257,12 @@ class TableRepair:
             self._verify_manifest_list(
                 snapshot.changelog_manifest_list,
                 f"snapshot-{snapshot_id}/changelogManifestList",
-                report, check_data_files
+                report, check_data_files, checked_files
             )
 
     def _verify_manifest_list(self, manifest_list_name: str, context: str,
-                              report: RepairReport, check_data_files: bool):
+                              report: RepairReport, check_data_files: bool,
+                              checked_files: set):
         """Verify a manifest list file exists and is readable."""
         if not manifest_list_name:
             return
@@ -298,10 +301,12 @@ class TableRepair:
 
         # Verify each manifest file referenced in this list
         for mf_name in manifest_file_names:
-            self._verify_manifest_file(mf_name, manifest_list_name, report, check_data_files)
+            self._verify_manifest_file(mf_name, manifest_list_name, report,
+                                       check_data_files, checked_files)
 
     def _verify_manifest_file(self, manifest_file_name: str, parent_list: str,
-                              report: RepairReport, check_data_files: bool):
+                              report: RepairReport, check_data_files: bool,
+                              checked_files: set):
         """Verify a manifest file exists and is readable."""
         report.manifest_files_checked += 1
         manifest_path = f"{self.manifest_dir}/{manifest_file_name}"
@@ -346,9 +351,6 @@ class TableRepair:
                 file_name = file_dict.get('_FILE_NAME')
                 if not file_name:
                     continue
-                report.data_files_checked += 1
-                if report.data_files_checked % 1000 == 0:
-                    logger.info("Checked %d data files so far...", report.data_files_checked)
 
                 external_path = file_dict.get('_EXTERNAL_PATH')
                 if external_path:
@@ -366,10 +368,24 @@ class TableRepair:
                                               if _is_null_or_whitespace_only(field_value)
                                               else str(field_value))
                                 path_builder = f"{path_builder}/{field_name}={part_value}"
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            report.issues.append(RepairIssue(
+                                level="warning",
+                                category="partition",
+                                message=(f"Failed to deserialize partition for {file_name}: {e}. "
+                                         "Data file path may be incorrect."),
+                                path=manifest_path,
+                            ))
                     bucket = record.get('_BUCKET', 0)
                     data_file_path = f"{path_builder}/bucket-{bucket}/{file_name}"
+
+                if data_file_path in checked_files:
+                    continue
+                checked_files.add(data_file_path)
+
+                report.data_files_checked += 1
+                if report.data_files_checked % 1000 == 0:
+                    logger.info("Checked %d data files so far...", report.data_files_checked)
 
                 if not self.file_io.exists(data_file_path):
                     report.issues.append(RepairIssue(
