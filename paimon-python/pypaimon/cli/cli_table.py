@@ -818,6 +818,40 @@ def cmd_table_list_partitions(args):
         sys.exit(1)
 
 
+def cmd_table_repair(args):
+    """
+    Execute the 'table repair' command.
+
+    Verifies and optionally repairs the metadata consistency chain of a table.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config_path = args.config
+    config = load_catalog_config(config_path)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    dry_run = not args.fix
+
+    try:
+        report = catalog.repair_table(
+            table_identifier,
+            dry_run=dry_run
+        )
+        print(report.summary())
+        if report.has_errors and dry_run:
+            print("\nRun with --fix to apply available fixes.")
+    except Exception as e:
+        print(f"Error: Failed to repair table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_table_drop_partition(args):
     """
     Execute the 'table drop-partition' command.
@@ -1170,3 +1204,16 @@ def add_table_subcommands(table_parser):
     update_comment_parser = alter_subparsers.add_parser('update-comment', help='Update table comment')
     update_comment_parser.add_argument('--comment', '-c', required=True, help='New table comment')
     update_comment_parser.set_defaults(func=cmd_table_alter)
+
+    # table repair command
+    repair_parser = table_subparsers.add_parser(
+        'repair', help='Verify and repair table metadata consistency')
+    repair_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    repair_parser.add_argument(
+        '--fix', action='store_true',
+        help='Apply fixes (default is dry-run/report only)'
+    )
+    repair_parser.set_defaults(func=cmd_table_repair)
