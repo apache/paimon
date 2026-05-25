@@ -845,9 +845,10 @@ class DataEvolutionSplitRead(SplitRead):
             first_file = bunch.files()[0]
 
             # Get field IDs for this bunch
-            if (DataFileMeta.is_blob_file(first_file.file_name)
-                    or DataFileMeta.is_vector_file(first_file.file_name)):
+            if DataFileMeta.is_blob_file(first_file.file_name):
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
+            elif DataFileMeta.is_vector_file(first_file.file_name):
+                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
             elif first_file.write_cols:
                 field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
             else:

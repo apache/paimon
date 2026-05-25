@@ -16,7 +16,7 @@
 # under the License.
 
 import uuid
-from typing import Tuple
+from typing import List, Tuple
 
 import pyarrow as pa
 
@@ -29,13 +29,17 @@ from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class VectorWriter(AppendOnlyDataWriter):
-    """Writer for vector columns stored in separate files (.vector.<format>)."""
+    """Writer for all vector columns stored in a single file (.vector.<format>).
+
+    Matches Java behavior: all vector columns go into one .vector.<format> file,
+    not one file per column.
+    """
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int,
-                 vector_column: str, vector_file_format: str, options: CoreOptions = None):
+                 vector_columns: List[str], vector_file_format: str, options: CoreOptions = None):
         super().__init__(table, partition, bucket, max_seq_number,
-                         options, write_cols=[vector_column])
-        self.vector_column = vector_column
+                         options, write_cols=vector_columns)
+        self.vector_columns = vector_columns
         self.vector_file_format = vector_file_format
         self.file_format = vector_file_format
         self.target_file_size = options.vector_target_file_size()

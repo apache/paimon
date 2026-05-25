@@ -17,7 +17,7 @@
 
 import logging
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pyarrow as pa
 
@@ -35,15 +35,13 @@ logger = logging.getLogger(__name__)
 class DataVectorWriter(DataWriter):
     """A rolling file writer that stores vector columns separately from normal columns.
 
-    Similar to DataBlobWriter but for vector data. Vector columns are written to
-    `.vector.<format>` files (e.g., `.vector.lance`), while normal columns go to
-    standard data files.
+    All vector columns are written to a single `.vector.<format>` file (matching
+    Java behavior), while normal columns go to standard data files.
 
     Metadata organization:
     committed_files = [
-        normal_file_meta,     # data.parquet
-        vector_file1_meta,    # data.vector.lance (embed1 column)
-        vector_file2_meta,    # data.vector.lance (embed2 column)
+        normal_file_meta,       # data.parquet (id, label columns)
+        vector_file_meta,       # data.vector.lance (all vector columns)
         ...
     ]
     """
@@ -85,14 +83,14 @@ class DataVectorWriter(DataWriter):
         self.pending_normal_data: Optional[pa.Table] = None
 
         from pypaimon.write.writer.vector_writer import VectorWriter
-        self.vector_writers: Dict[str, VectorWriter] = {}
-        for vector_column in self.vector_write_columns:
-            self.vector_writers[vector_column] = VectorWriter(
+        self.vector_writer: Optional[VectorWriter] = None
+        if self.vector_write_columns:
+            self.vector_writer = VectorWriter(
                 table=self.table,
                 partition=self.partition,
                 bucket=self.bucket,
                 max_seq_number=max_seq_number,
-                vector_column=vector_column,
+                vector_columns=self.vector_write_columns,
                 vector_file_format=self.vector_file_format,
                 options=options,
             )
@@ -112,7 +110,7 @@ class DataVectorWriter(DataWriter):
 
     def write(self, data: pa.RecordBatch):
         try:
-            normal_data, vector_data_map = self._split_data(data)
+            normal_data, vector_data = self._split_data(data)
 
             processed_normal = pa.Table.from_batches([normal_data]) if normal_data is not None else None
             if self.pending_normal_data is None:
@@ -120,9 +118,8 @@ class DataVectorWriter(DataWriter):
             elif processed_normal is not None:
                 self.pending_normal_data = pa.concat_tables([self.pending_normal_data, processed_normal])
 
-            for vector_column, vector_data in vector_data_map.items():
-                if vector_data is not None and vector_data.num_rows > 0:
-                    self.vector_writers[vector_column].write(vector_data)
+            if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
+                self.vector_writer.write(vector_data)
 
             self.record_count += data.num_rows
 
@@ -152,17 +149,15 @@ class DataVectorWriter(DataWriter):
             self.pending_normal_data = None
 
     def abort(self):
-        for vector_writer in self.vector_writers.values():
-            vector_writer.abort()
+        if self.vector_writer is not None:
+            self.vector_writer.abort()
         self.pending_normal_data = None
         self.committed_files.clear()
 
-    def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, Dict[str, pa.RecordBatch]]:
+    def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, pa.RecordBatch]:
         normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
-        vector_data_map = {
-            col: data.select([col]) for col in self.vector_write_columns
-        }
-        return normal_data, vector_data_map
+        vector_data = data.select(self.vector_write_columns) if self.vector_write_columns else None
+        return normal_data, vector_data
 
     def _should_roll_normal(self) -> bool:
         if self.pending_normal_data is None:
@@ -178,10 +173,9 @@ class DataVectorWriter(DataWriter):
         normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
 
         vector_metas = []
-        for vector_column in self.vector_write_columns:
-            writer_metas = self.vector_writers[vector_column].prepare_commit()
-            self._validate_consistency(normal_meta, writer_metas, vector_column)
-            vector_metas.extend(writer_metas)
+        if self.vector_writer is not None:
+            vector_metas = self.vector_writer.prepare_commit()
+            self._validate_consistency(normal_meta, vector_metas)
 
         self.committed_files.append(normal_meta)
         self.committed_files.extend(vector_metas)
@@ -235,7 +229,7 @@ class DataVectorWriter(DataWriter):
         )
 
     def _validate_consistency(
-            self, normal_meta: DataFileMeta, vector_metas: List[DataFileMeta], vector_column: str):
+            self, normal_meta: DataFileMeta, vector_metas: List[DataFileMeta]):
         if normal_meta is None:
             return
         normal_row_count = normal_meta.row_count
@@ -244,6 +238,5 @@ class DataVectorWriter(DataWriter):
             raise RuntimeError(
                 f"Row count mismatch between main file and vector files. "
                 f"Main file: {normal_meta.file_name} (rows: {normal_row_count}), "
-                f"vector field: {vector_column}, "
                 f"vector files: {[m.file_name for m in vector_metas]} (rows: {vector_row_count})"
             )
