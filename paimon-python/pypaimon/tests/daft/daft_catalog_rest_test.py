@@ -289,3 +289,20 @@ class DaftRestReadTest(RESTBaseTest):
         for k, v in token_payload.items():
             self.assertEqual(captured["opts"].get(k), v, captured["opts"])
         fake_file_io.try_to_refresh_token.assert_called()
+
+    def test_enrich_is_noop_when_not_rest_metastore(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+        opts = {"warehouse": "/tmp/x", "metastore": "filesystem"}
+        self.assertIs(_enrich_options_with_rest_token(opts, self.table), opts)
+
+    def test_enrich_is_noop_when_file_io_has_no_refresh(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+        with patch.object(self.table, "file_io", MagicMock(spec=[])):
+            self.assertIs(_enrich_options_with_rest_token(self.options, self.table), self.options)
+
+    def test_enrich_is_noop_when_token_is_none(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+        fake_file_io = MagicMock()
+        fake_file_io.token = None
+        with patch.object(self.table, "file_io", fake_file_io):
+            self.assertIs(_enrich_options_with_rest_token(self.options, self.table), self.options)

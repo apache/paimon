@@ -39,9 +39,7 @@ if TYPE_CHECKING:
 def _enrich_options_with_rest_token(
     catalog_options: Dict[str, str], table: "FileStoreTable"
 ) -> Dict[str, str]:
-    # REST catalogs (DLF) issue dynamic OSS STS tokens through table.file_io rather
-    # than catalog_options; fold them into the options dict so Daft's IOConfig gets
-    # the same credentials pypaimon would use for its own reads.
+    # REST catalogs (DLF) deliver OSS STS tokens via table.file_io; fold them in so Daft's IOConfig matches pypaimon's.
     if catalog_options.get("metastore") != "rest":
         return catalog_options
     file_io = getattr(table, "file_io", None)
