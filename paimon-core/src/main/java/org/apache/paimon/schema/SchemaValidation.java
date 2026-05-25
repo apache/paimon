@@ -807,8 +807,7 @@ public class SchemaValidation {
                                     field.id(),
                                     field.name(),
                                     new ArrayType(
-                                            vectorType.isNullable(),
-                                            vectorType.getElementType())));
+                                            vectorType.isNullable(), vectorType.getElementType())));
                 } else {
                     fieldsForValidation.add(field);
                 }
