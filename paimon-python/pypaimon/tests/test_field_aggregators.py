@@ -248,8 +248,9 @@ class FieldBoolAndAggTest(unittest.TestCase):
 
 
 class RegistrationTest(unittest.TestCase):
-    """Sanity check that all 9 expected aggregators are registered when
-    the package is imported. Guards against future refactors silently
+    """Sanity check that all 10 expected aggregators (the primary-key
+    placeholder plus 9 value aggregators) are registered when the
+    package is imported. Guards against future refactors silently
     dropping a registration.
     """
 
