@@ -16,7 +16,7 @@
 # under the License.
 
 import uuid
-from typing import List, Tuple
+from typing import Tuple
 
 import pyarrow as pa
 

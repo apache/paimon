@@ -151,5 +151,3 @@ class VectorBunch(_SpecialFieldBunch):
 
     def _file_type_label(self) -> str:
         return "vector"
-
-
