@@ -16,12 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Tests for the daft + REST catalog code path.
-
-- Wrapper tests use MagicMock to isolate PaimonCatalog transformation logic.
-- Read-flow tests use the in-process RESTCatalogServer to exercise
-  _read_table + PaimonDataSource end-to-end against a real REST catalog.
-"""
+"""Tests for the daft + REST catalog code path."""
 
 from __future__ import annotations
 
@@ -239,23 +234,9 @@ def test_create_namespace_single_part():
     inner.create_database.assert_called_once_with("new_db", ignore_if_exists=False)
 
 
-# ---------------------------------------------------------------------------
-# Read-flow tests against an in-process REST catalog server
-# ---------------------------------------------------------------------------
-
-
 class DaftRestReadTest(RESTBaseTest):
-    """End-to-end tests for the daft → REST catalog read path.
-
-    Uses RESTBaseTest's in-process RESTCatalogServer; self.table is a
-    populated append-only table created in setUp.
-    """
 
     def test_read_table_forwards_full_catalog_options_to_datasource(self):
-        """Reproduces Bug A: _read_table trims catalog_options to just
-        {'warehouse': ...} before constructing PaimonDataSource, dropping
-        metastore/uri/token/dlf.* — fields the connector needs to detect
-        a REST catalog and reach DLF credentials."""
         from pypaimon.daft.daft_datasource import PaimonDataSource
         from pypaimon.daft.daft_paimon import _read_table
 
@@ -274,29 +255,11 @@ class DaftRestReadTest(RESTBaseTest):
             _read_table(self.table, catalog_options=self.options)
 
         received = captured["catalog_options"]
-        self.assertEqual(
-            received.get("metastore"), "rest",
-            f"metastore stripped before reaching PaimonDataSource; got {received}",
-        )
-        self.assertIn(
-            "uri", received,
-            f"uri stripped before reaching PaimonDataSource; got {received}",
-        )
-        self.assertIn(
-            "token", received,
-            f"token stripped before reaching PaimonDataSource; got {received}",
-        )
+        self.assertEqual(received.get("metastore"), "rest", received)
+        self.assertIn("uri", received, received)
+        self.assertIn("token", received, received)
 
     def test_rest_catalog_disables_native_parquet_reader(self):
-        """Reproduces Bug B: PaimonDataSource leaves _is_parquet=True for
-        REST catalogs, sending OSS reads through Daft's static IOConfig
-        which cannot refresh DLF dynamic STS tokens. Should fall back to
-        the pypaimon reader whose file_io does refresh tokens.
-
-        Default file format is ORC, which makes _is_parquet=False
-        trivially; explicitly create a parquet table to isolate the
-        REST-detection path.
-        """
         from daft import context
         from daft.daft import StorageConfig
 
@@ -327,9 +290,4 @@ class DaftRestReadTest(RESTBaseTest):
             catalog_options=self.options,
         )
 
-        self.assertFalse(
-            source._is_parquet,
-            "REST catalog should disable native parquet reader; "
-            "Daft's static IOConfig cannot refresh DLF dynamic OSS tokens, "
-            "but is_parquet=True ⇒ DataSourceTask.parquet is yielded.",
-        )
+        self.assertFalse(source._is_parquet)
