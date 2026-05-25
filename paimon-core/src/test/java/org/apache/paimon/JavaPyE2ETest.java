@@ -941,6 +941,99 @@ public class JavaPyE2ETest {
                 res.size());
     }
 
+    /**
+     * Java writes a vector table with multiple vector columns in a single .vector.parquet file for
+     * Python to read.
+     */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteMultiVectorDedicatedFile() throws Exception {
+        Identifier identifier = identifier("multi_vector_dedicated_test");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("embed1", DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .column("embed2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .column("label", DataTypes.STRING())
+                        .option("vector.file.format", "parquet")
+                        .option("row-tracking.enabled", "true")
+                        .option("data-evolution.enabled", "true")
+                        .option("bucket", "-1")
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f}),
+                            BinaryVector.fromPrimitiveArray(new float[] {10.0f, 20.0f}),
+                            BinaryString.fromString("first")));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryVector.fromPrimitiveArray(new float[] {4.0f, 5.0f, 6.0f}),
+                            BinaryVector.fromPrimitiveArray(new float[] {40.0f, 50.0f}),
+                            BinaryString.fromString("second")));
+            write.write(
+                    GenericRow.of(
+                            3,
+                            BinaryVector.fromPrimitiveArray(new float[] {-1.0f, 0.5f, 2.5f}),
+                            BinaryVector.fromPrimitiveArray(new float[] {-10.0f, 5.0f}),
+                            BinaryString.fromString("third")));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "1, [1.0, 2.0, 3.0], [10.0, 20.0], first",
+                        "2, [4.0, 5.0, 6.0], [40.0, 50.0], second",
+                        "3, [-1.0, 0.5, 2.5], [-10.0, 5.0], third");
+        LOG.info("testJavaWriteMultiVectorDedicatedFile: wrote and read back {} rows", res.size());
+    }
+
+    /** Java reads a multi-vector-column table with dedicated vector files written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadMultiVectorDedicatedFile() throws Exception {
+        Identifier identifier = identifier("py_multi_vector_dedicated_test");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        assertThat(table.rowType().getFieldNames()).contains("embed1", "embed2");
+        assertThat(table.rowType().getTypeAt(table.rowType().getFieldIndex("embed1")))
+                .isEqualTo(DataTypes.VECTOR(3, DataTypes.FLOAT()));
+        assertThat(table.rowType().getTypeAt(table.rowType().getFieldIndex("embed2")))
+                .isEqualTo(DataTypes.VECTOR(2, DataTypes.FLOAT()));
+
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "1, [1.0, 2.0, 3.0], [10.0, 20.0], first",
+                        "2, [4.0, 5.0, 6.0], [40.0, 50.0], second",
+                        "3, [-1.0, 0.5, 2.5], [-10.0, 5.0], third");
+        LOG.info(
+                "testJavaReadMultiVectorDedicatedFile: Java read {} rows written by Python",
+                res.size());
+    }
+
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testBlobWriteAlterCompact() throws Exception {
