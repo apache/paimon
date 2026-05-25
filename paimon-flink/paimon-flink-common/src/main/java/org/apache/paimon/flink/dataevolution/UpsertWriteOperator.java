@@ -20,6 +20,7 @@ package org.apache.paimon.flink.dataevolution;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
@@ -50,7 +51,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -80,6 +80,7 @@ public class UpsertWriteOperator extends PrepareCommitOperator<UpsertRecord, Com
     private transient Map<Long, List<DataFileMeta>> firstIdToFiles;
     private transient RowType fullWriteType;
     private transient RowType readType;
+    private transient InternalRow.FieldGetter[] fieldGetters;
 
     public UpsertWriteOperator(
             StreamOperatorParameters<Committable> parameters, FileStoreTable table) {
@@ -100,6 +101,12 @@ public class UpsertWriteOperator extends PrepareCommitOperator<UpsertRecord, Com
         this.readType = SpecialFields.rowTypeWithRowId(fullWriteType);
         this.tableRead = table.newRead().withReadType(readType);
         this.projectedRow = ProjectedRow.from(fullWriteType, readType);
+
+        int colCount = fullWriteType.getFieldCount();
+        this.fieldGetters = new InternalRow.FieldGetter[colCount];
+        for (int i = 0; i < colCount; i++) {
+            fieldGetters[i] = InternalRow.createFieldGetter(fullWriteType.getTypeAt(i), i);
+        }
 
         @SuppressWarnings({"unchecked", "resource"})
         TableWriteImpl<InternalRow> writeImpl =
@@ -241,7 +248,7 @@ public class UpsertWriteOperator extends PrepareCommitOperator<UpsertRecord, Com
                         .rawConvertible(false)
                         .build();
 
-        int[] nonNullCols = computeAlwaysNonNullColumns(updates);
+        int[] nonNullCols = computeAnyNonNullColumns(updates);
         boolean isPartialColumn = nonNullCols.length < fullWriteType.getFieldCount();
 
         ProjectedRow writeProjection;
@@ -263,7 +270,7 @@ public class UpsertWriteOperator extends PrepareCommitOperator<UpsertRecord, Com
                     InternalRow originalRow = reader.next();
                     InternalRow updateRow = updates.get(offset);
                     if (updateRow != null) {
-                        writeProjection.replaceRow(updateRow);
+                        writeProjection.replaceRow(mergeUpdateWithOriginal(updateRow, originalRow));
                     } else {
                         writeProjection.replaceRow(originalRow);
                     }
@@ -302,19 +309,18 @@ public class UpsertWriteOperator extends PrepareCommitOperator<UpsertRecord, Com
         }
     }
 
-    private int[] computeAlwaysNonNullColumns(TreeMap<Long, InternalRow> updates) {
+    private int[] computeAnyNonNullColumns(TreeMap<Long, InternalRow> updates) {
         int colCount = fullWriteType.getFieldCount();
-        boolean[] allNonNull = new boolean[colCount];
-        Arrays.fill(allNonNull, true);
+        boolean[] anyNonNull = new boolean[colCount];
         for (InternalRow row : updates.values()) {
             for (int i = 0; i < colCount; i++) {
-                if (row.isNullAt(i)) {
-                    allNonNull[i] = false;
+                if (!row.isNullAt(i)) {
+                    anyNonNull[i] = true;
                 }
             }
         }
         int count = 0;
-        for (boolean b : allNonNull) {
+        for (boolean b : anyNonNull) {
             if (b) {
                 count++;
             }
@@ -322,11 +328,34 @@ public class UpsertWriteOperator extends PrepareCommitOperator<UpsertRecord, Com
         int[] result = new int[count];
         int idx = 0;
         for (int i = 0; i < colCount; i++) {
-            if (allNonNull[i]) {
+            if (anyNonNull[i]) {
                 result[idx++] = i;
             }
         }
         return result;
+    }
+
+    private InternalRow mergeUpdateWithOriginal(InternalRow updateRow, InternalRow originalRow) {
+        int colCount = fullWriteType.getFieldCount();
+        boolean needsMerge = false;
+        for (int i = 0; i < colCount; i++) {
+            if (updateRow.isNullAt(i)) {
+                needsMerge = true;
+                break;
+            }
+        }
+        if (!needsMerge) {
+            return updateRow;
+        }
+        GenericRow merged = new GenericRow(colCount);
+        for (int i = 0; i < colCount; i++) {
+            if (!updateRow.isNullAt(i)) {
+                merged.setField(i, fieldGetters[i].getFieldOrNull(updateRow));
+            } else {
+                merged.setField(i, fieldGetters[i].getFieldOrNull(originalRow));
+            }
+        }
+        return merged;
     }
 
     /** Factory for creating {@link UpsertWriteOperator}. */

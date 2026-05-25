@@ -213,6 +213,18 @@ public class DataEvolutionUpsertITCase extends ActionITCaseBase {
         testBatchRead("SELECT * FROM T ORDER BY id", expected);
     }
 
+    @Test
+    public void testMixedPartialColumnUpdatesInSameBatch() throws Exception {
+        createTable("T", false);
+        batchInsert("T", "(1, 'a', 1.0)", "(2, 'b', 2.0)");
+
+        // Row 1 updates 'name' only, row 2 updates 'value' only — different columns in same batch
+        upsert("T", "id", "(1, 'a_v2', CAST(NULL AS DOUBLE))", "(2, CAST(NULL AS STRING), 20.0)");
+
+        List<Row> expected = Arrays.asList(Row.of(1, "a_v2", 1.0), Row.of(2, "b", 20.0));
+        testBatchRead("SELECT * FROM T ORDER BY id", expected);
+    }
+
     private void createTable(String tableName, boolean partitioned) {
         List<String> fields = Arrays.asList("id INT", "name STRING", "`value` DOUBLE");
         List<String> partitionKeys =
