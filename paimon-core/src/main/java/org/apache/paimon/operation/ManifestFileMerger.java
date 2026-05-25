@@ -110,7 +110,8 @@ public class ManifestFileMerger {
             RowType partitionType,
             @Nullable Integer manifestReadParallelism,
             boolean manifestMergeSorted,
-            long manifestMergeSortBufferSize) {
+            long manifestMergeSortBufferSize,
+            @Nullable IOManager ioManager) {
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
@@ -125,7 +126,8 @@ public class ManifestFileMerger {
                             partitionType,
                             manifestReadParallelism,
                             manifestMergeSorted,
-                            manifestMergeSortBufferSize);
+                            manifestMergeSortBufferSize,
+                            ioManager);
             return fullCompacted.orElseGet(
                     () ->
                             tryMinorCompaction(
