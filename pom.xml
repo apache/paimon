@@ -75,6 +75,7 @@ under the License.
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
         <module>paimon-tantivy</module>
+        <module>paimon-cli</module>
     </modules>
 
     <properties>

@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Paimon CLI launcher script.
+#
+# Plugin jars (e.g. paimon-oss, paimon-s3) are loaded from:
+#   1. $PAIMON_HOME/plugins/   (alongside this script)
+#   2. $PAIMON_PLUGINS_DIR     (custom override)
+#
+# Environment variables:
+#   JAVA_HOME            - Java installation directory
+#   HADOOP_HOME          - Hadoop installation (classpath auto-appended)
+#   PAIMON_CLI_OPTS      - JVM options (default: -Xmx512m)
+#   PAIMON_PLUGINS_DIR   - Custom plugins directory
+
+set -euo pipefail
+
+# Resolve symlinks and find the real script location
+SCRIPT="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+BIN_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+PAIMON_HOME="$(dirname "$BIN_DIR")"
+
+# Find the fat jar
+PAIMON_JAR=""
+if [ -d "$PAIMON_HOME/target" ]; then
+    PAIMON_JAR=$(find "$PAIMON_HOME/target" -name "paimon-cli-*.jar" ! -name "*-original-*" ! -name "*-sources*" ! -name "*-tests*" | head -1)
+fi
+
+if [ -z "$PAIMON_JAR" ] && [ -d "$PAIMON_HOME/lib" ]; then
+    PAIMON_JAR=$(find "$PAIMON_HOME/lib" -name "paimon-cli-*.jar" | head -1)
+fi
+
+if [ -z "$PAIMON_JAR" ]; then
+    echo "Error: Cannot find paimon-cli jar." >&2
+    echo "Run 'mvn package -DskipTests' in $PAIMON_HOME first, or place the jar in $PAIMON_HOME/lib/" >&2
+    exit 1
+fi
+
+# Check Java
+if [ -n "${JAVA_HOME:-}" ]; then
+    JAVA="$JAVA_HOME/bin/java"
+else
+    JAVA="java"
+fi
+
+if ! command -v "$JAVA" &>/dev/null; then
+    echo "Error: Java not found. Set JAVA_HOME or add java to PATH." >&2
+    exit 1
+fi
+
+# JVM options (user can override via PAIMON_CLI_OPTS)
+JVM_OPTS="${PAIMON_CLI_OPTS:--Xmx512m}"
+
+# Build classpath: main jar + plugins + hadoop
+CLASSPATH="$PAIMON_JAR"
+
+# Collect plugin jars
+PLUGINS_DIR="${PAIMON_PLUGINS_DIR:-$PAIMON_HOME/plugins}"
+if [ -d "$PLUGINS_DIR" ]; then
+    for jar in "$PLUGINS_DIR"/*.jar; do
+        [ -f "$jar" ] && CLASSPATH="$CLASSPATH:$jar"
+    done
+fi
+
+# Hadoop classpath (optional)
+if [ -n "${HADOOP_HOME:-}" ]; then
+    HADOOP_CP="$("$HADOOP_HOME/bin/hadoop" classpath 2>/dev/null || true)"
+    if [ -n "$HADOOP_CP" ]; then
+        CLASSPATH="$CLASSPATH:$HADOOP_CP"
+    fi
+fi
+
+exec "$JAVA" $JVM_OPTS -cp "$CLASSPATH" org.apache.paimon.cli.PaimonCli "$@"
