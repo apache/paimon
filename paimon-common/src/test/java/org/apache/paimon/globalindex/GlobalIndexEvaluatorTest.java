@@ -224,11 +224,17 @@ class GlobalIndexEvaluatorTest {
         GlobalIndexEvaluator evaluator =
                 new GlobalIndexEvaluator(
                         rowType,
-                        fieldId -> {
-                            threadNames.put(Thread.currentThread().getName(), true);
-                            return Collections.singletonList(
-                                    readerReturning(resultOf(fieldId, fieldId + 10)));
-                        },
+                        fieldId ->
+                                Collections.singletonList(
+                                        new StubGlobalIndexReader(resultOf(fieldId, fieldId + 10)) {
+                                            @Override
+                                            public Optional<GlobalIndexResult> visitEqual(
+                                                    FieldRef fieldRef, Object literal) {
+                                                threadNames.put(
+                                                        Thread.currentThread().getName(), true);
+                                                return super.visitEqual(fieldRef, literal);
+                                            }
+                                        }),
                         executor);
 
         PredicateBuilder builder = new PredicateBuilder(rowType);

@@ -48,7 +48,7 @@ public class GlobalIndexEvaluator implements Closeable {
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
-    private final Map<Integer, Object> fieldLocks;
+    private final Map<GlobalIndexReader, Object> readerLocks;
     private final ExecutorService executorService;
 
     public GlobalIndexEvaluator(
@@ -60,7 +60,7 @@ public class GlobalIndexEvaluator implements Closeable {
         this.executorService =
                 executorService == null ? newDirectExecutorService() : executorService;
         this.indexReadersCache = new ConcurrentHashMap<>();
-        this.fieldLocks = new ConcurrentHashMap<>();
+        this.readerLocks = new ConcurrentHashMap<>();
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
@@ -80,37 +80,6 @@ public class GlobalIndexEvaluator implements Closeable {
         }
     }
 
-    private Optional<GlobalIndexResult> visitLeaf(LeafPredicate predicate) {
-        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
-        if (!fieldRefOptional.isPresent()) {
-            return Optional.empty();
-        }
-        FieldRef fieldRef = fieldRefOptional.get();
-        int fieldId = rowType.getField(fieldRef.name()).id();
-        Collection<GlobalIndexReader> readers =
-                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
-
-        Optional<GlobalIndexResult> compoundResult = Optional.empty();
-        for (GlobalIndexReader fileIndexReader : readers) {
-            Optional<GlobalIndexResult> childResult =
-                    predicate.function().visit(fileIndexReader, fieldRef, predicate.literals());
-            if (!childResult.isPresent()) {
-                continue;
-            }
-
-            GlobalIndexResult result = childResult.get();
-            compoundResult =
-                    compoundResult
-                            .map(globalIndexResult -> Optional.of(globalIndexResult.and(result)))
-                            .orElseGet(() -> Optional.of(result));
-
-            if (compoundResult.get().results().isEmpty()) {
-                return compoundResult;
-            }
-        }
-        return compoundResult;
-    }
-
     private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(Predicate predicate) {
         if (predicate instanceof LeafPredicate) {
             return visitLeafAsync((LeafPredicate) predicate);
@@ -123,15 +92,49 @@ public class GlobalIndexEvaluator implements Closeable {
         if (!fieldRefOptional.isPresent()) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
-        int fieldId = rowType.getField(fieldRefOptional.get().name()).id();
-        Object lock = fieldLocks.computeIfAbsent(fieldId, k -> new Object());
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    synchronized (lock) {
-                        return visitLeaf(predicate);
-                    }
-                },
-                executorService);
+        FieldRef fieldRef = fieldRefOptional.get();
+        int fieldId = rowType.getField(fieldRef.name()).id();
+        Collection<GlobalIndexReader> readers =
+                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+
+        List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
+                new ArrayList<>(readers.size());
+        for (GlobalIndexReader reader : readers) {
+            Object lock = readerLocks.computeIfAbsent(reader, k -> new Object());
+            readerFutures.add(
+                    CompletableFuture.supplyAsync(
+                            () -> {
+                                synchronized (lock) {
+                                    return predicate
+                                            .function()
+                                            .visit(reader, fieldRef, predicate.literals());
+                                }
+                            },
+                            executorService));
+        }
+
+        return CompletableFuture.allOf(readerFutures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        v -> {
+                            Optional<GlobalIndexResult> compoundResult = Optional.empty();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> f : readerFutures) {
+                                Optional<GlobalIndexResult> childResult = f.join();
+                                if (!childResult.isPresent()) {
+                                    continue;
+                                }
+                                if (compoundResult.isPresent()) {
+                                    compoundResult =
+                                            Optional.of(
+                                                    compoundResult.get().and(childResult.get()));
+                                } else {
+                                    compoundResult = childResult;
+                                }
+                                if (compoundResult.get().results().isEmpty()) {
+                                    return compoundResult;
+                                }
+                            }
+                            return compoundResult;
+                        });
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
