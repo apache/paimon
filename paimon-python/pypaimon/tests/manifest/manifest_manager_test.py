@@ -336,8 +336,8 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         'PyPI backports.zstd only supports Python 3.9–3.13',
     )
     @unittest.skipIf(
-        sys.version_info >= (3, 14),
-        'fastavro uses stdlib compression.zstd on Python 3.14+, not backports.zstd',
+        sys.version_info >= (3, 13),
+        'fastavro >= 1.12 bundles zstd in compiled extension on Python 3.13+',
     )
     def test_zstd_manifest_list_fastavro_requires_backports_zstd(self):
         """Child venv runs ``manifest_list_zstd_read_subprocess`` (argv: warehouse, table id, list file name).
@@ -363,7 +363,8 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         isolated_venv_python = _manifest_zstd_read_subprocess_venv_python()
         pip_install_env = _subprocess_env_for_pip()
         subprocess.run(
-            [isolated_venv_python, '-m', 'pip', 'uninstall', '-y', 'backports.zstd'],
+            [isolated_venv_python, '-m', 'pip', 'uninstall', '-y',
+             'backports.zstd', 'zstandard'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=pip_install_env,
@@ -389,7 +390,8 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         self.assertIn('backports.zstd', stderr_and_stdout)
 
         subprocess.check_call(
-            [isolated_venv_python, '-m', 'pip', 'install', '-q', 'backports.zstd'],
+            [isolated_venv_python, '-m', 'pip', 'install', '-q',
+             'backports.zstd', 'zstandard'],
             env=pip_install_env,
         )
         read_with_zstd_backend = subprocess.run(

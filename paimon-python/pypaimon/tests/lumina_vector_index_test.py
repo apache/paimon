@@ -22,6 +22,9 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
+
+lumina_data = pytest.importorskip("lumina_data")
 from lumina_data import LuminaBuilder
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
