@@ -300,6 +300,55 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator.close()
         executor.shutdown(wait=False)
 
+    def test_mixed_nested_does_not_deadlock_with_small_pool(self):
+        fields = _make_fields()
+        result_a = GlobalIndexResult.from_range(Range(1, 5))
+        result_b = GlobalIndexResult.from_range(Range(3, 7))
+        result_c = GlobalIndexResult.from_range(Range(1, 3))
+
+        field_results = {0: result_a, 1: result_b, 2: result_c}
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [StubGlobalIndexReader(field_results[field.id])],
+            executor,
+        )
+
+        # AND(OR(a, b), OR(a, c)) — mixed nesting
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(
+                    method='or', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a', literals=[1]),
+                        Predicate(method='equal', index=1, field='b', literals=[2]),
+                    ],
+                ),
+                Predicate(
+                    method='or', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a', literals=[3]),
+                        Predicate(method='equal', index=2, field='c', literals=[4]),
+                    ],
+                ),
+            ],
+        )
+
+        result = evaluator.evaluate(predicate)
+
+        self.assertIsNotNone(result)
+        bm = result.results()
+        # OR(a, b) = union([1,5], [3,7]) = [1,7]
+        # OR(a, c) = union([1,5], [1,3]) = [1,5]
+        # AND = intersection = [1,5]
+        self.assertEqual(bm.cardinality(), 5)
+        for v in [1, 2, 3, 4, 5]:
+            self.assertTrue(bm.contains(v))
+        evaluator.close()
+        executor.shutdown(wait=False)
+
     def test_null_predicate(self):
         fields = _make_fields()
         evaluator = GlobalIndexEvaluator(fields, lambda field: [])

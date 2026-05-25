@@ -333,6 +333,46 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testMixedNestedPredicateDoesNotDeadlockWithSmallPool() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexResult resultA = resultOf(1, 2, 3, 4, 5);
+        GlobalIndexResult resultB = resultOf(3, 4, 5, 6, 7);
+        GlobalIndexResult resultC = resultOf(1, 2, 3, 10, 11);
+        // Field c used for second OR child - distinct from field a/b
+
+        ConcurrentHashMap<Integer, GlobalIndexResult> fieldResults = new ConcurrentHashMap<>();
+        fieldResults.put(0, resultA);
+        fieldResults.put(1, resultB);
+        fieldResults.put(2, resultC);
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        readerReturning(fieldResults.get(fieldId))),
+                        executor);
+
+        // AND(OR(a, b), OR(a, c)) — mixed nesting, different compound types
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.or(builder.equal(0, 1), builder.equal(1, 2)),
+                        PredicateBuilder.or(builder.equal(0, 3), builder.equal(2, 4)));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        // OR(a, b) = union({1..5}, {3..7}) = {1..7}
+        // OR(a, c) = union({1..5}, {1,2,3,10,11}) = {1,2,3,4,5,10,11}
+        // AND = intersection = {1,2,3,4,5}
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L, 4L, 5L);
+        evaluator.close();
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =

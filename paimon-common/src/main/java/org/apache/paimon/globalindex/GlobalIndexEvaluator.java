@@ -156,7 +156,7 @@ public class GlobalIndexEvaluator
         List<Predicate> children = flattenChildren(predicate);
         List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(children.size());
         for (Predicate child : children) {
-            futures.add(executorService.submit(() -> child.visit(this)));
+            futures.add(executorService.submit(() -> evaluateChildSequentially(child)));
         }
 
         List<Optional<GlobalIndexResult>> results = new ArrayList<>(children.size());
@@ -203,6 +203,13 @@ public class GlobalIndexEvaluator
             }
             return compoundResult;
         }
+    }
+
+    private Optional<GlobalIndexResult> evaluateChildSequentially(Predicate child) {
+        if (child instanceof CompoundPredicate) {
+            return visitSequential((CompoundPredicate) child);
+        }
+        return child.visit(this);
     }
 
     private List<Predicate> flattenChildren(CompoundPredicate predicate) {

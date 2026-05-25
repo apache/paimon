@@ -111,8 +111,16 @@ class GlobalIndexEvaluator:
                 result.append(child)
         return result
 
+    def _evaluate_child_sequentially(self, child):
+        if isinstance(child, Predicate) and child.method in ('and', 'or'):
+            if child.method == 'and':
+                return self._visit_and_sequential(child.literals)
+            else:
+                return self._visit_or_sequential(child.literals)
+        return self._visit_predicate(child)
+
     def _submit_children(self, children) -> List[Future]:
-        return [self._executor.submit(self._visit_predicate, child) for child in children]
+        return [self._executor.submit(self._evaluate_child_sequentially, child) for child in children]
 
     def _collect_results(self, futures: List[Future]) -> List[Optional[GlobalIndexResult]]:
         return [f.result() for f in futures]
