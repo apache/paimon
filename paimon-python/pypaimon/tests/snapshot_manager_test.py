@@ -112,5 +112,76 @@ class SnapshotManagerTest(unittest.TestCase):
         self.assertEqual(skipped_count, 3)
 
 
+class SnapshotManagerInfraTest(unittest.TestCase):
+    """Tests for SnapshotManager infrastructure methods needed by expire/orphan-clean."""
+
+    def test_safely_get_all_snapshots_skips_unreadable(self):
+        file_io = Mock()
+        file_io.list_status.return_value = [
+            Mock(path="/tmp/test/snapshot/snapshot-1"),
+            Mock(path="/tmp/test/snapshot/snapshot-2"),
+            Mock(path="/tmp/test/snapshot/snapshot-bad"),
+            Mock(path="/tmp/test/snapshot/LATEST"),
+        ]
+        snapshots = {1: _create_mock_snapshot(1), 2: _create_mock_snapshot(2)}
+        manager = _build_manager(file_io)
+        manager.get_snapshot_by_id = lambda sid: snapshots.get(sid)
+        result = manager.safely_get_all_snapshots()
+        self.assertEqual(len(result), 2)
+        self.assertEqual([s.id for s in result], [1, 2])
+
+    def test_safely_get_all_snapshots_tolerates_read_failure(self):
+        file_io = Mock()
+        file_io.list_status.return_value = [
+            Mock(path="/tmp/test/snapshot/snapshot-1"),
+            Mock(path="/tmp/test/snapshot/snapshot-2"),
+        ]
+        manager = _build_manager(file_io)
+
+        def get_snapshot_by_id(sid):
+            if sid == 2:
+                raise FileNotFoundError("deleted concurrently")
+            return _create_mock_snapshot(sid)
+        manager.get_snapshot_by_id = get_snapshot_by_id
+        result = manager.safely_get_all_snapshots()
+        self.assertEqual(len(result), 1)
+
+    def test_earliest_snapshot_id(self):
+        file_io = Mock()
+        manager = _build_manager(file_io)
+        manager.try_get_earliest_snapshot = lambda: _create_mock_snapshot(5)
+        self.assertEqual(manager.earliest_snapshot_id(), 5)
+
+    def test_earliest_snapshot_id_none(self):
+        file_io = Mock()
+        manager = _build_manager(file_io)
+        manager.try_get_earliest_snapshot = lambda: None
+        self.assertIsNone(manager.earliest_snapshot_id())
+
+    def test_latest_snapshot_id(self):
+        file_io = Mock()
+        manager = _build_manager(file_io)
+        manager.get_latest_snapshot = lambda: _create_mock_snapshot(10)
+        self.assertEqual(manager.latest_snapshot_id(), 10)
+
+    def test_latest_snapshot_id_none(self):
+        file_io = Mock()
+        manager = _build_manager(file_io)
+        manager.get_latest_snapshot = lambda: None
+        self.assertIsNone(manager.latest_snapshot_id())
+
+    def test_delete_snapshot(self):
+        file_io = Mock()
+        manager = _build_manager(file_io)
+        manager.delete_snapshot(5)
+        file_io.delete_quietly.assert_called_once_with("/tmp/test_table/snapshot/snapshot-5")
+
+    def test_commit_earliest_hint(self):
+        file_io = Mock()
+        manager = _build_manager(file_io)
+        manager.commit_earliest_hint(3)
+        file_io.overwrite_file_utf8.assert_called_once_with("/tmp/test_table/snapshot/EARLIEST", "3")
+
+
 if __name__ == '__main__':
     unittest.main()

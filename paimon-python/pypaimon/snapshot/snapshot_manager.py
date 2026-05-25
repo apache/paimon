@@ -388,3 +388,44 @@ class SnapshotManager:
         # All fetched snapshots were skipped, but more may exist
         # Return next_id pointing past the batch
         return (None, start_id + lookahead_size, skipped_count)
+
+    def safely_get_all_snapshots(self) -> List[Snapshot]:
+        """List all snapshots, skipping those that fail to read."""
+        import re
+        snapshot_pattern = re.compile(r'^snapshot-(\d+)$')
+        try:
+            statuses = self.file_io.list_status(self.snapshot_dir)
+        except Exception:
+            return []
+        ids = []
+        for status in statuses:
+            name = status.path.rstrip('/').split('/')[-1]
+            match = snapshot_pattern.match(name)
+            if match:
+                ids.append(int(match.group(1)))
+        ids.sort()
+        snapshots = []
+        for sid in ids:
+            try:
+                snapshot = self.get_snapshot_by_id(sid)
+                if snapshot is not None:
+                    snapshots.append(snapshot)
+            except Exception:
+                logger.debug("Skipping unreadable snapshot-%d", sid)
+        return snapshots
+
+    def earliest_snapshot_id(self) -> Optional[int]:
+        snapshot = self.try_get_earliest_snapshot()
+        return snapshot.id if snapshot else None
+
+    def latest_snapshot_id(self) -> Optional[int]:
+        snapshot = self.get_latest_snapshot()
+        return snapshot.id if snapshot else None
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        path = self.get_snapshot_path(snapshot_id)
+        self.file_io.delete_quietly(path)
+
+    def commit_earliest_hint(self, snapshot_id: int) -> None:
+        earliest_path = f"{self.snapshot_dir}/EARLIEST"
+        self.file_io.overwrite_file_utf8(earliest_path, str(snapshot_id))
