@@ -281,6 +281,10 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
+        } else {
+            checkArgument(
+                    !options.deletionVectorsMergeOnRead(),
+                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
         // vector field names must point to vector type
