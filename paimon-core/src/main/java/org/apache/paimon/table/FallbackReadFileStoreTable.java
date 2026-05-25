@@ -592,7 +592,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             DataTableScan scan = scanCreator.apply(isMain ? wrappedTable : fallbackTable);
             if (isMain && getMainPartitionPredicate() != null) {
                 scan.withPartitionFilter(getMainPartitionPredicate());
-            } else if (getFallbackPartitionPredicate() != null) {
+            } else if (!isMain && getFallbackPartitionPredicate() != null) {
                 scan.withPartitionFilter(getFallbackPartitionPredicate());
             }
             return scan;
