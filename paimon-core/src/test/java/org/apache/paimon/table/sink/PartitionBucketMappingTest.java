@@ -19,13 +19,16 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.operation.FileStoreScan;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PartitionBucketMapping}. */
 public class PartitionBucketMappingTest {
@@ -58,6 +61,19 @@ public class PartitionBucketMappingTest {
 
         // Unmapped partition falls back to the default
         assertThat(mapping.resolveNumBuckets(partC)).isEqualTo(16);
+    }
+
+    @Test
+    public void testLoadFromScanPropagatesException() {
+        // Simulate a scan that throws (e.g. corrupted manifest, transient I/O error).
+        // loadFromScan must fail fast so the job does not silently write to wrong buckets.
+        FileStoreScan failingScan = Mockito.mock(FileStoreScan.class);
+        Mockito.when(failingScan.readPartitionEntries())
+                .thenThrow(new RuntimeException("simulated manifest scan failure"));
+
+        assertThatThrownBy(() -> PartitionBucketMapping.loadFromScan(failingScan, 8))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("simulated manifest scan failure");
     }
 
     private static BinaryRow partition(int value) {

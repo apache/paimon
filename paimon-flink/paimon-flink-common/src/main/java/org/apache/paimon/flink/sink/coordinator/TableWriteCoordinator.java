@@ -199,6 +199,11 @@ public class TableWriteCoordinator {
 
     private void loadPartitionBucketMapping() {
         int defaultNumBuckets = table.schema().numBuckets();
+        // Note: `scan` is shared between this method (called during refresh/checkpoint) and the
+        // `scan(ScanCoordinationRequest)` method (which calls scan.withPartitionBucket(...)).
+        // Both callers always invoke scan.withSnapshot(...) before using the scan, so the shared
+        // state is safe. The partition-bucket filter set by withPartitionBucket is applied per
+        // plan() call and does not bleed across invocations.
         this.partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, defaultNumBuckets);
     }
 

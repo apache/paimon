@@ -66,6 +66,14 @@ public class SchemaBucketFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public TableWriteImpl<?> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor) {
+        // Always use the schema-bucket-based extractor; ignore the caller-supplied extractor
+        // to ensure consistent per-partition bucket routing even when called via the 3-arg form.
+        return wrapped().newWrite(commitUser, writeId, createRowKeyExtractor());
+    }
+
+    @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new SchemaBucketFileStoreTable(wrapped().copy(dynamicOptions));
     }

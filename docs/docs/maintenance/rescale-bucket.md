@@ -68,6 +68,12 @@ Please note that
   After these operations, partition `dt=2022-01-01` uses 4 buckets, `dt=2022-01-02` uses 8 buckets, and any
   new partitions will use the latest table-level default (8 buckets in this case).
 - During overwrite period, make sure there are no other jobs writing the same table/partition.
+- **Streaming jobs must be restarted after rescaling a partition.** The per-partition bucket mapping
+  is loaded once when the streaming job starts (from the manifest files at that point in time). If a
+  partition is rescaled while the streaming job is running, the job will continue routing rows using
+  the old bucket count for that partition, which can cause rows to land in wrong buckets and lead to
+  data correctness issues. The recommended workflow is: suspend the streaming job with a savepoint →
+  perform the rescale overwrite → restart from the savepoint.
 
 ## Use Case
 

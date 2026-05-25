@@ -103,16 +103,21 @@ public class PartitionEntryTest {
     }
 
     @Test
-    public void testMergeWithEqualCreationTimeTakesFirstTotalBuckets() {
-        // When creation times are equal, the receiver's (this) totalBuckets is used.
-        // This is the tie-breaking behavior: the entry already accumulated takes precedence.
+    public void testMergeWithEqualCreationTimeIsCommutative() {
+        // When creation times are equal, merge must be commutative: a.merge(b) == b.merge(a).
+        // The tie-break takes the larger totalBuckets so that the parallel, non-deterministic
+        // aggregation in readPartitionEntries() always produces the same result regardless of
+        // manifest processing order.
         PartitionEntry a = entry(1, 2, 1000L);
         PartitionEntry b = entry(1, 4, 1000L);
 
-        PartitionEntry result = a.merge(b);
-        assertThat(result.totalBuckets())
-                .isEqualTo(2); // 'a' wins tie (lastCreationTime >= entry's)
-        assertThat(result.fileCount()).isEqualTo(2);
+        PartitionEntry ab = a.merge(b);
+        PartitionEntry ba = b.merge(a);
+
+        assertThat(ab.totalBuckets()).isEqualTo(4); // max(2, 4) = 4
+        assertThat(ba.totalBuckets()).isEqualTo(4); // max(4, 2) = 4, commutative
+        assertThat(ab.fileCount()).isEqualTo(2);
+        assertThat(ba.fileCount()).isEqualTo(2);
     }
 
     @Test

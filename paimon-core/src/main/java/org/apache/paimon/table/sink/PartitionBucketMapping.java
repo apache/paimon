@@ -83,8 +83,7 @@ public class PartitionBucketMapping implements Serializable {
      * <p>For partitioned tables, the method reads {@link
      * org.apache.paimon.manifest.PartitionEntry}s, which aggregate manifest entries per partition
      * during the scan and therefore have a much smaller memory footprint than loading all data file
-     * entries. If the scan fails for any reason, a fallback mapping with only the default bucket
-     * count is returned.
+     * entries. Any scan failure is propagated to the caller.
      *
      * @param table the {@link FileStoreTable} to load the mapping from
      * @return a {@link PartitionBucketMapping} reflecting the current bucket layout of the table
@@ -98,23 +97,21 @@ public class PartitionBucketMapping implements Serializable {
     }
 
     public static PartitionBucketMapping loadFromScan(FileStoreScan scan, int defaultBuckets) {
-        try {
-            List<PartitionEntry> partitionEntries = scan.readPartitionEntries();
-            Map<BinaryRow, Integer> partitionBucketMap = new HashMap<>();
-            for (PartitionEntry entry : partitionEntries) {
-                int totalBuckets = entry.totalBuckets();
-                // Only store partitions whose bucket count differs from the default.
-                // This keeps the map empty for partitions that have never been rescaled,
-                // avoiding per-partition BinaryRow copies and Integer allocations entirely.
-                if (totalBuckets > 0 && totalBuckets != defaultBuckets) {
-                    partitionBucketMap.put(entry.partition().copy(), totalBuckets);
-                }
-            }
-
-            return new PartitionBucketMapping(defaultBuckets, partitionBucketMap);
-        } catch (Exception e) {
+        if (scan == null) {
             return new PartitionBucketMapping(defaultBuckets, Collections.emptyMap());
         }
+        List<PartitionEntry> partitionEntries = scan.readPartitionEntries();
+        Map<BinaryRow, Integer> partitionBucketMap = new HashMap<>();
+        for (PartitionEntry entry : partitionEntries) {
+            int totalBuckets = entry.totalBuckets();
+            // Only store partitions whose bucket count differs from the default.
+            // This keeps the map empty for partitions that have never been rescaled,
+            // avoiding per-partition BinaryRow copies and Integer allocations entirely.
+            if (totalBuckets > 0 && totalBuckets != defaultBuckets) {
+                partitionBucketMap.put(entry.partition().copy(), totalBuckets);
+            }
+        }
+        return new PartitionBucketMapping(defaultBuckets, partitionBucketMap);
     }
 
     /**
