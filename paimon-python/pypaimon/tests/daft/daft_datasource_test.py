@@ -17,6 +17,11 @@
 ################################################################################
 import unittest
 
+import pytest
+
+pypaimon = pytest.importorskip("pypaimon")
+daft = pytest.importorskip("daft")
+
 from pypaimon.daft.daft_datasource import PaimonDataSource
 
 
