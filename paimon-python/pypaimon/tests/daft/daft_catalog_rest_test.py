@@ -16,11 +16,16 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for PaimonCatalog REST catalog path (using mocks, no real server needed)."""
+"""Tests for the daft + REST catalog code path.
+
+- Wrapper tests use MagicMock to isolate PaimonCatalog transformation logic.
+- Read-flow tests use the in-process RESTCatalogServer to exercise
+  _read_table + PaimonDataSource end-to-end against a real REST catalog.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,6 +39,7 @@ from pypaimon.catalog.catalog_exception import (
 )
 
 from pypaimon.daft.daft_catalog import PaimonCatalog
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 # ---------------------------------------------------------------------------
 # Helpers: build a mock inner catalog that mimics RESTCatalog's interface
@@ -231,3 +237,99 @@ def test_create_namespace_single_part():
     cat.create_namespace("new_db")
 
     inner.create_database.assert_called_once_with("new_db", ignore_if_exists=False)
+
+
+# ---------------------------------------------------------------------------
+# Read-flow tests against an in-process REST catalog server
+# ---------------------------------------------------------------------------
+
+
+class DaftRestReadTest(RESTBaseTest):
+    """End-to-end tests for the daft → REST catalog read path.
+
+    Uses RESTBaseTest's in-process RESTCatalogServer; self.table is a
+    populated append-only table created in setUp.
+    """
+
+    def test_read_table_forwards_full_catalog_options_to_datasource(self):
+        """Reproduces Bug A: _read_table trims catalog_options to just
+        {'warehouse': ...} before constructing PaimonDataSource, dropping
+        metastore/uri/token/dlf.* — fields the connector needs to detect
+        a REST catalog and reach DLF credentials."""
+        from pypaimon.daft.daft_datasource import PaimonDataSource
+        from pypaimon.daft.daft_paimon import _read_table
+
+        captured = {}
+        original_init = PaimonDataSource.__init__
+
+        def spy_init(_self, table, storage_config, catalog_options):
+            captured["catalog_options"] = dict(catalog_options)
+            return original_init(
+                _self, table,
+                storage_config=storage_config,
+                catalog_options=catalog_options,
+            )
+
+        with patch.object(PaimonDataSource, "__init__", spy_init):
+            _read_table(self.table, catalog_options=self.options)
+
+        received = captured["catalog_options"]
+        self.assertEqual(
+            received.get("metastore"), "rest",
+            f"metastore stripped before reaching PaimonDataSource; got {received}",
+        )
+        self.assertIn(
+            "uri", received,
+            f"uri stripped before reaching PaimonDataSource; got {received}",
+        )
+        self.assertIn(
+            "token", received,
+            f"token stripped before reaching PaimonDataSource; got {received}",
+        )
+
+    def test_rest_catalog_disables_native_parquet_reader(self):
+        """Reproduces Bug B: PaimonDataSource leaves _is_parquet=True for
+        REST catalogs, sending OSS reads through Daft's static IOConfig
+        which cannot refresh DLF dynamic STS tokens. Should fall back to
+        the pypaimon reader whose file_io does refresh tokens.
+
+        Default file format is ORC, which makes _is_parquet=False
+        trivially; explicitly create a parquet table to isolate the
+        REST-detection path.
+        """
+        from daft import context
+        from daft.daft import StorageConfig
+
+        from pypaimon.daft.daft_datasource import PaimonDataSource
+        from pypaimon.daft.daft_io_config import (
+            _convert_paimon_catalog_options_to_io_config,
+        )
+
+        self.rest_catalog.create_table(
+            "default.daft_rest_parquet",
+            pypaimon.Schema.from_pyarrow_schema(
+                self.pa_schema, options={"file.format": "parquet"}
+            ),
+            False,
+        )
+        parquet_table = self.rest_catalog.get_table("default.daft_rest_parquet")
+        self.assertEqual(parquet_table.options.file_format(), "parquet")
+
+        io_config = (
+            _convert_paimon_catalog_options_to_io_config(self.options)
+            or context.get_context().daft_planning_config.default_io_config
+        )
+        storage_config = StorageConfig(True, io_config)
+
+        source = PaimonDataSource(
+            parquet_table,
+            storage_config=storage_config,
+            catalog_options=self.options,
+        )
+
+        self.assertFalse(
+            source._is_parquet,
+            "REST catalog should disable native parquet reader; "
+            "Daft's static IOConfig cannot refresh DLF dynamic OSS tokens, "
+            "but is_parquet=True ⇒ DataSourceTask.parquet is yielded.",
+        )
