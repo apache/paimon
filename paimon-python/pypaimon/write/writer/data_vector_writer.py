@@ -154,8 +154,20 @@ class DataVectorWriter(DataWriter):
         self.committed_files.clear()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, pa.RecordBatch]:
-        normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
-        vector_data = data.select(self.vector_write_columns) if self.vector_write_columns else None
+        normal_data = (
+            pa.RecordBatch.from_arrays(
+                [data.column(name) for name in self.normal_column_names],
+                names=self.normal_column_names,
+            )
+            if self.normal_column_names else None
+        )
+        vector_data = (
+            pa.RecordBatch.from_arrays(
+                [data.column(name) for name in self.vector_write_columns],
+                names=self.vector_write_columns,
+            )
+            if self.vector_write_columns else None
+        )
         return normal_data, vector_data
 
     def _should_roll_normal(self) -> bool:
