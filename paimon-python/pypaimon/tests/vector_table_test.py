@@ -101,6 +101,22 @@ class VectorOnlyTableTest(unittest.TestCase):
             )
         self.assertIn("must have other normal columns", str(ctx.exception))
 
+    def test_vector_dedicated_missing_row_tracking_rejected(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('embed', pa.list_(pa.float32(), 3)),
+        ])
+        with self.assertRaises(ValueError) as ctx:
+            Schema.from_pyarrow_schema(
+                pa_schema,
+                options={
+                    'vector.file.format': 'parquet',
+                    'data-evolution.enabled': 'true',
+                    'bucket': '-1',
+                }
+            )
+        self.assertIn("row-tracking.enabled", str(ctx.exception))
+
 
 class VectorTableWriteReadTest(unittest.TestCase):
 

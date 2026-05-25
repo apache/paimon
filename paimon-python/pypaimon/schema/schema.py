@@ -119,9 +119,17 @@ class Schema:
                     "The vector-store columns can not be part of partition keys."
                 )
 
-            if not options.get(CoreOptions.DATA_EVOLUTION_ENABLED.key()) == 'true':
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true',
+            }
+            missing = [
+                f"{k}='{v}'" for k, v in required_options.items()
+                if options.get(k) != v
+            ]
+            if missing:
                 raise ValueError(
-                    "Data evolution config must enabled for table with vector-store file format."
+                    f"Table with vector-store file format requires: {', '.join(missing)}."
                 )
 
         return Schema(fields, partition_keys, primary_keys, options, comment)
