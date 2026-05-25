@@ -45,9 +45,29 @@ _PARTIAL_UPDATE_UNSUPPORTED_BOOLEAN_OPTIONS = (
     "partial-update.remove-record-on-delete",
     "partial-update.remove-record-on-sequence-group",
 )
+# Boolean-valued options that, when truthy, opt the table into the
+# retract / delete-removal behaviour the Python
+# ``AggregateMergeFunction`` does not implement.
+_AGGREGATION_UNSUPPORTED_BOOLEAN_OPTIONS = (
+    "aggregation.remove-record-on-delete",
+)
+# Aggregator identifiers the ``aggregation`` engine knows how to
+# build. Duplicated from the registration site in
+# ``aggregate/aggregators.py`` so this guard has no import-time
+# dependency on the read-pipeline modules; keep both sides in sync
+# when adding new aggregators.
+_AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
+    "primary_key",
+    "last_value", "last_non_null_value",
+    "first_value", "first_non_null_value",
+    "sum", "max", "min",
+    "bool_or", "bool_and",
+])
+_SEQUENCE_FIELD_KEY = "sequence.field"
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
 _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
+_FIELD_IGNORE_RETRACT_SUFFIX = ".ignore-retract"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
 
 
@@ -71,25 +91,35 @@ def check_supported(table) -> None:
                 "supported subset is per-key last-non-null merge with "
                 "no sequence-group, no per-field aggregator override, "
                 "no ignore-delete and no partial-update.remove-record-"
-                "on-* flags. Use the Java client for the full feature "
-                "set, or open an issue to track Python support.".format(
+                "on-* flags. These options are not yet supported; open "
+                "an issue to track support.".format(
                     ", ".join(sorted(unsupported))
                 )
             )
         return
     if engine == MergeEngine.AGGREGATE:
-        # AggregateMergeFunction is wired up; the unsupported-option
-        # guard for aggregation (rejecting tables that configure
-        # retract opt-ins or out-of-scope aggregators) lands in a
-        # follow-up commit. For now non-supported configurations will
-        # surface as a ValueError at merge-function construction time
-        # (e.g. unknown aggregator identifier) or a NotImplementedError
-        # at first DELETE / UPDATE_BEFORE row.
+        unsupported = aggregation_unsupported_options(table)
+        if unsupported:
+            raise NotImplementedError(
+                "merge-engine 'aggregation' is enabled together with "
+                "options that pypaimon does not yet implement: {}. The "
+                "supported subset is per-key field aggregation with the "
+                "built-in aggregators ({}); retract opt-ins "
+                "(aggregation.remove-record-on-delete, "
+                "fields.<f>.ignore-retract), sequence-field handling "
+                "and other aggregators (product / listagg / collect / "
+                "merge_map* / nested_update* / theta_sketch / "
+                "hll_sketch / roaring_bitmap_*) are not yet supported. "
+                "Open an issue to track support.".format(
+                    ", ".join(sorted(unsupported)),
+                    ", ".join(sorted(_AGGREGATION_SUPPORTED_AGG_FUNCS)),
+                )
+            )
         return
     raise NotImplementedError(
         "merge-engine '{}' is not implemented in pypaimon yet "
         "(supported: deduplicate, partial-update, aggregation). "
-        "Use the Java client or open an issue to track support.".format(
+        "Open an issue to track support.".format(
             engine.value
         )
     )
@@ -112,6 +142,50 @@ def partial_update_unsupported_options(table) -> Set[str]:
                 key.endswith(_FIELD_SEQUENCE_GROUP_SUFFIX)
                 or key.endswith(_FIELD_AGGREGATE_FUNCTION_SUFFIX)):
             flagged.add(key)
+    return flagged
+
+
+def aggregation_unsupported_options(table) -> Set[str]:
+    """Return the set of option keys configured on this table that the
+    ``AggregateMergeFunction`` does not yet support. Empty set means
+    the configuration is safe to run.
+
+    Three families of options are rejected:
+
+    1. Retract opt-ins: ``aggregation.remove-record-on-delete`` and
+       ``fields.<f>.ignore-retract`` only make sense in conjunction
+       with DELETE / UPDATE_BEFORE handling, which the engine does not
+       implement.
+    2. Sequence-field configuration: ``sequence.field`` /
+       ``fields.<f>.sequence-group`` are not supported; the merge
+       function does not special-case sequence fields, so we refuse
+       the table rather than silently merge them as ordinary value
+       columns.
+    3. Out-of-scope aggregator selections: ``fields.<f>.aggregate-
+       function`` and ``fields.default-aggregate-function`` set to an
+       identifier this engine doesn't support yet (e.g. ``collect``,
+       ``nested_update``).
+    """
+    flagged: Set[str] = set()
+    raw = table.options.options.to_map()
+    for key, value in raw.items():
+        if (key in _AGGREGATION_UNSUPPORTED_BOOLEAN_OPTIONS
+                and _option_is_truthy(value)):
+            flagged.add(key)
+        elif key == _SEQUENCE_FIELD_KEY and value:
+            flagged.add(key)
+        elif key == _DEFAULT_AGGREGATE_FUNCTION_KEY:
+            if value not in _AGGREGATION_SUPPORTED_AGG_FUNCS:
+                flagged.add(key)
+        elif key.startswith(_FIELDS_PREFIX):
+            if key.endswith(_FIELD_IGNORE_RETRACT_SUFFIX):
+                if _option_is_truthy(value):
+                    flagged.add(key)
+            elif key.endswith(_FIELD_SEQUENCE_GROUP_SUFFIX):
+                flagged.add(key)
+            elif key.endswith(_FIELD_AGGREGATE_FUNCTION_SUFFIX):
+                if value not in _AGGREGATION_SUPPORTED_AGG_FUNCS:
+                    flagged.add(key)
     return flagged
 
 

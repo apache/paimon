@@ -23,12 +23,13 @@ per-field aggregator configuration, writes two or more commits against
 the same PK, and reads back. The aggregation engine must reduce each
 non-PK column independently using the configured aggregator (sum / max
 / last_value / ...). Disjoint PKs must remain unmerged. Default
-behaviour when no aggregator is configured is ``last_non_null_value``,
-matching the Java port.
+behaviour when no aggregator is configured is ``last_non_null_value``.
 
-Tests that pin down the unsupported-option guard (out-of-scope
-aggregators, retract opt-ins) live in the corresponding follow-up
-commit so this file stays focused on positive merge semantics.
+The second half of the file exercises the merge-engine-support guard:
+tables that configure aggregation with options pypaimon does not yet
+implement (retract opt-ins, sequence fields, out-of-scope aggregator
+identifiers) must raise ``NotImplementedError`` at TableRead
+construction rather than silently fall back to a wrong answer.
 """
 
 import os
@@ -159,8 +160,8 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         )
         self._write(table, [{'id': 1, 'total': 5, 'max_score': 7, 'label': 'x'}])
         # null total is absorbed by sum; null max_score replaces under
-        # last_value (mirroring Java semantics — last_value keeps the
-        # last input verbatim, including None).
+        # last_value (last_value keeps the last input verbatim,
+        # including None).
         self._write(table, [{'id': 1, 'total': None, 'max_score': None, 'label': None}])
         self._write(table, [{'id': 1, 'total': 4, 'max_score': 9, 'label': 'y'}])
 
@@ -218,6 +219,84 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         self.assertEqual(row['total'], 7)       # latest non-null
         self.assertEqual(row['max_score'], 3)   # latest non-null
         self.assertEqual(row['label'], 'b')     # latest non-null
+
+    # -- unsupported-option guards --------------------------------------
+    #
+    # Tables that opt into behaviour AggregateMergeFunction doesn't
+    # implement must surface a NotImplementedError at TableRead
+    # construction, not silently produce wrong results.
+
+    def _create_and_expect_unsupported(self, table_name, extra_options,
+                                       expected_substring):
+        table = self._create_pk_table(
+            table_name, extra_options=extra_options
+        )
+        # Writing is fine — the guard fires when a reader is built.
+        self._write(table, [{'id': 1, 'total': 1, 'max_score': 1, 'label': 'a'}])
+        rb = table.new_read_builder()
+        with self.assertRaises(NotImplementedError) as cm:
+            rb.new_read()
+        msg = str(cm.exception)
+        self.assertIn('aggregation', msg)
+        self.assertIn(expected_substring, msg)
+
+    def test_remove_record_on_delete_rejected(self):
+        self._create_and_expect_unsupported(
+            'agg_reject_remove_on_delete',
+            {'aggregation.remove-record-on-delete': 'true'},
+            'aggregation.remove-record-on-delete',
+        )
+
+    def test_field_ignore_retract_rejected(self):
+        self._create_and_expect_unsupported(
+            'agg_reject_ignore_retract',
+            {'fields.total.ignore-retract': 'true'},
+            'fields.total.ignore-retract',
+        )
+
+    def test_sequence_field_rejected(self):
+        self._create_and_expect_unsupported(
+            'agg_reject_sequence_field',
+            {'sequence.field': 'total'},
+            'sequence.field',
+        )
+
+    def test_field_sequence_group_rejected(self):
+        self._create_and_expect_unsupported(
+            'agg_reject_sequence_group',
+            {'fields.max_score.sequence-group': 'label'},
+            'fields.max_score.sequence-group',
+        )
+
+    def test_out_of_scope_field_aggregator_rejected(self):
+        # collect is one of the aggregator identifiers this engine
+        # doesn't support yet. The guard must reject the config rather
+        # than let the per-field factory build a (silently wrong)
+        # fallback.
+        self._create_and_expect_unsupported(
+            'agg_reject_collect',
+            {'fields.label.aggregate-function': 'collect'},
+            'fields.label.aggregate-function',
+        )
+
+    def test_out_of_scope_default_aggregator_rejected(self):
+        self._create_and_expect_unsupported(
+            'agg_reject_default_collect',
+            {'fields.default-aggregate-function': 'product'},
+            'fields.default-aggregate-function',
+        )
+
+    def test_supported_field_aggregator_passes_guard(self):
+        # Sanity check: setting one of the supported aggregators does
+        # NOT trip the guard introduced for out-of-scope identifiers.
+        table = self._create_pk_table(
+            'agg_supported_passes',
+            field_aggs={'total': 'sum'},
+        )
+        self._write(table, [{'id': 1, 'total': 1, 'max_score': 1, 'label': 'a'}])
+        # If the guard wrongly flagged 'sum', new_read() would raise.
+        # Touch it explicitly so the test fails loudly otherwise.
+        table.new_read_builder().new_read()
 
 
 if __name__ == '__main__':
