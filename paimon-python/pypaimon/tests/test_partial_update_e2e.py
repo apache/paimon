@@ -21,9 +21,10 @@
 Each test creates a PK table with ``merge-engine`` set to a particular
 value, writes one or more batches, and reads back. Partial-update reads
 must merge non-null fields across batches; ``deduplicate`` must keep
-the latest row only; ``aggregation`` and ``first-row`` must raise
-``NotImplementedError`` (until they are ported), since silently
-treating them as deduplicate would corrupt the user's data.
+the latest row only; ``first-row`` must keep the earliest row;
+``aggregation`` must raise ``NotImplementedError`` (until it is
+ported), since silently treating it as deduplicate would corrupt the
+user's data.
 """
 
 import os
@@ -204,19 +205,17 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             rb.new_read().to_arrow(splits)
         self.assertIn('aggregation', str(cm.exception))
 
-    def test_first_row_engine_raises_not_implemented(self):
-        """Until ``first-row`` is ported, reading a first-row table must
-        raise rather than silently produce dedupe results."""
-        table = self._create_pk_table('first_row_unsupported',
+    def test_first_row_engine_keeps_first(self):
+        """The ``first-row`` engine must keep the earliest row per PK."""
+        table = self._create_pk_table('first_row_supported',
                                       merge_engine='first-row')
-        self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
-        self._write(table, [{'id': 1, 'a': 'y', 'b': None, 'c': None}])
+        self._write(table, [{'id': 1, 'a': 'first', 'b': None, 'c': None}])
+        self._write(table, [{'id': 1, 'a': 'second', 'b': 'B', 'c': 'C'}])
 
-        rb = table.new_read_builder()
-        splits = rb.new_scan().plan().splits()
-        with self.assertRaises(NotImplementedError) as cm:
-            rb.new_read().to_arrow(splits)
-        self.assertIn('first-row', str(cm.exception))
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'first', 'b': None, 'c': None}],
+        )
 
     # -- partial-update + out-of-scope option combinations ---------------
     #

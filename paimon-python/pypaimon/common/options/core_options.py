@@ -23,6 +23,7 @@ from typing import Dict, Optional
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
 from pypaimon.common.options.config_option import ConfigOption
+from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.options.config_options import ConfigOptions
 
 
@@ -375,6 +376,14 @@ class CoreOptions:
         .with_description("Specify the merge engine for table with primary key. "
                           "Options: deduplicate, partial-update, aggregation, first-row.")
     )
+
+    IGNORE_DELETE: ConfigOption[bool] = (
+        ConfigOptions.key("ignore-delete")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to ignore delete records.")
+    )
+
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
@@ -762,6 +771,19 @@ class CoreOptions:
 
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
+
+    def ignore_delete(self) -> bool:
+        raw = self.options.to_map()
+        fallback_keys = (
+            "ignore-delete", "first-row.ignore-delete",
+            "deduplicate.ignore-delete",
+            "partial-update.ignore-delete",
+        )
+        for key in fallback_keys:
+            val = raw.get(key)
+            if val is not None:
+                return OptionsUtils.convert_to_boolean(val)
+        return False
 
     def data_file_external_paths(self, default=None):
         external_paths_str = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS, default)

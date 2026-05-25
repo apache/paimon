@@ -62,6 +62,8 @@ def check_supported(table) -> None:
     engine = table.options.merge_engine()
     if engine == MergeEngine.DEDUPLICATE:
         return
+    if engine == MergeEngine.FIRST_ROW:
+        return
     if engine == MergeEngine.PARTIAL_UPDATE:
         unsupported = partial_update_unsupported_options(table)
         if unsupported:
@@ -79,7 +81,7 @@ def check_supported(table) -> None:
         return
     raise NotImplementedError(
         "merge-engine '{}' is not implemented in pypaimon yet "
-        "(supported: deduplicate, partial-update). Use the Java "
+        "(supported: deduplicate, first-row, partial-update). Use the Java "
         "client or open an issue to track support.".format(engine.value)
     )
 
