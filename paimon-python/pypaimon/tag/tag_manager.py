@@ -250,3 +250,17 @@ class TagManager:
         self.file_io.rename(old_path, new_path)
 
         logger.info(f"Tag renamed from '{old_name}' to '{new_name}'.")
+
+    def tagged_snapshots(self) -> list:
+        """Return all tags sorted by snapshot_id. Skips unreadable tags."""
+        tag_names = self.list_tags()
+        tags = []
+        for name in tag_names:
+            try:
+                tag = self.get(name)
+                if tag is not None:
+                    tags.append(tag)
+            except Exception:
+                logger.debug("Skipping unreadable tag: %s", name)
+        tags.sort(key=lambda t: t.id)
+        return tags
