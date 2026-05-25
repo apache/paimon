@@ -21,19 +21,11 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import static java.util.Collections.singletonList;
-import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
 /**
  * A {@link GlobalIndexReader} that combines results from multiple readers by performing a union
@@ -42,16 +34,9 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialR
 public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     private final List<GlobalIndexReader> readers;
-    private final @Nullable ExecutorService executor;
 
     public UnionGlobalIndexReader(List<GlobalIndexReader> readers) {
-        this(readers, null);
-    }
-
-    public UnionGlobalIndexReader(
-            List<GlobalIndexReader> readers, @Nullable ExecutorService executor) {
         this.readers = readers;
-        this.executor = executor;
     }
 
     @Override
@@ -163,18 +148,7 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     private <R> List<R> executeAllReaders(Function<GlobalIndexReader, R> function) {
-        if (executor == null) {
-            return readers.stream().map(function).collect(Collectors.toList());
-        }
-
-        Iterator<R> iterator =
-                randomlyExecuteSequentialReturn(
-                        executor, reader -> singletonList(function.apply(reader)), readers);
-        List<R> result = new ArrayList<>();
-        while (iterator.hasNext()) {
-            result.add(iterator.next());
-        }
-        return result;
+        return readers.stream().map(function).collect(Collectors.toList());
     }
 
     @Override
