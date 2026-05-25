@@ -95,6 +95,50 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
              {'mv_latest_version': 200, 'val': 'y', 'mv_latest_value': 'b'},
              {'mv_latest_version': 300, 'val': 'z', 'mv_latest_value': 'c'}])
 
+    def test_dotted_top_level_field_kept(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('media.left', pa.string()),
+        ])
+        identifier = 'default.ao_dotted_top_level'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pylist(
+            [{'id': 1, 'media.left': 'hello'}], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'media.left'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
+
+    def test_unknown_dotted_name_silently_skipped(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('plain', pa.string()),
+        ])
+        identifier = 'default.ao_unknown_dotted'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pylist(
+            [{'id': 1, 'plain': 'x'}], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'nonexistent.foo'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1}])
+
     def test_top_level_only_projection_unchanged(self):
         """A projection without dots must keep the existing top-level
         path — file-level pushdown still asks for plain column names,
@@ -234,6 +278,28 @@ class PrimaryKeyNestedTest(_AppendOnlyNestedBase):
             arrow.column('mv_latest_version').to_pylist(),
             arrow.column('val').to_pylist()))
         self.assertEqual(rows, [(1, 100, 'x'), (2, 200, 'y'), (3, 300, 'z')])
+
+    def test_dotted_top_level_field_kept(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('media.left', pa.string()),
+        ])
+        identifier = 'default.pk_dotted_top_level'
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['id'], options={'bucket': '1'})
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        rows = [{'id': 1, 'media.left': 'hello'}]
+        for _ in range(2):
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+            wb.new_commit().commit(w.prepare_commit())
+            w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'media.left'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
 
     def test_avro_extracts_single_nested_leaf(self):
         # Avro PK reads resolve DataFields through ``full_fields_map`` which
