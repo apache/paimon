@@ -3233,5 +3233,260 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertIn('Cannot rename BLOB column', str(ctx.exception))
 
 
+class GetBlobTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.warehouse = os.path.join(cls.temp_dir, 'warehouse')
+        cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
+        cls.catalog.create_database('test_db', False)
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        cls.catalog.create_table('test_db.get_blob_test', schema, False)
+        cls.table = cls.catalog.get_table('test_db.get_blob_test')
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+            'picture': [b'img_data_1', b'img_data_2', b'img_data_3'],
+        }, schema=pa_schema)
+
+        write_builder = cls.table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_get_blob_access(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        results = []
+        for row in read.to_iterator(splits):
+            blob = row.get_blob(2)
+            self.assertIsNotNone(blob)
+            results.append((row.get_field(0), blob.to_data()))
+
+        self.assertEqual(len(results), 3)
+        results.sort(key=lambda x: x[0])
+        self.assertEqual(results[0], (1, b'img_data_1'))
+        self.assertEqual(results[1], (2, b'img_data_2'))
+        self.assertEqual(results[2], (3, b'img_data_3'))
+
+    def test_get_blob_streaming(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        results = []
+        for row in read.to_iterator(splits):
+            with row.get_blob(2).new_input_stream() as stream:
+                results.append((row.get_field(0), stream.read()))
+        self.assertEqual(len(results), 3)
+        results.sort(key=lambda x: x[0])
+        self.assertEqual(results[0], (1, b'img_data_1'))
+        self.assertEqual(results[1], (2, b'img_data_2'))
+        self.assertEqual(results[2], (3, b'img_data_3'))
+
+    def test_get_blob_non_blob_field_raises(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        for row in read.to_iterator(splits):
+            with self.assertRaises(TypeError):
+                row.get_blob(0)
+            break
+
+    def test_to_iterator_yields_all_rows(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        count = 0
+        for row in read.to_iterator(splits):
+            self.assertIsNotNone(row.get_field(0))
+            self.assertIsNotNone(row.get_field(1))
+            count += 1
+        self.assertEqual(count, 3)
+
+
+class GetBlobMultiColumnTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create({'warehouse': os.path.join(cls.temp_dir, 'warehouse')})
+        cls.catalog.create_database('test_db', False)
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('cover', pa.large_binary()),
+            ('thumb', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        cls.catalog.create_table('test_db.get_blob_multi', schema, False)
+        cls.table = cls.catalog.get_table('test_db.get_blob_multi')
+
+        write_builder = cls.table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'cover': [b'cover_1', b'cover_2'],
+            'thumb': [b'thumb_1', b'thumb_2'],
+        }, schema=pa_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_get_blob_each_column_independent(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        results = []
+        for row in read.to_iterator(splits):
+            results.append((row.get_field(0),
+                            row.get_blob(1).to_data(),
+                            row.get_blob(2).to_data()))
+        results.sort(key=lambda x: x[0])
+        self.assertEqual(results, [(1, b'cover_1', b'thumb_1'),
+                                   (2, b'cover_2', b'thumb_2')])
+
+
+class GetBlobThroughDescriptorConvertReaderTest(unittest.TestCase):
+    """Pin BlobDescriptorConvertReader's file_io / blob_field_indices
+    propagation. Configuring blob-descriptor-field puts the wrapper on the
+    read chain; reading via to_iterator() + row.get_blob() is the only path
+    that consumes those propagated attributes. Regressions on either line
+    would silently pass the to_arrow()-based blob_descriptor tests."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create({'warehouse': os.path.join(cls.temp_dir, 'warehouse')})
+        cls.catalog.create_database('test_db', False)
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('pic1', pa.large_binary()),
+            ('pic2', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob-descriptor-field': 'pic2',
+        })
+        cls.catalog.create_table('test_db.get_blob_via_descriptor_convert', schema, False)
+        cls.table = cls.catalog.get_table('test_db.get_blob_via_descriptor_convert')
+
+        from pypaimon.table.row.blob import BlobDescriptor
+        cls.pic1_data = b'inline_pic1_payload'
+        cls.pic2_data = b'external_pic2_payload'
+        cls.pic2_path = os.path.join(cls.temp_dir, 'pic2_external_blob')
+        with open(cls.pic2_path, 'wb') as f:
+            f.write(cls.pic2_data)
+
+        write_builder = cls.table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'pic1': [cls.pic1_data],
+            'pic2': [BlobDescriptor(cls.pic2_path, 0, len(cls.pic2_data)).serialize()],
+        }, schema=pa_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_get_blob_resolves_through_descriptor_convert_reader(self):
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        for row in read.to_iterator(splits):
+            self.assertEqual(row.get_blob(1).to_data(), self.pic1_data)
+            self.assertEqual(row.get_blob(2).to_data(), self.pic2_data)
+            break
+
+
+class GetBlobNonBlobColumnSecurityTest(unittest.TestCase):
+    """SSRF defence: get_blob on a non-BLOB column must NOT resolve a
+    descriptor URI even when the cell starts with the BLOBDESC magic header."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.catalog = CatalogFactory.create({'warehouse': os.path.join(cls.temp_dir, 'warehouse')})
+        cls.catalog.create_database('test_db', False)
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        cls.catalog.create_table('test_db.no_blob_col', schema, False)
+        cls.table = cls.catalog.get_table('test_db.no_blob_col')
+
+        from pypaimon.table.row.blob import BlobDescriptor
+        attacker_bytes = BlobDescriptor(
+            "/etc/should-never-be-read-by-paimon", 0, 32
+        ).serialize()
+
+        write_builder = cls.table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'payload': [attacker_bytes],
+        }, schema=pa_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_get_blob_on_non_blob_column_with_magic_bytes_raises(self):
+        from unittest.mock import patch
+
+        read_builder = self.table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        with patch.object(
+            self.table.file_io.uri_reader_factory, 'create',
+            side_effect=AssertionError("URI resolution must not happen on non-BLOB column")
+        ) as mock_create:
+            for row in read.to_iterator(splits):
+                with self.assertRaises(TypeError):
+                    row.get_blob(1)
+                break
+            mock_create.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
