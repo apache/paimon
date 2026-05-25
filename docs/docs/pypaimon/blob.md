@@ -109,18 +109,17 @@ genuinely lazy depends on how the table is configured:
 This mirrors Java's `BlobFormatReader` semantics.
 
 For genuine on-demand streaming of large blobs (videos, model weights),
-configure `blob-as-descriptor=true` before reading:
+use `table.copy` to set `blob-as-descriptor=true` before reading:
 
 ```python
-schema = Schema.from_pyarrow_schema(
-    pa_schema,
-    options={
-        'row-tracking.enabled': 'true',
-        'data-evolution.enabled': 'true',
-        'blob-as-descriptor': 'true',
-    },
-)
-# Reads of this table return BlobRef whose new_input_stream() is lazy.
+table = catalog.get_table('my_db.image_table')
+table = table.copy({'blob-as-descriptor': 'true'})
+
+read_builder = table.new_read_builder()
+splits = read_builder.new_scan().plan().splits()
+read = read_builder.new_read()
+
+# Reads now return BlobRef whose new_input_stream() is lazy.
 for row in read.to_iterator(splits):
     with row.get_blob(2).new_input_stream() as stream:
         chunk = stream.read(1024)
