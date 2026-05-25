@@ -560,9 +560,9 @@ public class SparkCatalog extends SparkBaseCatalog
             checkArgument(
                     add.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                     "The type of blob field must be binary");
-            return new BlobType().copy(add.isNullable());
+            return new BlobType();
         }
-        return toPaimonType(add.dataType()).copy(add.isNullable());
+        return toPaimonType(add.dataType());
     }
 
     private static Set<String> blobTypeFields(Map<String, String> options) {

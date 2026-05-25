@@ -856,6 +856,9 @@ public class FlinkCatalog extends AbstractCatalog {
                                                     newTable.getOptions())
                                                     .stream())
                             .collect(Collectors.toList());
+            // Blob AddColumn conversion above uses new table options. Flink emits table option
+            // changes before physical column changes, so SchemaManager sees the BLOB option before
+            // adding the converted BLOB column.
             changes.addAll(schemaChanges);
         }
 

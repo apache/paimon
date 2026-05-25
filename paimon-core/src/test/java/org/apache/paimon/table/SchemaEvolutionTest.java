@@ -689,6 +689,52 @@ public class SchemaEvolutionTest {
                 .hasMessageContaining("Cannot remove an existing field 'f1' from 'blob-field'.");
     }
 
+    @Test
+    public void testAlterBlobFieldOptionCannotRemoveFieldAddedInSameCommit() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.STRING()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        optionsForBlobTable(),
+                        "");
+        schemaManager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        SchemaChange.setOption(
+                                                CoreOptions.BLOB_FIELD.key(), "picture"),
+                                        SchemaChange.addColumn("picture", DataTypes.BLOB()),
+                                        SchemaChange.setOption(CoreOptions.BLOB_FIELD.key(), "")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "Cannot remove an existing field 'picture' from 'blob-field'.");
+    }
+
+    @Test
+    public void testAlterBlobFieldOptionCannotConfigureFieldAddedEarlierInSameCommit()
+            throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.STRING()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        optionsForBlobTable(),
+                        "");
+        schemaManager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        SchemaChange.addColumn("picture", DataTypes.BYTES()),
+                                        SchemaChange.setOption(
+                                                CoreOptions.BLOB_FIELD.key(), "picture")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot configure existing field 'picture' as a BLOB field.")
+                .hasMessageContaining("set 'blob-field' before adding the binary column");
+    }
+
     private Map<String, String> optionsForBlobTable() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");

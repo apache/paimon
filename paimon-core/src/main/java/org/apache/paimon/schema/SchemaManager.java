@@ -318,7 +318,7 @@ public class SchemaManager implements Serializable {
             if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
                 checkAlterBlobFieldOption(
-                        oldTableSchema, oldOptions, setOption.key(), setOption.value());
+                        newFields, newOptions, setOption.key(), setOption.value());
                 if (hasSnapshots.get()) {
                     checkAlterTableOption(
                             oldOptions,
@@ -329,7 +329,7 @@ public class SchemaManager implements Serializable {
                 newOptions.put(setOption.key(), setOption.value());
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
-                if (isBlobFieldOption(removeOption.key())) {
+                if (isMutableBlobFieldOption(removeOption.key())) {
                     throw new UnsupportedOperationException(
                             "Cannot remove blob field option: " + removeOption.key());
                 }
@@ -1293,43 +1293,46 @@ public class SchemaManager implements Serializable {
      * Check alter blob field option. Now we only allow adding non-existing new fields as BLOB
      * fields, and removing existing BLOB fields is not allowed.
      *
-     * @param oldTableSchema table schema
-     * @param oldOptions old table options
+     * @param currentFields current table fields with previous changes applied
+     * @param currentOptions current table options with previous changes applied
      * @param key altering key
      * @param value altering value
      */
     private static void checkAlterBlobFieldOption(
-            TableSchema oldTableSchema, Map<String, String> oldOptions, String key, String value) {
-        if (!isBlobFieldOption(key)) {
+            List<DataField> currentFields,
+            Map<String, String> currentOptions,
+            String key,
+            String value) {
+        if (!isMutableBlobFieldOption(key)) {
             return;
         }
 
-        Map<String, String> newOptions = new HashMap<>(oldOptions);
+        Map<String, String> newOptions = new HashMap<>(currentOptions);
         if (value == null) {
             newOptions.remove(key);
         } else {
             newOptions.put(key, value);
         }
 
-        Set<String> oldFields = getBlobFields(oldOptions, key);
-        Set<String> newFields = getBlobFields(newOptions, key);
+        Set<String> oldFields = getMutableBlobFields(currentOptions, key);
+        Set<String> newFields = getMutableBlobFields(newOptions, key);
+        Set<String> existingFields =
+                currentFields.stream().map(DataField::name).collect(Collectors.toSet());
 
         // 1. do not allow removing existing blob fields
         Set<String> removals = new HashSet<>(oldFields);
         removals.removeAll(newFields);
-        for (String fieldName : oldTableSchema.fieldNames()) {
-            if (removals.contains(fieldName)) {
+        for (String fieldName : removals) {
+            if (existingFields.contains(fieldName)) {
                 throw new UnsupportedOperationException(
                         String.format(
-                                "Cannot remove an existing field '%s' from 'blob-field'.",
-                                fieldName));
+                                "Cannot remove an existing field '%s' from '%s'.", fieldName, key));
             }
         }
 
         // 2. do not allow adding existing fields as BLOB fields
         Set<String> additions = new HashSet<>(newFields);
         additions.removeAll(oldFields);
-        Set<String> existingFields = new HashSet<>(oldTableSchema.fieldNames());
         for (String field : additions) {
             if (existingFields.contains(field)) {
                 throw new UnsupportedOperationException(
@@ -1343,24 +1346,18 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private static boolean isBlobFieldOption(String key) {
+    private static boolean isMutableBlobFieldOption(String key) {
         return CoreOptions.BLOB_FIELD.key().equals(key)
-                || CoreOptions.BLOB_DESCRIPTOR_FIELD.key().equals(key)
-                || CoreOptions.BLOB_VIEW_FIELD.key().equals(key)
-                || CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key().equals(key);
+                || CoreOptions.BLOB_DESCRIPTOR_FIELD.key().equals(key);
     }
 
-    private static Set<String> getBlobFields(Map<String, String> options, String key) {
+    private static Set<String> getMutableBlobFields(Map<String, String> options, String key) {
         if (CoreOptions.BLOB_FIELD.key().equals(key)) {
             return new HashSet<>(CoreOptions.blobField(options));
         } else if (CoreOptions.BLOB_DESCRIPTOR_FIELD.key().equals(key)) {
             return new CoreOptions(options).blobDescriptorField();
-        } else if (CoreOptions.BLOB_VIEW_FIELD.key().equals(key)) {
-            return new CoreOptions(options).blobViewField();
-        } else if (CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key().equals(key)) {
-            return new CoreOptions(options).blobExternalStorageField();
         }
-        throw new IllegalArgumentException("Unknown blob field option: " + key);
+        throw new IllegalArgumentException("Unknown mutable blob field option: " + key);
     }
 
     public static void checkAlterTablePath(String key) {
