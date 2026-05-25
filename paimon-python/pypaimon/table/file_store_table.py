@@ -136,6 +136,21 @@ class FileStoreTable(Table):
         from pypaimon.changelog.changelog_manager import ChangelogManager
         return ChangelogManager(self.file_io, self.table_path, self.current_branch())
 
+    def manifest_list_manager(self):
+        """Get the manifest list manager for this table."""
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        return ManifestListManager(self)
+
+    def manifest_file_manager(self):
+        """Get the manifest file manager for this table."""
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        return ManifestFileManager(self)
+
+    def index_manifest_file(self):
+        """Get the index manifest file handler for this table."""
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+        return IndexManifestFile(self)
+
     def rename_branch(self, from_branch: str, to_branch: str) -> None:
         """
         Rename a branch.
@@ -405,6 +420,17 @@ class FileStoreTable(Table):
 
     def new_stream_read_builder(self) -> 'StreamReadBuilder':
         return StreamReadBuilder(self)
+
+    def new_expire_snapshots(self):
+        from pypaimon.operation.expire_snapshots import ExpireSnapshots
+        from pypaimon.operation.snapshot_deletion import SnapshotDeletion
+        return ExpireSnapshots(
+            self.snapshot_manager(),
+            self.changelog_manager(),
+            self.consumer_manager(),
+            SnapshotDeletion(self),
+            self.tag_manager(),
+        )
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)

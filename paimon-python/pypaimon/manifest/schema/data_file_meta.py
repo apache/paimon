@@ -30,6 +30,9 @@ from pypaimon.utils.file_store_path_factory import _is_null_or_whitespace_only
 
 @dataclass
 class DataFileMeta:
+    FILE_SOURCE_APPEND = 0
+    FILE_SOURCE_COMPACT = 1
+
     file_name: str
     file_size: int
     row_count: int

@@ -26,6 +26,9 @@ class FileEntry:
     The same Identifier indicates that the FileEntry refers to the same data file.
     """
 
+    KIND_ADD = 0
+    KIND_DELETE = 1
+
     class Identifier:
         """Unique identifier for a file entry.
 
@@ -109,13 +112,13 @@ class FileEntry:
 
         for entry in entries:
             entry_identifier = entry.identifier()
-            if entry.kind == 0:  # ADD
+            if entry.kind == FileEntry.KIND_ADD:
                 if entry_identifier in entry_map:
                     raise RuntimeError(
                         "Trying to add file {} which is already added.".format(
                             entry.file.file_name))
                 entry_map[entry_identifier] = entry
-            elif entry.kind == 1:  # DELETE
+            elif entry.kind == FileEntry.KIND_DELETE:
                 if entry_identifier in entry_map:
                     del entry_map[entry_identifier]
                 else:
