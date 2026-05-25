@@ -18,6 +18,8 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -504,6 +506,33 @@ class GlobalIndexEvaluatorTest {
         evaluator.evaluate(predicate);
 
         assertThat(maxConcurrencyA.get()).isEqualTo(1);
+        evaluator.close();
+    }
+
+    @Test
+    void testNonFieldLeafPredicateDoesNotThrow() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexResult resultA = resultOf(1, 2, 3);
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> Collections.singletonList(readerReturning(resultA)),
+                        executor);
+
+        // Manually build AND(alwaysTrue, a=1) to bypass PredicateBuilder simplification
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                new CompoundPredicate(
+                        And.INSTANCE,
+                        Arrays.asList(PredicateBuilder.alwaysTrue(), builder.equal(0, 42)));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L);
         evaluator.close();
     }
 

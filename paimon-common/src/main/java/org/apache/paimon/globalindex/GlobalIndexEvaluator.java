@@ -247,7 +247,10 @@ public class GlobalIndexEvaluator
 
     private void collectFieldsRecursive(Predicate predicate, java.util.Set<String> fields) {
         if (predicate instanceof LeafPredicate) {
-            fields.add(((LeafPredicate) predicate).fieldName());
+            Optional<FieldRef> ref = ((LeafPredicate) predicate).fieldRefOptional();
+            if (ref.isPresent()) {
+                fields.add(ref.get().name());
+            }
         } else if (predicate instanceof CompoundPredicate) {
             for (Predicate child : ((CompoundPredicate) predicate).children()) {
                 collectFieldsRecursive(child, fields);

@@ -527,6 +527,34 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator.close()
         executor.shutdown(wait=False)
 
+    def test_non_field_leaf_predicate_does_not_throw(self):
+        fields = _make_fields()
+        result_a = GlobalIndexResult.from_range(Range(1, 3))
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [StubGlobalIndexReader(result_a)],
+            executor,
+        )
+
+        # AND(non-field leaf, a=1) — non-field leaf has field=None
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(method='alwaysTrue', index=None, field=None, literals=[]),
+                Predicate(method='equal', index=0, field='a', literals=[42]),
+            ],
+        )
+
+        result = evaluator.evaluate(predicate)
+
+        # alwaysTrue has no reader support, returns None — AND ignores it
+        self.assertIsNotNone(result)
+        self.assertEqual(result.results().cardinality(), 3)
+        evaluator.close()
+        executor.shutdown(wait=False)
+
     def test_null_predicate(self):
         fields = _make_fields()
         evaluator = GlobalIndexEvaluator(fields, lambda field: [])
