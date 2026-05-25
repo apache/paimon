@@ -49,6 +49,16 @@ PAIMON_FILE_FORMAT_PARQUET = "parquet"
 PAIMON_FILE_FORMAT_ORC = "orc"
 PAIMON_FILE_FORMAT_AVRO = "avro"
 
+# Schemes that, when already present in a file_path, indicate the path is
+# already an absolute URI and must not be re-prefixed. REST catalogs (DLF,
+# etc.) hand back paths like ``oss://bucket/...``; the previous unconditional
+# ``f"{scheme}://{file_path}"`` produced invalid double-scheme URIs such as
+# ``file://oss://...``.
+_ABSOLUTE_URI_SCHEMES = (
+    "oss://", "s3://", "s3a://", "s3n://",
+    "hdfs://", "file://", "http://", "https://",
+)
+
 
 class _PaimonPKSplitTask(DataSourceTask):
     """DataSourceTask for PK-table splits that require LSM-tree merge.
@@ -294,7 +304,14 @@ class PaimonDataSource(DataSource):
                 yield _PaimonPKSplitTask(read_table, split, self._schema, self._blob_column_names)
 
     def _build_file_uri(self, file_path: str) -> str:
-        """Reconstruct a full URI from a (potentially scheme-stripped) file_path."""
+        """Reconstruct a full URI from a (potentially scheme-stripped) file_path.
+
+        If ``file_path`` already carries a scheme (e.g. REST catalogs typically
+        return absolute ``oss://`` / ``s3://`` paths), return it unchanged.
+        Otherwise fall back to the warehouse scheme, or ``file://`` if none.
+        """
+        if file_path.startswith(_ABSOLUTE_URI_SCHEMES):
+            return file_path
         if self._warehouse_scheme:
             return f"{self._warehouse_scheme}://{file_path}"
         return f"file://{file_path}"
