@@ -30,10 +30,16 @@ import org.apache.paimon.utils.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
@@ -43,12 +49,23 @@ public class GlobalIndexEvaluator
 
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
-    private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache = new HashMap<>();
+    private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
+    @Nullable private final ExecutorService executorService;
 
     public GlobalIndexEvaluator(
             RowType rowType, IntFunction<Collection<GlobalIndexReader>> readersFunction) {
+        this(rowType, readersFunction, null);
+    }
+
+    public GlobalIndexEvaluator(
+            RowType rowType,
+            IntFunction<Collection<GlobalIndexReader>> readersFunction,
+            @Nullable ExecutorService executorService) {
         this.rowType = rowType;
         this.readersFunction = readersFunction;
+        this.executorService = executorService;
+        this.indexReadersCache =
+                executorService != null ? new ConcurrentHashMap<>() : new HashMap<>();
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
@@ -92,6 +109,13 @@ public class GlobalIndexEvaluator
 
     @Override
     public Optional<GlobalIndexResult> visit(CompoundPredicate predicate) {
+        if (executorService != null && predicate.children().size() > 1) {
+            return visitParallel(predicate);
+        }
+        return visitSequential(predicate);
+    }
+
+    private Optional<GlobalIndexResult> visitSequential(CompoundPredicate predicate) {
         if (predicate.function() instanceof Or) {
             GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
             for (Predicate predicate1 : predicate.children()) {
@@ -120,6 +144,59 @@ public class GlobalIndexEvaluator
                 }
 
                 // if not remain, no need to test anymore
+                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
+                    return compoundResult;
+                }
+            }
+            return compoundResult;
+        }
+    }
+
+    private Optional<GlobalIndexResult> visitParallel(CompoundPredicate predicate) {
+        List<Predicate> children = predicate.children();
+        List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(children.size());
+        for (Predicate child : children) {
+            futures.add(executorService.submit(() -> child.visit(this)));
+        }
+
+        List<Optional<GlobalIndexResult>> results = new ArrayList<>(children.size());
+        for (Future<Optional<GlobalIndexResult>> future : futures) {
+            try {
+                results.add(future.get());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof RuntimeException) {
+                    throw (RuntimeException) cause;
+                }
+                if (cause instanceof Error) {
+                    throw (Error) cause;
+                }
+                throw new RuntimeException(cause);
+            }
+        }
+
+        if (predicate.function() instanceof Or) {
+            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
+            for (Optional<GlobalIndexResult> childResult : results) {
+                if (!childResult.isPresent()) {
+                    return Optional.empty();
+                }
+                compoundResult = compoundResult.or(childResult.get());
+            }
+            return Optional.of(compoundResult);
+        } else {
+            Optional<GlobalIndexResult> compoundResult = Optional.empty();
+            for (Optional<GlobalIndexResult> childResult : results) {
+                if (childResult.isPresent()) {
+                    if (compoundResult.isPresent()) {
+                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
+                    } else {
+                        compoundResult = childResult;
+                    }
+                }
                 if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
                     return compoundResult;
                 }

@@ -54,12 +54,14 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /** Scanner for shard-based global indexes. */
 public class GlobalIndexScanner implements Closeable {
 
     private final Options options;
     private final ExecutorService executor;
+    private final ExecutorService evaluatorExecutor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
 
@@ -72,6 +74,10 @@ public class GlobalIndexScanner implements Closeable {
         this.options = options;
         this.executor =
                 ManifestReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
+        Integer threadNum = options.get(GLOBAL_INDEX_THREAD_NUM);
+        int parallelism =
+                threadNum != null ? threadNum : Runtime.getRuntime().availableProcessors();
+        this.evaluatorExecutor = createCachedThreadPool(parallelism, "GLOBAL-INDEX-EVALUATOR-POOL");
         this.indexPathFactory = indexPathFactory;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
@@ -94,7 +100,8 @@ public class GlobalIndexScanner implements Closeable {
                                 indexFileReader,
                                 indexMetas.get(fieldId),
                                 rowType.getField(fieldId));
-        this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
+        this.globalIndexEvaluator =
+                new GlobalIndexEvaluator(rowType, readersFunction, evaluatorExecutor);
     }
 
     public static Optional<GlobalIndexScanner> create(
@@ -195,5 +202,6 @@ public class GlobalIndexScanner implements Closeable {
     @Override
     public void close() throws IOException {
         globalIndexEvaluator.close();
+        evaluatorExecutor.shutdownNow();
     }
 }

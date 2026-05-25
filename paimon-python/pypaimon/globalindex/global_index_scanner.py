@@ -17,6 +17,8 @@
 
 """Scanner for shard-based global indexes."""
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Collection, Optional
 
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
@@ -37,9 +39,15 @@ class GlobalIndexScanner:
         fields: list,
         file_io,
         index_path: str,
-        index_files: Collection['IndexFileMeta']
+        index_files: Collection['IndexFileMeta'],
+        thread_num: Optional[int] = None,
     ):
-        self._evaluator = self._create_evaluator(fields, file_io, index_path, index_files)
+        self._executor = ThreadPoolExecutor(
+            max_workers=thread_num or os.cpu_count() or 4
+        )
+        self._evaluator = self._create_evaluator(
+            fields, file_io, index_path, index_files
+        )
 
     def _create_evaluator(self, fields, file_io, index_path, index_files):
         index_metas = {}
@@ -71,7 +79,7 @@ class GlobalIndexScanner:
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
             return _create_readers(file_io, index_path, index_metas.get(field.id), field)
 
-        return GlobalIndexEvaluator(fields, readers_function)
+        return GlobalIndexEvaluator(fields, readers_function, self._executor)
 
     @staticmethod
     def create(table, index_files=None, partition_filter=None, predicate=None) -> Optional['GlobalIndexScanner']:
@@ -90,7 +98,8 @@ class GlobalIndexScanner:
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path=table.path_factory().global_index_path_factory().index_path(),
-                index_files=index_files
+                index_files=index_files,
+                thread_num=table.options.global_index_thread_num(),
             )
 
         # Scan index files from snapshot using partition_filter and predicate
@@ -121,7 +130,8 @@ class GlobalIndexScanner:
             fields=table.fields,
             file_io=table.file_io,
             index_path=table.path_factory().global_index_path_factory().index_path(),
-            index_files=scanned_index_files
+            index_files=scanned_index_files,
+            thread_num=table.options.global_index_thread_num(),
         )
 
     def scan(self, predicate: Optional[Predicate]) -> Optional[GlobalIndexResult]:
@@ -131,6 +141,7 @@ class GlobalIndexScanner:
     def close(self):
         """Close the scanner and release resources."""
         self._evaluator.close()
+        self._executor.shutdown(wait=False)
 
     def __enter__(self) -> 'GlobalIndexScanner':
         return self
