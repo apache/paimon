@@ -48,8 +48,6 @@ import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.
 /** Predicate for filtering data using global indexes. */
 public class GlobalIndexEvaluator implements Closeable {
 
-    private static final int MAX_PREDICATE_DEPTH = 1000;
-
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
@@ -71,7 +69,7 @@ public class GlobalIndexEvaluator implements Closeable {
             return Optional.empty();
         }
         try {
-            return visitAsync(predicate, 0).get();
+            return visitAsync(predicate).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted during index evaluation", e);
@@ -86,16 +84,11 @@ public class GlobalIndexEvaluator implements Closeable {
         }
     }
 
-    private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(
-            Predicate predicate, int depth) {
-        if (depth > MAX_PREDICATE_DEPTH) {
-            throw new IllegalArgumentException(
-                    "Predicate tree exceeds maximum depth of " + MAX_PREDICATE_DEPTH);
-        }
+    private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(Predicate predicate) {
         if (predicate instanceof LeafPredicate) {
             return visitLeafAsync((LeafPredicate) predicate);
         }
-        return visitCompoundAsync((CompoundPredicate) predicate, depth);
+        return visitCompoundAsync((CompoundPredicate) predicate);
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitLeafAsync(LeafPredicate predicate) {
@@ -151,12 +144,10 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
-            CompoundPredicate predicate, int depth) {
+            CompoundPredicate predicate) {
         List<Predicate> children = flattenChildren(predicate);
         List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
-                children.stream()
-                        .map(child -> visitAsync(child, depth + 1))
-                        .collect(Collectors.toList());
+                children.stream().map(this::visitAsync).collect(Collectors.toList());
 
         return CompletableFuture.allOf(childFutures.toArray(new CompletableFuture[0]))
                 .thenApply(
