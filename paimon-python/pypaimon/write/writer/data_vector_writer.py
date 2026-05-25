@@ -212,8 +212,6 @@ class DataVectorWriter(DataWriter):
         stats_columns = self.normal_columns if metadata_stats_enabled else []
         value_stats = self._collect_value_stats(data, stats_columns)
 
-        self.sequence_generator.start = self.sequence_generator.current
-
         return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
