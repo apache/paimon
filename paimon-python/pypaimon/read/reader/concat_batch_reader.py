@@ -29,9 +29,11 @@ _MIN_BATCH_SIZE_TO_REFILL = 1024
 
 class ConcatBatchReader(RecordBatchReader):
 
-    def __init__(self, reader_suppliers: List[Callable]):
+    def __init__(self, reader_suppliers: List[Callable], file_io=None, blob_field_indices=None):
         self.queue: collections.deque[Callable] = collections.deque(reader_suppliers)
         self.current_reader: Optional[RecordBatchReader] = None
+        self.file_io = file_io
+        self.blob_field_indices = blob_field_indices
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         while True:
