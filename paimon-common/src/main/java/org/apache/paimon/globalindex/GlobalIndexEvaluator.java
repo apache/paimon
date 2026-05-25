@@ -23,7 +23,6 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -44,8 +43,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 
 /** Predicate for filtering data using global indexes. */
-public class GlobalIndexEvaluator
-        implements Closeable, PredicateVisitor<Optional<GlobalIndexResult>> {
+public class GlobalIndexEvaluator implements Closeable {
 
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
@@ -82,8 +80,7 @@ public class GlobalIndexEvaluator
         }
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visit(LeafPredicate predicate) {
+    private Optional<GlobalIndexResult> visitLeaf(LeafPredicate predicate) {
         Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
         if (!fieldRefOptional.isPresent()) {
             return Optional.empty();
@@ -102,22 +99,16 @@ public class GlobalIndexEvaluator
             }
 
             GlobalIndexResult result = childResult.get();
-            if (compoundResult.isPresent()) {
-                compoundResult = Optional.of(compoundResult.get().and(result));
-            } else {
-                compoundResult = Optional.of(result);
-            }
+            compoundResult =
+                    compoundResult
+                            .map(globalIndexResult -> Optional.of(globalIndexResult.and(result)))
+                            .orElseGet(() -> Optional.of(result));
 
             if (compoundResult.get().results().isEmpty()) {
                 return compoundResult;
             }
         }
         return compoundResult;
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visit(CompoundPredicate predicate) {
-        throw new UnsupportedOperationException("Use visitAsync for compound predicates");
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(Predicate predicate) {
@@ -137,7 +128,7 @@ public class GlobalIndexEvaluator
         return CompletableFuture.supplyAsync(
                 () -> {
                     synchronized (lock) {
-                        return visit(predicate);
+                        return visitLeaf(predicate);
                     }
                 },
                 executorService);
@@ -175,11 +166,14 @@ public class GlobalIndexEvaluator
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<GlobalIndexResult> childResult : results) {
                 if (childResult.isPresent()) {
-                    if (compoundResult.isPresent()) {
-                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
-                    } else {
-                        compoundResult = childResult;
-                    }
+                    compoundResult =
+                            compoundResult
+                                    .map(
+                                            globalIndexResult ->
+                                                    Optional.of(
+                                                            globalIndexResult.and(
+                                                                    childResult.get())))
+                                    .orElse(childResult);
                 }
                 if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
                     return compoundResult;
@@ -204,6 +198,7 @@ public class GlobalIndexEvaluator
         return result;
     }
 
+    @Override
     public void close() {
         IOUtils.closeAllQuietly(
                 indexReadersCache.values().stream()
