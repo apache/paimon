@@ -23,6 +23,7 @@ import org.apache.paimon.codegen.NormalizedKeyComputer;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
@@ -30,7 +31,6 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
@@ -397,11 +397,12 @@ public class ManifestFileMerger {
         for (ManifestFileMeta file : toBeMerged) {
             List<ManifestEntry> entries = new ArrayList<>();
             boolean requireChange = mustChange.test(file);
-            for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
-                if (entry.kind() == FileKind.DELETE) {
-                    continue;
-                }
-
+            for (ManifestEntry entry :
+                    manifestFile.read(
+                            file.fileName(),
+                            file.fileSize(),
+                            FileEntry.addFilter(),
+                            Filter.alwaysTrue())) {
                 if (deleteEntries.contains(entry.identifier())) {
                     requireChange = true;
                 } else {
@@ -439,11 +440,12 @@ public class ManifestFileMerger {
             for (ManifestFileMeta file : toBeMerged) {
                 List<ManifestEntry> entries = new ArrayList<>();
                 boolean requireChange = mustChange.test(file);
-                for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
-                    if (entry.kind() == FileKind.DELETE) {
-                        continue;
-                    }
-
+                for (ManifestEntry entry :
+                        manifestFile.read(
+                                file.fileName(),
+                                file.fileSize(),
+                                FileEntry.addFilter(),
+                                Filter.alwaysTrue())) {
                     if (deleteEntries.contains(entry.identifier())) {
                         requireChange = true;
                     } else {
@@ -463,11 +465,12 @@ public class ManifestFileMerger {
                                         manifestMergeSortBufferSize);
                     }
                     for (ManifestEntry entry : entries) {
-                        GenericRow row = new GenericRow(4);
+                        GenericRow row = new GenericRow(5);
                         row.setField(0, entry.partition());
                         row.setField(1, entry.bucket());
                         row.setField(2, entry.level());
                         row.setField(3, entrySerializer.serializeToBytes(entry));
+                        row.setField(4, BinaryString.fromString(entry.fileName()));
                         sortBuffer.write(row);
                     }
                     actualRewriteCount++;
@@ -508,11 +511,11 @@ public class ManifestFileMerger {
                 manifestMergeSortBufferSize >= minBufferSize,
                 "Manifest merge sort buffer must be at least three pages (" + minBufferSize + ")");
 
-        RecordComparator partitionRmpr = null;
+        RecordComparator partitionCmp = null;
         if (partitionType.getFieldCount() > 0) {
-            partitionRmpr = createPartitionRecordComparator(partitionType);
+            partitionCmp = createPartitionRecordComparator(partitionType);
         }
-        RecordComparator partitionComparator = partitionRmpr;
+        RecordComparator partitionComparator = partitionCmp;
 
         RecordComparator comparator =
                 (a, b) -> {
@@ -531,7 +534,12 @@ public class ManifestFileMerger {
                         return cmp;
                     }
 
-                    return Integer.compare(a.getInt(2), b.getInt(2));
+                    cmp = Integer.compare(a.getInt(2), b.getInt(2));
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+
+                    return a.getString(4).compareTo(b.getString(4));
                 };
 
         MemorySegmentPool memoryPool =
@@ -557,7 +565,8 @@ public class ManifestFileMerger {
                 partitionType,
                 new IntType(false),
                 new IntType(false),
-                SerializationUtils.newBytesType(false));
+                SerializationUtils.newBytesType(false),
+                SerializationUtils.newStringType(false));
     }
 
     private static RecordComparator createPartitionRecordComparator(RowType partitionType) {

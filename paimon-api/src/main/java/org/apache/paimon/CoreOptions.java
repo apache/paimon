@@ -494,7 +494,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> MANIFEST_DELTA_SORTED =
             key("manifest.delta.sorted")
                     .booleanType()
-                    .defaultValue(true)
+                    .defaultValue(false)
                     .withDescription(
                             "Whether to sort ManifestEntry by partition when writing manifest delta.");
 
