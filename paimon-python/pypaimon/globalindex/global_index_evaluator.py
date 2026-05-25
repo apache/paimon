@@ -102,6 +102,15 @@ class GlobalIndexEvaluator:
 
         return compound_result
 
+    def _flatten_children(self, method: str, children) -> list:
+        result = []
+        for child in children:
+            if isinstance(child, Predicate) and child.method == method:
+                result.extend(self._flatten_children(method, child.literals))
+            else:
+                result.append(child)
+        return result
+
     def _submit_children(self, children) -> List[Future]:
         return [self._executor.submit(self._visit_predicate, child) for child in children]
 
@@ -109,6 +118,7 @@ class GlobalIndexEvaluator:
         return [f.result() for f in futures]
 
     def _visit_and_parallel(self, children) -> Optional[GlobalIndexResult]:
+        children = self._flatten_children('and', children)
         results = self._collect_results(self._submit_children(children))
 
         compound_result: Optional[GlobalIndexResult] = None
@@ -125,6 +135,7 @@ class GlobalIndexEvaluator:
         return compound_result
 
     def _visit_or_parallel(self, children) -> Optional[GlobalIndexResult]:
+        children = self._flatten_children('or', children)
         results = self._collect_results(self._submit_children(children))
 
         compound_result = GlobalIndexResult.create_empty()

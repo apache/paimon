@@ -263,6 +263,76 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testNestedAndPredicateDoesNotDeadlockWithSmallPool() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexResult resultA = resultOf(1, 2, 3, 4, 5);
+        GlobalIndexResult resultB = resultOf(3, 4, 5, 6, 7);
+        GlobalIndexResult resultC = resultOf(4, 5, 8, 9);
+
+        ConcurrentHashMap<Integer, GlobalIndexResult> fieldResults = new ConcurrentHashMap<>();
+        fieldResults.put(0, resultA);
+        fieldResults.put(1, resultB);
+        fieldResults.put(2, resultC);
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        readerReturning(fieldResults.get(fieldId))),
+                        executor);
+
+        // and(a, b, c) builds as and(and(a, b), c) — nested binary tree
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(builder.equal(0, 1), builder.equal(1, 2), builder.equal(2, 3));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        // intersection of {1..5}, {3..7}, {4,5,8,9} -> {4,5}
+        assertBitmapContainsExactly(result.get().results(), 4L, 5L);
+        evaluator.close();
+    }
+
+    @Test
+    void testNestedOrPredicateDoesNotDeadlockWithSmallPool() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexResult resultA = resultOf(1, 2);
+        GlobalIndexResult resultB = resultOf(3, 4);
+        GlobalIndexResult resultC = resultOf(5, 6);
+
+        ConcurrentHashMap<Integer, GlobalIndexResult> fieldResults = new ConcurrentHashMap<>();
+        fieldResults.put(0, resultA);
+        fieldResults.put(1, resultB);
+        fieldResults.put(2, resultC);
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        readerReturning(fieldResults.get(fieldId))),
+                        executor);
+
+        // or(a, b, c) builds as or(or(a, b), c) — nested binary tree
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.or(builder.equal(0, 1), builder.equal(1, 2), builder.equal(2, 3));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        // union of {1,2}, {3,4}, {5,6}
+        assertBitmapContainsExactly(result.get().results(), 1L, 2L, 3L, 4L, 5L, 6L);
+        evaluator.close();
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =

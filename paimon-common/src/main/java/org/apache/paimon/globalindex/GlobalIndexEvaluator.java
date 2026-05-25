@@ -153,7 +153,7 @@ public class GlobalIndexEvaluator
     }
 
     private Optional<GlobalIndexResult> visitParallel(CompoundPredicate predicate) {
-        List<Predicate> children = predicate.children();
+        List<Predicate> children = flattenChildren(predicate);
         List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(children.size());
         for (Predicate child : children) {
             futures.add(executorService.submit(() -> child.visit(this)));
@@ -203,6 +203,21 @@ public class GlobalIndexEvaluator
             }
             return compoundResult;
         }
+    }
+
+    private List<Predicate> flattenChildren(CompoundPredicate predicate) {
+        List<Predicate> result = new ArrayList<>();
+        for (Predicate child : predicate.children()) {
+            if (child instanceof CompoundPredicate) {
+                CompoundPredicate compound = (CompoundPredicate) child;
+                if (compound.function().getClass() == predicate.function().getClass()) {
+                    result.addAll(flattenChildren(compound));
+                    continue;
+                }
+            }
+            result.add(child);
+        }
+        return result;
     }
 
     public void close() {

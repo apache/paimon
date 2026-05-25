@@ -218,6 +218,88 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         self.assertEqual(call_count[0], 2)
         evaluator.close()
 
+    def test_nested_and_does_not_deadlock_with_small_pool(self):
+        fields = _make_fields()
+        result_a = GlobalIndexResult.from_range(Range(1, 5))
+        result_b = GlobalIndexResult.from_range(Range(3, 7))
+        result_c = GlobalIndexResult.from_range(Range(4, 5))
+
+        field_results = {0: result_a, 1: result_b, 2: result_c}
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [StubGlobalIndexReader(field_results[field.id])],
+            executor,
+        )
+
+        # Nested binary tree: and(and(a, b), c)
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(
+                    method='and', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a', literals=[1]),
+                        Predicate(method='equal', index=1, field='b', literals=[2]),
+                    ],
+                ),
+                Predicate(method='equal', index=2, field='c', literals=[3]),
+            ],
+        )
+
+        result = evaluator.evaluate(predicate)
+
+        self.assertIsNotNone(result)
+        bm = result.results()
+        # intersection of [1,5], [3,7], [4,5] -> [4,5]
+        self.assertEqual(bm.cardinality(), 2)
+        for v in [4, 5]:
+            self.assertTrue(bm.contains(v))
+        evaluator.close()
+        executor.shutdown(wait=False)
+
+    def test_nested_or_does_not_deadlock_with_small_pool(self):
+        fields = _make_fields()
+        result_a = GlobalIndexResult.from_range(Range(1, 2))
+        result_b = GlobalIndexResult.from_range(Range(3, 4))
+        result_c = GlobalIndexResult.from_range(Range(5, 6))
+
+        field_results = {0: result_a, 1: result_b, 2: result_c}
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [StubGlobalIndexReader(field_results[field.id])],
+            executor,
+        )
+
+        # Nested binary tree: or(or(a, b), c)
+        predicate = Predicate(
+            method='or', index=None, field=None,
+            literals=[
+                Predicate(
+                    method='or', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a', literals=[1]),
+                        Predicate(method='equal', index=1, field='b', literals=[2]),
+                    ],
+                ),
+                Predicate(method='equal', index=2, field='c', literals=[3]),
+            ],
+        )
+
+        result = evaluator.evaluate(predicate)
+
+        self.assertIsNotNone(result)
+        bm = result.results()
+        # union of [1,2], [3,4], [5,6] -> {1,2,3,4,5,6}
+        self.assertEqual(bm.cardinality(), 6)
+        for v in [1, 2, 3, 4, 5, 6]:
+            self.assertTrue(bm.contains(v))
+        evaluator.close()
+        executor.shutdown(wait=False)
+
     def test_null_predicate(self):
         fields = _make_fields()
         evaluator = GlobalIndexEvaluator(fields, lambda field: [])
