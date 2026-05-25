@@ -97,10 +97,11 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
         if (segments == null || segments[0].size() < length) {
             // Need a larger buffer
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
-        } else if (segments[0].size() > REUSE_SHRINK_THRESHOLD) {
-            // The existing buffer is oversized (> 4MB). Shrink it to avoid holding onto large
-            // byte arrays indefinitely, which can cause OOM when many merge channels each
-            // retain a bloated reuse buffer.
+        } else if (segments[0].size() > REUSE_SHRINK_THRESHOLD && length < REUSE_SHRINK_THRESHOLD) {
+            // Hysteresis: only shrink when the buffer is oversized AND the current record is
+            // small. This avoids thrashing (release-and-rebuild on every record) when records
+            // are consistently large (e.g. 5-10MB), while still reclaiming memory when the
+            // workload transitions back to small records.
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
         }
         source.readFully(segments[0].getArray(), 0, length);

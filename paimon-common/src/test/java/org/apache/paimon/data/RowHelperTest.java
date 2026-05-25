@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RowHelperTest {
 
     @Test
-    void testResetIfTooLargeReleasesOversizedBuffer() {
+    void testResetIfTooLargeReleasesAfterTransitionToSmallRecord() {
         RowHelper helper = new RowHelper(Arrays.asList(DataTypes.STRING(), DataTypes.BYTES()));
 
         // Write a large record (> 4MB) to inflate the internal buffer
@@ -43,7 +43,16 @@ class RowHelperTest {
 
         assertThat(helper.reuseRow()).isNotNull();
 
-        // resetIfTooLarge() should release the bloated buffer
+        // Hysteresis: resetIfTooLarge() should NOT release when last record is large
+        helper.resetIfTooLarge();
+        assertThat(helper.reuseRow()).isNotNull();
+
+        // Now write a small record — buffer is still oversized from the large record
+        GenericRow smallRow = GenericRow.of(BinaryString.fromString("s"), new byte[10]);
+        smallRow.setRowKind(RowKind.INSERT);
+        helper.copyInto(smallRow);
+
+        // resetIfTooLarge() should release now: buffer > 4MB but last record < 4MB
         helper.resetIfTooLarge();
         assertThat(helper.reuseRow()).isNull();
     }
@@ -80,17 +89,21 @@ class RowHelperTest {
     void testReuseIsRecreatedAfterRelease() {
         RowHelper helper = new RowHelper(Arrays.asList(DataTypes.STRING(), DataTypes.BYTES()));
 
-        // Write a large record to inflate the buffer
+        // Write a large record to inflate the buffer, then a small record to trigger release
         byte[] largePayload = new byte[5 * 1024 * 1024];
         GenericRow largeRow = GenericRow.of(BinaryString.fromString("key"), largePayload);
         largeRow.setRowKind(RowKind.INSERT);
         helper.copyInto(largeRow);
+
+        GenericRow smallRow = GenericRow.of(BinaryString.fromString("small"), new byte[10]);
+        smallRow.setRowKind(RowKind.INSERT);
+        helper.copyInto(smallRow);
+
+        // Buffer is oversized + last record is small → release
         helper.resetIfTooLarge();
         assertThat(helper.reuseRow()).isNull();
 
-        // Write a small record — reuseRow should be recreated
-        GenericRow smallRow = GenericRow.of(BinaryString.fromString("small"), new byte[10]);
-        smallRow.setRowKind(RowKind.INSERT);
+        // Write another small record — reuseRow should be recreated
         helper.copyInto(smallRow);
         assertThat(helper.reuseRow()).isNotNull();
 

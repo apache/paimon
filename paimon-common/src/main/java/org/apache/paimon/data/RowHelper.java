@@ -90,14 +90,15 @@ public class RowHelper implements Serializable {
     }
 
     /**
-     * Release the internal reuse buffer if the segment exceeds the threshold. This should be called
-     * after the caller has finished using the reuseRow (e.g. after serialization), so that large
-     * records don't linger in memory.
+     * Release the internal reuse buffer if the segment exceeds the threshold AND the last written
+     * record is small. This hysteresis avoids thrashing when records are consistently large, while
+     * still reclaiming memory when the workload transitions back to small records.
      */
     public void resetIfTooLarge() {
         if (reuseWriter != null
                 && reuseWriter.getSegments() != null
-                && reuseWriter.getSegments().size() > REUSE_RELEASE_THRESHOLD) {
+                && reuseWriter.getSegments().size() > REUSE_RELEASE_THRESHOLD
+                && reuseRow.getSizeInBytes() < REUSE_RELEASE_THRESHOLD) {
             reuseRow = null;
             reuseWriter = null;
         }
