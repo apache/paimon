@@ -105,18 +105,18 @@ public class BTreeIndexTopoBuilder {
             Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
                     indexBuilder.scan();
             if (!indexRangeAndSplits.isPresent()) {
-                return false;
+                continue;
             }
 
             Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
             List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
             if (splits.isEmpty()) {
-                return false;
+                continue;
             }
             Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
                     groupSplitsByRange(scanResult.getLeft(), splits);
             if (partitionRangeSplits.isEmpty()) {
-                return false;
+                continue;
             }
 
             // 2. Select necessary columns (index field + ROW_ID)
