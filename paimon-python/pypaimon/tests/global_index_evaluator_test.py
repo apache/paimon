@@ -462,6 +462,71 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator.close()
         executor.shutdown(wait=False)
 
+    def test_mixed_nested_same_field_not_accessed_concurrently(self):
+        import threading
+        import time
+
+        fields = _make_fields()
+
+        concurrency_a = [0]
+        max_concurrency_a = [0]
+        lock = threading.Lock()
+
+        class ConcurrencyDetectingReader(GlobalIndexReader):
+            def __init__(self, result):
+                self._result = result
+
+            def visit_equal(self, field_ref, literal):
+                with lock:
+                    concurrency_a[0] += 1
+                    max_concurrency_a[0] = max(max_concurrency_a[0], concurrency_a[0])
+                time.sleep(0.05)
+                with lock:
+                    concurrency_a[0] -= 1
+                return self._result
+
+            def close(self):
+                pass
+
+        result_all = GlobalIndexResult.from_range(Range(1, 5))
+        detecting_reader = ConcurrencyDetectingReader(result_all)
+        normal_reader = StubGlobalIndexReader(result_all)
+
+        def readers_fn(field):
+            if field.id == 0:
+                return [detecting_reader]
+            return [normal_reader]
+
+        executor = ThreadPoolExecutor(max_workers=4)
+        evaluator = GlobalIndexEvaluator(fields, readers_fn, executor)
+
+        # AND(OR(a=1, b=2), OR(a=3, c=4)) — field a in both OR subtrees
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(
+                    method='or', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a', literals=[1]),
+                        Predicate(method='equal', index=1, field='b', literals=[2]),
+                    ],
+                ),
+                Predicate(
+                    method='or', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a', literals=[3]),
+                        Predicate(method='equal', index=2, field='c', literals=[4]),
+                    ],
+                ),
+            ],
+        )
+
+        evaluator.evaluate(predicate)
+
+        self.assertEqual(max_concurrency_a[0], 1)
+        evaluator.close()
+        executor.shutdown(wait=False)
+
     def test_null_predicate(self):
         fields = _make_fields()
         evaluator = GlobalIndexEvaluator(fields, lambda field: [])

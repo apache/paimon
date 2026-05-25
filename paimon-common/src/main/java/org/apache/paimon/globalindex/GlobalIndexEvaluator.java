@@ -32,7 +32,6 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -209,18 +208,51 @@ public class GlobalIndexEvaluator
     }
 
     private List<List<Predicate>> groupByField(List<Predicate> children) {
-        Map<String, List<Predicate>> fieldGroups = new HashMap<>();
-        List<List<Predicate>> result = new ArrayList<>();
+        List<List<Predicate>> groups = new ArrayList<>();
+        List<java.util.Set<String>> groupFields = new ArrayList<>();
+
         for (Predicate child : children) {
-            if (child instanceof LeafPredicate) {
-                String fieldName = ((LeafPredicate) child).fieldName();
-                fieldGroups.computeIfAbsent(fieldName, k -> new ArrayList<>()).add(child);
-            } else {
-                result.add(Collections.singletonList(child));
+            java.util.Set<String> fields = collectFields(child);
+            int mergedIdx = -1;
+            for (int i = 0; i < groups.size(); i++) {
+                if (!java.util.Collections.disjoint(groupFields.get(i), fields)) {
+                    if (mergedIdx == -1) {
+                        groups.get(i).add(child);
+                        groupFields.get(i).addAll(fields);
+                        mergedIdx = i;
+                    } else {
+                        groups.get(mergedIdx).addAll(groups.get(i));
+                        groupFields.get(mergedIdx).addAll(groupFields.get(i));
+                        groups.remove(i);
+                        groupFields.remove(i);
+                        i--;
+                    }
+                }
+            }
+            if (mergedIdx == -1) {
+                List<Predicate> newGroup = new ArrayList<>();
+                newGroup.add(child);
+                groups.add(newGroup);
+                groupFields.add(fields);
             }
         }
-        result.addAll(fieldGroups.values());
-        return result;
+        return groups;
+    }
+
+    private java.util.Set<String> collectFields(Predicate predicate) {
+        java.util.Set<String> fields = new java.util.HashSet<>();
+        collectFieldsRecursive(predicate, fields);
+        return fields;
+    }
+
+    private void collectFieldsRecursive(Predicate predicate, java.util.Set<String> fields) {
+        if (predicate instanceof LeafPredicate) {
+            fields.add(((LeafPredicate) predicate).fieldName());
+        } else if (predicate instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) predicate).children()) {
+                collectFieldsRecursive(child, fields);
+            }
+        }
     }
 
     private Optional<GlobalIndexResult> evaluateGroupWithoutParallel(

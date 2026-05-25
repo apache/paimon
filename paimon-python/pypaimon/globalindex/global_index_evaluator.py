@@ -135,19 +135,42 @@ class GlobalIndexEvaluator:
                 compound_result = compound_result.or_(child_result)
             return compound_result
 
+    def _collect_fields(self, predicate) -> set:
+        if not isinstance(predicate, Predicate):
+            return set()
+        if predicate.method in ('and', 'or'):
+            fields = set()
+            for child in predicate.literals:
+                fields.update(self._collect_fields(child))
+            return fields
+        return {predicate.field} if predicate.field else set()
+
     def _group_by_field(self, children) -> list:
-        field_groups = {}
-        result = []
+        groups = []
+        group_fields = []
+
         for child in children:
-            if isinstance(child, Predicate) and child.method not in ('and', 'or'):
-                field_name = child.field
-                if field_name not in field_groups:
-                    field_groups[field_name] = []
-                field_groups[field_name].append(child)
-            else:
-                result.append([child])
-        result.extend(field_groups.values())
-        return result
+            fields = self._collect_fields(child)
+            merged_idx = -1
+            i = 0
+            while i < len(groups):
+                if group_fields[i] & fields:
+                    if merged_idx == -1:
+                        groups[i].append(child)
+                        group_fields[i].update(fields)
+                        merged_idx = i
+                    else:
+                        groups[merged_idx].extend(groups[i])
+                        group_fields[merged_idx].update(group_fields[i])
+                        groups.pop(i)
+                        group_fields.pop(i)
+                        continue
+                i += 1
+            if merged_idx == -1:
+                groups.append([child])
+                group_fields.append(set(fields))
+
+        return groups
 
     def _evaluate_group_without_parallel(self, group, method) -> Optional[GlobalIndexResult]:
         if len(group) == 1:

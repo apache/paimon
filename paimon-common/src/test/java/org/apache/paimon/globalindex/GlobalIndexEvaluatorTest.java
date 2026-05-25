@@ -458,6 +458,56 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testMixedNestedSameFieldNotAccessedConcurrently() {
+        executor = Executors.newFixedThreadPool(4);
+        RowType rowType = rowType();
+
+        AtomicInteger concurrencyA = new AtomicInteger(0);
+        AtomicInteger maxConcurrencyA = new AtomicInteger(0);
+
+        GlobalIndexReader concurrencyDetectingReaderA =
+                new StubGlobalIndexReader(resultOf(1, 2, 3, 4, 5)) {
+                    @Override
+                    public Optional<GlobalIndexResult> visitEqual(
+                            FieldRef fieldRef, Object literal) {
+                        int c = concurrencyA.incrementAndGet();
+                        maxConcurrencyA.updateAndGet(cur -> Math.max(cur, c));
+                        try {
+                            Thread.sleep(50);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        concurrencyA.decrementAndGet();
+                        return super.visitEqual(fieldRef, literal);
+                    }
+                };
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            if (fieldId == 0) {
+                                return Collections.singletonList(concurrencyDetectingReaderA);
+                            }
+                            return Collections.singletonList(
+                                    readerReturning(resultOf(1, 2, 3, 4, 5)));
+                        },
+                        executor);
+
+        // AND(OR(a=1, b=2), OR(a=3, c=4)) — field a appears in both OR subtrees
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.or(builder.equal(0, 1), builder.equal(1, 2)),
+                        PredicateBuilder.or(builder.equal(0, 3), builder.equal(2, 4)));
+
+        evaluator.evaluate(predicate);
+
+        assertThat(maxConcurrencyA.get()).isEqualTo(1);
+        evaluator.close();
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =
