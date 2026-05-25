@@ -349,3 +349,7 @@ class ChangelogManager:
             pass
         except Exception as e:
             logger.warning(f"Failed to delete earliest hint {earliest_file}: {e}")
+
+    def delete_changelog(self, changelog_id: int) -> None:
+        path = self.long_lived_changelog_path(changelog_id)
+        self.file_io.delete_quietly(path)
