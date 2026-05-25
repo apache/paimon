@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.flink.source.aggregate.PushedAggregateResult;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
@@ -57,19 +57,30 @@ public class DataTableSource extends BaseDataTableSource
             ObjectIdentifier tableIdentifier,
             Table table,
             boolean unbounded,
+            DynamicTableFactory.Context context) {
+        this(tableIdentifier, table, unbounded, context, null, null, null, null, null);
+    }
+
+    public DataTableSource(
+            ObjectIdentifier tableIdentifier,
+            Table table,
+            boolean unbounded,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory) {
+            @Nullable Predicate predicate,
+            @Nullable int[][] projectFields,
+            @Nullable Long limit,
+            @Nullable WatermarkStrategy<RowData> watermarkStrategy,
+            @Nullable List<String> dynamicPartitionFilteringFields) {
         this(
                 tableIdentifier,
                 table,
                 unbounded,
                 context,
-                logStoreTableFactory,
-                null,
-                null,
-                null,
-                null,
-                null,
+                predicate,
+                projectFields,
+                limit,
+                watermarkStrategy,
+                dynamicPartitionFilteringFields,
                 null);
     }
 
@@ -78,24 +89,22 @@ public class DataTableSource extends BaseDataTableSource
             Table table,
             boolean unbounded,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
             @Nullable List<String> dynamicPartitionFilteringFields,
-            @Nullable Long countPushed) {
+            @Nullable PushedAggregateResult pushedAggregateResult) {
         super(
                 tableIdentifier,
                 table,
                 unbounded,
                 context,
-                logStoreTableFactory,
                 predicate,
                 projectFields,
                 limit,
                 watermarkStrategy,
-                countPushed);
+                pushedAggregateResult);
         this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
@@ -106,13 +115,12 @@ public class DataTableSource extends BaseDataTableSource
                 table,
                 unbounded,
                 context,
-                logStoreTableFactory,
                 predicate,
                 projectFields,
                 limit,
                 watermarkStrategy,
                 dynamicPartitionFilteringFields,
-                countPushed);
+                pushedAggregateResult);
     }
 
     @Override

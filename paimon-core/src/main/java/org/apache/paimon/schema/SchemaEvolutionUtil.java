@@ -28,6 +28,7 @@ import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
@@ -153,17 +154,22 @@ public class SchemaEvolutionUtil {
 
         PredicateReplaceVisitor visitor =
                 predicate -> {
+                    Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+                    if (!fieldRefOptional.isPresent()) {
+                        return Optional.empty();
+                    }
+                    FieldRef fieldRef = fieldRefOptional.get();
                     DataField tableField =
                             checkNotNull(
-                                    nameToTableFields.get(predicate.fieldName()),
-                                    String.format("Find no field %s", predicate.fieldName()));
+                                    nameToTableFields.get(fieldRef.name()),
+                                    String.format("Find no field %s", fieldRef.name()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
                         return keepNewFieldFilter ? Optional.of(predicate) : Optional.empty();
                     }
 
                     return CastExecutors.castLiteralsWithEvolution(
-                                    predicate.literals(), predicate.type(), dataField.type())
+                                    predicate.literals(), fieldRef.type(), dataField.type())
                             .map(
                                     literals ->
                                             new LeafPredicate(
@@ -217,12 +223,15 @@ public class SchemaEvolutionUtil {
         boolean castExist = false;
 
         for (int i = 0; i < tableFields.size(); i++) {
+            DataField tableField = tableFields.get(i);
             int dataIndex = indexMapping == null ? i : indexMapping[i];
             if (dataIndex < 0) {
                 converterMapping[i] =
-                        new CastFieldGetter(row -> null, CastExecutors.identityCastExecutor());
+                        new CastFieldGetter(
+                                row -> null,
+                                CastExecutors.identityCastExecutor(),
+                                tableField.name());
             } else {
-                DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
                 if (!dataField.type().equalsIgnoreNullable(tableField.type())) {
                     castExist = true;
@@ -232,7 +241,8 @@ public class SchemaEvolutionUtil {
                 converterMapping[i] =
                         new CastFieldGetter(
                                 InternalRowUtils.createNullCheckingFieldGetter(dataField.type(), i),
-                                createCastExecutor(dataField.type(), tableField.type()));
+                                createCastExecutor(dataField.type(), tableField.type()),
+                                tableField.name());
             }
         }
 

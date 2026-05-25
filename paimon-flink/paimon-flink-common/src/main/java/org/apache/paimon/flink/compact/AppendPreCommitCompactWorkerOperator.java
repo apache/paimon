@@ -87,9 +87,7 @@ public class AppendPreCommitCompactWorkerOperator extends AbstractStreamOperator
         } else {
             long checkpointId = record.getValue().right().f0;
             CommitMessage message = doCompact(record.getValue().right().f1);
-            output.collect(
-                    new StreamRecord<>(
-                            new Committable(checkpointId, Committable.Kind.FILE, message)));
+            output.collect(new StreamRecord<>(new Committable(checkpointId, message)));
         }
     }
 

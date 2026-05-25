@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
@@ -155,11 +156,15 @@ public class LookupStreamingReader {
             return;
         }
 
-        DataSplit dataSplit = (DataSplit) splits.get(0);
+        Split split = splits.get(0);
+        long snapshotId =
+                split instanceof DataSplit
+                        ? ((DataSplit) split).snapshotId()
+                        : ((IncrementalSplit) split).snapshotId();
         LOG.info(
                 "LookupStreamingReader get splits from {} with snapshotId {}.",
                 table.name(),
-                dataSplit.snapshotId());
+                snapshotId);
     }
 
     @Nullable

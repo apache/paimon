@@ -80,7 +80,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             RowType keyType = new RowType(extractor.keyFields(tableSchema));
 
             MergeFunctionFactory<KeyValue> mfFactory =
-                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
+                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
             if (options.needLookup()) {
                 mfFactory = LookupMergeFunction.wrap(mfFactory, options, keyType, rowType);
             }
@@ -93,8 +93,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
-                            PrimaryKeyTableUtils.addKeyNamePrefix(
-                                    tableSchema.logicalBucketKeyType()),
                             keyType,
                             rowType,
                             extractor,

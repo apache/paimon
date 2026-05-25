@@ -61,6 +61,8 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -72,6 +74,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -94,7 +97,9 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(5, "created_at", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(6, "created_by", DataTypes.STRING()),
                             new DataField(7, "updated_by", DataTypes.STRING()),
-                            new DataField(8, "options", DataTypes.STRING())));
+                            new DataField(8, "options", DataTypes.STRING()),
+                            new DataField(9, "total_buckets", DataTypes.INT().notNull()),
+                            new DataField(10, "done", DataTypes.BOOLEAN().notNull())));
 
     private final FileStoreTable storeTable;
 
@@ -166,6 +171,11 @@ public class PartitionsTable implements ReadonlyTable {
         public int hashCode() {
             return 1;
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private static class PartitionsRead implements InnerTableRead {
@@ -174,13 +184,15 @@ public class PartitionsTable implements ReadonlyTable {
 
         private RowType readType;
 
+        @Nullable private Predicate predicate;
+
         public PartitionsRead(FileStoreTable table) {
             this.fileStoreTable = table;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.predicate = predicate;
             return this;
         }
 
@@ -227,6 +239,10 @@ public class PartitionsTable implements ReadonlyTable {
                                                             .partitionDefaultName()))
                             .sorted(Comparator.comparing(row -> row.getString(0)))
                             .iterator();
+
+            if (predicate != null) {
+                iterator = Iterators.filter(iterator, predicate::test);
+            }
 
             if (readType != null) {
                 iterator =
@@ -285,7 +301,9 @@ public class PartitionsTable implements ReadonlyTable {
                     createdAtTimestamp,
                     createdByString,
                     updatedByString,
-                    optionsString);
+                    optionsString,
+                    partition.totalBuckets(),
+                    partition.done());
         }
 
         private PartitionEntry toPartitionEntry(Partition partition) {
@@ -301,7 +319,8 @@ public class PartitionsTable implements ReadonlyTable {
                     partition.recordCount(),
                     partition.fileSizeInBytes(),
                     partition.fileCount(),
-                    partition.lastFileCreationTime());
+                    partition.lastFileCreationTime(),
+                    partition.totalBuckets());
         }
 
         private Timestamp toTimestamp(Long epochMillis) {

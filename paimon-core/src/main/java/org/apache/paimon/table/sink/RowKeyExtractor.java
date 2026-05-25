@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
@@ -28,19 +26,14 @@ import org.apache.paimon.schema.TableSchema;
 public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow> {
 
     private final RowPartitionKeyExtractor partitionKeyExtractor;
-    private final Projection logPrimaryKeyProjection;
 
     protected InternalRow record;
 
     private BinaryRow partition;
     private BinaryRow trimmedPrimaryKey;
-    private BinaryRow logPrimaryKey;
 
     public RowKeyExtractor(TableSchema schema) {
-        partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
-        logPrimaryKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.primaryKeys()));
+        this.partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
     }
 
     @Override
@@ -48,7 +41,6 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
         this.record = record;
         this.partition = null;
         this.trimmedPrimaryKey = null;
-        this.logPrimaryKey = null;
     }
 
     @Override
@@ -65,13 +57,5 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
             trimmedPrimaryKey = partitionKeyExtractor.trimmedPrimaryKey(record);
         }
         return trimmedPrimaryKey;
-    }
-
-    @Override
-    public BinaryRow logPrimaryKey() {
-        if (logPrimaryKey == null) {
-            logPrimaryKey = logPrimaryKeyProjection.apply(record);
-        }
-        return logPrimaryKey;
     }
 }

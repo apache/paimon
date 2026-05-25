@@ -21,17 +21,21 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link CompoundPredicate.Function} to eval or. */
-public class Or extends CompoundPredicate.Function {
+/** A {@link CompoundFunction} to eval or. */
+public class Or extends CompoundFunction {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "OR";
     public static final Or INSTANCE = new Or();
 
+    @JsonCreator
     private Or() {}
 
     @Override

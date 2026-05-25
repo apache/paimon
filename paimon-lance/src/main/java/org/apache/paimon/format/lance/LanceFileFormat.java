@@ -48,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import javax.annotation.Nullable;
 
@@ -189,6 +190,11 @@ public class LanceFileFormat extends FileFormat {
 
         @Override
         public Void visit(ArrayType arrayType) {
+            return null;
+        }
+
+        @Override
+        public Void visit(VectorType vectorType) {
             return null;
         }
 

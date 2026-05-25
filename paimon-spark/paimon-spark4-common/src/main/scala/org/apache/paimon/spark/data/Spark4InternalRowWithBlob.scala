@@ -25,11 +25,11 @@ import org.apache.paimon.utils.InternalRowUtils.copyInternalRow
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.unsafe.types.VariantVal
 
-class Spark4InternalRowWithBlob(rowType: RowType, blobFieldIndex: Int, blobAsDescriptor: Boolean)
+class Spark4InternalRowWithBlob(rowType: RowType, blobFields: Set[Int], blobAsDescriptor: Boolean)
   extends Spark4InternalRow(rowType) {
 
   override def getBinary(ordinal: Int): Array[Byte] = {
-    if (ordinal == blobFieldIndex) {
+    if (blobFields.contains(ordinal)) {
       if (blobAsDescriptor) {
         row.getBlob(ordinal).toDescriptor.serialize()
       } else {

@@ -102,11 +102,6 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
     }
 
     @Override
-    protected boolean containLogSystem() {
-        return false;
-    }
-
-    @Override
     public void processElement(StreamRecord<CdcRecord> element) throws Exception {
         CdcRecord record = element.getValue();
         Optional<GenericRow> optionalConverted =

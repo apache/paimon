@@ -280,7 +280,7 @@ public class ChangelogCompactTask implements Serializable {
                                     Collections.emptyList(),
                                     Collections.emptyList(),
                                     compactChangelog));
-            newCommittables.add(new Committable(checkpointId, Committable.Kind.FILE, newMessage));
+            newCommittables.add(new Committable(checkpointId, newMessage));
         }
         return newCommittables;
     }

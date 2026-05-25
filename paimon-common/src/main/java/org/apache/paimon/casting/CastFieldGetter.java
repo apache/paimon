@@ -27,16 +27,31 @@ public class CastFieldGetter {
 
     private final InternalRow.FieldGetter fieldGetter;
     private final CastExecutor<Object, Object> castExecutor;
+    private final String fieldName;
 
     @SuppressWarnings("unchecked")
-    public CastFieldGetter(InternalRow.FieldGetter fieldGetter, CastExecutor<?, ?> castExecutor) {
+    public CastFieldGetter(
+            InternalRow.FieldGetter fieldGetter,
+            CastExecutor<?, ?> castExecutor,
+            String fieldName) {
         this.fieldGetter = fieldGetter;
         this.castExecutor = (CastExecutor<Object, Object>) castExecutor;
+        this.fieldName = fieldName;
     }
 
     @SuppressWarnings("unchecked")
     public <V> V getFieldOrNull(InternalRow row) {
         Object value = fieldGetter.getFieldOrNull(row);
-        return value == null ? null : (V) castExecutor.cast(value);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return (V) castExecutor.cast(value);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to cast value for field '%s': %s", fieldName, e.getMessage()),
+                    e);
+        }
     }
 }

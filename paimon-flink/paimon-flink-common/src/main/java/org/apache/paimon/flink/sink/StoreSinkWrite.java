@@ -56,8 +56,6 @@ public interface StoreSinkWrite {
     @Nullable
     SinkRecord write(InternalRow rowData, int bucket) throws Exception;
 
-    SinkRecord toLogRecord(SinkRecord record);
-
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
     void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);

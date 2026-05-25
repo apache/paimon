@@ -44,12 +44,12 @@ import org.apache.flink.cdc.common.exceptions.UnsupportedSchemaChangeEventExcept
 import org.apache.flink.cdc.common.schema.Schema;
 import org.apache.flink.cdc.common.sink.MetadataApplier;
 import org.apache.flink.cdc.common.types.utils.DataTypeUtils;
-import org.apache.flink.shaded.guava31.com.google.common.collect.Sets;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,7 +106,7 @@ public class PaimonMetadataApplier implements MetadataApplier {
 
     @Override
     public Set<SchemaChangeEventType> getSupportedSchemaEvolutionTypes() {
-        return Sets.newHashSet(
+        return EnumSet.of(
                 SchemaChangeEventType.CREATE_TABLE,
                 SchemaChangeEventType.ADD_COLUMN,
                 SchemaChangeEventType.DROP_COLUMN,
@@ -189,15 +189,18 @@ public class PaimonMetadataApplier implements MetadataApplier {
                                                             .getLogicalType()),
                                             column.getComment()));
             List<String> partitionKeys = new ArrayList<>();
-            List<String> primaryKeys = schema.primaryKeys();
+            List<String> primaryKeys = new ArrayList<>(schema.primaryKeys());
             if (partitionMaps.containsKey(event.tableId())) {
                 partitionKeys.addAll(partitionMaps.get(event.tableId()));
             } else if (schema.partitionKeys() != null && !schema.partitionKeys().isEmpty()) {
                 partitionKeys.addAll(schema.partitionKeys());
             }
-            for (String partitionColumn : partitionKeys) {
-                if (!primaryKeys.contains(partitionColumn)) {
-                    primaryKeys.add(partitionColumn);
+            // Only add partition keys to primary keys if primary keys exist
+            if (!primaryKeys.isEmpty()) {
+                for (String partitionColumn : partitionKeys) {
+                    if (!primaryKeys.contains(partitionColumn)) {
+                        primaryKeys.add(partitionColumn);
+                    }
                 }
             }
             builder.primaryKey(primaryKeys)

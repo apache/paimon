@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -26,7 +26,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 TableNotExistException)
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.common.file_io import FileIO
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -147,10 +147,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 5, 8, 12],
-            'item_id': [1001, 1002, 1003, 1005, 1008, 1012],
-            'behavior': ['a', 'b', 'c', 'd', 'g', 'k'],
-            'dt': ['p1', 'p1', 'p2', 'p2', 'p1', 'p1'],
+            'user_id': [1, 2, 3, 4, 5, 13],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1013],
+            'behavior': ['a', 'b', 'c', None, 'd', 'l'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -404,19 +404,19 @@ class AOSimpleTest(RESTBaseTest):
 
         with patch("pypaimon.common.file_io.pyarrow.__version__", "6.0.0"), \
                 patch("pyarrow.fs.S3FileSystem") as mock_s3fs:
-            FileIO("oss://oss-bucket/paimon-database/paimon-table", Options(props))
+            PyArrowFileIO("oss://oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_once_with(access_key="AKID",
                                               secret_key="SECRET",
                                               session_token="TOKEN",
                                               region="cn-hangzhou",
                                               endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
-            FileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", Options(props))
+            PyArrowFileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
                                          endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
-            FileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", Options(props))
+            PyArrowFileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",

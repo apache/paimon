@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -44,6 +45,9 @@ public class StringUtils {
 
     /** The empty String {@code ""}. */
     public static final String EMPTY = "";
+
+    /** Default maximum number of fields for truncated string representation. */
+    public static final int DEFAULT_MAX_FIELDS = 25;
 
     /**
      * Checks if the string is null, empty, or contains only whitespace characters. A whitespace
@@ -303,6 +307,101 @@ public class StringUtils {
         return !isEmpty(cs);
     }
 
+    public static boolean isBlank(final CharSequence cs) {
+        final int strLen = cs == null ? 0 : cs.length();
+        for (int i = 0; i < strLen; i++) {
+            if (!Character.isWhitespace(cs.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean equals(final CharSequence cs1, final CharSequence cs2) {
+        if (cs1 == cs2) {
+            return true;
+        }
+        if (cs1 == null || cs2 == null || cs1.length() != cs2.length()) {
+            return false;
+        }
+
+        for (int i = 0; i < cs1.length(); i++) {
+            if (cs1.charAt(i) != cs2.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean startsWith(final CharSequence str, final CharSequence prefix) {
+        if (str == null || prefix == null) {
+            return str == null && prefix == null;
+        }
+        return str.toString().startsWith(prefix.toString());
+    }
+
+    public static boolean endsWith(final CharSequence str, final CharSequence suffix) {
+        if (str == null || suffix == null) {
+            return str == null && suffix == null;
+        }
+        return str.toString().endsWith(suffix.toString());
+    }
+
+    public static String substringBeforeLast(final String str, final String separator) {
+        if (isEmpty(str) || isEmpty(separator)) {
+            return str;
+        }
+
+        int pos = str.lastIndexOf(separator);
+        if (pos == INDEX_NOT_FOUND) {
+            return str;
+        }
+
+        return str.substring(0, pos);
+    }
+
+    public static String substringAfterLast(final String str, final String separator) {
+        if (isEmpty(str)) {
+            return str;
+        }
+        if (isEmpty(separator)) {
+            return EMPTY;
+        }
+
+        int pos = str.lastIndexOf(separator);
+        if (pos == INDEX_NOT_FOUND || pos == str.length() - separator.length()) {
+            return EMPTY;
+        }
+
+        return str.substring(pos + separator.length());
+    }
+
+    public static String stripEnd(final String str, final String stripChars) {
+        if (isEmpty(str)) {
+            return str;
+        }
+
+        int end = str.length();
+        if (stripChars == null) {
+            while (end != 0 && Character.isWhitespace(str.charAt(end - 1))) {
+                end--;
+            }
+        } else if (stripChars.isEmpty()) {
+            return str;
+        } else {
+            while (end != 0 && stripChars.indexOf(str.charAt(end - 1)) != INDEX_NOT_FOUND) {
+                end--;
+            }
+        }
+
+        return str.substring(0, end);
+    }
+
+    public static String trimToNull(final String str) {
+        String trimmed = trim(str);
+        return isEmpty(trimmed) ? null : trimmed;
+    }
+
     public static String randomNumericString(int len) {
         StringBuilder builder = new StringBuilder();
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
@@ -442,6 +541,68 @@ public class StringUtils {
     }
 
     /**
+     * Joins the elements of the provided array into a single String containing the provided list of
+     * elements.
+     *
+     * <p>No delimiter is added before or after the list. A {@code null} separator is the same as an
+     * empty String ("").
+     *
+     * @param array the array of values to join together, may be null
+     * @param delimiter the separator character to use, null treated as ""
+     * @return the joined String, {@code null} if null array input
+     */
+    public static String join(final Object[] array, final String delimiter) {
+        if (array == null) {
+            return null;
+        }
+        return join(array, delimiter, 0, array.length);
+    }
+
+    /**
+     * Joins the elements of the provided array into a single String containing the provided list of
+     * elements.
+     *
+     * <p>No delimiter is added before or after the list. A {@code null} separator is the same as an
+     * empty String ("").
+     *
+     * @param array the array of values to join together, may be null
+     * @param delimiter the separator character to use, null treated as ""
+     * @param startIndex the first index to start joining from
+     * @param endIndex the index to stop joining from (exclusive)
+     * @return the joined String, {@code null} if null array input
+     */
+    public static String join(
+            final Object[] array,
+            final String delimiter,
+            final int startIndex,
+            final int endIndex) {
+        if (array == null) {
+            return null;
+        }
+        if (startIndex < 0 || startIndex >= array.length) {
+            throw new ArrayIndexOutOfBoundsException(startIndex);
+        }
+        if (endIndex < 0 || endIndex > array.length) {
+            throw new ArrayIndexOutOfBoundsException(endIndex);
+        }
+        final int noOfItems = endIndex - startIndex;
+        if (noOfItems <= 0) {
+            return EMPTY;
+        }
+        Objects.requireNonNull(delimiter, "The delimiter must not be null");
+        final StringBuilder buf = new StringBuilder(noOfItems * 16);
+        for (int i = startIndex; i < endIndex; i++) {
+            if (i > startIndex) {
+                buf.append(delimiter);
+            }
+            if (array[i] != null) {
+                buf.append(array[i]);
+            }
+        }
+        return buf.toString();
+    }
+
+    /**
      * Joins the elements of the provided {@code Iterable} into a single String containing the
      * provided elements.
      *
@@ -541,6 +702,33 @@ public class StringUtils {
         return value.trim();
     }
 
+    public static String trim(String value, String charsToTrim) {
+        return rtrim(ltrim(value, charsToTrim), charsToTrim);
+    }
+
+    public static String ltrim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value);
+        while (sb.length() > 0 && charsToTrim.contains(sb.substring(0, 1))) {
+            sb.deleteCharAt(0);
+        }
+        return sb.toString();
+    }
+
+    public static String rtrim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value);
+        while (sb.length() > 0
+                && charsToTrim.contains(sb.substring(sb.length() - 1, sb.length()))) {
+            sb.deleteCharAt(sb.length() - 1);
+        }
+        return sb.toString();
+    }
+
     public static String toUpperCase(String value) {
         if (value == null) {
             return null;
@@ -561,5 +749,47 @@ public class StringUtils {
 
     public static boolean isCloseBracket(char c) {
         return c == ']' || c == '}' || c == ')';
+    }
+
+    /**
+     * Converts a sequence to a string with truncation if it exceeds the maximum number of fields.
+     * This is useful for limiting the size of string representations of large collections.
+     *
+     * @param lst the collection to convert to string
+     * @param start the prefix string
+     * @param sep the separator between elements
+     * @param end the suffix string
+     * @param maxFields the maximum number of fields to include before truncation
+     * @return the truncated string representation
+     */
+    public static String truncatedString(
+            Collection<?> lst, String start, String sep, String end, int maxFields) {
+        boolean truncated = lst.size() > maxFields;
+        int numFields = truncated ? Math.max(0, maxFields - 1) : lst.size();
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(start);
+
+        Iterator<?> iterator = lst.iterator();
+        for (int i = 0; i < numFields; i++) {
+            if (i > 0) {
+                builder.append(sep);
+            }
+            builder.append(iterator.next());
+        }
+
+        if (truncated) {
+            builder.append(sep)
+                    .append("... ")
+                    .append(lst.size() - numFields)
+                    .append(" more fields");
+        }
+
+        builder.append(end);
+        return builder.toString();
+    }
+
+    public static String truncatedString(Collection<?> lst, String start, String sep, String end) {
+        return truncatedString(lst, start, sep, end, DEFAULT_MAX_FIELDS);
     }
 }

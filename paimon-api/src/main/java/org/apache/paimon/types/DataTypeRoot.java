@@ -106,6 +106,8 @@ public enum DataTypeRoot {
 
     ARRAY(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 
+    VECTOR(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
+
     MULTISET(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 
     MAP(DataTypeFamily.CONSTRUCTED, DataTypeFamily.EXTENSION),

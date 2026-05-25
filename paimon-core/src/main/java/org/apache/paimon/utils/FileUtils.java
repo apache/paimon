@@ -109,15 +109,19 @@ public class FileUtils {
 
     public static void checkExists(FileIO fileIO, Path file) throws IOException {
         if (!fileIO.exists(file)) {
-            throw new FileNotFoundException(
-                    String.format(
-                            "File '%s' not found, Possible causes: "
-                                    + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
-                                    + " option with a larger value. "
-                                    + "2.consumption is too slow, you can improve the performance of consumption"
-                                    + " (For example, increasing parallelism).",
-                            file));
+            throw newFileNotFoundException(file);
         }
+    }
+
+    public static FileNotFoundException newFileNotFoundException(Path file) {
+        return new FileNotFoundException(
+                String.format(
+                        "File '%s' not found, Possible causes: "
+                                + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
+                                + " option with a larger value. "
+                                + "2.consumption is too slow, you can improve the performance of consumption"
+                                + " (For example, increasing parallelism).",
+                        file));
     }
 
     public static RecordReader<InternalRow> createFormatReader(

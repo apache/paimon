@@ -18,6 +18,8 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.types.RowType;
+
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
@@ -30,23 +32,10 @@ public interface MergeFunctionFactory<T> extends Serializable {
         return create(null);
     }
 
-    MergeFunction<T> create(@Nullable int[][] projection);
+    MergeFunction<T> create(@Nullable RowType readType);
 
-    // todo: replace projection with rowType
-    default AdjustedProjection adjustProjection(@Nullable int[][] projection) {
-        return new AdjustedProjection(projection, null);
-    }
-
-    /** Result of adjusted projection. */
-    class AdjustedProjection {
-
-        @Nullable public final int[][] pushdownProjection;
-
-        @Nullable public final int[][] outerProjection;
-
-        public AdjustedProjection(int[][] pushdownProjection, int[][] outerProjection) {
-            this.pushdownProjection = pushdownProjection;
-            this.outerProjection = outerProjection;
-        }
+    /** Adjust read type, if no need to adjust, return the original read type. */
+    default RowType adjustReadType(RowType readType) {
+        return readType;
     }
 }

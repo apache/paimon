@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -499,14 +500,18 @@ public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
 
     @Test
     public void testExpireTags() throws Exception {
+        boolean tagTimeExpireEnabled = ThreadLocalRandom.current().nextBoolean();
         sql(
                 "CREATE TABLE T ("
                         + " k STRING,"
                         + " dt STRING,"
                         + " PRIMARY KEY (k, dt) NOT ENFORCED"
                         + ") PARTITIONED BY (dt) WITH ("
-                        + " 'bucket' = '1'"
-                        + ")");
+                        + " 'bucket' = '1',"
+                        + " 'tag.time-expire-enabled' = '%s'"
+                        + ")",
+                tagTimeExpireEnabled);
+
         FileStoreTable table = paimonTable("T");
         for (int i = 1; i <= 3; i++) {
             sql("INSERT INTO T VALUES ('" + i + "', '" + i + "')");

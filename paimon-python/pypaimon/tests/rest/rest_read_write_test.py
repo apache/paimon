@@ -1,30 +1,29 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 
 import pandas as pd
 import pyarrow as pa
-import unittest
 
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon import CatalogFactory
+from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon import Schema
@@ -115,6 +114,71 @@ class RESTTableReadWriteTest(RESTBaseTest):
         df2['f0'] = df2['f0'].astype('int32')
         pd.testing.assert_frame_equal(
             actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
+
+    def test_dynamic_partition_overwrite(self):
+        pa_schema = pa.schema([
+            ('f0', pa.string()),
+            ('f1', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['f0'])
+        self.rest_catalog.create_table('default.test_dynamic_overwrite', schema, False)
+        table = self.rest_catalog.get_table('default.test_dynamic_overwrite')
+        read_builder = table.new_read_builder()
+
+        # Write initial non-null and null partitions
+        self._batch_write(table, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['apple', 'banana', 'cherry'],
+        }))
+
+        # Dynamic overwrite partition f0='a' only; 'b' and null untouched
+        self._batch_overwrite(table, pd.DataFrame({
+            'f0': ['a'],
+            'f1': ['watermelon'],
+        }))
+
+        self._assert_table_equals(read_builder, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['watermelon', 'banana', 'cherry'],
+        }), sort_by='f0')
+
+        # Dynamic overwrite partitions f0='a' and f0=None; 'b' untouched
+        self._batch_overwrite(table, pd.DataFrame({
+            'f0': ['a', None],
+            'f1': ['mango', 'grape'],
+        }))
+
+        self._assert_table_equals(read_builder, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['mango', 'banana', 'grape'],
+        }), sort_by='f0')
+
+    def _batch_write(self, table, df):
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _batch_overwrite(self, table, df, partition=None):
+        write_builder = table.new_batch_write_builder().overwrite(partition)
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _assert_table_equals(self, read_builder, expected_df, sort_by=None):
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df = table_read.to_pandas(table_scan.plan().splits())
+        if sort_by:
+            actual_df = actual_df.sort_values(by=sort_by)
+        pd.testing.assert_frame_equal(
+            actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
     def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -238,11 +302,12 @@ class RESTTableReadWriteTest(RESTBaseTest):
         table = self.rest_catalog.get_table('default.test_append_only_limit')
         self._write_test_table(table)
 
+        # Row-level limit: the reader stops at exactly N rows (not "first
+        # split's full row count"). Scan still keeps the first split that
+        # covers the limit; the reader short-circuits inside it.
         read_builder = table.new_read_builder().with_limit(1)
         actual = self._read_test_table(read_builder)
-        # only records from 1st commit (1st split) will be read
-        # might be split of "dt=1" or split of "dt=2"
-        self.assertEqual(actual.num_rows, 4)
+        self.assertEqual(actual.num_rows, 1)
 
     def test_pk_parquet_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -255,7 +320,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -292,7 +357,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_pk_lance_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -312,7 +377,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
@@ -357,12 +422,11 @@ class RESTTableReadWriteTest(RESTBaseTest):
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = pa.concat_tables([
-            self.expected.slice(1, 1),  # 2/b
-            self.expected.slice(5, 1)  # 7/g
+            self.pk_expected.slice(1, 1),  # 2/b
+            self.pk_expected.slice(5, 1)  # 7/g
         ])
         self.assertEqual(actual, expected)
 
-    @unittest.skip("does not support dynamic bucket in dummy rest server")
     def test_pk_lance_reader_no_bucket(self):
         """Test Lance format with PrimaryKey table without specifying bucket."""
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -378,7 +442,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -397,8 +461,8 @@ class RESTTableReadWriteTest(RESTBaseTest):
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = pa.concat_tables([
-            self.expected.slice(1, 1),  # 2/b
-            self.expected.slice(5, 1)  # 7/g
+            self.pk_expected.slice(1, 1),  # 2/b
+            self.pk_expected.slice(5, 1)  # 7/g
         ])
         self.assertEqual(actual, expected)
 
@@ -413,7 +477,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id', 'behavior'])
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        expected = self.expected.select(['dt', 'user_id', 'behavior'])
+        expected = self.pk_expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
     def test_write_wrong_schema(self):
@@ -639,3 +703,52 @@ class RESTTableReadWriteTest(RESTBaseTest):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         self.assertEqual(table_read.to_arrow(splits).num_rows, total_rows)
+
+    def test_drop_partitions(self):
+        pa_schema = pa.schema([
+            ('col', pa.int32()),
+            ('dt', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_drop_partitions_table', schema, False)
+        table = self.rest_catalog.get_table('default.test_drop_partitions_table')
+
+        partition_specs = [{'dt': '20250101'}, {'dt': '20250102'}]
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        for spec in partition_specs:
+            batch = pa.RecordBatch.from_pydict(
+                {'col': [0], 'dt': [spec['dt']]},
+                schema=pa_schema,
+            )
+            table_write.write_arrow(pa.Table.from_batches([batch]))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        before = table_read.to_arrow(splits)
+        self.assertEqual(before.num_rows, 2, "Should have 2 rows before drop_partitions")
+
+        self.rest_catalog.drop_partitions(
+            'default.test_drop_partitions_table',
+            partition_specs,
+        )
+
+        splits_after = read_builder.new_scan().plan().splits()
+        after = table_read.to_arrow(splits_after)
+        self.assertEqual(after.num_rows, 0, "Table should be empty after drop_partitions")
+
+    def test_drop_partitions_table_not_exist(self):
+        with self.assertRaises(TableNotExistException):
+            self.rest_catalog.drop_partitions(
+                'default.non_existing_table',
+                [{'dt': '20250101'}],
+            )
+
+    def test_drop_partitions_empty_list(self):
+        with self.assertRaises(ValueError):
+            self.rest_catalog.drop_partitions('default.test_reader_iterator', [])

@@ -18,13 +18,15 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.table.Table
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFromPaimonTable
+import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
-import org.apache.spark.sql.catalyst.plans.logical.Assignment
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeIntoTable, UpdateTable}
 
-trait RowLevelHelper extends SQLConfHelper {
+trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
 
   val operation: RowLevelOp
 
@@ -72,5 +74,47 @@ trait RowLevelHelper extends SQLConfHelper {
           isTargetPrimaryKey(key)
         case _ => false
       }
+  }
+
+  /**
+   * Determines if DataSourceV2 is not supported for the given table. This is the logical complement
+   * of [[SparkTable.supportsV2RowLevelOps]]; the two predicates must stay in sync so that Spark
+   * 4.1's row-level rewrite rules (which key on `SupportsRowLevelOperations`) and Paimon's V1
+   * postHoc fallback rules (which gate on this predicate) agree about which tables go down which
+   * path.
+   */
+  protected def shouldFallbackToV1(table: SparkTable): Boolean = {
+    !SparkTable.supportsV2RowLevelOps(table)
+  }
+
+  /** Determines if DataSourceV2 delete is not supported for the given table. */
+  protected def shouldFallbackToV1Delete(table: SparkTable, condition: Expression): Boolean = {
+    shouldFallbackToV1(table) ||
+    OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
+      table.getTable.asInstanceOf[FileStoreTable],
+      condition)
+  }
+
+  /** Determines if DataSourceV2 update is not supported for the given table. */
+  protected def shouldFallbackToV1Update(table: SparkTable, updateTable: UpdateTable): Boolean = {
+    shouldFallbackToV1(table) ||
+    !updateTable.rewritable ||
+    !updateTable.aligned
+  }
+
+  /** Determines if DataSourceV2 merge into is not supported for the given table. */
+  protected def shouldFallbackToV1MergeInto(m: MergeIntoTable): Boolean = {
+    val relation = PaimonRelation.getPaimonRelation(m.targetTable)
+    val table = relation.table.asInstanceOf[SparkTable]
+    // Note for Spark 4.1+: `shouldFallbackToV1(table)` returns `false` for pure append-only
+    // tables (no PK / RT / DE / DV), so this predicate lets the aligned `MergeIntoTable` node
+    // return untouched. Spark's own `RewriteMergeIntoTable` in the Resolution batch can't fire
+    // (`resolveOperators` short-circuits on `analyzed=true`), so the rewrite is performed by
+    // `Spark41MergeIntoRewrite` (paimon-spark4-common) which aligns + transcribes Spark's
+    // `ReplaceData` / `AppendData` branches for non-`SupportsDelta` sources. Non-append-only
+    // tables still fall back to V1 (`MergeIntoPaimonTable` / `MergeIntoPaimonDataEvolutionTable`).
+    shouldFallbackToV1(table) ||
+    !m.rewritable ||
+    !m.aligned
   }
 }

@@ -26,7 +26,8 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.util.Collector;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import java.io.IOException;
@@ -36,18 +37,16 @@ import static org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils.SCHEMA_
 
 /** A simple deserialization schema for {@link CdcSourceRecord}. */
 public class KafkaDebeziumAvroDeserializationSchema
-        implements KafkaDeserializationSchema<CdcSourceRecord> {
+        implements KafkaRecordDeserializationSchema<CdcSourceRecord> {
 
     private static final long serialVersionUID = 1L;
 
-    private final String topic;
     private final String schemaRegistryUrl;
 
     /** The deserializer to deserialize Debezium Avro data. */
     private ConfluentAvroDeserializationSchema avroDeserializer;
 
     public KafkaDebeziumAvroDeserializationSchema(Configuration cdcSourceConfig) {
-        this.topic = KafkaActionUtils.findOneTopic(cdcSourceConfig);
         this.schemaRegistryUrl = cdcSourceConfig.get(SCHEMA_REGISTRY_URL);
     }
 
@@ -57,16 +56,18 @@ public class KafkaDebeziumAvroDeserializationSchema
     }
 
     @Override
-    public CdcSourceRecord deserialize(ConsumerRecord<byte[], byte[]> message) throws IOException {
+    public void deserialize(ConsumerRecord<byte[], byte[]> message, Collector<CdcSourceRecord> out)
+            throws IOException {
         if (message.value() == null) {
             // skip tombstone messages
-            return null;
+            return;
         }
 
         if (this.avroDeserializer == null) {
             initAvroDeserializer();
         }
 
+        String topic = message.topic();
         GenericContainerWithVersion keyContainerWithVersion =
                 this.avroDeserializer.deserialize(topic, true, message.key());
         GenericContainerWithVersion valueContainerWithVersion =
@@ -76,12 +77,10 @@ public class KafkaDebeziumAvroDeserializationSchema
             key = (GenericRecord) keyContainerWithVersion.container();
         }
         GenericRecord value = (GenericRecord) valueContainerWithVersion.container();
-        return new CdcSourceRecord(topic, key, value);
-    }
 
-    @Override
-    public boolean isEndOfStream(CdcSourceRecord nextElement) {
-        return false;
+        out.collect(
+                new CdcSourceRecord(
+                        topic, key, value, KafkaActionUtils.extractKafkaMetadata(message)));
     }
 
     @Override

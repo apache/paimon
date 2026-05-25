@@ -51,9 +51,7 @@ public class RemovePostponeBucketFilesOperator extends BoundedOneInputOperator<S
                                 dataSplit.dataFiles(),
                                 Collections.emptyList(),
                                 Collections.emptyList()));
-        output.collect(
-                new StreamRecord<>(
-                        new Committable(Long.MAX_VALUE, Committable.Kind.FILE, message)));
+        output.collect(new StreamRecord<>(new Committable(Long.MAX_VALUE, message)));
     }
 
     @Override

@@ -70,7 +70,12 @@ case class PaimonSparkWriter(
 
   private val writeType = {
     if (writeRowTracking) {
-      SpecialFields.rowTypeWithRowTracking(table.rowType(), true)
+      // The historical data and new data are processed separately.
+      // 1. The historical data contains the non-null RowId, but its sequenceNumber may not have been generated yet,
+      //    will be generated according to the Snapshot id when committing. (But the previously updated data included
+      //    the sequenceNumber value).
+      // 2. The new data will be written to the branch without writeRowTracking.
+      SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true)
     } else {
       table.rowType()
     }
@@ -118,7 +123,9 @@ case class PaimonSparkWriter(
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
       if (postponeBatchWriteFixedBucket) {
         val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-        val defaultPostponeNumBuckets = withInitBucketCol.rdd.getNumPartitions
+        val defaultPostponeNumBuckets = Math.min(
+          withInitBucketCol.rdd.getNumPartitions,
+          table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
         Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
       } else {
         None
@@ -131,8 +138,7 @@ case class PaimonSparkWriter(
       writeRowTracking,
       fullCompactionDeltaCommits,
       batchId,
-      coreOptions.blobAsDescriptor(),
-      table.catalogEnvironment().catalogContext(),
+      catalogContextForBlobDescriptor,
       postponePartitionBucketComputer
     )
 
@@ -257,7 +263,8 @@ case class PaimonSparkWriter(
                   coreOptions.dynamicBucketMaxBuckets
                 )
               row => {
-                val sparkRow = new SparkRow(writeType, row)
+                val sparkRow =
+                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
                 assigner.assign(
                   extractor.partition(sparkRow),
                   extractor.trimmedPrimaryKey(sparkRow).hashCode)
@@ -297,15 +304,19 @@ case class PaimonSparkWriter(
           }
         }
         val clusteringColumns = coreOptions.clusteringColumns()
-        if ((!coreOptions.clusteringIncrementalEnabled()) && (!clusteringColumns.isEmpty)) {
-          val strategy = coreOptions.clusteringStrategy(tableSchema.fields().size())
+        if (
+          table.bucketMode() != POSTPONE_MODE &&
+          (!coreOptions.clusteringIncrementalEnabled() || coreOptions
+            .clusteringIncrementalOptimizeWrite()) && (!clusteringColumns.isEmpty)
+        ) {
+          val strategy = coreOptions.clusteringStrategy(clusteringColumns.size())
           val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
           input = sorter.sort(data)
         }
         writeWithoutBucket(input)
 
       case HASH_FIXED =>
-        if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
+        if (paimonExtensionEnabled(sparkSession) && BucketFunction.supportsTable(table)) {
           // Topology: input -> shuffle by partition & bucket
           val bucketNumber = coreOptions.bucket()
           val bucketKeyCol = tableSchema
@@ -398,6 +409,10 @@ case class PaimonSparkWriter(
       .map(deserializeCommitMessage(serializer, _))
   }
 
+  def rowIdCheckConflict(rowIdCheckFromSnapshot: Long): Unit = {
+    writeBuilder.asInstanceOf[BatchWriteBuilderImpl].rowIdCheckConflict(rowIdCheckFromSnapshot)
+  }
+
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
     val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
       writeBuilder
@@ -441,11 +456,8 @@ case class PaimonSparkWriter(
               .bootstrap(numSparkPartitions, sparkPartitionId)
               .toCloseableIterator
             TaskContext.get().addTaskCompletionListener[Unit](_ => bootstrapIterator.close())
-            val toPaimonRow = SparkRowUtils.toPaimonRow(
-              rowType,
-              rowKindColIdx,
-              table.coreOptions().blobAsDescriptor(),
-              table.catalogEnvironment().catalogContext())
+            val toPaimonRow =
+              SparkRowUtils.toPaimonRow(rowType, rowKindColIdx, catalogContextForBlobDescriptor)
 
             bootstrapIterator.asScala
               .map(
@@ -479,7 +491,8 @@ case class PaimonSparkWriter(
             val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(tableSchema)
             iterator.map(
               row => {
-                val sparkRow = new SparkRow(writeType, row)
+                val sparkRow =
+                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
                 val partitionHash = rowPartitionKeyExtractor.partition(sparkRow).hashCode
                 val keyHash = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow).hashCode
                 (

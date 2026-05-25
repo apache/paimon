@@ -19,10 +19,14 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.EntropyInjectExternalPathProvider;
 import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -90,5 +94,69 @@ public class DataFilePathFactoryTest {
                 .startsWith(
                         new Path(tempDir.toString() + "/dt=20211224/bucket-123/my-data-file-name")
                                 .toString());
+    }
+
+    @Test
+    public void testEntropyInjectWithNoPartition() {
+        EntropyInjectExternalPathProvider externalPathProvider =
+                createExternalPathProvider(new Path(tempDir.toString()), "bucket-123");
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-123"),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        externalPathProvider);
+        String uuid = pathFactory.uuid();
+
+        for (int i = 0; i < 20; i++) {
+            String filename =
+                    "data-" + uuid + "-" + i + "." + CoreOptions.FILE_FORMAT.defaultValue();
+            assertThat(pathFactory.newPath())
+                    .isEqualTo(
+                            new Path(
+                                    tempDir.toString()
+                                            + "/bucket-123/"
+                                            + externalPathProvider.computeHash(filename)
+                                            + "/"
+                                            + filename));
+        }
+    }
+
+    @Test
+    public void testEntropyInjectWithPartition() {
+        EntropyInjectExternalPathProvider externalPathProvider =
+                createExternalPathProvider(new Path(tempDir.toString()), "dt=20211224/bucket-123");
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/dt=20211224/bucket-123"),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        externalPathProvider);
+        String uuid = pathFactory.uuid();
+
+        for (int i = 0; i < 20; i++) {
+            String filename =
+                    "data-" + uuid + "-" + i + "." + CoreOptions.FILE_FORMAT.defaultValue();
+            assertThat(pathFactory.newPath())
+                    .isEqualTo(
+                            new Path(
+                                    tempDir.toString()
+                                            + "/dt=20211224/bucket-123/"
+                                            + externalPathProvider.computeHash(filename)
+                                            + "/"
+                                            + filename));
+        }
+    }
+
+    public EntropyInjectExternalPathProvider createExternalPathProvider(
+            Path path, String relativeBucketPath) {
+        List<Path> externalPaths = Collections.singletonList(path);
+        return new EntropyInjectExternalPathProvider(externalPaths, new Path(relativeBucketPath));
     }
 }

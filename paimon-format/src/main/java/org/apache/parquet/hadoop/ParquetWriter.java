@@ -19,8 +19,11 @@
 package org.apache.parquet.hadoop;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.compression.CompressionCodecFactory;
 import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -56,21 +59,33 @@ public class ParquetWriter<T> implements Closeable {
     public static final int MAX_PADDING_SIZE_DEFAULT = 8 * 1024 * 1024; // 8MB
 
     private final InternalParquetRecordWriter<T> writer;
-    private final CodecFactory codecFactory;
+    private final CompressionCodecFactory codecFactory;
 
     ParquetWriter(
             OutputFile file,
             ParquetFileWriter.Mode mode,
             WriteSupport<T> writeSupport,
             CompressionCodecName compressionCodecName,
+            CompressionCodecFactory codecFactory,
             long rowGroupSize,
             boolean validating,
             Configuration conf,
             int maxPaddingSize,
-            ParquetProperties encodingProps)
+            ParquetProperties encodingProps,
+            FileEncryptionProperties encryptionProperties)
             throws IOException {
         WriteSupport.WriteContext writeContext = writeSupport.init(conf);
         MessageType schema = writeContext.getSchema();
+
+        // encryptionProperties could be built from the implementation of
+        // EncryptionPropertiesFactory when it is attached.
+        if (encryptionProperties == null) {
+            Path tempFilePath =
+                    file != null && file.getPath() != null ? new Path(file.getPath()) : null;
+            encryptionProperties =
+                    EncryptionPropertiesHelper.createEncryptionProperties(
+                            conf, tempFilePath, writeContext);
+        }
 
         ParquetFileWriter fileWriter =
                 new ParquetFileWriter(
@@ -79,14 +94,13 @@ public class ParquetWriter<T> implements Closeable {
                         mode,
                         rowGroupSize,
                         maxPaddingSize,
-                        encodingProps.getColumnIndexTruncateLength(),
-                        encodingProps.getStatisticsTruncateLength(),
-                        encodingProps.getPageWriteChecksumEnabled(),
-                        (FileEncryptionProperties) null);
+                        encryptionProperties,
+                        encodingProps);
         fileWriter.start();
 
-        this.codecFactory = new CodecFactory(conf, encodingProps.getPageSizeThreshold());
-        CodecFactory.BytesCompressor compressor = codecFactory.getCompressor(compressionCodecName);
+        this.codecFactory = codecFactory;
+        CompressionCodecFactory.BytesInputCompressor compressor =
+                codecFactory.getCompressor(compressionCodecName);
 
         final Map<String, String> extraMetadata;
         if (encodingProps.getExtraMetaData() == null
@@ -169,8 +183,10 @@ public class ParquetWriter<T> implements Closeable {
 
         private final OutputFile file;
 
+        private FileEncryptionProperties encryptionProperties = null;
         private Configuration conf = new Configuration(false);
         private ParquetFileWriter.Mode mode;
+        private CompressionCodecFactory codecFactory = null;
         private CompressionCodecName codecName = DEFAULT_COMPRESSION_CODEC_NAME;
         private long rowGroupSize = DEFAULT_BLOCK_SIZE;
         private int maxPaddingSize = MAX_PADDING_SIZE_DEFAULT;
@@ -225,6 +241,29 @@ public class ParquetWriter<T> implements Closeable {
         }
 
         /**
+         * Set the {@link CompressionCodecFactory codec factory} used by the constructed writer.
+         *
+         * @param codecFactory a {@link CompressionCodecFactory}
+         * @return this builder for method chaining.
+         */
+        public SELF withCodecFactory(CompressionCodecFactory codecFactory) {
+            this.codecFactory = codecFactory;
+            return self();
+        }
+
+        /**
+         * Set the {@link FileEncryptionProperties file encryption properties} used by the
+         * constructed writer.
+         *
+         * @param encryptionProperties a {@code FileEncryptionProperties}
+         * @return this builder for method chaining.
+         */
+        public SELF withEncryption(FileEncryptionProperties encryptionProperties) {
+            this.encryptionProperties = encryptionProperties;
+            return self();
+        }
+
+        /**
          * Set the Parquet format row group size used by the constructed writer.
          *
          * @param rowGroupSize an integer size in bytes
@@ -255,6 +294,17 @@ public class ParquetWriter<T> implements Closeable {
          */
         public SELF withPageSize(int pageSize) {
             encodingPropsBuilder.withPageSize(pageSize);
+            return self();
+        }
+
+        /**
+         * Sets the Parquet format row group row count limit used by the constructed writer.
+         *
+         * @param rowCount limit for the number of rows stored in a row group
+         * @return this builder for method chaining
+         */
+        public SELF withRowGroupRowCountLimit(int rowCount) {
+            encodingPropsBuilder.withRowGroupRowCountLimit(rowCount);
             return self();
         }
 
@@ -385,6 +435,17 @@ public class ParquetWriter<T> implements Closeable {
         }
 
         /**
+         * Set max Bloom filter bytes for related columns.
+         *
+         * @param maxBloomFilterBytes the max bytes of a Bloom filter bitset for a column.
+         * @return this builder for method chaining
+         */
+        public SELF withMaxBloomFilterBytes(int maxBloomFilterBytes) {
+            encodingPropsBuilder.withMaxBloomFilterBytes(maxBloomFilterBytes);
+            return self();
+        }
+
+        /**
          * Sets the NDV (number of distinct values) for the specified column.
          *
          * @param columnPath the path of the column (dot-string)
@@ -399,6 +460,29 @@ public class ParquetWriter<T> implements Closeable {
 
         public SELF withBloomFilterFPP(String columnPath, double fpp) {
             encodingPropsBuilder.withBloomFilterFPP(columnPath, fpp);
+            return self();
+        }
+
+        /**
+         * When NDV (number of distinct values) for a specified column is not set, whether to use
+         * `AdaptiveBloomFilter` to automatically adjust the BloomFilter size according to
+         * `parquet.bloom.filter.max.bytes`.
+         *
+         * @param enabled whether to write bloom filter for the column
+         */
+        public SELF withAdaptiveBloomFilterEnabled(boolean enabled) {
+            encodingPropsBuilder.withAdaptiveBloomFilterEnabled(enabled);
+            return self();
+        }
+
+        /**
+         * When `AdaptiveBloomFilter` is enabled, set how many bloom filter candidates to use.
+         *
+         * @param columnPath the path of the column (dot-string)
+         * @param number the number of candidate
+         */
+        public SELF withBloomFilterCandidateNumber(String columnPath, int number) {
+            encodingPropsBuilder.withBloomFilterCandidatesNumber(columnPath, number);
             return self();
         }
 
@@ -472,6 +556,28 @@ public class ParquetWriter<T> implements Closeable {
         }
 
         /**
+         * Sets additional metadata entries to be included in the file footer.
+         *
+         * @param extraMetaData a Map of additional stringly-typed metadata entries
+         * @return this builder for method chaining
+         */
+        public SELF withExtraMetaData(Map<String, String> extraMetaData) {
+            encodingPropsBuilder.withExtraMetaData(extraMetaData);
+            return self();
+        }
+
+        /**
+         * Sets the ByteBuffer allocator instance to be used for allocating memory for writing.
+         *
+         * @param allocator the allocator instance
+         * @return this builder for method chaining
+         */
+        public SELF withAllocator(ByteBufferAllocator allocator) {
+            encodingPropsBuilder.withAllocator(allocator);
+            return self();
+        }
+
+        /**
          * Set a property that will be available to the read path. For writers that use a Hadoop
          * configuration, this is the recommended way to add configuration values.
          *
@@ -485,22 +591,79 @@ public class ParquetWriter<T> implements Closeable {
         }
 
         /**
+         * Sets the statistics enabled/disabled for the specified column. All column statistics are
+         * enabled by default.
+         *
+         * @param columnPath the path of the column (dot-string)
+         * @param enabled whether to write calculate statistics for the column
+         * @return this builder for method chaining
+         */
+        public SELF withStatisticsEnabled(String columnPath, boolean enabled) {
+            encodingPropsBuilder.withStatisticsEnabled(columnPath, enabled);
+            return self();
+        }
+
+        /**
+         * Sets whether statistics are enabled globally. When disabled, statistics will not be
+         * collected for any column unless explicitly enabled for specific columns.
+         *
+         * @param enabled whether to collect statistics globally
+         * @return this builder for method chaining
+         */
+        public SELF withStatisticsEnabled(boolean enabled) {
+            encodingPropsBuilder.withStatisticsEnabled(enabled);
+            return self();
+        }
+
+        /**
+         * Sets the size statistics enabled/disabled for the specified column. All column size
+         * statistics are enabled by default.
+         *
+         * @param columnPath the path of the column (dot-string)
+         * @param enabled whether to collect size statistics for the column
+         * @return this builder for method chaining
+         */
+        public SELF withSizeStatisticsEnabled(String columnPath, boolean enabled) {
+            encodingPropsBuilder.withSizeStatisticsEnabled(columnPath, enabled);
+            return self();
+        }
+
+        /**
+         * Sets whether size statistics are enabled globally. When disabled, size statistics will
+         * not be collected for any column unless explicitly enabled for specific columns.
+         *
+         * @param enabled whether to collect size statistics globally
+         * @return this builder for method chaining
+         */
+        public SELF withSizeStatisticsEnabled(boolean enabled) {
+            encodingPropsBuilder.withSizeStatisticsEnabled(enabled);
+            return self();
+        }
+
+        /**
          * Build a {@link ParquetWriter} with the accumulated configuration.
          *
          * @return a configured {@code ParquetWriter} instance.
          * @throws IOException if there is an error while creating the writer
          */
         public ParquetWriter<T> build() throws IOException {
+            ParquetProperties encodingProps = encodingPropsBuilder.build();
+            if (codecFactory == null) {
+                codecFactory = new CodecFactory(conf, encodingProps.getPageSizeThreshold());
+            }
+
             return new ParquetWriter<>(
                     file,
                     mode,
                     getWriteSupport(conf),
                     codecName,
+                    codecFactory,
                     rowGroupSize,
                     enableValidation,
                     conf,
                     maxPaddingSize,
-                    encodingPropsBuilder.build());
+                    encodingProps,
+                    encryptionProperties);
         }
     }
 }

@@ -24,6 +24,7 @@ import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
@@ -36,12 +37,14 @@ object OptionUtils extends SQLConfHelper with Logging {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
   private val SPARK_CATALOG_PREFIX = "spark.sql.catalog."
+  private val PAIMON_SPARK_SESSION_EXTENSIONS =
+    "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions"
 
-  def paimonExtensionEnabled: Boolean = {
-    conf
+  def paimonExtensionEnabled(sparkSession: SparkSession): Boolean = {
+    sparkSession.sessionState.conf
       .getConf(StaticSQLConf.SPARK_SESSION_EXTENSIONS)
       .getOrElse(Seq.empty)
-      .contains("org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+      .contains(PAIMON_SPARK_SESSION_EXTENSIONS)
   }
 
   def getOptionString(option: ConfigOption[_]): String = {
@@ -63,15 +66,22 @@ object OptionUtils extends SQLConfHelper with Logging {
     }
   }
 
-  def checkRequiredConfigurations(): Unit = {
-    if (getOptionString(SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED).toBoolean) {
-      if (!paimonExtensionEnabled) {
-        throw new RuntimeException(
-          """
-            |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions`.
-            |You can disable this check by configuring `spark.paimon.requiredSparkConfsCheck.enabled` to `false`, but it is strongly discouraged to do so.
-            |""".stripMargin)
-      }
+  private def requiredSparkConfsCheckEnabled(sparkSession: SparkSession): Boolean = {
+    sparkSession.sessionState.conf
+      .getConfString(
+        s"$PAIMON_OPTION_PREFIX${SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED.key()}",
+        SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED.defaultValue().toString
+      )
+      .toBoolean
+  }
+
+  def checkRequiredConfigurations(sparkSession: SparkSession): Unit = {
+    if (requiredSparkConfsCheckEnabled(sparkSession) && !paimonExtensionEnabled(sparkSession)) {
+      throw new RuntimeException(
+        """
+          |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions`.
+          |You can disable this check by configuring `spark.paimon.requiredSparkConfsCheck.enabled` to `false`, but it is strongly discouraged to do so.
+          |""".stripMargin)
     }
   }
 

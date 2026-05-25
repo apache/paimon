@@ -24,7 +24,7 @@ import org.apache.paimon.flink.action.cdc.serialization.CdcJsonDeserializationSc
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 
 import java.util.function.Function;
 
@@ -35,7 +35,7 @@ import java.util.function.Function;
 public abstract class AbstractJsonDataFormat extends AbstractDataFormat {
 
     @Override
-    protected Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>>
+    protected Function<Configuration, KafkaRecordDeserializationSchema<CdcSourceRecord>>
             kafkaDeserializer() {
         return KafkaDebeziumJsonDeserializationSchema::new;
     }

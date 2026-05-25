@@ -58,4 +58,8 @@ public class CachelessSegmentPool implements MemorySegmentPool {
     public int freePages() {
         return maxPages - numPage;
     }
+
+    public int maxPages() {
+        return maxPages;
+    }
 }

@@ -18,10 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -58,7 +59,6 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private IOManager ioManager = null;
     @Nullable private TopN topN = null;
     @Nullable private Integer limit = null;
-    @Nullable private VariantAccessInfo[] variantAccess = null;
 
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
@@ -97,9 +97,6 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (limit != null) {
             read = read.withLimit(limit);
         }
-        if (variantAccess != null) {
-            read = read.withVariantAccess(variantAccess);
-        }
         read.withFilter(predicate).withIOManager(ioManager);
     }
 
@@ -107,12 +104,6 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     public void applyReadType(RowType readType) {
         initialized().forEach(r -> r.withReadType(readType));
         this.readType = readType;
-    }
-
-    @Override
-    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
-        initialized().forEach(r -> r.withVariantAccess(variantAccess));
-        this.variantAccess = variantAccess;
     }
 
     @Override
@@ -161,14 +152,24 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         throw new RuntimeException("Should not happen.");
     }
 
-    public static RecordReader<InternalRow> unwrap(RecordReader<KeyValue> reader) {
+    public static RecordReader<InternalRow> unwrap(
+            RecordReader<KeyValue> reader, Map<String, String> schemaOptions) {
         return new RecordReader<InternalRow>() {
 
             @Nullable
             @Override
             public RecordIterator<InternalRow> readBatch() throws IOException {
+                boolean keyValueSequenceNumberEnabled =
+                        Boolean.parseBoolean(
+                                schemaOptions.getOrDefault(
+                                        CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(),
+                                        "false"));
+
                 RecordIterator<KeyValue> batch = reader.readBatch();
-                return batch == null ? null : new ValueContentRowDataRecordIterator(batch);
+                return batch == null
+                        ? null
+                        : new ValueContentRowDataRecordIterator(
+                                batch, keyValueSequenceNumberEnabled);
             }
 
             @Override

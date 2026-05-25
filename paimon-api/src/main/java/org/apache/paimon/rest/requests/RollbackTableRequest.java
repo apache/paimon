@@ -24,24 +24,42 @@ import org.apache.paimon.table.Instant;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
+import javax.annotation.Nullable;
 
 /** Request for rollback table. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackTableRequest implements RESTRequest {
 
     private static final String FIELD_INSTANT = "instant";
+    private static final String FIELD_FROM_SNAPSHOT = "fromSnapshot";
 
     @JsonProperty(FIELD_INSTANT)
     private final Instant instant;
 
+    @JsonProperty(FIELD_FROM_SNAPSHOT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    private final Long fromSnapshot;
+
     @JsonCreator
-    public RollbackTableRequest(@JsonProperty(FIELD_INSTANT) Instant instant) {
+    public RollbackTableRequest(
+            @JsonProperty(FIELD_INSTANT) Instant instant,
+            @JsonProperty(FIELD_FROM_SNAPSHOT) @Nullable Long fromSnapshot) {
         this.instant = instant;
+        this.fromSnapshot = fromSnapshot;
     }
 
     @JsonGetter(FIELD_INSTANT)
     public Instant getInstant() {
         return instant;
+    }
+
+    @JsonGetter(FIELD_FROM_SNAPSHOT)
+    @Nullable
+    public Long getFromSnapshot() {
+        return fromSnapshot;
     }
 }

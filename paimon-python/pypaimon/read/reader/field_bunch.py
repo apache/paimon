@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 """
 FieldBunch classes for organizing files by field in data evolution.
 
@@ -54,9 +54,10 @@ class DataBunch(FieldBunch):
 class BlobBunch(FieldBunch):
     """Files for partial field (blob files)."""
 
-    def __init__(self, expected_row_count: int):
+    def __init__(self, expected_row_count: int, row_id_push_down: bool = False):
         self._files: List[DataFileMeta] = []
         self.expected_row_count = expected_row_count
+        self.row_id_push_down = row_id_push_down
         self.latest_first_row_id = -1
         self.expected_next_first_row_id = -1
         self.latest_max_sequence_number = -1
@@ -64,7 +65,7 @@ class BlobBunch(FieldBunch):
 
     def add(self, file: DataFileMeta) -> None:
         """Add a blob file to this bunch."""
-        if not self._is_blob_file(file.file_name):
+        if not DataFileMeta.is_blob_file(file.file_name):
             raise ValueError("Only blob file can be added to a blob bunch.")
 
         if file.first_row_id == self.latest_first_row_id:
@@ -76,26 +77,37 @@ class BlobBunch(FieldBunch):
 
         if self._files:
             first_row_id = file.first_row_id
-            if first_row_id < self.expected_next_first_row_id:
-                if file.max_sequence_number >= self.latest_max_sequence_number:
+            if self.row_id_push_down:
+                if first_row_id < self.expected_next_first_row_id:
+                    if file.max_sequence_number > self.latest_max_sequence_number:
+                        last_file = self._files.pop()
+                        self._row_count -= last_file.row_count
+                    else:
+                        return
+            else:
+                if first_row_id < self.expected_next_first_row_id:
+                    if file.max_sequence_number >= self.latest_max_sequence_number:
+                        raise ValueError(
+                            "Blob file with overlapping row id should have "
+                            "decreasing sequence number."
+                        )
+                    return
+                elif first_row_id > self.expected_next_first_row_id:
                     raise ValueError(
-                        "Blob file with overlapping row id should have decreasing sequence number."
+                        f"Blob file first row id should be continuous, expect "
+                        f"{self.expected_next_first_row_id} but got {first_row_id}"
                     )
-                return
-            elif first_row_id > self.expected_next_first_row_id:
-                raise ValueError(
-                    f"Blob file first row id should be continuous, expect "
-                    f"{self.expected_next_first_row_id} but got {first_row_id}"
-                )
 
-            if file.schema_id != self._files[0].schema_id:
-                raise ValueError(
-                    "All files in a blob bunch should have the same schema id."
-                )
-            if file.write_cols != self._files[0].write_cols:
-                raise ValueError(
-                    "All files in a blob bunch should have the same write columns."
-                )
+            if self._files:
+                if not DataFileMeta.is_blob_file(file.file_name):
+                    if file.schema_id != self._files[0].schema_id:
+                        raise ValueError(
+                            "All files in a blob bunch should have the same schema id."
+                        )
+                if file.write_cols != self._files[0].write_cols:
+                    raise ValueError(
+                        "All files in a blob bunch should have the same write columns."
+                    )
 
         self._files.append(file)
         self._row_count += file.row_count
@@ -113,8 +125,3 @@ class BlobBunch(FieldBunch):
 
     def files(self) -> List[DataFileMeta]:
         return self._files
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
-        return file_name.endswith('.blob')

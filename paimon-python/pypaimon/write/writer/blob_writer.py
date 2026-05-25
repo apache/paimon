@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 import uuid
@@ -27,8 +26,6 @@ from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.blob_file_writer import BlobFileWriter
 
 logger = logging.getLogger(__name__)
-
-CHECK_ROLLING_RECORD_CNT = 1000
 
 
 class BlobWriter(AppendOnlyDataWriter):
@@ -60,30 +57,17 @@ class BlobWriter(AppendOnlyDataWriter):
         if self.pending_data is None:
             return
 
-        if self.blob_as_descriptor:
-            # blob-as-descriptor=true: Write row by row and check actual file size
-            for i in range(self.pending_data.num_rows):
-                row_data = self.pending_data.slice(i, 1)
-                self._write_row_to_file(row_data)
-                self.record_count += 1
+        # Always write blob rows one-by-one so rolling uses actual blob bytes size rather than
+        # in-memory serialized descriptor size.
+        for i in range(self.pending_data.num_rows):
+            row_data = self.pending_data.slice(i, 1)
+            self._write_row_to_file(row_data)
+            self.record_count += 1
 
-                if self.rolling_file(False):
-                    self.close_current_writer()
+            if self.rolling_file():
+                self.close_current_writer()
 
-            # All data has been written
-            self.pending_data = None
-        else:
-            # blob-as-descriptor=false: Use blob_target_file_size instead of target_file_size
-            current_size = self.pending_data.nbytes
-            if current_size > self.blob_target_file_size:
-                split_row = self._find_optimal_split_point(self.pending_data, self.blob_target_file_size)
-                if split_row > 0:
-                    data_to_write = self.pending_data.slice(0, split_row)
-                    remaining_data = self.pending_data.slice(split_row)
-
-                    self._write_data_to_file(data_to_write)
-                    self.pending_data = remaining_data
-                    self._check_and_roll_if_needed()
+        self.pending_data = None
 
     def _write_row_to_file(self, row_data: pa.Table):
         """Write a single row to the current blob file. Opens a new file if needed."""
@@ -103,14 +87,13 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
-        self.current_writer = BlobFileWriter(self.file_io, file_path, self.blob_as_descriptor)
+        self.current_writer = BlobFileWriter(self.file_io, file_path)
 
-    def rolling_file(self, force_check: bool = False) -> bool:
+    def rolling_file(self) -> bool:
         if self.current_writer is None:
             return False
 
-        should_check = force_check or (self.record_count % CHECK_ROLLING_RECORD_CNT == 0)
-        return self.current_writer.reach_target_size(should_check, self.blob_target_file_size)
+        return self.current_writer.reach_target_size(self.blob_target_file_size)
 
     def close_current_writer(self):
         """Close current writer and create metadata."""
@@ -132,8 +115,8 @@ class BlobWriter(AppendOnlyDataWriter):
 
     def _write_data_to_file(self, data):
         """
-        Override for blob format in normal mode (blob-as-descriptor=false).
-        Only difference from parent: use shared UUID + counter for file naming.
+        Keep a fallback path for direct blob table writes while preserving the shared uuid+counter
+        naming behavior.
         """
         if data.num_rows == 0:
             return
@@ -146,8 +129,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1
         file_path = self._generate_file_path(file_name)
 
-        # Write blob file (parent class already supports blob format)
-        self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
+        self.file_io.write_blob(file_path, data)
 
         file_size = self.file_io.get_file_size(file_path)
 
@@ -219,20 +201,20 @@ class BlobWriter(AppendOnlyDataWriter):
 
     def prepare_commit(self):
         """Prepare commit, ensuring all data is written."""
-        # Close current file if open (blob-as-descriptor=true mode)
+        # Close current file if open.
         if self.current_writer is not None:
             self.close_current_writer()
 
-        # Call parent to handle pending_data (blob-as-descriptor=false mode)
+        # Call parent to handle pending_data fallback.
         return super().prepare_commit()
 
     def close(self):
         """Close current writer if open."""
-        # Close current file if open (blob-as-descriptor=true mode)
+        # Close current file if open.
         if self.current_writer is not None:
             self.close_current_writer()
 
-        # Call parent to handle pending_data (blob-as-descriptor=false mode)
+        # Call parent to handle pending_data fallback.
         super().close()
 
     def abort(self):

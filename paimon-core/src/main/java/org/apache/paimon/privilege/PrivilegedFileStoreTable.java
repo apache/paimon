@@ -181,6 +181,18 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createBranch(branchName, ignoreIfExists);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createBranch(branchName, tagName, ignoreIfExists);
+    }
+
+    @Override
     public void deleteBranch(String branchName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.deleteBranch(branchName);
@@ -190,6 +202,12 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public void fastForward(String branchName) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.fastForward(branchName);
+    }
+
+    @Override
+    public void mergeBranch(String sourceBranch, String targetBranch) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.mergeBranch(sourceBranch, targetBranch);
     }
 
     @Override

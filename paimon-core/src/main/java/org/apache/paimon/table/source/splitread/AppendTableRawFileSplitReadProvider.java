@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.splitread;
 
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 
 import java.util.function.Supplier;
@@ -34,6 +35,6 @@ public class AppendTableRawFileSplitReadProvider extends RawFileSplitReadProvide
 
     @Override
     public boolean match(Split split, Context context) {
-        return split instanceof DataSplit;
+        return split instanceof DataSplit || split instanceof IncrementalSplit;
     }
 }

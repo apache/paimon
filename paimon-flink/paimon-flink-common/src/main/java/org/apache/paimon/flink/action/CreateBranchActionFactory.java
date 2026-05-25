@@ -27,6 +27,7 @@ public class CreateBranchActionFactory implements ActionFactory {
 
     private static final String TAG_NAME = "tag_name";
     private static final String BRANCH_NAME = "branch_name";
+    private static final String IGNORE_IF_EXISTS = "ignore_if_exists";
 
     @Override
     public String identifier() {
@@ -41,7 +42,8 @@ public class CreateBranchActionFactory implements ActionFactory {
                         params.getRequired(TABLE),
                         catalogConfigMap(params),
                         params.getRequired(BRANCH_NAME),
-                        params.get(TAG_NAME));
+                        params.get(TAG_NAME),
+                        params.getBoolean(IGNORE_IF_EXISTS, false));
         return Optional.of(action);
     }
 
@@ -57,7 +59,8 @@ public class CreateBranchActionFactory implements ActionFactory {
                         + "--database <database_name> \\\n"
                         + "--table <table_name> \\\n"
                         + "--branch_name <branch_name> \\\n"
-                        + "[--tag_name <tag_name>]");
+                        + "[--tag_name <tag_name>] \\\n"
+                        + "[--ignore_if_exists <true/false>]");
         System.out.println();
     }
 }

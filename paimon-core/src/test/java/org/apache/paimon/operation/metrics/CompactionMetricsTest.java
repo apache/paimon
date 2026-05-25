@@ -58,6 +58,49 @@ public class CompactionMetricsTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
+    public void testSortBufferMetrics() {
+        CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
+
+        // no reporters yet: gauges return -1 (no data)
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_SORT_BUFFER_USED_BYTES)).isEqualTo(-1L);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_SORT_BUFFER_USED_BYTES))
+                .isEqualTo(-1.0);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_SORT_BUFFER_UTILISATION))
+                .isEqualTo(-1.0);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_SORT_BUFFER_UTILISATION))
+                .isEqualTo(-1.0);
+
+        CompactionMetrics.Reporter r0 = metrics.createReporter(BinaryRow.EMPTY_ROW, 0);
+        CompactionMetrics.Reporter r1 = metrics.createReporter(BinaryRow.EMPTY_ROW, 1);
+
+        // bucket 0: 32 MB used of 64 MB total = 50% utilisation
+        r0.reportSortBufferMetrics(32L * 1024 * 1024, 64L * 1024 * 1024);
+        // bucket 1: 48 MB used of 64 MB total = 75% utilisation
+        r1.reportSortBufferMetrics(48L * 1024 * 1024, 64L * 1024 * 1024);
+
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_SORT_BUFFER_USED_BYTES))
+                .isEqualTo(48L * 1024 * 1024);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_SORT_BUFFER_USED_BYTES))
+                .isEqualTo(40.0 * 1024 * 1024);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_SORT_BUFFER_UTILISATION))
+                .isEqualTo(75.0);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_SORT_BUFFER_UTILISATION))
+                .isEqualTo(62.5);
+
+        // update bucket 0 to full utilisation
+        r0.reportSortBufferMetrics(64L * 1024 * 1024, 64L * 1024 * 1024);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_SORT_BUFFER_UTILISATION))
+                .isEqualTo(100.0);
+        assertThat(getMetric(metrics, CompactionMetrics.AVG_SORT_BUFFER_UTILISATION))
+                .isEqualTo(87.5);
+
+        // zero-total pool reports 0% utilisation (no division by zero)
+        r0.reportSortBufferMetrics(0L, 0L);
+        assertThat(getMetric(metrics, CompactionMetrics.MAX_SORT_BUFFER_UTILISATION))
+                .isEqualTo(75.0);
+    }
+
+    @Test
     public void testReportMetrics() {
         CompactionMetrics metrics = new CompactionMetrics(new TestMetricRegistry(), "myTable");
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(-1L);

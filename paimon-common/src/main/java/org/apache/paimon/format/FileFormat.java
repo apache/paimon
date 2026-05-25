@@ -19,7 +19,6 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.factories.FormatFactoryUtil;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
@@ -62,17 +61,6 @@ public abstract class FileFormat {
      */
     public abstract FormatReaderFactory createReaderFactory(
             RowType dataSchemaRowType, RowType projectedRowType, @Nullable List<Predicate> filters);
-
-    public FormatReaderFactory createReaderFactory(
-            RowType dataSchemaRowType,
-            RowType projectedRowType,
-            @Nullable List<Predicate> filters,
-            @Nullable VariantAccessInfo[] variantAccess) {
-        if (variantAccess != null) {
-            throw new UnsupportedOperationException();
-        }
-        return createReaderFactory(dataSchemaRowType, projectedRowType, filters);
-    }
 
     /** Create a {@link FormatWriterFactory} from the type. */
     public abstract FormatWriterFactory createWriterFactory(RowType type);
@@ -117,6 +105,15 @@ public abstract class FileFormat {
 
     public static FileFormat fileFormat(CoreOptions options) {
         return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
+    }
+
+    @Nullable
+    public static FileFormat vectorFileFormat(CoreOptions options) {
+        String vectorFileFormat = options.vectorFileFormatString();
+        if (vectorFileFormat == null) {
+            return null;
+        }
+        return FileFormat.fromIdentifier(vectorFileFormat, options.toConfiguration());
     }
 
     public static FileFormat manifestFormat(CoreOptions options) {

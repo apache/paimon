@@ -1,35 +1,44 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-#################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
+from pypaimon.api.api_response import GetTagResponse, PagedList
 from pypaimon.catalog.catalog import Catalog
+from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
-                                                DatabaseNotExistException,
-                                                TableAlreadyExistException,
-                                                TableNotExistException)
+from pypaimon.catalog.catalog_exception import (
+    BranchAlreadyExistException,
+    BranchNotExistException,
+    DatabaseAlreadyExistException,
+    DatabaseNotExistException,
+    TableAlreadyExistException,
+    TableNotExistException,
+    TagAlreadyExistException,
+    TagNotExistException,
+)
 from pypaimon.catalog.database import Database
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.filesystem.caching_file_io import CachingFileIO
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -43,7 +52,22 @@ class FileSystemCatalog(Catalog):
             raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.file_io = FileIO(self.warehouse, self.catalog_options)
+        self.catalog_context = CatalogContext.create_from_options(catalog_options)
+        self._cache_manager = CachingFileIO.create_cache_manager(self.catalog_options)
+        self.file_io = CachingFileIO.wrap_with_caching_if_needed(
+            FileIO.get(self.warehouse, self.catalog_options), self.catalog_options,
+            self._cache_manager)
+
+    def list_databases(self) -> list:
+        statuses = self.file_io.list_status(self.warehouse)
+        database_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and name.endswith(Catalog.DB_SUFFIX):
+                database_names.append(name[:-len(Catalog.DB_SUFFIX)])
+        return sorted(database_names)
 
     def get_database(self, name: str) -> Database:
         if self.file_io.exists(self.get_database_path(name)):
@@ -62,9 +86,56 @@ class FileSystemCatalog(Catalog):
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
 
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        try:
+            self.get_database(name)
+        except DatabaseNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        db_path = self.get_database_path(name)
+
+        if cascade:
+            for table_name in self.list_tables(name):
+                table_path = f"{db_path}/{table_name}"
+                self.file_io.delete(table_path, True)
+
+        # Check if database still has tables
+        remaining_tables = self.list_tables(name)
+        if remaining_tables and not cascade:
+            raise ValueError(
+                f"Database {name} is not empty. "
+                f"Use cascade=True to drop all tables first."
+            )
+
+        self.file_io.delete(db_path, True)
+
+    def list_tables(self, database_name: str) -> list:
+        try:
+            self.get_database(database_name)
+        except DatabaseNotExistException:
+            raise
+
+        db_path = self.get_database_path(database_name)
+        statuses = self.file_io.list_status(db_path)
+        table_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and not name.startswith("."):
+                table_names.append(name)
+        return sorted(table_names)
+
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        if identifier.is_system_table():
+            return self._load_system_table(identifier)
+        return self._load_data_table(identifier)
+
+    def _load_data_table(self, identifier: Identifier) -> FileStoreTable:
         if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
@@ -80,6 +151,22 @@ class FileSystemCatalog(Catalog):
         )
 
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
+
+    def _load_system_table(self, identifier: Identifier) -> Table:
+        from pypaimon.table.system import system_table_loader
+
+        base_identifier = Identifier.create(
+            identifier.get_database_name(),
+            identifier.get_table_name(),
+            branch=identifier.get_branch_name(),
+        )
+        base_table = self._load_data_table(base_identifier)
+        sys_table = system_table_loader.load(
+            identifier.get_system_table_name(), base_table
+        )
+        if sys_table is None:
+            raise TableNotExistException(identifier)
+        return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
@@ -115,6 +202,70 @@ class FileSystemCatalog(Catalog):
         db_path = self.get_database_path(identifier.get_database_name())
         return f"{db_path}/{identifier.get_table_name()}"
 
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        table_path = self.get_table_path(identifier)
+        schema_manager = SchemaManager(self.file_io, table_path)
+        try:
+            schema_manager.commit_changes(changes)
+        except Exception as e:
+            raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
+
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+
+        # Verify source table exists
+        try:
+            self.get_table(source_identifier)
+        except TableNotExistException:
+            raise
+
+        # Verify target database exists
+        self.get_database(target_identifier.get_database_name())
+
+        # Verify target table does not exist
+        try:
+            self.get_table(target_identifier)
+            raise TableAlreadyExistException(target_identifier)
+        except TableNotExistException:
+            pass
+
+        source_path = self.get_table_path(source_identifier)
+        target_path = self.get_table_path(target_identifier)
+        self.file_io.rename(source_path, target_path)
+
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        
+        # Check if table exists
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+        
+        # Delete the table directory
+        table_path = self.get_table_path(identifier)
+        self.file_io.delete(table_path, True)
+
     def commit_snapshot(
             self,
             identifier: Identifier,
@@ -123,3 +274,313 @@ class FileSystemCatalog(Catalog):
             statistics: List[PartitionStatistics]
     ) -> bool:
         raise NotImplementedError("This catalog does not support commit catalog")
+
+    def load_snapshot(self, identifier: Identifier):
+        raise NotImplementedError("Filesystem catalog does not support load_snapshot")
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        from pypaimon.api.api_response import Partition, PagedList
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+
+        table = self.get_table(identifier)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if snapshot is None:
+            return PagedList(elements=[])
+
+        # Read all manifest entries (ADD - DELETE merged)
+        manifest_list_manager = ManifestListManager(table)
+        manifest_file_manager = ManifestFileManager(table)
+        manifest_files = manifest_list_manager.read_all(snapshot)
+        entries = manifest_file_manager.read_entries_parallel(manifest_files, drop_stats=True)
+
+        # Group entries by partition spec
+        partition_map = {}  # spec_key -> aggregated stats
+        for entry in entries:
+            spec = {field.name: str(v) for field, v in
+                    zip(entry.partition.fields, entry.partition.values)}
+            spec_key = tuple(sorted(spec.items()))
+
+            if spec_key not in partition_map:
+                partition_map[spec_key] = {
+                    'spec': spec,
+                    'record_count': 0,
+                    'file_size_in_bytes': 0,
+                    'file_count': 0,
+                    'last_file_creation_time': 0,
+                    'buckets': set(),
+                }
+            stats = partition_map[spec_key]
+            stats['record_count'] += entry.file.row_count
+            stats['file_size_in_bytes'] += entry.file.file_size
+            stats['file_count'] += 1
+            if entry.file.creation_time is not None:
+                ct = entry.file.creation_time.get_millisecond()
+                if ct > stats['last_file_creation_time']:
+                    stats['last_file_creation_time'] = ct
+            stats['buckets'].add(entry.bucket)
+
+        # Convert to Partition objects
+        partitions = []
+        for stats in partition_map.values():
+            partitions.append(Partition(
+                spec=stats['spec'],
+                record_count=stats['record_count'],
+                file_size_in_bytes=stats['file_size_in_bytes'],
+                file_count=stats['file_count'],
+                last_file_creation_time=stats['last_file_creation_time'],
+                total_buckets=len(stats['buckets']),
+            ))
+
+        # Apply pattern filter with proper regex escaping
+        if partition_name_pattern:
+            import re
+            # Escape special regex chars except '*', then replace '*' with '.*'
+            escaped_pattern = re.escape(partition_name_pattern).replace(r'\*', '.*')
+            regex = re.compile(escaped_pattern)
+            partitions = [
+                p for p in partitions
+                if regex.fullmatch(','.join(f'{k}={v}' for k, v in p.spec.items()))
+            ]
+
+        # Sort partitions by name (partition spec string)
+        partitions.sort(key=lambda p: ','.join(f'{k}={v}' for k, v in sorted(p.spec.items())))
+
+        # Apply pagination
+        start_index = 0
+        if page_token is not None:
+            try:
+                start_index = int(page_token)
+            except ValueError:
+                # Invalid token, start from beginning
+                start_index = 0
+
+        end_index = len(partitions)
+        if max_results is not None and max_results > 0:
+            end_index = min(start_index + max_results, len(partitions))
+
+        result_partitions = partitions[start_index:end_index]
+        next_page_token = None
+        if max_results is not None and end_index < len(partitions):
+            next_page_token = str(end_index)
+
+        return PagedList(elements=result_partitions, next_page_token=next_page_token)
+
+    def drop_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+        table = self.get_table(identifier)
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.truncate_partitions(partitions)
+        finally:
+            commit.close()
+
+    # ===================== Tag CRUD =====================
+    # Thin wrappers that delegate to FileStoreTable's existing tag helpers
+    # (which in turn use the Python-side TagManager). The catalog layer is
+    # responsible for translating ValueError messages from TagManager into
+    # the typed Catalog exceptions used by the rest of the API.
+
+    def create_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+            ignore_if_exists: bool = False,
+    ) -> None:
+        if time_retained is not None:
+            # Python's Tag dataclass does not yet carry tag_create_time /
+            # tag_time_retained fields; supporting TTL on FileSystemCatalog
+            # requires extending Tag + TagManager and is tracked as a
+            # follow-up. Raise here instead of silently dropping the option,
+            # so callers cannot mistakenly believe the TTL took effect.
+            raise NotImplementedError(
+                "FileSystemCatalog does not yet support `time_retained` on "
+                "create_tag (requires extending the Python Tag dataclass + "
+                "TagManager).")
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.create_tag(tag_name, snapshot_id, ignore_if_exists)
+        except ValueError as e:
+            # ``table.create_tag`` honors ``ignore_if_exists`` internally, so
+            # any "already exists" message that bubbles up here means the
+            # caller asked us to fail on conflict.
+            if "already exists" in str(e):
+                raise TagAlreadyExistException(tag_name) from e
+            raise
+
+    def delete_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        # ``table.delete_tag`` returns False (no exception) when the tag is
+        # missing — surface that as a typed catalog exception to match the
+        # RESTCatalog behavior.
+        if not table.delete_tag(tag_name):
+            raise TagNotExistException(tag_name)
+
+    def get_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ) -> GetTagResponse:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        tag = table.tag_manager().get(tag_name)
+        if tag is None:
+            raise TagNotExistException(tag_name)
+        # tag_create_time / tag_time_retained are not tracked on the
+        # filesystem side yet — the Python Tag dataclass inherits only
+        # Snapshot fields. Returning ``None`` for both keeps the response
+        # shape compatible with the Java contract while making the gap
+        # visible to callers.
+        return GetTagResponse(
+            tag_name=tag_name,
+            snapshot=tag.trim_to_snapshot(),
+            tag_create_time=None,
+            tag_time_retained=None,
+        )
+
+    def list_tags_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            tag_name_prefix: Optional[str] = None,
+    ) -> PagedList:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+
+        # TagManager.list_tags() returns the full list with no built-in
+        # pagination, so we filter + paginate client-side. Sort
+        # lexicographically so ``page_token`` (the previous page's last
+        # entry) gives a stable continuation cursor.
+        tags = sorted(table.list_tags())
+        if tag_name_prefix:
+            tags = [t for t in tags if t.startswith(tag_name_prefix)]
+        if page_token:
+            tags = [t for t in tags if t > page_token]
+        if max_results is not None and max_results > 0 and len(tags) > max_results:
+            page = tags[:max_results]
+            next_token = page[-1]
+        else:
+            page = tags
+            next_token = None
+        return PagedList(elements=page, next_page_token=next_token)
+
+    # ===================== Branch CRUD =====================
+    # Thin wrappers that delegate to FileSystemBranchManager (returned by
+    # FileStoreTable.branch_manager() in the local-catalog case). Mirrors
+    # the RESTCatalog branch overrides added in #7747; the only difference
+    # is that the manager raises ValueError / RuntimeError instead of REST
+    # exceptions, so the catalog layer translates the messages back into
+    # the typed Catalog exception hierarchy.
+
+    def create_branch(
+            self,
+            identifier: Union[str, Identifier],
+            branch_name: str,
+            tag_name: Optional[str] = None,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().create_branch(branch_name, tag_name)
+        except ValueError as e:
+            msg = str(e)
+            # ``tag_manager.get_or_throw`` raises ValueError("Tag '...' doesn't exist.")
+            if tag_name is not None and "Tag" in msg and "doesn't exist" in msg:
+                raise TagNotExistException(tag_name) from e
+            # ``_validate_branch`` raises ValueError("Branch name '...' already exists.")
+            if "already exists" in msg:
+                raise BranchAlreadyExistException(branch_name) from e
+            raise
+
+    def drop_branch(
+            self,
+            identifier: Union[str, Identifier],
+            branch_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().drop_branch(branch_name)
+        except ValueError as e:
+            # FileSystemBranchManager.drop_branch raises
+            # ValueError("Branch name '...' doesn't exist.") when missing.
+            if "doesn't exist" in str(e):
+                raise BranchNotExistException(branch_name) from e
+            raise
+
+    def rename_branch(
+            self,
+            identifier: Union[str, Identifier],
+            from_branch: str,
+            to_branch: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().rename_branch(from_branch, to_branch)
+        except ValueError as e:
+            msg = str(e)
+            if "Source branch" in msg and "doesn't exist" in msg:
+                raise BranchNotExistException(from_branch) from e
+            if "Target branch" in msg and "already exists" in msg:
+                raise BranchAlreadyExistException(to_branch) from e
+            # Other ValueErrors (rename-main rejection, blank/invalid names)
+            # propagate as-is — they are user-facing argument errors that
+            # the catalog API does not have a typed equivalent for.
+            raise
+
+    def fast_forward(
+            self,
+            identifier: Union[str, Identifier],
+            branch_name: str,
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        try:
+            table.branch_manager().fast_forward(branch_name)
+        except ValueError as e:
+            if "doesn't exist" in str(e):
+                raise BranchNotExistException(branch_name) from e
+            raise
+
+    def list_branches(
+            self,
+            identifier: Union[str, Identifier],
+    ) -> List[str]:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        table = self.get_table(identifier)
+        return table.branch_manager().branches()

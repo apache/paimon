@@ -23,7 +23,7 @@ import java.util.function.Supplier;
 /** A class to lazy initialized field. */
 public class LazyField<T> {
 
-    private final Supplier<T> supplier;
+    private Supplier<T> supplier;
 
     private boolean initialized;
     private T value;
@@ -37,6 +37,7 @@ public class LazyField<T> {
             T t = supplier.get();
             value = t;
             initialized = true;
+            supplier = null; // release the closure chain for GC
             return t;
         }
         return value;

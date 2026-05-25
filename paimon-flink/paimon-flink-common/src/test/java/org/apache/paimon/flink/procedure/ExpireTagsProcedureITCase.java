@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,10 +38,12 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testExpireTagsByTagCreateTimeAndTagTimeRetained() throws Exception {
+        boolean tagTimeExpireEnabled = ThreadLocalRandom.current().nextBoolean();
         sql(
                 "CREATE TABLE T (id STRING, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
-                        + " WITH ('bucket'='1', 'write-only'='true')");
+                        + " WITH ('bucket'='1', 'write-only'='true', 'tag.time-expire-enabled'='%s')",
+                tagTimeExpireEnabled);
 
         FileStoreTable table = paimonTable("T");
         SnapshotManager snapshotManager = table.snapshotManager();

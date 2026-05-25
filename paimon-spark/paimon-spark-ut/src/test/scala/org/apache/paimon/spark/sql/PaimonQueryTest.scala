@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.source.DataSplit
 
@@ -47,7 +48,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                       |VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')
                       |""".stripMargin)
 
-          val location = loadTable("T").location().toUri.toString
+          val location = loadTable("T").location().toString
           val res = spark.sql(
             s"""
                |SELECT SUM(cnt)
@@ -128,7 +129,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").location().toString
 
               spark.sql("INSERT INTO T VALUES (1, 'x1'), (3, 'x3')")
 
@@ -175,7 +176,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").location().toString
 
               spark.sql("INSERT INTO T VALUES (1, 'x1', '2024'), (3, 'x3', '2024')")
 
@@ -426,6 +427,83 @@ class PaimonQueryTest extends PaimonSparkTestBase {
             .contains("Full scan is not supported."))
       }
     }
+  }
+
+  test("Paimon Query: select from parquet datasource path under paimon catalog") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (id INT, name STRING) USING paimon")
+      spark.sql("INSERT INTO T VALUES (1, 'a')")
+
+      val bucketDir = loadTable("T").location() + "/bucket-0"
+      checkAnswer(spark.sql(s"SELECT * FROM parquet.`$bucketDir`"), spark.sql("SELECT * FROM T"))
+    }
+  }
+
+  fileFormats.foreach {
+    fileFormat =>
+      test(s"Query ignore-corrupt-files: file.format=$fileFormat") {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, name STRING, pt STRING)
+                       |PARTITIONED BY (pt)
+                       |TBLPROPERTIES ('file.format'='$fileFormat', 'bucket'='4', 'bucket-key'='id')
+                       |""".stripMargin)
+          spark.sql("INSERT INTO T VALUES (1, 'x1', '2024'), (3, 'x3', '2024')")
+
+          spark.sql("INSERT INTO T VALUES (2, 'x2', '2024'), (4, 'x4', '2024')")
+
+          val allFiles = getAllFiles("T", Seq("pt"), null)
+          Assertions.assertEquals(4, allFiles.length)
+          val corruptFile = allFiles.head
+          val io = loadTable("T").fileIO()
+          io.overwriteFileUtf8(new Path(corruptFile), "corrupt file")
+          val content = io.readFileUtf8(new Path(corruptFile))
+          Assertions.assertEquals("corrupt file", content)
+
+          withSQLConf("spark.paimon.scan.ignore-corrupt-files" -> "true") {
+            val res = spark.sql("SELECT * FROM T")
+            Assertions.assertEquals(3, res.collect().length)
+          }
+        }
+      }
+  }
+
+  fileFormats.foreach {
+    fileFormat =>
+      test(s"Query ignore-lost-files: file.format=$fileFormat") {
+        withTable("T") {
+          spark.sql(s"""
+                       |CREATE TABLE T (id INT, name STRING, pt STRING)
+                       |PARTITIONED BY (pt)
+                       |TBLPROPERTIES ('file.format'='$fileFormat', 'bucket'='4', 'bucket-key'='id')
+                       |""".stripMargin)
+          spark.sql("INSERT INTO T VALUES (1, 'x1', '2024'), (3, 'x3', '2024')")
+
+          spark.sql("INSERT INTO T VALUES (2, 'x2', '2024'), (4, 'x4', '2024')")
+
+          val allFiles = getAllFiles("T", Seq("pt"), null)
+          Assertions.assertEquals(4, allFiles.length)
+          val lostFile = allFiles.head
+          val io = loadTable("T").fileIO()
+          io.deleteQuietly(new Path(lostFile))
+
+          withSQLConf("spark.paimon.scan.ignore-corrupt-files" -> "true") {
+            var failed: Boolean = false
+            try {
+              spark.sql("SELECT * FROM T").collect()
+            } catch {
+              case e: Exception => failed = true
+            }
+            Assertions.assertTrue(failed)
+          }
+
+          withSQLConf("spark.paimon.scan.ignore-lost-files" -> "true") {
+            val res = spark.sql("SELECT * FROM T")
+            Assertions.assertEquals(3, res.collect().length)
+          }
+
+        }
+      }
   }
 
   private def getAllFiles(

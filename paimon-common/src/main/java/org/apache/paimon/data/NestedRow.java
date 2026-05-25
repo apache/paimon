@@ -291,7 +291,7 @@ public final class NestedRow extends BinarySection implements InternalRow, DataS
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
+        return Blob.fromBytes(getBinary(pos), null, null);
     }
 
     @Override
@@ -304,6 +304,11 @@ public final class NestedRow extends BinarySection implements InternalRow, DataS
     public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        throw new IllegalArgumentException("Unsupported type: VectorType");
     }
 
     @Override

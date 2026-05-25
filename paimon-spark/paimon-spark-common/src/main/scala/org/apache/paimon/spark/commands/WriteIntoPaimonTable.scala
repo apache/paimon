@@ -21,11 +21,12 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
+import org.apache.paimon.spark.catalyst.analysis.ReplacePaimonFunctions
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, PaimonUtils, Row, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 
@@ -44,7 +45,11 @@ case class WriteIntoPaimonTable(
   with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val data = mergeSchema(sparkSession, _data, options)
+    val replacedData =
+      PaimonUtils.createDataset(
+        sparkSession,
+        ReplacePaimonFunctions(sparkSession)(_data.queryExecution.analyzed))
+    val data = mergeSchema(sparkSession, replacedData, options)
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
     // use the extra options to rebuild the table object

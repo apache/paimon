@@ -85,7 +85,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 table.newWrite(commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .withBucketMode(table.bucketMode())
                         .withMemoryPoolFactory(memoryPoolFactory);
 
         if (metricGroup != null) {
@@ -116,11 +115,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public SinkRecord toLogRecord(SinkRecord record) {
-        return write.toLogRecord(record);
-    }
-
-    @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         write.compact(partition, bucket, fullCompaction);
     }
@@ -147,8 +141,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             try {
                 for (CommitMessage committable :
                         write.prepareCommit(this.waitCompaction || waitCompaction, checkpointId)) {
-                    committables.add(
-                            new Committable(checkpointId, Committable.Kind.FILE, committable));
+                    committables.add(new Committable(checkpointId, committable));
                 }
             } catch (Exception e) {
                 throw new IOException(e);

@@ -173,7 +173,7 @@ public class JarFileChecker {
                         // JSON License
                         "The Software shall be used for Good, not Evil.",
                         // can sometimes be found in "funny" licenses
-                        "Don’t be evil"));
+                        "Don't be evil"));
     }
 
     private static Collection<Pattern> asPatterns(String... texts) {

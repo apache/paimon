@@ -22,6 +22,9 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.io.Serializable;
 import java.util.Optional;
 
@@ -32,7 +35,17 @@ import java.util.Optional;
  * @since 0.4.0
  */
 @Public
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = Predicate.FIELD_KIND)
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = LeafPredicate.class, name = LeafPredicate.NAME),
+    @JsonSubTypes.Type(value = CompoundPredicate.class, name = CompoundPredicate.NAME)
+})
 public interface Predicate extends Serializable {
+
+    String FIELD_KIND = "kind";
 
     /**
      * Test based on the specific input row.

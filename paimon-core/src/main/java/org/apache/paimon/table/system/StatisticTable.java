@@ -47,6 +47,8 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -54,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -118,7 +121,6 @@ public class StatisticTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
             return this;
         }
 
@@ -156,11 +158,18 @@ public class StatisticTable implements ReadonlyTable {
         public int hashCode() {
             return Objects.hash(location);
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private static class StatisticRead implements InnerTableRead {
 
         private RowType readType;
+
+        @Nullable private Predicate postFilter;
 
         private final FileStoreTable dataTable;
 
@@ -170,7 +179,7 @@ public class StatisticTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.postFilter = predicate;
             return this;
         }
 
@@ -192,23 +201,29 @@ public class StatisticTable implements ReadonlyTable {
             }
 
             Optional<Statistics> statisticsOptional = dataTable.statistics();
-            if (statisticsOptional.isPresent()) {
-                Statistics statistics = statisticsOptional.get();
-                Iterator<Statistics> statisticsIterator =
-                        Collections.singletonList(statistics).iterator();
-                Iterator<InternalRow> rows = Iterators.transform(statisticsIterator, this::toRow);
-                if (readType != null) {
-                    rows =
-                            Iterators.transform(
-                                    rows,
-                                    row ->
-                                            ProjectedRow.from(readType, StatisticTable.TABLE_TYPE)
-                                                    .replaceRow(row));
-                }
-                return new IteratorRecordReader<>(rows);
-            } else {
+            if (!statisticsOptional.isPresent()) {
                 return new EmptyRecordReader<>();
             }
+
+            Iterator<InternalRow> rows =
+                    Iterators.transform(
+                            Collections.singletonList(statisticsOptional.get()).iterator(),
+                            this::toRow);
+
+            if (postFilter != null) {
+                rows = Iterators.filter(rows, postFilter::test);
+            }
+
+            if (readType != null) {
+                rows =
+                        Iterators.transform(
+                                rows,
+                                row ->
+                                        ProjectedRow.from(readType, StatisticTable.TABLE_TYPE)
+                                                .replaceRow(row));
+            }
+
+            return new IteratorRecordReader<>(rows);
         }
 
         private InternalRow toRow(Statistics statistics) {

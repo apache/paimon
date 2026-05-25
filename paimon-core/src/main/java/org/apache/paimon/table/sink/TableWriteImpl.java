@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.BundleRecords;
@@ -31,7 +32,6 @@ import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -60,7 +60,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Nullable private final RowKindFilter rowKindFilter;
 
     private boolean batchCommitted = false;
-    private BucketMode bucketMode;
     private RowType writeType;
     private int[] notNullFieldIndex;
 
@@ -130,13 +129,14 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         return this;
     }
 
-    public TableWriteImpl<T> withCompactExecutor(ExecutorService compactExecutor) {
-        write.withCompactExecutor(compactExecutor);
+    @Override
+    public TableWrite withBlobConsumer(BlobConsumer blobConsumer) {
+        write.withBlobConsumer(blobConsumer);
         return this;
     }
 
-    public TableWriteImpl<T> withBucketMode(BucketMode bucketMode) {
-        this.bucketMode = bucketMode;
+    public TableWriteImpl<T> withCompactExecutor(ExecutorService compactExecutor) {
+        write.withCompactExecutor(compactExecutor);
         return this;
     }
 
@@ -222,15 +222,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                 bucket,
                 keyAndBucketExtractor.trimmedPrimaryKey(),
                 row);
-    }
-
-    public SinkRecord toLogRecord(SinkRecord record) {
-        keyAndBucketExtractor.setRecord(record.row());
-        return new SinkRecord(
-                record.partition(),
-                bucketMode == BucketMode.BUCKET_UNAWARE ? -1 : record.bucket(),
-                keyAndBucketExtractor.logPrimaryKey(),
-                record.row());
     }
 
     @Override

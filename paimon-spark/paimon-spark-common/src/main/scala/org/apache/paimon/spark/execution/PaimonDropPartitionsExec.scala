@@ -35,36 +35,33 @@ case class PaimonDropPartitionsExec(
     refreshCache: () => Unit)
   extends LeafV2CommandExec
   with Logging {
+
   override protected def run(): Seq[InternalRow] = {
     val partitionSchema = table.asPartitionable.partitionSchema()
+
     val (partialPartSpecs, fullPartSpecs) =
       partSpecs.partition(_.ident.numFields != partitionSchema.length)
 
-    val (existsPartIdents, notExistsPartIdents) =
-      fullPartSpecs.map(_.ident).partition(table.partitionExists)
-    if (notExistsPartIdents.nonEmpty && !ignoreIfNotExists) {
+    val (existsFullPartSpecs, notExistsPartSpecs) =
+      fullPartSpecs.partition(spec => table.partitionExists(spec.ident))
+    if (notExistsPartSpecs.nonEmpty && !ignoreIfNotExists) {
       throw new NoSuchPartitionsException(
         table.name(),
-        notExistsPartIdents,
+        notExistsPartSpecs.map(_.ident),
         table.asPartitionable.partitionSchema())
     }
-    val allExistsPartIdents = existsPartIdents ++ partialPartSpecs.flatMap(expendPartialSpec)
-    logDebug("Try to drop partitions: " + allExistsPartIdents.mkString(","))
-    val isTableAltered = if (allExistsPartIdents.nonEmpty) {
-      allExistsPartIdents
-        .map(
-          partIdent => {
-            if (purge) table.purgePartition(partIdent) else table.dropPartition(partIdent)
-          })
-        .reduce(_ || _)
+    val partSpecsToDrop = existsFullPartSpecs ++ partialPartSpecs
+    val isTableAltered = if (partSpecsToDrop.nonEmpty) {
+      val partIdentsToDrop = partSpecsToDrop.map(_.ident).toArray
+      if (purge) {
+        table.purgePartitions(partIdentsToDrop)
+      } else {
+        table.dropPartitions(partIdentsToDrop)
+      }
     } else false
 
     if (isTableAltered) refreshCache()
     Seq.empty
-  }
-
-  private def expendPartialSpec(partialSpec: ResolvedPartitionSpec): Seq[InternalRow] = {
-    table.listPartitionIdentifiers(partialSpec.names.toArray, partialSpec.ident).toSeq
   }
 
   override def output: Seq[Attribute] = Seq.empty

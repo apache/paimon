@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>1.4-SNAPSHOT</version>
+        <version>1.5-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>1.20.1</flink.version>
+        <flink.version>1.20.4</flink.version>
         <flink.cdc.version>3.5.0</flink.cdc.version>
         <flink.mongodb.cdc.version>3.5.0</flink.mongodb.cdc.version>
         <avro.version>1.11.4</avro.version>
@@ -371,6 +371,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.zaxxer</pattern>
+                                    <shadedPattern>org.apache.flink.cdc.connectors.shaded.com.zaxxer</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

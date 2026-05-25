@@ -33,6 +33,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
@@ -42,6 +43,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
@@ -78,6 +80,7 @@ public class IcebergDataField {
     @JsonIgnore private DataType dataType;
 
     @JsonProperty(FIELD_DOC)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String doc;
 
     public IcebergDataField(DataField dataField) {
@@ -161,6 +164,12 @@ public class IcebergDataField {
                 return "double";
             case DATE:
                 return "date";
+            case TIME_WITHOUT_TIME_ZONE:
+                int timePrecision = ((TimeType) dataType).getPrecision();
+                Preconditions.checkArgument(
+                        timePrecision >= 0 && timePrecision <= 3,
+                        "Paimon Iceberg compatibility only support time type with precision from 0 to 3.");
+                return "time";
             case CHAR:
             case VARCHAR:
                 return "string";
@@ -174,14 +183,14 @@ public class IcebergDataField {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 int timestampPrecision = ((TimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
-                        timestampPrecision > 3 && timestampPrecision <= 9,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9.");
+                        timestampPrecision >= 3 && timestampPrecision <= 9,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
                 return timestampPrecision >= 7 ? "timestamp_ns" : "timestamp";
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
-                        timestampLtzPrecision > 3 && timestampLtzPrecision <= 9,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9.");
+                        timestampLtzPrecision >= 3 && timestampLtzPrecision <= 9,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
                 return timestampLtzPrecision >= 7 ? "timestamptz_ns" : "timestamptz";
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;
@@ -233,6 +242,8 @@ public class IcebergDataField {
                     return new DoubleType(!isRequired);
                 case "date":
                     return new DateType(!isRequired);
+                case "time":
+                    return new TimeType(!isRequired, 3);
                 case "string":
                     return new VarCharType(!isRequired, VarCharType.MAX_LENGTH);
                 case "binary":

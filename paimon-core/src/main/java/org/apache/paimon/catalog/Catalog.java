@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
@@ -32,6 +33,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
@@ -156,6 +158,15 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Return a {@link Table} identified by the given tableId.
+     *
+     * @param tableId Id of the table
+     * @return The requested table
+     * @throws TableIdNotExistException if the target does not exist
+     */
+    Table getTableById(String tableId) throws TableIdNotExistException;
+
+    /**
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * <p>NOTE: System tables will not be listed.
@@ -221,6 +232,17 @@ public interface Catalog extends AutoCloseable {
             @Nullable String tableNamePattern,
             @Nullable String tableType)
             throws DatabaseNotExistException;
+
+    /**
+     * Get list of table details under this database. An empty list is returned if none exists.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseName Name of the database to list table details.
+     * @return a list of the details of all tables in this database.
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException;
 
     /**
      * Gets an array of tables for a catalog.
@@ -336,6 +358,25 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
+    /**
+     * Replace an existing table with a new {@link Schema}.
+     *
+     * <p>For compatible FileStore tables, it truncates visible data and appends a new schema to the
+     * schema chain, preserving old schemas and snapshots for time travel. Other table kinds may
+     * fall back to drop-and-create behavior.
+     *
+     * @param identifier path of the table to be replaced
+     * @param newSchema the new {@link Schema}
+     * @param ignoreIfNotExists if true, do nothing when the table does not exist
+     * @throws TableNotExistException if the table does not exist and {@code ignoreIfNotExists} is
+     *     false
+     */
+    default void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "Catalog " + getClass().getName() + " does not support replaceTable.");
+    }
+
     // ======================= partition methods ===============================
 
     /**
@@ -380,6 +421,19 @@ public interface Catalog extends AutoCloseable {
             @Nullable Integer maxResults,
             @Nullable String pageToken,
             @Nullable String partitionNamePattern)
+            throws TableNotExistException;
+
+    /**
+     * Get Partition list by partition names of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @param partitions partition names to be queried
+     * @return a list of the partitions matching the given partition names
+     * @throws IllegalArgumentException if the number of partition specs exceeds 1000
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException;
 
     // ======================= view methods ===============================
@@ -628,10 +682,11 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
+     *   <li>{@link #renameBranch(Identifier, String, String)}.
      *   <li>{@link #listBranches(Identifier)}.
      *   <li>{@link #getTag(Identifier, String)}.
      *   <li>{@link #createTag(Identifier, String, Long, String, boolean)}.
-     *   <li>{@link #listTagsPaged(Identifier, Integer, String)}.
+     *   <li>{@link #listTagsPaged(Identifier, Integer, String, String)}.
      *   <li>{@link #deleteTag(Identifier, String)}.
      * </ul>
      */
@@ -709,6 +764,44 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
+     * Get paged consumers list of the table.
+     *
+     * @param identifier path of the table to list consumers
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the consumers with provided page size(@param maxResults) in this table and
+     *     next page token. Each consumer is represented as a Map.Entry where the key is the
+     *     consumer id and the value is the next snapshot id.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default PagedList<ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException("This catalog does not support list consumers");
+    }
+
+    /**
+     * Reset consumer for table.
+     *
+     * @param identifier path of the table
+     * @param consumerId consumer id
+     * @param nextSnapshotId next snapshot id. If null, the consumer will be deleted.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException("This catalog does not support reset consumer");
+    }
+
+    /**
      * rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table
@@ -717,7 +810,40 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    void rollbackTo(Identifier identifier, Instant instant) throws Catalog.TableNotExistException;
+    default void rollbackTo(Identifier identifier, Instant instant)
+            throws Catalog.TableNotExistException {
+        rollbackTo(identifier, instant, null);
+    }
+
+    /**
+     * rollback table by the given {@link Identifier} and instant.
+     *
+     * @param identifier path of the table
+     * @param instant like snapshotId or tagName
+     * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
+     *     snapshot.
+     * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
+            throws Catalog.TableNotExistException;
+
+    /**
+     * Rollback table schema to a specific schema version. All schema versions greater than the
+     * target will be deleted. This operation will fail if any snapshot, tag, or changelog
+     * references a schema version greater than the target.
+     *
+     * @param identifier path of the table
+     * @param schemaId the target schema version to rollback to
+     * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
 
     /**
      * Create a new branch for this table. By default, an empty branch will be created using the
@@ -737,6 +863,28 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException;
 
     /**
+     * Create a branch for this table with option to ignore if the branch already exists.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param branch the branch name
+     * @param fromTag from the tag
+     * @param ignoreIfExists if true, do nothing when branch already exists
+     * @throws TableNotExistException if the table in identifier doesn't exist
+     * @throws BranchAlreadyExistException if the branch already exists and ignoreIfExists is false
+     * @throws TagNotExistException if the tag doesn't exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void createBranch(
+            Identifier identifier, String branch, @Nullable String fromTag, boolean ignoreIfExists)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        if (ignoreIfExists && listBranches(identifier).contains(branch)) {
+            return;
+        }
+        createBranch(identifier, branch, fromTag);
+    }
+
+    /**
      * Drop the branch for this table.
      *
      * @param identifier path of the table, cannot be system or branch name.
@@ -746,6 +894,20 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()}
      */
     void dropBranch(Identifier identifier, String branch) throws BranchNotExistException;
+
+    /**
+     * Rename a branch for this table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param fromBranch the source branch name
+     * @param toBranch the target branch name
+     * @throws BranchNotExistException if the source branch doesn't exist
+     * @throws BranchAlreadyExistException if the target branch already exists
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException;
 
     /**
      * Fast-forward a branch to main branch.
@@ -813,6 +975,7 @@ public interface Catalog extends AutoCloseable {
      *     max results.
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
+     * @param tagNamePrefix A prefix for tag names. All tags will be returned if not set or empty.
      * @return a list of the names of tags with provided page size in this table and next page
      *     token, or a list of the names of all tags in this table if the catalog does not {@link
      *     #supportsListObjectsPaged()}.
@@ -821,7 +984,10 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()} or it does not {@link #supportsListByPattern()}
      */
     PagedList<String> listTagsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
             throws TableNotExistException;
 
     /**
@@ -840,14 +1006,33 @@ public interface Catalog extends AutoCloseable {
     // ==================== Partition Modifications ==========================
 
     /**
+     * Whether this catalog supports partition modification for tables.
+     *
+     * <p>If not, following methods will do nothing:
+     *
+     * <ul>
+     *   <li>{@link #createPartitions(Identifier, List)}.
+     *   <li>{@link #alterPartitions(Identifier, List)}.
+     * </ul>
+     *
+     * <p>If not, following method will be exactly the same as directly using {@link
+     * BatchTableCommit#truncatePartitions}:
+     *
+     * <ul>
+     *   <li>{@link #dropPartitions(Identifier, List)}.
+     * </ul>
+     */
+    boolean supportsPartitionModification();
+
+    /**
      * Create partitions of the specify table. Ignore existing partitions.
      *
      * @param identifier path of the table to create partitions
      * @param partitions partitions to be created
      * @throws TableNotExistException if the table does not exist
      */
-    void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
+    default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
 
     /**
      * Drop partitions of the specify table. Ignore non-existent partitions.
@@ -856,8 +1041,15 @@ public interface Catalog extends AutoCloseable {
      * @param partitions partitions to be deleted
      * @throws TableNotExistException if the table does not exist
      */
-    void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
+    default void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     /**
      * Alter partitions of the specify table. For non-existent partitions, partitions will be
@@ -867,8 +1059,8 @@ public interface Catalog extends AutoCloseable {
      * @param partitions partitions to be altered
      * @throws TableNotExistException if the table does not exist
      */
-    void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
-            throws TableNotExistException;
+    default void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {}
 
     // ======================= Function methods ===============================
 
@@ -1011,14 +1203,15 @@ public interface Catalog extends AutoCloseable {
     // ==================== Table Auth ==========================
 
     /**
-     * Auth table query select and get the filter for row level access control.
+     * Auth table query select and get the filter for row level access control and column masking
+     * rules.
      *
      * @param identifier path of the table to alter partitions
      * @param select selected fields, null if select all
-     * @return additional filter for row level access control
+     * @return additional filter for row level access control and column masking rules
      * @throws TableNotExistException if the table does not exist
      */
-    List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+    TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
 
     // ==================== Catalog Information ==========================
@@ -1052,6 +1245,7 @@ public interface Catalog extends AutoCloseable {
     String NUM_FILES_PROP = "numFiles";
     String TOTAL_SIZE_PROP = "totalSize";
     String LAST_UPDATE_TIME_PROP = "lastUpdateTime";
+    String TOTAL_BUCKETS = "totalBuckets";
 
     // ======================= Exceptions ===============================
 
@@ -1192,6 +1386,23 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /** Exception for trying to operate on a table by ID that doesn't exist. */
+    class TableIdNotExistException extends Exception {
+
+        private static final String MSG = "Table id %s does not exist.";
+
+        private final String tableId;
+
+        public TableIdNotExistException(String tableId, Throwable cause) {
+            super(String.format(MSG, tableId), cause);
+            this.tableId = tableId;
+        }
+
+        public String getTableId() {
+            return tableId;
+        }
+    }
+
     /** Exception for trying to operate on the table that doesn't have permission. */
     class TableNoPermissionException extends RuntimeException {
 
@@ -1211,6 +1422,55 @@ public interface Catalog extends AutoCloseable {
 
         @VisibleForTesting
         public TableNoPermissionException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a table by ID that doesn't have permission. */
+    class TableIdNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "Table id %s has no permission. Cause by %s.";
+
+        private final String tableId;
+
+        public TableIdNoPermissionException(String tableId, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            tableId,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.tableId = tableId;
+        }
+
+        public String getTableId() {
+            return tableId;
+        }
+    }
+
+    /** Exception for trying to operate on the view that doesn't have permission. */
+    class ViewNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "View %s has no permission. Caused by %s.";
+
+        private final Identifier identifier;
+
+        public ViewNoPermissionException(Identifier identifier, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.identifier = identifier;
+        }
+
+        @VisibleForTesting
+        public ViewNoPermissionException(Identifier identifier) {
             this(identifier, null);
         }
 

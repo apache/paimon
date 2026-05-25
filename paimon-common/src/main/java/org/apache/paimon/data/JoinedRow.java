@@ -253,6 +253,15 @@ public class JoinedRow implements InternalRow {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        if (pos < row1.getFieldCount()) {
+            return row1.getVector(pos);
+        } else {
+            return row2.getVector(pos - row1.getFieldCount());
+        }
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         if (pos < row1.getFieldCount()) {
             return row1.getMap(pos);

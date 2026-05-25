@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-org.apache.paimon.flink.kafka.KafkaLogStoreFactory
-
 ### cdc action factories
 org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableActionFactory
 org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseActionFactory

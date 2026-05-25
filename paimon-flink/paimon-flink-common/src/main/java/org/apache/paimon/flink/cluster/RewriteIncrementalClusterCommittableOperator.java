@@ -67,11 +67,7 @@ public class RewriteIncrementalClusterCommittableOperator
     @Override
     public void processElement(StreamRecord<Committable> element) throws Exception {
         Committable committable = element.getValue();
-        if (committable.kind() != Committable.Kind.FILE) {
-            output.collect(element);
-        }
-
-        CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+        CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
         checkArgument(message.bucket() == 0);
         BinaryRow partition = message.partition();
         partitionFiles
@@ -107,9 +103,7 @@ public class RewriteIncrementalClusterCommittableOperator
                             table.coreOptions().bucket(),
                             DataIncrement.emptyIncrement(),
                             compactIncrement);
-            output.collect(
-                    new StreamRecord<>(
-                            new Committable(checkpointId, Committable.Kind.FILE, clusterMessage)));
+            output.collect(new StreamRecord<>(new Committable(checkpointId, clusterMessage)));
         }
 
         partitionFiles.clear();

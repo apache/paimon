@@ -26,6 +26,9 @@ import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheKey.PositionCacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.sst.BloomFilterHandle;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -56,6 +59,24 @@ public class FileBasedBloomFilter implements Closeable {
         this.filter = new BloomFilter(expectedEntries, readLength);
         this.accessCount = 0;
         this.cacheKey = CacheKey.forPosition(filePath, readOffset, readLength, true);
+    }
+
+    @Nullable
+    public static FileBasedBloomFilter create(
+            SeekableInputStream input,
+            Path filePath,
+            CacheManager cacheManager,
+            @Nullable BloomFilterHandle bloomFilterHandle) {
+        if (bloomFilterHandle == null) {
+            return null;
+        }
+        return new FileBasedBloomFilter(
+                input,
+                filePath,
+                cacheManager,
+                bloomFilterHandle.expectedEntries(),
+                bloomFilterHandle.offset(),
+                bloomFilterHandle.size());
     }
 
     public boolean testHash(int hash) {

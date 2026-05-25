@@ -326,6 +326,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         private final List<String> computedColumnArgs = new ArrayList<>();
         private final List<String> typeMappingModes = new ArrayList<>();
         private final List<String> metadataColumns = new ArrayList<>();
+        private String metadataColumnPrefix = null;
         private boolean syncPKeysFromSourceSchema = true;
 
         public SyncTableActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
@@ -372,6 +373,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncTableActionBuilder<T> withMetadataColumnPrefix(String prefix) {
+            this.metadataColumnPrefix = prefix;
+            return this;
+        }
+
         public SyncTableActionBuilder<T> syncPKeysFromSourceSchema(boolean flag) {
             this.syncPKeysFromSourceSchema = flag;
             return this;
@@ -400,6 +406,10 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
+            if (metadataColumnPrefix != null) {
+                args.add("--metadata-column-prefix");
+                args.add(metadataColumnPrefix);
+            }
             args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
             args.add("--use_pkeys_from_source_for_paimon_schema");
 

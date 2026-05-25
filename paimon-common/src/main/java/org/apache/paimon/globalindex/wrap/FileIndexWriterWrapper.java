@@ -20,16 +20,16 @@ package org.apache.paimon.globalindex.wrap;
 
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.utils.Range;
 
 import java.io.OutputStream;
 import java.util.Collections;
 import java.util.List;
 
 /** A {@link GlobalIndexReader} wrapper for {@link FileIndexWriter}. */
-public class FileIndexWriterWrapper implements GlobalIndexWriter {
+public class FileIndexWriterWrapper implements GlobalIndexSingletonWriter {
 
     private final GlobalIndexFileWriter fileWriter;
     private final FileIndexWriter writer;
@@ -58,8 +58,7 @@ public class FileIndexWriterWrapper implements GlobalIndexWriter {
             } catch (Exception e) {
                 throw new RuntimeException("Failed to write global index file: " + fileName, e);
             }
-            return Collections.singletonList(
-                    ResultEntry.of(fileName, null, new Range(0, count - 1)));
+            return Collections.singletonList(new ResultEntry(fileName, count, null));
         } else {
             return Collections.emptyList();
         }

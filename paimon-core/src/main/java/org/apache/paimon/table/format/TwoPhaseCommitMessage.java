@@ -26,7 +26,8 @@ import javax.annotation.Nullable;
 
 /** {@link CommitMessage} implementation for format table. */
 public class TwoPhaseCommitMessage implements CommitMessage {
-    private TwoPhaseOutputStream.Committer committer;
+
+    private final TwoPhaseOutputStream.Committer committer;
 
     public TwoPhaseCommitMessage(TwoPhaseOutputStream.Committer committer) {
         this.committer = committer;

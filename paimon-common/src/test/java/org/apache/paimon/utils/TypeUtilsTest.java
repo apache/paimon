@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -114,6 +115,14 @@ public class TypeUtilsTest {
                                         BinaryString.fromString("2"))
                                 .toArray());
         assertThat(result).isEqualTo(expected);
+    }
+
+    @Test
+    public void testVectorCastFromString() {
+        String value = "[1.0, 2.5, 3.5]";
+        Object result = TypeUtils.castFromString(value, DataTypes.VECTOR(3, DataTypes.FLOAT()));
+        BinaryVector vector = (BinaryVector) result;
+        assertThat(vector.toFloatArray()).isEqualTo(new float[] {1.0f, 2.5f, 3.5f});
     }
 
     @Test

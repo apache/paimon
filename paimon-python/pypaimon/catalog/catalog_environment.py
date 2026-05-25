@@ -1,20 +1,19 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import Optional
 
@@ -23,6 +22,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.catalog_snapshot_commit import CatalogSnapshotCommit
 from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
 from pypaimon.snapshot.snapshot_commit import SnapshotCommit
+from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
 
 class CatalogEnvironment:
@@ -59,6 +59,32 @@ class CatalogEnvironment:
             # In a full implementation, this would use a proper lock factory
             # to create locks based on the catalog lock context
             return RenamingSnapshotCommit(snapshot_manager)
+
+    def catalog_table_rollback(self):
+        """Create a TableRollback instance based on the catalog environment.
+
+        Returns a TableRollback that delegates to catalog.rollback_to
+        when catalog_loader is available and version management is supported.
+        Returns None otherwise (fallback to local file cleanup).
+
+        Returns:
+            A TableRollback instance, or None.
+        """
+        if self.catalog_loader is not None and self.supports_version_management:
+            from pypaimon.catalog.table_rollback import TableRollback
+            catalog = self.catalog_loader.load()
+            return TableRollback(catalog, self.identifier)
+        return None
+
+    def snapshot_loader(self) -> Optional[SnapshotLoader]:
+        """Create a SnapshotLoader instance based on the catalog environment.
+
+        Returns:
+            SnapshotLoader instance if catalog_loader is available, None otherwise
+        """
+        if self.catalog_loader is not None:
+            return SnapshotLoader(self.catalog_loader, self.identifier)
+        return None
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """

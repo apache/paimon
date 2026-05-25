@@ -67,6 +67,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.TreeMap;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -188,6 +189,11 @@ public class TagsTable implements ReadonlyTable {
         public int hashCode() {
             return Objects.hash(location);
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private class TagsRead implements InnerTableRead {
@@ -195,13 +201,15 @@ public class TagsTable implements ReadonlyTable {
         private final FileIO fileIO;
         private RowType readType;
 
+        @Nullable private Predicate postFilter;
+
         public TagsRead(FileIO fileIO) {
             this.fileIO = fileIO;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.postFilter = predicate;
             return this;
         }
 
@@ -266,6 +274,11 @@ public class TagsTable implements ReadonlyTable {
 
             Iterator<InternalRow> rows =
                     Iterators.transform(nameToSnapshot.entrySet().iterator(), this::toRow);
+
+            if (postFilter != null) {
+                rows = Iterators.filter(rows, postFilter::test);
+            }
+
             if (readType != null) {
                 rows =
                         Iterators.transform(

@@ -34,7 +34,7 @@ import java.util.Map;
 /** {@link VersionedSerializer} for {@link ManifestCommittable}. */
 public class ManifestCommittableSerializer implements VersionedSerializer<ManifestCommittable> {
 
-    private static final int CURRENT_VERSION = 4;
+    private static final int CURRENT_VERSION = 5;
 
     private final CommitMessageSerializer commitMessageSerializer;
 
@@ -61,20 +61,10 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
             view.writeBoolean(false);
             view.writeLong(watermark);
         }
-        serializeOffsets(view, obj.logOffsets());
         serializeProperties(view, obj.properties());
         view.writeInt(commitMessageSerializer.getVersion());
         commitMessageSerializer.serializeList(obj.fileCommittables(), view);
         return out.toByteArray();
-    }
-
-    private void serializeOffsets(DataOutputViewStreamWrapper view, Map<Integer, Long> offsets)
-            throws IOException {
-        view.writeInt(offsets.size());
-        for (Map.Entry<Integer, Long> entry : offsets.entrySet()) {
-            view.writeInt(entry.getKey());
-            view.writeLong(entry.getValue());
-        }
     }
 
     private void serializeProperties(
@@ -100,9 +90,11 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         long identifier = view.readLong();
         Long watermark = view.readBoolean() ? null : view.readLong();
-        Map<Integer, Long> offsets = deserializeOffsets(view);
+        if (version <= 4) {
+            skipLegacyLogOffsets(view);
+        }
         Map<String, String> properties =
-                version == CURRENT_VERSION ? deserializeProperties(view) : new HashMap<>();
+                version >= 4 ? deserializeProperties(view) : new HashMap<>();
         int fileCommittableSerializerVersion = view.readInt();
         List<CommitMessage> fileCommittables;
         try {
@@ -119,7 +111,7 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
             if (!view.readBoolean()) {
                 view.readLong();
             }
-            deserializeOffsets(view);
+            skipLegacyLogOffsets(view);
             view.readInt();
 
             if (legacyV2CommitMessageSerializer == null) {
@@ -128,17 +120,15 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
             fileCommittables = legacyV2CommitMessageSerializer.deserializeList(view);
         }
 
-        return new ManifestCommittable(
-                identifier, watermark, offsets, fileCommittables, properties);
+        return new ManifestCommittable(identifier, watermark, fileCommittables, properties);
     }
 
-    private Map<Integer, Long> deserializeOffsets(DataInputDeserializer view) throws IOException {
+    private void skipLegacyLogOffsets(DataInputDeserializer view) throws IOException {
         int size = view.readInt();
-        Map<Integer, Long> offsets = new HashMap<>(size);
         for (int i = 0; i < size; i++) {
-            offsets.put(view.readInt(), view.readLong());
+            view.readInt();
+            view.readLong();
         }
-        return offsets;
     }
 
     private Map<String, String> deserializeProperties(DataInputDeserializer view)

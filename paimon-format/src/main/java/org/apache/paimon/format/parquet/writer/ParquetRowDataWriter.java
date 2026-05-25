@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -29,7 +30,6 @@ import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
-import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
@@ -70,11 +70,17 @@ public class ParquetRowDataWriter {
     private final Configuration conf;
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
+    @Nullable private final RowType shreddingSchemas;
 
     public ParquetRowDataWriter(
-            RecordConsumer recordConsumer, RowType rowType, GroupType schema, Configuration conf) {
+            RecordConsumer recordConsumer,
+            RowType rowType,
+            GroupType schema,
+            Configuration conf,
+            @Nullable RowType shreddingSchemas) {
         this.conf = conf;
         this.recordConsumer = recordConsumer;
+        this.shreddingSchemas = shreddingSchemas;
         this.rowWriter = new RowWriter(rowType, schema);
     }
 
@@ -100,6 +106,8 @@ public class ParquetRowDataWriter {
                 case BINARY:
                 case VARBINARY:
                     return new BinaryWriter();
+                case BLOB:
+                    return new BlobDescriptorWriter();
                 case DECIMAL:
                     DecimalType decimalType = (DecimalType) t;
                     return createDecimalWriter(decimalType.getPrecision(), decimalType.getScale());
@@ -144,9 +152,11 @@ public class ParquetRowDataWriter {
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType);
             } else if (t instanceof VariantType && type instanceof GroupType) {
-                return new VariantWriter(
-                        groupType,
-                        VariantUtils.extractShreddingSchemaFromConf(conf, type.getName()));
+                RowType shreddingSchema =
+                        shreddingSchemas != null && shreddingSchemas.containsField(type.getName())
+                                ? (RowType) shreddingSchemas.getField(type.getName()).type()
+                                : null;
+                return new VariantWriter(groupType, shreddingSchema);
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -303,6 +313,33 @@ public class ParquetRowDataWriter {
 
         private void writeBinary(byte[] value) {
             recordConsumer.addBinary(Binary.fromReusedByteArray(value));
+        }
+    }
+
+    /** Writes inline BLOB bytes as serialized descriptor or view struct. */
+    private class BlobDescriptorWriter implements FieldWriter {
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            writeBlob(row.getBlob(ordinal));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            // Currently we don't support BLOB inside arrays/maps.
+            throw new UnsupportedOperationException("BLOB in array is not supported.");
+        }
+
+        private void writeBlob(Blob blob) {
+            try {
+                recordConsumer.addBinary(Binary.fromReusedByteArray(Blob.serializeBlob(blob)));
+            } catch (Throwable t) {
+                throw new IllegalArgumentException(
+                        "BLOB inline fields configured by blob-descriptor-field or "
+                                + "blob-view-field require values to be a BlobDescriptor or "
+                                + "BlobViewStruct.",
+                        t);
+            }
         }
     }
 

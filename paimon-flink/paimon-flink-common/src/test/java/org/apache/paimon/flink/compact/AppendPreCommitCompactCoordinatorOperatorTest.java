@@ -185,7 +185,7 @@ public class AppendPreCommitCompactCoordinatorOperatorTest {
         assertThat(record.getValue().isLeft()).isTrue();
         Committable committable = record.getValue().left();
         assertThat(committable.checkpointId()).isEqualTo(checkpointId);
-        CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+        CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
         assertThat(message.partition()).isEqualTo(partition);
         assertThat(message.newFilesIncrement().deletedFiles()).isEmpty();
         assertThat(message.newFilesIncrement().changelogFiles()).isEmpty();
@@ -228,7 +228,7 @@ public class AppendPreCommitCompactCoordinatorOperatorTest {
                                 Collections.emptyList(),
                                 Collections.emptyList()),
                         CompactIncrement.emptyIncrement());
-        return new Committable(checkpointId, Committable.Kind.FILE, message);
+        return new Committable(checkpointId, message);
     }
 
     private DataFileMeta createDataFileMetaOfSize(int mb) {

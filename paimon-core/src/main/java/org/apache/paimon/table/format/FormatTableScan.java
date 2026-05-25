@@ -33,11 +33,13 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.predicate.PredicateUtils;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -55,6 +57,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
@@ -107,7 +110,7 @@ public class FormatTableScan implements InnerTableScan {
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
-            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L));
+            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L, -1));
         }
         return partitionEntries;
     }
@@ -160,7 +163,7 @@ public class FormatTableScan implements InnerTableScan {
         }
     }
 
-    private List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+    List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
         boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
@@ -173,7 +176,16 @@ public class FormatTableScan implements InnerTableScan {
                     partitions,
                     onlyValueInPath);
         } else {
-            // search paths
+            // search paths with partition filter optimization
+            // This will prune partition directories early during traversal,
+            // which is especially important for cloud storage like OSS/S3
+            Map<String, Predicate> partitionPredicates = new HashMap<>();
+            if (partitionFilter instanceof DefaultPartitionPredicate) {
+                Predicate predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
+                partitionPredicates =
+                        PredicateUtils.splitPartitionPredicate(table.partitionType(), predicate);
+            }
+
             Pair<Path, Integer> scanPathAndLevel =
                     computeScanPathAndLevel(
                             new Path(table.location()),
@@ -186,7 +198,10 @@ public class FormatTableScan implements InnerTableScan {
                     scanPathAndLevel.getLeft(),
                     scanPathAndLevel.getRight(),
                     table.partitionKeys(),
-                    onlyValueInPath);
+                    onlyValueInPath,
+                    partitionPredicates,
+                    table.partitionType(),
+                    table.defaultPartName());
         }
     }
 
@@ -303,10 +318,14 @@ public class FormatTableScan implements InnerTableScan {
         Map<String, String> equals = new HashMap<>();
         for (Predicate sub : predicates) {
             if (sub instanceof LeafPredicate) {
-                LeafFunction function = ((LeafPredicate) sub).function();
-                String field = ((LeafPredicate) sub).fieldName();
-                if (function instanceof Equal && partitionKeys.contains(field)) {
-                    equals.put(field, ((LeafPredicate) sub).literals().get(0).toString());
+                Optional<FieldRef> fieldRefOptional = ((LeafPredicate) sub).fieldRefOptional();
+                if (fieldRefOptional.isPresent()) {
+                    FieldRef fieldRef = fieldRefOptional.get();
+                    LeafFunction function = ((LeafPredicate) sub).function();
+                    String field = fieldRef.name();
+                    if (function instanceof Equal && partitionKeys.contains(field)) {
+                        equals.put(field, ((LeafPredicate) sub).literals().get(0).toString());
+                    }
                 }
             }
         }

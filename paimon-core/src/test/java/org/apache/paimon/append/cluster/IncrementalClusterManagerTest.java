@@ -58,18 +58,6 @@ public class IncrementalClusterManagerTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testNonUnAwareBucketTable() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.BUCKET.key(), "1");
-        options.put(CoreOptions.BUCKET_KEY.key(), "f0");
-
-        assertThatThrownBy(() -> createTable(options, Collections.emptyList()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Cannot define bucket for incremental clustering  table, it only support bucket = -1");
-    }
-
-    @Test
     public void testNonClusterIncremental() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");
@@ -156,6 +144,38 @@ public class IncrementalClusterManagerTest {
         for (DataFileMeta upgradedFile : upgradedFiles) {
             assertThat(upgradedFile.level()).isEqualTo(outputLevel);
         }
+    }
+
+    @Test
+    public void testClusteringIncrementalModeDefault() throws Exception {
+        // Test default mode is GLOBAL_SORT
+        Map<String, String> options = new HashMap<>();
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        IncrementalClusterManager manager = new IncrementalClusterManager(table);
+        assertThat(manager.clusteringIncrementalMode())
+                .isEqualTo(CoreOptions.ClusteringIncrementalMode.GLOBAL_SORT);
+    }
+
+    @Test
+    public void testClusteringIncrementalModeLocalSort() throws Exception {
+        // Test local-sort mode
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL_MODE.key(), "local-sort");
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        IncrementalClusterManager manager = new IncrementalClusterManager(table);
+        assertThat(manager.clusteringIncrementalMode())
+                .isEqualTo(CoreOptions.ClusteringIncrementalMode.LOCAL_SORT);
+    }
+
+    @Test
+    public void testClusteringIncrementalModeGlobalSort() throws Exception {
+        // Test explicit global-sort mode
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL_MODE.key(), "global-sort");
+        FileStoreTable table = createTable(options, Collections.emptyList());
+        IncrementalClusterManager manager = new IncrementalClusterManager(table);
+        assertThat(manager.clusteringIncrementalMode())
+                .isEqualTo(CoreOptions.ClusteringIncrementalMode.GLOBAL_SORT);
     }
 
     @Test

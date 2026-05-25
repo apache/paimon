@@ -260,6 +260,58 @@ class StringUtilsTest {
     }
 
     @Nested
+    class CommonsCompatibilityTests {
+
+        @Test
+        void testIsBlank() {
+            assertThat(StringUtils.isBlank(null)).isTrue();
+            assertThat(StringUtils.isBlank("")).isTrue();
+            assertThat(StringUtils.isBlank(" \t")).isTrue();
+            assertThat(StringUtils.isBlank("paimon")).isFalse();
+        }
+
+        @Test
+        void testEquals() {
+            assertThat(StringUtils.equals(null, null)).isTrue();
+            assertThat(StringUtils.equals(null, "paimon")).isFalse();
+            assertThat(StringUtils.equals("paimon", "paimon")).isTrue();
+            assertThat(StringUtils.equals("paimon", "Paimon")).isFalse();
+        }
+
+        @Test
+        void testStartsWithAndEndsWith() {
+            assertThat(StringUtils.startsWith("manifest-1", "manifest")).isTrue();
+            assertThat(StringUtils.startsWith(null, "manifest")).isFalse();
+            assertThat(StringUtils.startsWith(null, null)).isTrue();
+            assertThat(StringUtils.endsWith("part-0.parquet", ".parquet")).isTrue();
+            assertThat(StringUtils.endsWith("part-0.orc", ".parquet")).isFalse();
+            assertThat(StringUtils.endsWith(null, null)).isTrue();
+        }
+
+        @Test
+        void testSubstringBeforeAndAfterLast() {
+            assertThat(StringUtils.substringBeforeLast("a/b/c", "/")).isEqualTo("a/b");
+            assertThat(StringUtils.substringBeforeLast("abc", "/")).isEqualTo("abc");
+            assertThat(StringUtils.substringAfterLast("a/b/c", "/")).isEqualTo("c");
+            assertThat(StringUtils.substringAfterLast("abc/", "/")).isEmpty();
+        }
+
+        @Test
+        void testStripEnd() {
+            assertThat(StringUtils.stripEnd("cpu\n", null)).isEqualTo("cpu");
+            assertThat(StringUtils.stripEnd("abccc", "c")).isEqualTo("ab");
+            assertThat(StringUtils.stripEnd("abc", "")).isEqualTo("abc");
+        }
+
+        @Test
+        void testTrimToNull() {
+            assertThat(StringUtils.trimToNull(null)).isNull();
+            assertThat(StringUtils.trimToNull("   ")).isNull();
+            assertThat(StringUtils.trimToNull("  paimon  ")).isEqualTo("paimon");
+        }
+    }
+
+    @Nested
     class RandomNumericStringTests {
 
         @Test
@@ -328,6 +380,30 @@ class StringUtilsTest {
             assertThat(StringUtils.join(Arrays.asList("a", "b", "c"), null)).isEqualTo("abc");
             assertThat(StringUtils.join(Arrays.asList("single"), ",")).isEqualTo("single");
             assertThat(StringUtils.join(Arrays.asList("a", null, "c"), ",")).isEqualTo("a,,c");
+        }
+
+        @Test
+        void testJoinArrayNullDelimiter() {
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, null))
+                    .isInstanceOf(NullPointerException.class)
+                    .hasMessage("The delimiter must not be null");
+        }
+
+        @Test
+        void testJoinArrayStartAndEndIndex() {
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, "--", 1, 3))
+                    .isEqualTo("b--c");
+            assertThat(StringUtils.join(new Object[] {"a", "b", "c"}, "--", 2, 2)).isEmpty();
+        }
+
+        @Test
+        void testJoinArrayInvalidIndex() {
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 0, -1))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 3, 3))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> StringUtils.join(new Object[] {"a", "b", "c"}, ",", 0, 4))
+                    .isInstanceOf(ArrayIndexOutOfBoundsException.class);
         }
 
         @Test
@@ -408,6 +484,101 @@ class StringUtilsTest {
                 strings = {"", " ", "abc", "12.3", "12a", "a12", " 12", "12 ", "+12", "-", "1 23"})
         void testIsNumericInvalidNumbers(String input) {
             assertThat(StringUtils.isNumeric(input)).isFalse();
+        }
+    }
+
+    @Nested
+    class TruncatedStringTests {
+
+        @Test
+        void testTruncatedStringWithinMaxFields() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 5);
+            assertThat(result).isEqualTo("[a, b, c]");
+        }
+
+        @Test
+        void testTruncatedStringExactlyMaxFields() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[a, b, c]");
+        }
+
+        @Test
+        void testTruncatedStringExceedsMaxFields() {
+            List<String> items = Arrays.asList("a", "b", "c", "d", "e");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[a, b, ... 3 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringExceedsMaxFieldsWithSeparator() {
+            List<Integer> items = Arrays.asList(1, 2, 3, 4, 5, 6);
+            String result = StringUtils.truncatedString(items, "(", "-", ")", 4);
+            assertThat(result).isEqualTo("(1-2-3-... 3 more fields)");
+        }
+
+        @Test
+        void testTruncatedStringEmptyCollection() {
+            List<String> items = Arrays.asList();
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[]");
+        }
+
+        @Test
+        void testTruncatedStringSingleElement() {
+            List<String> items = Arrays.asList("only");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 5);
+            assertThat(result).isEqualTo("[only]");
+        }
+
+        @Test
+        void testTruncatedStringMaxFieldsZero() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 0);
+            assertThat(result).isEqualTo("[, ... 3 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringMaxFieldsOne() {
+            List<String> items = Arrays.asList("a", "b", "c", "d");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 1);
+            assertThat(result).isEqualTo("[, ... 4 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringLargeCollection() {
+            List<Integer> items = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+            String result = StringUtils.truncatedString(items, "{", ", ", "}", 5);
+            assertThat(result).isEqualTo("{1, 2, 3, 4, ... 6 more fields}");
+        }
+
+        @Test
+        void testTruncatedStringWithEmptyStrings() {
+            List<String> items = Arrays.asList("", "a", "", "b", "");
+            String result = StringUtils.truncatedString(items, "[", "|", "]", 3);
+            assertThat(result).isEqualTo("[|a|... 3 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringWithNullElements() {
+            List<String> items = Arrays.asList("a", null, "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[a, null, ... 2 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringWithCustomDelimiters() {
+            List<String> items = Arrays.asList("apple", "banana", "cherry", "date");
+            String result = StringUtils.truncatedString(items, "<", " | ", ">", 3);
+            assertThat(result).isEqualTo("<apple | banana | ... 2 more fields>");
+        }
+
+        @Test
+        void testTruncatedStringWithEmptyDelimiters() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "", "", "", 5);
+            assertThat(result).isEqualTo("abc");
         }
     }
 

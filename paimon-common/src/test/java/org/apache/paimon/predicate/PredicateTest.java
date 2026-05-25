@@ -23,6 +23,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -293,6 +295,32 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null)).isEqualTo(builder.isNull(0));
+    }
+
+    @Test
+    public void testIsNaNDouble() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new DoubleType()));
+        Predicate predicate = builder.isNaN(0);
+
+        assertThat(predicate.test(GenericRow.of(Double.NaN))).isEqualTo(true);
+        assertThat(predicate.test(GenericRow.of(1.5))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of(Double.POSITIVE_INFINITY))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(false);
+
+        assertThat(test(predicate, 3, new SimpleColStats[] {new SimpleColStats(0.0, 1.0, 0L)}))
+                .isEqualTo(true);
+
+        assertThat(predicate.negate()).isEmpty();
+    }
+
+    @Test
+    public void testIsNaNFloat() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new FloatType()));
+        Predicate predicate = builder.isNaN(0);
+
+        assertThat(predicate.test(GenericRow.of(Float.NaN))).isEqualTo(true);
+        assertThat(predicate.test(GenericRow.of(1.5f))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(false);
     }
 
     @Test
@@ -568,7 +596,7 @@ public class PredicateTest {
     private LeafFunction getLikeFunc(String pattern) {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
         Predicate predicate = builder.like(0, fromString(pattern));
-        return ((LeafPredicate) predicate).function;
+        return ((LeafPredicate) predicate).function();
     }
 
     @Test
@@ -711,5 +739,18 @@ public class PredicateTest {
         assertThat(p9.toString())
                 .isEqualTo(
                         "NotIn(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
+    }
+
+    @Test
+    public void testPredicateToStringWithManyFields() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Object> literals = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) {
+            literals.add(i);
+        }
+        Predicate p = builder.in(0, literals);
+        assertThat(p.toString())
+                .isEqualTo(
+                        "In(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, ... 76 more fields])");
     }
 }

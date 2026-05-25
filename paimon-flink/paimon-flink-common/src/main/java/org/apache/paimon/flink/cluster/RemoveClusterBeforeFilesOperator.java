@@ -57,9 +57,7 @@ public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Sp
                                 dataSplit.dataFiles(),
                                 Collections.emptyList(),
                                 Collections.emptyList()));
-        output.collect(
-                new StreamRecord<>(
-                        new Committable(Long.MAX_VALUE, Committable.Kind.FILE, message)));
+        output.collect(new StreamRecord<>(new Committable(Long.MAX_VALUE, message)));
     }
 
     @Override
@@ -69,9 +67,7 @@ public class RemoveClusterBeforeFilesOperator extends BoundedOneInputOperator<Sp
 
     private void emitDvIndexCommitMessages(long checkpointId) {
         if (dvCommitMessage != null) {
-            output.collect(
-                    new StreamRecord<>(
-                            new Committable(checkpointId, Committable.Kind.FILE, dvCommitMessage)));
+            output.collect(new StreamRecord<>(new Committable(checkpointId, dvCommitMessage)));
         }
     }
 }

@@ -1,34 +1,35 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import io
+import struct
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import BinaryIO, Optional, Union
 from urllib.parse import urlparse
 
 from pypaimon.common.uri_reader import UriReader, FileUriReader
 
 
 class BlobDescriptor:
-    CURRENT_VERSION = 1
+    CURRENT_VERSION = 2
+    MAGIC = 0x424C4F4244455343  # "BLOBDESC"
 
-    def __init__(self, uri: str, offset: int, length: int, version: int = CURRENT_VERSION):
-        self._version = version
+    def __init__(self, uri: str, offset: int, length: int):
+        self._version = self.CURRENT_VERSION
         self._uri = uri
         self._offset = offset
         self._length = length
@@ -50,25 +51,20 @@ class BlobDescriptor:
         return self._version
 
     def serialize(self) -> bytes:
-        import struct
-
         uri_bytes = self._uri.encode('utf-8')
         uri_length = len(uri_bytes)
-
-        # Pack using little endian format
         data = struct.pack('<B', self._version)  # version (1 byte)
+        if self._version > 1:
+            data += struct.pack('<Q', self.MAGIC)  # magic (8 bytes, unsigned)
         data += struct.pack('<I', uri_length)  # uri length (4 bytes)
         data += uri_bytes  # uri bytes
         data += struct.pack('<q', self._offset)  # offset (8 bytes, signed)
         data += struct.pack('<q', self._length)  # length (8 bytes, signed)
-
         return data
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'BlobDescriptor':
-        import struct
-
-        if len(data) < 5:  # minimum size: version(1) + uri_length(4)
+        if len(data) < 5:
             raise ValueError("Invalid BlobDescriptor data: too short")
 
         offset = 0
@@ -77,11 +73,26 @@ class BlobDescriptor:
         version = struct.unpack('<B', data[offset:offset + 1])[0]
         offset += 1
 
-        # For now, we only support version 1, but allow flexibility for future versions
-        if version < 1:
-            raise ValueError(f"Unsupported BlobDescriptor version: {version}")
+        if version > cls.CURRENT_VERSION:
+            raise ValueError(
+                f"Expecting BlobDescriptor version to be less than or equal to "
+                f"{cls.CURRENT_VERSION}, but found {version}."
+            )
+
+        if version > 1:
+            if offset + 8 > len(data):
+                raise ValueError("Invalid BlobDescriptor data: too short")
+            magic = struct.unpack('<Q', data[offset:offset + 8])[0]
+            offset += 8
+            if magic != cls.MAGIC:
+                raise ValueError(
+                    f"Invalid BlobDescriptor: missing magic header. Expected magic: "
+                    f"{cls.MAGIC}, but found: {magic}"
+                )
 
         # Read URI length
+        if offset + 4 > len(data):
+            raise ValueError("Invalid BlobDescriptor data: too short")
         uri_length = struct.unpack('<I', data[offset:offset + 4])[0]
         offset += 4
 
@@ -102,7 +113,31 @@ class BlobDescriptor:
 
         blob_length = struct.unpack('<q', data[offset:offset + 8])[0]
 
-        return cls(uri, blob_offset, blob_length, version)
+        descriptor = cls(uri, blob_offset, blob_length)
+        descriptor._version = version
+        return descriptor
+
+    @classmethod
+    def is_blob_descriptor(cls, data: bytes) -> bool:
+        if not isinstance(data, (bytes, bytearray)):
+            return False
+        raw = bytes(data)
+        if len(raw) < 9:
+            return False
+
+        version = raw[0]
+        # v1 descriptors remain deserializable for compatibility,
+        # but descriptor detection is v2-only.
+        if version == 1:
+            return False
+        if version > cls.CURRENT_VERSION:
+            return False
+
+        try:
+            magic = struct.unpack('<Q', raw[1:9])[0]
+            return magic == cls.MAGIC
+        except Exception:
+            return False
 
     def __eq__(self, other) -> bool:
         """Check equality with another BlobDescriptor."""
@@ -127,6 +162,72 @@ class BlobDescriptor:
         return self.__str__()
 
 
+class OffsetInputStream(io.RawIOBase):
+
+    def __init__(self, wrapped, offset: int, length: int):
+        self._wrapped = wrapped
+        self._offset = offset
+        self._length = length
+        if offset != 0:
+            wrapped.seek(offset)
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def readinto(self, b):
+        if self._length != -1:
+            remaining = self._length - self.tell()
+            if remaining <= 0:
+                return 0
+            if len(b) > remaining:
+                b = memoryview(b)[:remaining]
+        n = self._wrapped.readinto(b)
+        return n if n is not None else 0
+
+    def read(self, size=-1):
+        if size is None:
+            size = -1
+        if self._length != -1:
+            remaining = self._length - self.tell()
+            if remaining <= 0:
+                return b''
+            if size < 0 or size > remaining:
+                size = remaining
+        if size < 0:
+            return self._wrapped.read()
+        return self._wrapped.read(size)
+
+    def seek(self, pos, whence=io.SEEK_SET):
+        if whence == io.SEEK_SET:
+            if pos < 0:
+                raise ValueError(f"Negative seek position: {pos}")
+            target = self._offset + pos
+        elif whence == io.SEEK_CUR:
+            target = self._wrapped.tell() + pos
+            target = max(target, self._offset)
+        elif whence == io.SEEK_END:
+            if self._length != -1:
+                target = self._offset + self._length + pos
+            else:
+                end = self._wrapped.seek(0, io.SEEK_END)
+                target = max(end + pos, self._offset)
+            target = max(target, self._offset)
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+        return self._wrapped.seek(target) - self._offset
+
+    def tell(self) -> int:
+        return self._wrapped.tell() - self._offset
+
+    def close(self):
+        if not self.closed:
+            self._wrapped.close()
+            super().close()
+
+
 class Blob(ABC):
 
     @abstractmethod
@@ -138,7 +239,7 @@ class Blob(ABC):
         pass
 
     @abstractmethod
-    def new_input_stream(self) -> io.BytesIO:
+    def new_input_stream(self) -> BinaryIO:
         pass
 
     @staticmethod
@@ -155,7 +256,7 @@ class Blob(ABC):
             file_uri = file
         else:
             file_uri = f"file://{file}"
-        file_io = FileIO(file_uri, {})
+        file_io = FileIO.get(file_uri, {})
         uri_reader = FileUriReader(file_io)
         descriptor = BlobDescriptor(file, 0, -1)
         return Blob.from_descriptor(uri_reader, descriptor)
@@ -174,6 +275,26 @@ class Blob(ABC):
     @staticmethod
     def from_descriptor(uri_reader: UriReader, descriptor: BlobDescriptor) -> 'Blob':
         return BlobRef(uri_reader, descriptor)
+
+    @staticmethod
+    def from_bytes(data: Optional[bytes], file_io=None, allow_blob_data: bool = True) -> Optional['Blob']:
+        if data is None:
+            return None
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError(f"Blob.from_bytes expects bytes, got {type(data)}")
+        data = bytes(data)
+        is_descriptor = BlobDescriptor.is_blob_descriptor(data)
+        if not allow_blob_data and not is_descriptor:
+            raise ValueError(
+                "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
+            )
+        if is_descriptor:
+            if file_io is None:
+                raise ValueError("file_io is required to resolve BlobDescriptor bytes")
+            descriptor = BlobDescriptor.deserialize(data)
+            uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
+            return BlobRef(uri_reader, descriptor)
+        return BlobData(data)
 
 
 class BlobData(Blob):
@@ -200,7 +321,7 @@ class BlobData(Blob):
     def to_descriptor(self) -> 'BlobDescriptor':
         raise RuntimeError("Blob data can not convert to descriptor.")
 
-    def new_input_stream(self) -> io.BytesIO:
+    def new_input_stream(self) -> BinaryIO:
         return io.BytesIO(self._data)
 
     def __eq__(self, other) -> bool:
@@ -228,18 +349,16 @@ class BlobRef(Blob):
     def to_descriptor(self) -> BlobDescriptor:
         return self._descriptor
 
-    def new_input_stream(self) -> io.BytesIO:
+    def new_input_stream(self) -> BinaryIO:
         uri = self._descriptor.uri
         offset = self._descriptor.offset
         length = self._descriptor.length
-        with self._uri_reader.new_input_stream(uri) as input_stream:
-            if offset > 0:
-                input_stream.seek(offset)
-            if length == -1:
-                data = input_stream.read()
-            else:
-                data = input_stream.read(length)
-            return io.BytesIO(data)
+        stream = self._uri_reader.new_input_stream(uri)
+        try:
+            return OffsetInputStream(stream, offset, length)
+        except Exception:
+            stream.close()
+            raise
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, BlobRef):

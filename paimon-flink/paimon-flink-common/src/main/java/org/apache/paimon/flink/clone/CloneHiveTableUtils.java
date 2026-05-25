@@ -156,7 +156,9 @@ public class CloneHiveTableUtils {
             @Nullable String whereSql,
             @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
-            @Nullable String preferFileFormat)
+            @Nullable String preferFileFormat,
+            boolean metaOnly,
+            boolean cloneIfExists)
             throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
@@ -179,9 +181,18 @@ public class CloneHiveTableUtils {
                 partitionedSource
                         .process(
                                 new CloneHiveSchemaFunction(
-                                        sourceCatalogConfig, targetCatalogConfig, preferFileFormat))
+                                        sourceCatalogConfig,
+                                        targetCatalogConfig,
+                                        preferFileFormat,
+                                        cloneIfExists))
                         .name("Clone Schema")
                         .setParallelism(parallelism);
+
+        // if metaOnly is true, only clone schema and skip data cloning
+        if (metaOnly) {
+            schemaInfos.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
+            return;
+        }
 
         buildForCloneSplits(
                 sourceCatalogConfig, targetCatalogConfig, parallelism, whereSql, schemaInfos);

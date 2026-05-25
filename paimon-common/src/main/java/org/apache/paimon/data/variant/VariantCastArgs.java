@@ -21,6 +21,7 @@ package org.apache.paimon.data.variant;
 import java.io.Serializable;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Objects;
 
 /** Several parameters used by `VariantGet.cast`. Packed together to simplify parameter passing. */
 public class VariantCastArgs implements Serializable {
@@ -50,5 +51,19 @@ public class VariantCastArgs implements Serializable {
     @Override
     public String toString() {
         return "VariantCastArgs{" + "failOnError=" + failOnError + ", zoneId=" + zoneId + '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        VariantCastArgs that = (VariantCastArgs) o;
+        return failOnError == that.failOnError && Objects.equals(zoneId, that.zoneId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(failOnError, zoneId);
     }
 }

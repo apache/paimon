@@ -18,7 +18,8 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.paimon.shade.org.apache.commons.lang3.SystemUtils;
 
 import java.io.BufferedReader;

@@ -19,7 +19,7 @@
 package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionMarkDone;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -27,26 +27,26 @@ import java.util.LinkedHashMap;
 
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
-/** A {@link PartitionMarkDoneAction} which add mark "PartitionEventType.LOAD_DONE". */
+/** A {@link PartitionMarkDoneAction} which add done in metastore. */
 public class MarkPartitionDoneEventAction implements PartitionMarkDoneAction {
 
-    private final PartitionHandler partitionHandler;
+    private final PartitionMarkDone partitionMarkDone;
 
-    public MarkPartitionDoneEventAction(PartitionHandler partitionHandler) {
-        this.partitionHandler = partitionHandler;
+    public MarkPartitionDoneEventAction(PartitionMarkDone partitionMarkDone) {
+        this.partitionMarkDone = partitionMarkDone;
     }
 
     @Override
     public void markDone(String partition) throws Exception {
         LinkedHashMap<String, String> partitionSpec =
                 extractPartitionSpecFromPath(new Path(partition));
-        partitionHandler.markDonePartitions(Collections.singletonList(partitionSpec));
+        partitionMarkDone.markDonePartitions(Collections.singletonList(partitionSpec));
     }
 
     @Override
     public void close() throws IOException {
         try {
-            partitionHandler.close();
+            partitionMarkDone.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

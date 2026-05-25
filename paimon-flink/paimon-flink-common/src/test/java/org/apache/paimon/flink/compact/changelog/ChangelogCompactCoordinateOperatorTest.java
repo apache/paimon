@@ -268,7 +268,7 @@ public class ChangelogCompactCoordinateOperatorTest {
         Committable committable = record.getValue().left();
 
         assertThat(committable.checkpointId()).isEqualTo(1);
-        CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+        CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
         assertThat(message.partition()).isEqualTo(partition);
         assertThat(message.bucket()).isEqualTo(0);
 
@@ -334,7 +334,7 @@ public class ChangelogCompactCoordinateOperatorTest {
                                 compactChangelogMbs.stream()
                                         .map(this::createDataFileMetaOfSize)
                                         .collect(Collectors.toList())));
-        return new Committable(checkpointId, Committable.Kind.FILE, message);
+        return new Committable(checkpointId, message);
     }
 
     private DataFileMeta createDataFileMetaOfSize(int mb) {

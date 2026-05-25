@@ -20,6 +20,7 @@ package org.apache.paimon.rest.auth;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalogOptions;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,25 +37,32 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
 
     @Override
     public AuthProvider create(Options options) {
+        String uri = options.get(URI);
         String region =
                 options.getOptional(RESTCatalogOptions.DLF_REGION)
-                        .orElseGet(() -> parseRegionFromUri(options.get(URI)));
+                        .orElseGet(() -> parseRegionFromUri(uri));
+        String signingAlgorithm =
+                options.getOptional(RESTCatalogOptions.DLF_SIGNING_ALGORITHM)
+                        .orElseGet(() -> parseSigningAlgoFromUri(uri));
+
         if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_LOADER).isPresent()) {
             DLFTokenLoader dlfTokenLoader =
                     DLFTokenLoaderFactory.createDLFTokenLoader(
                             options.get(RESTCatalogOptions.DLF_TOKEN_LOADER), options);
-            return DLFAuthProvider.fromTokenLoader(dlfTokenLoader, region);
+            return DLFAuthProvider.fromTokenLoader(dlfTokenLoader, uri, region, signingAlgorithm);
         } else if (options.getOptional(RESTCatalogOptions.DLF_TOKEN_PATH).isPresent()) {
             DLFTokenLoader dlfTokenLoader =
                     DLFTokenLoaderFactory.createDLFTokenLoader("local_file", options);
-            return DLFAuthProvider.fromTokenLoader(dlfTokenLoader, region);
+            return DLFAuthProvider.fromTokenLoader(dlfTokenLoader, uri, region, signingAlgorithm);
         } else if (options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_ID).isPresent()
                 && options.getOptional(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET).isPresent()) {
             return DLFAuthProvider.fromAccessKey(
                     options.get(RESTCatalogOptions.DLF_ACCESS_KEY_ID),
                     options.get(RESTCatalogOptions.DLF_ACCESS_KEY_SECRET),
                     options.get(RESTCatalogOptions.DLF_SECURITY_TOKEN),
-                    region);
+                    uri,
+                    region,
+                    signingAlgorithm);
         }
         throw new IllegalArgumentException("DLF token path or AK must be set for DLF Auth.");
     }
@@ -73,5 +81,26 @@ public class DLFAuthProviderFactory implements AuthProviderFactory {
         }
         throw new IllegalArgumentException(
                 "Could not get region from conf or uri, please check your config.");
+    }
+
+    /**
+     * Parse signing algorithm from uri. Automatically selects the appropriate signer based on the
+     * endpoint uri.
+     *
+     * @param uri endpoint uri
+     * @return signing algorithm identifier
+     */
+    protected static String parseSigningAlgoFromUri(String uri) {
+        if (StringUtils.isEmpty(uri)) {
+            return DLFDefaultSigner.IDENTIFIER;
+        }
+
+        // Check for aliyun openapi endpoints
+        if (uri.toLowerCase().contains("dlfnext")) {
+            return DLFOpenApiSigner.IDENTIFIER;
+        }
+
+        // Default to dlf for unknown hosts
+        return DLFDefaultSigner.IDENTIFIER;
     }
 }

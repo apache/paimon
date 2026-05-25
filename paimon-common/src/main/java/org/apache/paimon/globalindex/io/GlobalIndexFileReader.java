@@ -19,11 +19,12 @@
 package org.apache.paimon.globalindex.io;
 
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 
 import java.io.IOException;
 
 /** File reader for global index. */
 public interface GlobalIndexFileReader {
 
-    SeekableInputStream getInputStream(String fileName) throws IOException;
+    SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException;
 }

@@ -18,13 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.format;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 
 import java.util.List;
 
@@ -38,13 +39,31 @@ public interface DataFormat {
      * Creates a new instance of {@link AbstractRecordParser} for this data format with the
      * specified configurations.
      *
+     * @param typeMapping Type mapping configuration
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link AbstractRecordParser}.
      */
     AbstractRecordParser createParser(
             TypeMapping typeMapping, List<ComputedColumn> computedColumns);
 
-    KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
+    /**
+     * Creates a new instance of {@link AbstractRecordParser} for this data format with the
+     * specified configurations including metadata converters.
+     *
+     * @param typeMapping Type mapping configuration
+     * @param computedColumns List of computed columns to be considered by the parser.
+     * @param metadataConverters Array of metadata converters for extracting CDC metadata
+     * @return A new instance of {@link AbstractRecordParser}.
+     */
+    default AbstractRecordParser createParser(
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            CdcMetadataConverter[] metadataConverters) {
+        return createParser(typeMapping, computedColumns)
+                .withMetadataConverters(metadataConverters);
+    }
+
+    KafkaRecordDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
             Configuration cdcSourceConfig);
 
     DeserializationSchema<CdcSourceRecord> createPulsarDeserializer(Configuration cdcSourceConfig);

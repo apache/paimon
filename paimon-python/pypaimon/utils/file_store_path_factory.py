@@ -1,24 +1,31 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import List, Optional, Tuple
 
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.table.bucket_mode import BucketMode
+
+
+def _is_null_or_whitespace_only(value) -> bool:
+    if value is None:
+        return True
+    s = str(value)
+    return len(s) == 0 or s.isspace()
 
 
 class FileStorePathFactory:
@@ -91,7 +98,12 @@ class FileStorePathFactory:
         if partition:
             partition_parts = []
             for i, field_name in enumerate(self.partition_keys):
-                partition_parts.append(f"{field_name}={partition[i]}")
+                val = partition[i]
+                if _is_null_or_whitespace_only(val):
+                    val = self.default_part_value
+                else:
+                    val = str(val)
+                partition_parts.append(f"{field_name}={val}")
             if partition_parts:
                 relative_parts = partition_parts + relative_parts
 
@@ -113,3 +125,32 @@ class FileStorePathFactory:
 
         relative_bucket_path = self.relative_bucket_path(partition, bucket)
         return ExternalPathProvider(self.external_paths, relative_bucket_path)
+
+    def global_index_path_factory(self) -> 'IndexPathFactory':
+        return IndexPathFactory(self.index_path())
+
+
+class IndexPathFactory:
+
+    def __init__(self, index_path: str):
+        self._index_path = index_path
+        self._file_count = 0
+
+    def index_path(self) -> str:
+        """Return the base index path."""
+        return self._index_path
+
+    def to_path(self, file_name: str) -> str:
+        """Convert a file name to a full path."""
+        return f"{self._index_path}/{file_name}"
+
+    def new_path(self, prefix: str = "index-") -> str:
+        """Create a new unique index file path."""
+        import uuid
+        unique_id = str(uuid.uuid4())
+        self._file_count += 1
+        return self.to_path(f"{prefix}{unique_id}-{self._file_count}")
+
+    def is_external_path(self) -> bool:
+        """Return whether this is an external path."""
+        return False

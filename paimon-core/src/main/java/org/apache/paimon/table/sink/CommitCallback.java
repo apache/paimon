@@ -40,13 +40,32 @@ import java.util.List;
  */
 public interface CommitCallback extends AutoCloseable {
 
-    void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot);
+    void call(Context context);
 
     void retry(ManifestCommittable committable);
 
     default void setTable(FileStoreTable table) {}
+
+    /** Context for callback. */
+    class Context {
+
+        public final List<SimpleFileEntry> baseFiles;
+        public final List<ManifestEntry> deltaFiles;
+        public final List<IndexManifestEntry> indexFiles;
+        public final Snapshot snapshot;
+        public final long identifier;
+
+        public Context(
+                List<SimpleFileEntry> baseFiles,
+                List<ManifestEntry> deltaFiles,
+                List<IndexManifestEntry> indexFiles,
+                Snapshot snapshot,
+                long identifier) {
+            this.baseFiles = baseFiles;
+            this.deltaFiles = deltaFiles;
+            this.indexFiles = indexFiles;
+            this.snapshot = snapshot;
+            this.identifier = identifier;
+        }
+    }
 }

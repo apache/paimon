@@ -40,6 +40,7 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFact
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap32AggFactory;
@@ -70,6 +71,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -81,6 +83,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.ThetaSketch.sketchOf;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -156,7 +159,10 @@ public class FieldAggregatorTest {
     public void testFieldListAggWithDefaultDelimiter() {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
-                        .create(new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
         BinaryString accumulator = BinaryString.fromString("user1");
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
@@ -168,7 +174,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -192,7 +198,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.distinct",
@@ -216,7 +222,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -239,7 +245,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -262,7 +268,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.distinct",
@@ -289,7 +295,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.distinct",
@@ -316,7 +322,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -339,7 +345,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.list-agg-delimiter", "-")),
@@ -348,6 +354,61 @@ public class FieldAggregatorTest {
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
                 .isEqualTo("user1-user2");
+    }
+
+    @Test
+    public void testFieldListAggDistinctShouldNotMatchSubstring() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString accumulator = BinaryString.fromString("abc,def,asd");
+        BinaryString inputField = BinaryString.fromString("ab,xy");
+        Object result = fieldListaggAgg.agg(accumulator, inputField);
+
+        assertNotNull(result);
+        assertEquals("abc,def,asd,ab,xy", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggDistinctSubstringWithCustomDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.distinct",
+                                                "true",
+                                                "fields.fieldName.list-agg-delimiter",
+                                                ";")),
+                                "fieldName");
+
+        BinaryString accumulator = BinaryString.fromString("abc;def;asd");
+        BinaryString inputField = BinaryString.fromString("ab;xy;def");
+        Object result = fieldListaggAgg.agg(accumulator, inputField);
+
+        assertNotNull(result);
+        assertEquals("abc;def;asd;ab;xy", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggWithBoundedVarcharShouldFail() {
+        FieldListaggAggFactory factory = new FieldListaggAggFactory();
+        // Should throw IllegalArgumentException when using VARCHAR(n) with length limit
+        assertThatThrownBy(
+                        () ->
+                                factory.create(
+                                        new VarCharType(100),
+                                        CoreOptions.fromMap(new HashMap<>()),
+                                        "fieldName"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Data type for list agg column must be STRING (unbounded VARCHAR), but was VARCHAR(100)");
     }
 
     @Test
@@ -626,7 +687,7 @@ public class FieldAggregatorTest {
         return new GenericArray(new InternalRow[] {row});
     }
 
-    private InternalRow row(int k0, int k1, String v) {
+    private InternalRow row(Integer k0, Integer k1, String v) {
         return GenericRow.of(k0, k1, BinaryString.fromString(v));
     }
 
@@ -1154,6 +1215,48 @@ public class FieldAggregatorTest {
         assertThat(agg).isEqualTo("test");
     }
 
+    @Test
+    public void testFieldNestedPartialUpdateAgg() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v2", DataTypes.STRING()));
+        FieldNestedPartialUpdateAgg agg =
+                new FieldNestedPartialUpdateAgg(
+                        FieldNestedPartialUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
+                        Collections.singletonList("k"));
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, null);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, null, "A");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, "A")));
+
+        current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
+
+        current = row(1, 2, "C");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(1, 2, "C")));
+    }
+
     private Map<Object, Object> toMap(Object... kvs) {
         Map<Object, Object> result = new HashMap<>();
         for (int i = 0; i < kvs.length; i += 2) {
@@ -1171,5 +1274,94 @@ public class FieldAggregatorTest {
             result.put(keyArray.getInt(i), valueArray.getString(i));
         }
         return result;
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAgg() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+
+        GenericMap map1 =
+                createTestMap(
+                        createEntry("key1", "A", "17682882903686900100"),
+                        createEntry("key2", "B", "17682882903686900100"));
+        GenericMap map2 =
+                createTestMap(
+                        createEntry("key1", "A1", "17682882903686900200"),
+                        createEntry("key3", "C", "17682882903686900200"));
+        GenericMap map3 = createTestMap(createEntry("key2", "B2", "17682882903686900050"));
+
+        Object acc = agg.agg(null, map1);
+        assertTestMap(acc, createExpectedEntry("key1", "A"), createExpectedEntry("key2", "B"));
+
+        acc = agg.agg(acc, map2);
+        assertTestMap(
+                acc,
+                createExpectedEntry("key1", "A1"),
+                createExpectedEntry("key2", "B"),
+                createExpectedEntry("key3", "C"));
+
+        acc = agg.agg(acc, map3);
+        assertTestMap(
+                acc,
+                createExpectedEntry("key1", "A1"),
+                createExpectedEntry("key2", "B"),
+                createExpectedEntry("key3", "C"));
+    }
+
+    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
+        return new AbstractMap.SimpleEntry<>(
+                BinaryString.fromString(key),
+                GenericRow.of(
+                        value == null ? null : BinaryString.fromString(value),
+                        ts == null ? null : BinaryString.fromString(ts)));
+    }
+
+    private Map.Entry<String, String> createExpectedEntry(String key, String value) {
+        return new AbstractMap.SimpleEntry<>(key, value);
+    }
+
+    @SafeVarargs
+    private final GenericMap createTestMap(Map.Entry<BinaryString, InternalRow>... entries) {
+        Map<BinaryString, InternalRow> map = new HashMap<>();
+        for (Map.Entry<BinaryString, InternalRow> entry : entries) {
+            map.put(entry.getKey(), entry.getValue());
+        }
+        return new GenericMap(map);
+    }
+
+    @SafeVarargs
+    private final void assertTestMap(Object mapObj, Map.Entry<String, String>... expected) {
+        InternalMap map = (InternalMap) mapObj;
+        Map<String, String> actual = new HashMap<>();
+
+        InternalArray keyArray = map.keyArray();
+        InternalArray valueArray = map.valueArray();
+
+        for (int i = 0; i < map.size(); i++) {
+            BinaryString keyBinary = keyArray.getString(i);
+            String key = keyBinary.toString();
+
+            InternalRow row = valueArray.getRow(i, 2);
+
+            String value = null;
+            if (!row.isNullAt(0)) {
+                BinaryString valueBinary = row.getString(0);
+                value = valueBinary != null ? valueBinary.toString() : null;
+            }
+            actual.put(key, value);
+        }
+
+        Map<String, String> expectedMap = new HashMap<>();
+        for (Map.Entry<String, String> e : expected) {
+            expectedMap.put(e.getKey(), e.getValue());
+        }
+
+        assertThat(actual).containsExactlyInAnyOrderEntriesOf(expectedMap);
     }
 }

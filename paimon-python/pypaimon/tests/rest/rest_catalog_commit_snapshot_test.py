@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
-
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import time
 import unittest
 from unittest.mock import Mock, patch
 
+import pyarrow as pa
+
+from pypaimon import Schema
 from pypaimon.api.api_response import CommitTableResponse
 from pypaimon.common.options import Options
 from pypaimon.api.rest_exception import NoSuchResourceException
@@ -31,6 +32,7 @@ from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
 class TestRESTCatalogCommitSnapshot(unittest.TestCase):
@@ -57,11 +59,12 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             schema_id=0,
             base_manifest_list="manifest-list-1",
             delta_manifest_list="manifest-list-1",
+            total_record_count=1,
+            delta_record_count=1,
             commit_user="test_user",
             commit_identifier=12345,
             commit_kind="APPEND",
-            time_millis=int(time.time() * 1000),
-            log_offsets={}
+            time_millis=int(time.time() * 1000)
         )
 
         # Create test statistics
@@ -164,13 +167,13 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
         from pypaimon.api.api_request import CommitTableRequest
 
         request = CommitTableRequest(
-            table_uuid="test-uuid",
+            table_id="test-uuid",
             snapshot=self.test_snapshot,
             statistics=self.test_statistics
         )
 
         # Verify request fields
-        self.assertEqual(request.table_uuid, "test-uuid")
+        self.assertEqual(request.table_id, "test-uuid")
         self.assertEqual(request.snapshot, self.test_snapshot)
         self.assertEqual(request.statistics, self.test_statistics)
 
@@ -289,6 +292,48 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
         finally:
             server.shutdown()
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestRESTCommit(RESTBaseTest):
+
+    def test_commit_succeeded_on_server_but_client_fails(self):
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        opts = {
+            'bucket': '1',
+            'file.format': 'parquet',
+            'commit.max-retries': '0',
+            'commit.timeout': '1000',
+        }
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, partition_keys=['id'], options=opts)
+        self.rest_catalog.create_table('default.test_abort_bug', schema, False)
+        table = self.rest_catalog.get_table('default.test_abort_bug')
+
+        tw = table.new_batch_write_builder().new_write()
+        tc = table.new_batch_write_builder().new_commit()
+        data = pa.Table.from_pydict(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c']}, schema=pa_schema)
+        tw.write_arrow(data)
+        cm = tw.prepare_commit()
+
+        real_commit = tc.file_store_commit.snapshot_commit.commit
+
+        def commit_then_raise(sn, st):
+            real_commit(sn, st)
+            raise RuntimeError("simulated")
+
+        with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
+            with self.assertRaises(RuntimeError):
+                tc.commit(cm)
+        tw.close()
+        tc.close()
+
+        # We no longer abort on failure. Data was committed on server.
+        rb = table.new_read_builder()
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
 
 
 if __name__ == '__main__':

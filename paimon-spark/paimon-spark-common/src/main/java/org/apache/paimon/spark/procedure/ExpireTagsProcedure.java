@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.TagTimeExpire;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -31,6 +32,7 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.TimeZone;
 
@@ -73,6 +75,10 @@ public class ExpireTagsProcedure extends BaseProcedure {
                 tableIdent,
                 table -> {
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
+                    fileStoreTable =
+                            fileStoreTable.copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.TAG_TIME_EXPIRE_ENABLED.key(), "true"));
                     TagTimeExpire tagTimeExpire =
                             fileStoreTable
                                     .store()

@@ -21,6 +21,7 @@ package org.apache.paimon.predicate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /** Extract leaf predicate for field names. */
 public class LeafPredicateExtractor implements PredicateVisitor<Map<String, LeafPredicate>> {
@@ -29,7 +30,11 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
 
     @Override
     public Map<String, LeafPredicate> visit(LeafPredicate predicate) {
-        return Collections.singletonMap(predicate.fieldName(), predicate);
+        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+        if (!fieldRefOptional.isPresent()) {
+            throw new UnsupportedOperationException();
+        }
+        return Collections.singletonMap(fieldRefOptional.get().name(), predicate);
     }
 
     @Override
@@ -40,10 +45,5 @@ public class LeafPredicateExtractor implements PredicateVisitor<Map<String, Leaf
             return leafPredicates;
         }
         return Collections.emptyMap();
-    }
-
-    @Override
-    public Map<String, LeafPredicate> visit(TransformPredicate predicate) {
-        throw new UnsupportedOperationException();
     }
 }

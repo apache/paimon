@@ -25,6 +25,7 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
@@ -41,7 +42,10 @@ import org.apache.parquet.column.statistics.FloatStatistics;
 import org.apache.parquet.column.statistics.IntStatistics;
 import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.PrimitiveType;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -56,14 +60,16 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
 
     private final RowType rowType;
     private final SimpleColStatsCollector.Factory[] statsCollectors;
+    private final Options options;
 
     public ParquetSimpleStatsExtractor(
-            RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
+            Options options, RowType rowType, SimpleColStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
                 rowType.getFieldCount() == statsCollectors.length,
                 "The stats collector is not aligned to write schema.");
+        this.options = options;
     }
 
     @Override
@@ -72,10 +78,33 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
     }
 
     @Override
+    public SimpleColStats[] extract(
+            FileIO fileIO, Path path, long length, @Nullable Object writerMetadata)
+            throws IOException {
+        if (writerMetadata instanceof ParquetMetadata) {
+            // Use in-memory metadata directly, avoiding re-reading the file.
+            // This is critical for object stores (OSS/S3) where the file may not be
+            // immediately visible after close.
+            Map<String, Statistics<?>> columnStats =
+                    ParquetUtil.extractColumnStats((ParquetMetadata) writerMetadata);
+            SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
+            return IntStream.range(0, rowType.getFieldCount())
+                    .mapToObj(
+                            i -> {
+                                DataField field = rowType.getFields().get(i);
+                                return toFieldStats(
+                                        field, columnStats.get(field.name()), collectors[i]);
+                            })
+                    .toArray(SimpleColStats[]::new);
+        }
+        return extract(fileIO, path, length);
+    }
+
+    @Override
     public Pair<SimpleColStats[], FileInfo> extractWithFileInfo(
             FileIO fileIO, Path path, long length) throws IOException {
         Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
-                ParquetUtil.extractColumnStats(fileIO, path, length);
+                ParquetUtil.extractColumnStats(fileIO, path, length, options);
         SimpleColStatsCollector[] collectors = SimpleColStatsCollector.create(statsCollectors);
         return Pair.of(
                 IntStream.range(0, rowType.getFieldCount())

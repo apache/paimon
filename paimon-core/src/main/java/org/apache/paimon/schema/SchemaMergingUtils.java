@@ -29,6 +29,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,6 +38,9 @@ import java.util.stream.Collectors;
 
 /** The util class for merging the schemas. */
 public class SchemaMergingUtils {
+
+    public static final String ARRAY_ELEMENT_FIELD_NAME = "element";
+    public static final String MAP_VALUE_FIELD_NAME = "value";
 
     public static TableSchema mergeSchemas(
             TableSchema currentTableSchema, RowType targetType, boolean allowExplicitCast) {
@@ -232,5 +236,107 @@ public class SchemaMergingUtils {
                 dataType,
                 field.description(),
                 field.defaultValue());
+    }
+
+    /**
+     * Generate a list of {@link SchemaChange} by comparing the old and new {@link TableSchema}.
+     * This supports detecting added columns and type changes (including nested structs).
+     */
+    public static List<SchemaChange> diffSchemaChanges(
+            TableSchema oldSchema, TableSchema newSchema) {
+        List<SchemaChange> changes = new ArrayList<>();
+        diffFields(
+                oldSchema.logicalRowType().getFields(),
+                newSchema.logicalRowType().getFields(),
+                new String[0],
+                changes);
+        return changes;
+    }
+
+    private static void diffFields(
+            List<DataField> oldFields,
+            List<DataField> newFields,
+            String[] parentNames,
+            List<SchemaChange> changes) {
+        Map<String, DataField> oldFieldMap =
+                oldFields.stream().collect(Collectors.toMap(DataField::name, Function.identity()));
+
+        for (DataField newField : newFields) {
+            String[] fieldNames = appendFieldName(parentNames, newField.name());
+            DataField oldField = oldFieldMap.get(newField.name());
+            if (oldField == null) {
+                // new column added
+                changes.add(
+                        SchemaChange.addColumn(
+                                fieldNames, newField.type(), newField.description(), null));
+            } else if (!oldField.type().equals(newField.type())
+                    && !diffNestedTypeChanges(
+                            oldField.type(), newField.type(), fieldNames, changes)) {
+                changes.add(SchemaChange.updateColumnType(fieldNames, newField.type(), true));
+            }
+        }
+    }
+
+    /**
+     * Returns true only when the type difference has been fully represented by nested schema
+     * changes. Returns false to let the caller fall back to {@link SchemaChange.UpdateColumnType}.
+     */
+    private static boolean diffNestedTypeChanges(
+            DataType oldType, DataType newType, String[] fieldNames, List<SchemaChange> changes) {
+        List<SchemaChange> stagedChanges = new ArrayList<>();
+        boolean handled = diffNestedTypeChangesInner(oldType, newType, fieldNames, stagedChanges);
+        if (handled) {
+            changes.addAll(stagedChanges);
+        }
+        return handled;
+    }
+
+    private static boolean diffNestedTypeChangesInner(
+            DataType oldType, DataType newType, String[] fieldNames, List<SchemaChange> changes) {
+        if (oldType instanceof RowType && newType instanceof RowType) {
+            List<DataField> oldFields = ((RowType) oldType).getFields();
+            List<DataField> newFields = ((RowType) newType).getFields();
+            if (hasRemovedFields(oldFields, newFields)) {
+                return false;
+            }
+            diffFields(oldFields, newFields, fieldNames, changes);
+            return true;
+        } else if (oldType instanceof ArrayType && newType instanceof ArrayType) {
+            return diffNestedTypeChanges(
+                    ((ArrayType) oldType).getElementType(),
+                    ((ArrayType) newType).getElementType(),
+                    appendFieldName(fieldNames, ARRAY_ELEMENT_FIELD_NAME),
+                    changes);
+        } else if (oldType instanceof MapType && newType instanceof MapType) {
+            MapType oldMapType = (MapType) oldType;
+            MapType newMapType = (MapType) newType;
+            if (!oldMapType.getKeyType().equals(newMapType.getKeyType())) {
+                return false;
+            }
+            return diffNestedTypeChanges(
+                    oldMapType.getValueType(),
+                    newMapType.getValueType(),
+                    appendFieldName(fieldNames, MAP_VALUE_FIELD_NAME),
+                    changes);
+        }
+        return false;
+    }
+
+    private static boolean hasRemovedFields(List<DataField> oldFields, List<DataField> newFields) {
+        Map<String, DataField> newFieldMap =
+                newFields.stream().collect(Collectors.toMap(DataField::name, Function.identity()));
+        for (DataField oldField : oldFields) {
+            if (!newFieldMap.containsKey(oldField.name())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String[] appendFieldName(String[] parentNames, String fieldName) {
+        String[] result = new String[parentNames.length + 1];
+        System.arraycopy(parentNames, 0, result, 0, parentNames.length);
+        result[parentNames.length] = fieldName;
+        return result;
     }
 }

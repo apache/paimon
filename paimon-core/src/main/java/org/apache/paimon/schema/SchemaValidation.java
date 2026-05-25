@@ -21,7 +21,9 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
@@ -30,20 +32,21 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -74,13 +77,18 @@ import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
-import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
+import static org.apache.paimon.types.DataTypeRoot.VECTOR;
+import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
+import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -92,8 +100,6 @@ public class SchemaValidation {
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
-     *
-     * <p>TODO validate all items in schema and all keys in options.
      *
      * @param schema the schema to be validated
      */
@@ -119,7 +125,7 @@ public class SchemaValidation {
 
         validateSequenceField(schema, options);
 
-        validateSequenceGroup(schema, options);
+        validateMergeFunction(schema);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
@@ -159,7 +165,55 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
+        RowType tableRowType = new RowType(schema.fields());
+        validateBlobFields(tableRowType, options);
+        Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
+        Set<String> blobViewFields =
+                validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
+        blobInlineFields.addAll(blobViewFields);
+        validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
+
+        List<DataField> fieldsInNormalFile = new ArrayList<>();
+        Set<String> fieldsInDedicatedFile =
+                SetUtils.union(
+                        fieldNamesInBlobFile(tableRowType, blobInlineFields),
+                        fieldNamesInVectorFile(tableRowType, options.withVectorFormat()));
+        for (DataField field : tableRowType.getFields()) {
+            if (!fieldsInDedicatedFile.contains(field.name())) {
+                fieldsInNormalFile.add(field);
+            }
+        }
+        fileFormat.validateDataFields(new RowType(fieldsInNormalFile));
+
+        for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
+            if (!"avro".equalsIgnoreCase(entry.getValue())) {
+                continue;
+            }
+            for (DataField field : fieldsInNormalFile) {
+                DataType type = field.type();
+                int precision = -1;
+                if (type instanceof TimestampType) {
+                    precision = ((TimestampType) type).getPrecision();
+                } else if (type instanceof LocalZonedTimestampType) {
+                    precision = ((LocalZonedTimestampType) type).getPrecision();
+                }
+                if (precision > 6) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "'%s' entry '%d:avro' is incompatible with column '%s' of type %s: "
+                                            + "Avro supports timestamp precision up to 6, got %d. "
+                                            + "Either lower the column precision, drop the per-level mapping for level %d, "
+                                            + "or use a different format (parquet or orc) for that level.",
+                                    CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
+                                    entry.getKey(),
+                                    field.name(),
+                                    type,
+                                    precision,
+                                    entry.getKey()));
+                }
+            }
+        }
 
         // Check column names in schema
         schema.fieldNames()
@@ -183,13 +237,6 @@ public class SchemaValidation {
                             "Doesn't support streaming read the changes from overwrite when the primary keys are "
                                     + "not defined. Please use %s to enable the streaming read overwrite commit for append table.",
                             CoreOptions.STREAMING_READ_APPEND_OVERWRITE.key()));
-        }
-
-        if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
-            if (schema.partitionKeys().isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Can not set 'partition.expiration-time' for non-partitioned table.");
-            }
         }
 
         String recordLevelTimeField = options.recordLevelTimeField();
@@ -234,24 +281,74 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
+        } else {
+            checkArgument(
+                    !options.deletionVectorsMergeOnRead(),
+                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
+        // vector field names must point to vector type
+        Set<String> fieldNamesSpecifiedAsVector = options.vectorField();
+        schema.fields()
+                .forEach(
+                        f ->
+                                checkState(
+                                        !fieldNamesSpecifiedAsVector.contains(f.name())
+                                                || VECTOR.equals(f.type().getTypeRoot()),
+                                        String.format(
+                                                "Field name[%s] is configured as vector-field so"
+                                                        + " the type must be vector, but it is %s",
+                                                f.name(), f.type())));
+        // vector field names must exist in table schema
+        schema.fieldNames().forEach(fieldNamesSpecifiedAsVector::remove);
+        checkArgument(
+                fieldNamesSpecifiedAsVector.isEmpty(),
+                "Some of the columns specified as vector-field are unknown.");
+
         validateMergeFunctionFactory(schema);
+
+        validateFileIndex(schema);
 
         validateRowTracking(schema, options);
 
         validateIncrementalClustering(schema, options);
+
+        validateChainTable(schema, options);
+
+        validateChangelogReadSequenceNumber(schema, options);
+
+        validatePkClusteringOverride(options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
         String fallbackBranch = schema.options().get(CoreOptions.SCAN_FALLBACK_BRANCH.key());
+        String primaryBranch = schema.options().get(CoreOptions.SCAN_PRIMARY_BRANCH.key());
+
+        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)
+                && !StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot set both '%s' and '%s' at the same time.",
+                            CoreOptions.SCAN_FALLBACK_BRANCH.key(),
+                            CoreOptions.SCAN_PRIMARY_BRANCH.key()));
+        }
+
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             checkArgument(
                     schemaManager.copyWithBranch(fallbackBranch).latest().isPresent(),
-                    "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
+                    "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
                     CoreOptions.SCAN_FALLBACK_BRANCH.key(),
                     fallbackBranch,
                     fallbackBranch);
+        }
+
+        if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+            checkArgument(
+                    schemaManager.copyWithBranch(primaryBranch).latest().isPresent(),
+                    "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
+                    CoreOptions.SCAN_PRIMARY_BRANCH.key(),
+                    primaryBranch,
+                    primaryBranch);
         }
     }
 
@@ -431,7 +528,8 @@ public class SchemaValidation {
                 .forEach(
                         k -> {
                             if (k.startsWith(FIELDS_PREFIX)) {
-                                String[] fields = k.split("\\.")[1].split(FIELDS_SEPARATOR);
+                                String[] segments = k.split("\\.");
+                                String[] fields = segments[1].split(FIELDS_SEPARATOR);
                                 for (String field : fields) {
                                     checkArgument(
                                             DEFAULT_AGG_FUNCTION.equals(field)
@@ -440,64 +538,76 @@ public class SchemaValidation {
                                                     "Field %s can not be found in table schema.",
                                                     field));
                                 }
+                                // PAIMON-6471: dot paths into a ROW field's members
+                                // (e.g. fields.row.inner.aggregate-function) are silently
+                                // dropped today and produce wrong results. This check
+                                // rejects them.
+                                if (segments.length > 3 && fields.length == 1) {
+                                    String parent = fields[0];
+                                    schema.fields().stream()
+                                            .filter(f -> f.name().equals(parent))
+                                            .findFirst()
+                                            .ifPresent(
+                                                    f ->
+                                                            checkArgument(
+                                                                    !(f.type() instanceof RowType),
+                                                                    "Nested-field path is not supported on ROW field '%s': %s",
+                                                                    parent,
+                                                                    k));
+                                }
                             }
                         });
     }
 
-    private static void validateSequenceGroup(TableSchema schema, CoreOptions options) {
-        Map<String, Set<String>> fields2Group = new HashMap<>();
-        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
-            String k = entry.getKey();
-            String v = entry.getValue();
-            List<String> fieldNames = schema.fieldNames();
-            if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
-                String[] sequenceFieldNames =
-                        k.substring(
-                                        FIELDS_PREFIX.length() + 1,
-                                        k.length() - SEQUENCE_GROUP.length() - 1)
-                                .split(FIELDS_SEPARATOR);
-
-                for (String field : v.split(FIELDS_SEPARATOR)) {
-                    if (!fieldNames.contains(field)) {
-                        throw new IllegalArgumentException(
-                                String.format("Field %s can not be found in table schema.", field));
-                    }
-
-                    List<String> sequenceFieldsList = new ArrayList<>();
-                    for (String sequenceFieldName : sequenceFieldNames) {
-                        if (!fieldNames.contains(sequenceFieldName)) {
-                            throw new IllegalArgumentException(
-                                    String.format(
-                                            "The sequence field group: %s can not be found in table schema.",
-                                            sequenceFieldName));
-                        }
-                        sequenceFieldsList.add(sequenceFieldName);
-                    }
-
-                    if (fields2Group.containsKey(field)) {
-                        List<List<String>> sequenceGroups = new ArrayList<>();
-                        sequenceGroups.add(new ArrayList<>(fields2Group.get(field)));
-                        sequenceGroups.add(sequenceFieldsList);
-
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Field %s is defined repeatedly by multiple groups: %s.",
-                                        field, sequenceGroups));
-                    }
-
-                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
-                    group.addAll(sequenceFieldsList);
-                }
-            }
+    private static void validateMergeFunction(TableSchema schema) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
         }
-        Set<String> illegalGroup =
-                fields2Group.values().stream()
-                        .flatMap(Collection::stream)
-                        .filter(g -> options.fieldAggFunc(g) != null)
-                        .collect(Collectors.toSet());
-        if (!illegalGroup.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Should not defined aggregation function on sequence group: " + illegalGroup);
+
+        createMergeFunctionFactory(schema);
+    }
+
+    private static void validateFileIndex(TableSchema schema) {
+        CoreOptions options = new CoreOptions(schema.options());
+        FileIndexOptions fileIndexOptions = options.indexColumnsOptions();
+        if (fileIndexOptions.isEmpty()) {
+            return;
+        }
+
+        Map<String, DataField> fieldMap = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            fieldMap.put(field.name(), field);
+        }
+
+        for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
+                fileIndexOptions.entrySet()) {
+            FileIndexOptions.Column column = entry.getKey();
+            String columnName = column.getColumnName();
+            checkArgument(
+                    fieldMap.containsKey(columnName),
+                    "Column '%s' specified in 'file-index.<index-type>.columns' "
+                            + "does not exist in table schema. Existing columns: %s.",
+                    columnName,
+                    schema.fieldNames());
+
+            DataField field = fieldMap.get(columnName);
+            if (column.isNestedColumn()) {
+                checkArgument(
+                        field.type().getTypeRoot() == DataTypeRoot.MAP,
+                        "Column '%s' is configured as nested column in "
+                                + "'file-index.<index-type>.columns' but is not a map type. "
+                                + "Only map type supports nested column.",
+                        columnName);
+                DataType keyType = ((MapType) field.type()).getKeyType();
+                DataTypeRoot keyRoot = keyType.getTypeRoot();
+                checkArgument(
+                        keyRoot == DataTypeRoot.CHAR || keyRoot == DataTypeRoot.VARCHAR,
+                        "Column '%s' is configured as nested column in "
+                                + "'file-index.<index-type>.columns', but its map key type is %s. "
+                                + "Only CHAR/VARCHAR/STRING is supported.",
+                        columnName,
+                        keyType);
+            }
         }
     }
 
@@ -508,9 +618,12 @@ public class SchemaValidation {
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for NONE/INPUT/LOOKUP changelog producer now.");
 
-        checkArgument(
-                !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
-                "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+        // pk-clustering-override mode allows deletion vectors for first-row
+        if (!options.pkClusteringOverride()) {
+            checkArgument(
+                    !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
+                    "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+        }
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
@@ -631,13 +744,13 @@ public class SchemaValidation {
         boolean rowTrackingEnabled = options.rowTrackingEnabled();
         if (rowTrackingEnabled) {
             checkArgument(
-                    options.bucket() == -1,
-                    "Cannot define %s for row tracking table, it only support bucket = -1",
-                    CoreOptions.BUCKET.key());
-            checkArgument(
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for row tracking table.",
                     PRIMARY_KEY.key());
+            checkArgument(
+                    options.bucket() == -1,
+                    "Cannot define %s for row tracking table, it only support bucket = -1",
+                    CoreOptions.BUCKET.key());
         }
 
         if (options.dataEvolutionEnabled()) {
@@ -647,36 +760,262 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+            checkArgument(
+                    !options.clusteringIncrementalEnabled(),
+                    "Data evolution config must disabled with clustering.incremental");
         }
 
+        List<DataField> fields = schema.fields();
         List<String> blobNames =
-                BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldNames();
+                fields.stream()
+                        .filter(field -> field.type().is(DataTypeRoot.BLOB))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
             checkArgument(
-                    blobNames.size() == 1,
-                    "Table with BLOB type column only support one BLOB column.");
-            checkArgument(
-                    schema.fields().size() > 1,
+                    fields.size() > blobNames.size(),
                     "Table with BLOB type column must have other normal columns.");
             checkArgument(
-                    !schema.partitionKeys().contains(blobNames.get(0)),
+                    blobNames.stream().noneMatch(schema.partitionKeys()::contains),
                     "The BLOB type column can not be part of partition keys.");
+        }
+
+        FileFormat vectorFileFormat = vectorFileFormat(options);
+        if (vectorFileFormat != null) {
+            Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
+            checkArgument(
+                    schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
+                    "The vector-store columns can not be part of partition keys.");
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with vector-store file format.");
+
+            List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
+            vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
+        }
+    }
+
+    private static void validateBlobFields(RowType rowType, CoreOptions options) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured =
+                CoreOptions.blobField(options.toMap()).stream()
+                        .collect(Collectors.toCollection(HashSet::new));
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_FIELD.key());
+        }
+    }
+
+    private static Set<String> validateBlobDescriptorFields(RowType rowType, CoreOptions options) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured = options.blobDescriptorField();
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        }
+        return configured;
+    }
+
+    private static Set<String> validateBlobViewFields(
+            RowType rowType, CoreOptions options, Set<String> blobDescriptorFields) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured = options.blobViewField();
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_VIEW_FIELD.key());
+            checkArgument(
+                    !blobDescriptorFields.contains(field),
+                    "Field '%s' in '%s' can not also be in '%s'.",
+                    field,
+                    CoreOptions.BLOB_VIEW_FIELD.key(),
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        }
+        return configured;
+    }
+
+    private static void validateBlobExternalStorageFields(
+            RowType rowType, CoreOptions options, Set<String> blobDescriptorFields) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured = options.blobExternalStorageField();
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
+            checkArgument(
+                    blobDescriptorFields.contains(field),
+                    "Field '%s' in '%s' must also be in '%s'.",
+                    field,
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(),
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        }
+        if (!configured.isEmpty()) {
+            String externalStoragePath = options.blobExternalStoragePath();
+            checkArgument(
+                    externalStoragePath != null && !externalStoragePath.isEmpty(),
+                    "'%s' must be set when '%s' is configured.",
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
         }
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
         if (options.clusteringIncrementalEnabled()) {
             checkArgument(
-                    options.bucket() == -1,
-                    "Cannot define %s for incremental clustering  table, it only support bucket = -1",
-                    CoreOptions.BUCKET.key());
-            checkArgument(
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for incremental clustering table.",
                     PRIMARY_KEY.key());
+            if (options.bucket() != -1) {
+                checkArgument(
+                        !options.bucketAppendOrdered(),
+                        "%s must be false for incremental clustering table.",
+                        CoreOptions.BUCKET_APPEND_ORDERED.key());
+                checkArgument(
+                        !options.deletionVectorsEnabled(),
+                        "Cannot enable deletion-vectors for incremental clustering table which bucket is not -1.");
+            }
+        }
+    }
+
+    private static int requireField(String fieldName, List<String> fieldNames) {
+        int field = fieldNames.indexOf(fieldName);
+        if (field == -1) {
+            throw new IllegalArgumentException(
+                    String.format("Field %s can not be found in table schema.", fieldName));
+        }
+        return field;
+    }
+
+    public static void validateChainTable(TableSchema schema, CoreOptions options) {
+        if (options.isChainTable()) {
+            boolean isPrimaryTbl = schema.primaryKeys() != null && !schema.primaryKeys().isEmpty();
+            boolean isPartitionTbl =
+                    schema.partitionKeys() != null && !schema.partitionKeys().isEmpty();
+            ChangelogProducer changelogProducer = options.changelogProducer();
+            Preconditions.checkArgument(
+                    options.type() == TableType.TABLE, "Chain table must be table type.");
+            Preconditions.checkArgument(isPrimaryTbl, "Primary key is required for chain table.");
+            Preconditions.checkArgument(isPartitionTbl, "Chain table must be partition table.");
+            Preconditions.checkArgument(
+                    options.bucket() > 0, "Bucket number must be greater than 0 for chain table.");
+            Preconditions.checkArgument(
+                    !options.sequenceField().isEmpty(),
+                    "Sequence field is required for chain table.");
+            Preconditions.checkArgument(
+                    changelogProducer == ChangelogProducer.NONE
+                            || changelogProducer == ChangelogProducer.INPUT,
+                    "Changelog producer must be none or input for chain table.");
+            Preconditions.checkArgument(
+                    !options.deletionVectorsEnabled(),
+                    "Chain table do not support enable deletion vector");
+            Preconditions.checkArgument(
+                    options.partitionTimestampPattern() != null,
+                    "Partition timestamp pattern is required for chain table.");
+            Preconditions.checkArgument(
+                    options.partitionTimestampFormatter() != null,
+                    "Partition timestamp formatter is required for chain table.");
+
+            // validate chain-table.chain-partition-keys
+            List<String> chainPartKeys = options.chainTableChainPartitionKeys();
+            if (chainPartKeys != null) {
+                List<String> partitionKeys = schema.partitionKeys();
+
+                Preconditions.checkArgument(
+                        !chainPartKeys.isEmpty(),
+                        "chain-table.chain-partition-keys must not be empty.");
+
+                // chain partition keys should be in the tails of partition keys.
+                int chainStart = partitionKeys.size() - chainPartKeys.size();
+                Preconditions.checkArgument(
+                        chainStart >= 0
+                                && partitionKeys
+                                        .subList(chainStart, partitionKeys.size())
+                                        .equals(chainPartKeys),
+                        "chain-table.chain-partition-keys must be a contiguous suffix "
+                                + "of the table's partition keys. "
+                                + "Partition keys: %s, chain partition keys: %s.",
+                        partitionKeys,
+                        chainPartKeys);
+            }
+        }
+    }
+
+    private static void validateChangelogReadSequenceNumber(
+            TableSchema schema, CoreOptions options) {
+        if (options.tableReadSequenceNumberEnabled()) {
+            checkArgument(
+                    !schema.primaryKeys().isEmpty(),
+                    "Cannot enable '%s' for non-primary-key table. "
+                            + "Sequence number is only available for primary key tables.",
+                    CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key());
+        }
+    }
+
+    public static void validatePkClusteringOverride(CoreOptions options) {
+        if (options.pkClusteringOverride()) {
+            if (options.clusteringColumns().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Cannot support 'pk-clustering-override' mode without 'clustering.columns'.");
+            }
+            if (!options.deletionVectorsEnabled()
+                    && options.mergeEngine() != CoreOptions.MergeEngine.FIRST_ROW) {
+                throw new UnsupportedOperationException(
+                        "Cannot support deletion-vectors disabled in 'pk-clustering-override' mode.");
+            }
+            if (options.recordLevelExpireTime() != null) {
+                throw new UnsupportedOperationException(
+                        "Cannot support record level expire time enabled in 'pk-clustering-override' mode.");
+            }
+            if (options.mergeEngine() != CoreOptions.MergeEngine.DEDUPLICATE
+                    && options.mergeEngine() != CoreOptions.MergeEngine.FIRST_ROW) {
+                throw new UnsupportedOperationException(
+                        "Cannot support merge engine: "
+                                + options.mergeEngine()
+                                + " in 'pk-clustering-override' mode.");
+            }
+            if (!options.sequenceField().isEmpty()) {
+                throw new UnsupportedOperationException(
+                        "Cannot support sequence field: "
+                                + options.sequenceField()
+                                + " in 'pk-clustering-override' mode.");
+            }
+            ChangelogProducer changelogProducer = options.changelogProducer();
+            if (changelogProducer != ChangelogProducer.NONE
+                    && changelogProducer != ChangelogProducer.INPUT) {
+                throw new UnsupportedOperationException(
+                        "Cannot support changelog producer: "
+                                + changelogProducer
+                                + " in 'pk-clustering-override' mode.");
+            }
         }
     }
 }

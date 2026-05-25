@@ -18,17 +18,27 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ListUtils;
+import org.apache.paimon.utils.ProjectedRow;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
@@ -43,8 +53,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     public abstract void applyReadType(RowType readType);
-
-    public abstract void applyVariantAccess(VariantAccessInfo[] variantAccess);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -82,19 +90,75 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return this;
     }
 
-    @Override
-    public InnerTableRead withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
-        applyVariantAccess(variantAccessInfo);
-        return this;
+    protected TableSchema schema() {
+        return schema;
+    }
+
+    protected RowType currentReadType() {
+        return readType == null ? schema.logicalRowType() : readType;
+    }
+
+    @Nullable
+    protected Predicate predicate() {
+        return predicate;
     }
 
     @Override
-    public final RecordReader<InternalRow> createReader(Split split) throws IOException {
-        RecordReader<InternalRow> reader = reader(split);
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
+        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+    }
+
+    protected final QueryAuthContext unwrapQueryAuthSplit(Split split) {
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            return new QueryAuthContext(authSplit.split(), authSplit.authResult());
+        }
+        return new QueryAuthContext(split, null);
+    }
+
+    protected final RecordReader<InternalRow> createDataReader(
+            Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
+        RecordReader<InternalRow> reader;
+        if (authResult == null) {
+            reader = reader(split);
+        } else {
+            reader = authedReader(split, authResult);
+        }
         if (executeFilter) {
             reader = executeFilter(reader);
         }
 
+        return reader;
+    }
+
+    private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
+            throws IOException {
+        RecordReader<InternalRow> reader;
+        RowType tableType = schema.logicalRowType();
+        RowType readType = this.readType == null ? tableType : this.readType;
+        Predicate authPredicate = authResult.extractPredicate();
+        ProjectedRow backRow = null;
+        if (authPredicate != null) {
+            Set<String> authFields = collectFieldNames(authPredicate);
+            List<String> readFields = readType.getFieldNames();
+            List<String> authAddNames = new ArrayList<>();
+            Set<String> readFieldSet = new HashSet<>(readFields);
+            for (String field : tableType.getFieldNames()) {
+                if (authFields.contains(field) && !readFieldSet.contains(field)) {
+                    authAddNames.add(field);
+                }
+            }
+            if (!authAddNames.isEmpty()) {
+                readType = tableType.project(ListUtils.union(readFields, authAddNames));
+                withReadType(readType);
+                backRow = ProjectedRow.from(readType.projectIndexes(readFields));
+            }
+        }
+        reader = authResult.doAuth(reader(split), readType);
+        if (backRow != null) {
+            reader = reader.transform(backRow::replaceRow);
+        }
         return reader;
     }
 
@@ -107,7 +171,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         if (readType != null) {
             int[] projection = schema.logicalRowType().getFieldIndices(readType.getFieldNames());
             Optional<Predicate> optional =
-                    predicate.visit(new PredicateProjectionConverter(projection));
+                    predicate.visit(PredicateProjectionConverter.fromProjection(projection));
             if (!optional.isPresent()) {
                 return reader;
             }
@@ -116,5 +180,26 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
         Predicate finalFilter = predicate;
         return reader.filter(finalFilter::test);
+    }
+
+    /** Split with auth context. */
+    protected static class QueryAuthContext {
+
+        private final Split split;
+        @Nullable private final TableQueryAuthResult authResult;
+
+        private QueryAuthContext(Split split, @Nullable TableQueryAuthResult authResult) {
+            this.split = split;
+            this.authResult = authResult;
+        }
+
+        protected Split split() {
+            return split;
+        }
+
+        @Nullable
+        protected TableQueryAuthResult authResult() {
+            return authResult;
+        }
     }
 }

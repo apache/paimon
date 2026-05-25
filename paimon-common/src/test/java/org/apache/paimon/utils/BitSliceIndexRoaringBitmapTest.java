@@ -52,6 +52,8 @@ public class BitSliceIndexRoaringBitmapTest {
     private Random random;
     private List<Pair> pairs;
     private BitSliceIndexRoaringBitmap bsi;
+    private long bsiMin;
+    private long bsiMax;
 
     @BeforeEach
     public void setup() throws IOException {
@@ -79,6 +81,8 @@ public class BitSliceIndexRoaringBitmapTest {
         }
         this.bsi = appender.build();
         this.pairs = Collections.unmodifiableList(pairs);
+        this.bsiMin = min;
+        this.bsiMax = max;
     }
 
     @Test
@@ -222,8 +226,9 @@ public class BitSliceIndexRoaringBitmapTest {
 
     @Test
     public void testCompareUsingMinMax() {
-        // a predicate in the value bound
-        final int predicate = generateNextValue();
+        // a predicate strictly between min and max (exclusive) so that
+        // compareUsingMinMax cannot short-circuit and must return Optional.empty()
+        final long predicate = bsiMin + 1 + random.nextInt((int) (bsiMax - bsiMin - 1));
         final Optional<RoaringBitmap32> empty = Optional.of(new RoaringBitmap32());
         final Optional<RoaringBitmap32> notNul = Optional.of(bsi.isNotNull());
         final Optional<RoaringBitmap32> inBound = Optional.empty();
@@ -250,7 +255,7 @@ public class BitSliceIndexRoaringBitmapTest {
         assertThat(bsi.compareUsingMinMax(GT, VALUE_LT_MIN, null)).isEqualTo(notNul);
         assertThat(bsi.compareUsingMinMax(GTE, VALUE_LT_MIN, null)).isEqualTo(notNul);
         assertThat(bsi.compareUsingMinMax(GT, VALUE_GT_MAX, null)).isEqualTo(empty);
-        assertThat(bsi.compareUsingMinMax(GT, VALUE_GT_MAX, null)).isEqualTo(empty);
+        assertThat(bsi.compareUsingMinMax(GTE, VALUE_GT_MAX, null)).isEqualTo(empty);
     }
 
     private int generateNextValue() {

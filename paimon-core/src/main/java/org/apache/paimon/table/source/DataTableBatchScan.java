@@ -29,16 +29,28 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
+import org.apache.paimon.tag.BatchReadTagCreator;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
 /** {@link TableScan} implementation for batch planning. */
 public class DataTableBatchScan extends AbstractDataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataTableBatchScan.class);
 
     private StartingScanner startingScanner;
     private boolean hasNext;
@@ -47,6 +59,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     private TopN topN;
 
     private final SchemaManager schemaManager;
+    @Nullable private String readProtectionTagName;
 
     public DataTableBatchScan(
             TableSchema schema,
@@ -90,24 +103,27 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     @Override
-    public TableScan.Plan plan() {
-        authQuery();
-
+    protected TableScan.Plan planWithoutAuth() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
 
         if (hasNext) {
             hasNext = false;
+            StartingScanner.Result result;
             Optional<StartingScanner.Result> pushed = applyPushDownLimit();
             if (pushed.isPresent()) {
-                return DataFilePlan.fromResult(pushed.get());
+                result = pushed.get();
+            } else {
+                pushed = applyPushDownTopN();
+                result = pushed.orElseGet(() -> startingScanner.scan(snapshotReader));
             }
-            pushed = applyPushDownTopN();
-            if (pushed.isPresent()) {
-                return DataFilePlan.fromResult(pushed.get());
+
+            if (result instanceof ScannedResult) {
+                maybeCreateReadProtectionTag(((ScannedResult) result).currentSnapshotId());
             }
-            return DataFilePlan.fromResult(startingScanner.scan(snapshotReader));
+
+            return DataFilePlan.fromResult(result);
         } else {
             throw new EndOfScanException();
         }
@@ -122,7 +138,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (pushDownLimit == null) {
+        if (pushDownLimit == null || snapshotReader.hasNonPartitionFilter()) {
             return Optional.empty();
         }
 
@@ -133,20 +149,26 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         long scannedRowCount = 0;
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
 
+        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
         List<Split> limitedSplits = new ArrayList<>();
-        for (DataSplit dataSplit : splits) {
-            if (dataSplit.rawConvertible()) {
-                long partialMergedRowCount = dataSplit.partialMergedRowCount();
-                limitedSplits.add(dataSplit);
-                scannedRowCount += partialMergedRowCount;
+        for (Split split : splits) {
+            OptionalLong mergedRowCount = split.mergedRowCount();
+            if (mergedRowCount.isPresent()) {
+                limitedSplits.add(split);
+                scannedRowCount += mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit) {
                     SnapshotReader.Plan newPlan =
                             new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
+                    LOG.info(
+                            "Limit pushdown applied successfully. Original splits: {}, Limited splits: {}, Pushdown limit: {}",
+                            splits.size(),
+                            limitedSplits.size(),
+                            pushDownLimit);
                     return Optional.of(new ScannedResult(newPlan));
                 }
             }
@@ -183,7 +205,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
@@ -198,5 +220,22 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         snapshotReader.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
         return this;
+    }
+
+    @Override
+    @Nullable
+    public String readProtectionTagName() {
+        return readProtectionTagName;
+    }
+
+    private void maybeCreateReadProtectionTag(long snapshotId) {
+        Duration timeRetained = options().scanPlanAutoTagTimeRetained();
+        if (timeRetained == null) {
+            return;
+        }
+        SnapshotManager sm = snapshotReader.snapshotManager();
+        TagManager tagMgr = new TagManager(sm.fileIO(), sm.tablePath(), sm.branch());
+        BatchReadTagCreator creator = new BatchReadTagCreator(tagMgr, sm, timeRetained);
+        this.readProtectionTagName = creator.createReadTag(snapshotId);
     }
 }

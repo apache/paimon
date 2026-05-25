@@ -18,13 +18,14 @@
 
 package org.apache.paimon.globalindex.io;
 
+import org.apache.paimon.fs.PositionOutputStream;
+
 import java.io.IOException;
-import java.io.OutputStream;
 
 /** Global index writer io operators. */
 public interface GlobalIndexFileWriter {
 
     String newFileName(String prefix);
 
-    OutputStream newOutputStream(String fileName) throws IOException;
+    PositionOutputStream newOutputStream(String fileName) throws IOException;
 }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.csv;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
@@ -27,6 +28,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -35,6 +37,8 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static org.apache.paimon.format.csv.CsvOptions.Mode.DROPMALFORMED;
+import static org.apache.paimon.format.csv.CsvOptions.Mode.PERMISSIVE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -44,6 +48,7 @@ public class CsvParser {
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
     private static final Map<String, CastExecutor<?, ?>> CAST_EXECUTOR_CACHE =
             new ConcurrentHashMap<>();
+    private static final int NUMBER_PARSE_RADIX = 10;
 
     private final RowType dataSchemaRowType;
     private final int[] projectMapping;
@@ -157,20 +162,28 @@ public class CsvParser {
         for (int i = 0; i < projectMapping.length; i++) {
             int ordinal = projectMapping[i];
             DataType type = dataSchemaRowType.getTypeAt(ordinal);
-            Object field = null;
+            Pair<Boolean, Object> parseResult = null;
+            Exception exception = null;
+            String parseValue = rowValues[ordinal];
             try {
-                field = parseField(rowValues[ordinal], type);
+                parseResult = parseField(parseValue, type);
             } catch (Exception e) {
-                switch (mode) {
-                    case PERMISSIVE:
-                        break;
-                    case DROPMALFORMED:
-                        return null;
-                    case FAILFAST:
-                        throw e;
-                }
+                exception = e;
             }
-            row.setField(i, field);
+            if (parseResult != null && parseResult.getLeft()) {
+                row.setField(i, parseResult.getValue());
+            } else if (mode == PERMISSIVE
+                    && (parseResult == null || !parseResult.getLeft() || exception != null)) {
+                break;
+            } else if (mode == DROPMALFORMED
+                    && (parseResult == null || !parseResult.getLeft() || exception != null)) {
+                return null;
+            } else if (exception != null) {
+                throw new RuntimeException(exception);
+            } else if (parseResult == null
+                    || !parseResult.getLeft() && parseResult.getValue() == null) {
+                throw new NumberFormatException("For input string: \"" + parseValue + "\"");
+            }
         }
         return row;
     }
@@ -188,35 +201,46 @@ public class CsvParser {
         return true;
     }
 
-    private Object parseField(String field, DataType dataType) {
+    @VisibleForTesting
+    public Pair<Boolean, Object> parseField(String field, DataType dataType) {
         if (field == null || field.equals(nullLiteral)) {
-            return null;
+            return Pair.of(true, null);
         }
 
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case TINYINT:
-                return Byte.parseByte(field);
+                Integer intVal = parseInt(field);
+                if (intVal == null || intVal > Byte.MAX_VALUE || intVal < Byte.MIN_VALUE) {
+                    return Pair.of(false, null);
+                }
+                return Pair.of(true, intVal.byteValue());
             case SMALLINT:
-                return Short.parseShort(field);
+                intVal = parseInt(field);
+                if (intVal == null || intVal > Short.MAX_VALUE || intVal < Short.MIN_VALUE) {
+                    return Pair.of(false, null);
+                }
+                return Pair.of(true, intVal.shortValue());
             case INTEGER:
-                return Integer.parseInt(field);
+                intVal = parseInt(field);
+                return Pair.of(intVal != null, intVal);
             case BIGINT:
-                return Long.parseLong(field);
+                Long longVal = parseLong(field);
+                return Pair.of(longVal != null, longVal);
             case FLOAT:
-                return Float.parseFloat(field);
+                return Pair.of(true, Float.parseFloat(field));
             case DOUBLE:
-                return Double.parseDouble(field);
+                return Pair.of(true, Double.parseDouble(field));
             case BOOLEAN:
-                return Boolean.parseBoolean(field);
+                return Pair.of(true, Boolean.parseBoolean(field));
             case CHAR:
             case VARCHAR:
-                return BinaryString.fromString(field);
+                return Pair.of(true, BinaryString.fromString(field));
             case BINARY:
             case VARBINARY:
-                return BASE64_DECODER.decode(field);
+                return Pair.of(true, BASE64_DECODER.decode(field));
             default:
-                return parseByCastExecutor(field, dataType);
+                return Pair.of(true, parseByCastExecutor(field, dataType));
         }
     }
 
@@ -232,5 +256,98 @@ public class CsvParser {
             return cast.cast(BinaryString.fromString(field));
         }
         return BinaryString.fromString(field);
+    }
+
+    private static Integer parseInt(String s) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        int len = s.length();
+        int i = 0;
+        char firstChar = s.charAt(0);
+        boolean negative = false;
+        int limit = -Integer.MAX_VALUE;
+
+        if (firstChar < '0') {
+            if (firstChar == '-') {
+                negative = true;
+                limit = Integer.MIN_VALUE;
+            } else if (firstChar != '+') {
+                return null;
+            }
+
+            if (len == 1) {
+                return null;
+            }
+            i++;
+        }
+
+        int multmin = limit / NUMBER_PARSE_RADIX;
+        int result = 0;
+        int digit;
+
+        while (i < len) {
+            digit = Character.digit(s.charAt(i++), NUMBER_PARSE_RADIX);
+            if (digit < 0) {
+                return null;
+            }
+            if (result < multmin) {
+                return null;
+            }
+            result *= NUMBER_PARSE_RADIX;
+            if (result < limit + digit) {
+                return null;
+            }
+            result -= digit;
+        }
+
+        return negative ? result : -result;
+    }
+
+    private static Long parseLong(String s) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        int len = s.length();
+        int i = 0;
+        char firstChar = s.charAt(0);
+        boolean negative = false;
+        long limit = -Long.MAX_VALUE;
+
+        if (firstChar < '0') {
+            if (firstChar == '-') {
+                negative = true;
+                limit = Long.MIN_VALUE;
+            } else if (firstChar != '+') {
+                return null;
+            }
+
+            if (len == 1) {
+                return null;
+            }
+            i++;
+        }
+
+        long multmin = limit / NUMBER_PARSE_RADIX;
+        long result = 0;
+        int digit;
+
+        while (i < len) {
+            digit = Character.digit(s.charAt(i++), NUMBER_PARSE_RADIX);
+            if (digit < 0) {
+                return null;
+            }
+
+            if (result < multmin) {
+                return null;
+            }
+            result *= NUMBER_PARSE_RADIX;
+            if (result < limit + digit) {
+                return null;
+            }
+            result -= digit;
+        }
+
+        return negative ? result : -result;
     }
 }

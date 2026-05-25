@@ -111,6 +111,27 @@ public class DataFileTestUtils {
                 null);
     }
 
+    public static DataFileMeta newFile(long fileSize) {
+        return DataFileMeta.create(
+                "",
+                fileSize,
+                100,
+                row(0),
+                row(0),
+                EMPTY_STATS,
+                EMPTY_STATS,
+                0,
+                0,
+                0,
+                0,
+                0L,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                null);
+    }
+
     public static BinaryRow row(int i) {
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);

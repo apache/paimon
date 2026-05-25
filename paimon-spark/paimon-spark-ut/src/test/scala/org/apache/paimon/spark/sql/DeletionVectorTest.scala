@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{BucketedDvMaintainer, BucketedDvMaintainerTest, DeletionVector}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.scan.PaimonSplitScan
+import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.FileStoreTable
 

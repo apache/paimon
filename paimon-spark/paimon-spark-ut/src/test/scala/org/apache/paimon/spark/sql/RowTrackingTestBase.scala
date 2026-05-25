@@ -20,15 +20,243 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.plans.logical.{Join, LogicalPlan, RepartitionByExpression, Sort}
+import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort}
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
-import scala.collection.mutable
+import java.util.concurrent.{CountDownLatch, TimeUnit}
+
+import scala.collection.JavaConverters._
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.DurationInt
 
 abstract class RowTrackingTestBase extends PaimonSparkTestBase {
+
+  import testImplicits._
+
+  test("Data Evolution: concurrent merge and compact") {
+    withTable("s", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'compaction.min.file-num' = '2',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
+
+      val mergeInto = Future {
+        for (_ <- 1 to 10) {
+          sql(s"""
+                 |MERGE INTO t
+                 |USING s
+                 |ON t.id = s.id
+                 |WHEN MATCHED THEN
+                 |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                 |""".stripMargin).collect()
+        }
+      }
+
+      val t = loadTable("t")
+
+      def canBeCompacted: Boolean = {
+        val split = t.newSnapshotReader().read().splits().get(0).asInstanceOf[DataSplit]
+        split.dataFiles().size() > 1
+      }
+
+      val compact = Future {
+        for (_ <- 1 to 10) {
+          while (!canBeCompacted) {
+            Thread.sleep(1)
+          }
+          sql("CALL sys.compact(table => 't')")
+          val snapshot = t.latestSnapshot().get()
+          assert(snapshot.totalRecordCount > 0)
+          assert(snapshot.totalRecordCount < 12)
+        }
+      }
+
+      Await.result(mergeInto, 60.seconds)
+      Await.result(compact, 60.seconds)
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10, 10)))
+    }
+  }
+
+  test("Data Evolution: concurrent merge and merge") {
+    withTable("s", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
+
+      def doMerge(): Unit = {
+        var success = false
+        while (!success) {
+          try {
+            sql(s"""
+                   |MERGE INTO t
+                   |USING s
+                   |ON t.id = s.id
+                   |WHEN MATCHED THEN
+                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                   |""".stripMargin).collect()
+            success = true
+          } catch {
+            case e: Exception =>
+              if (
+                !e.getMessage.contains(
+                  "multiple 'MERGE INTO' operations have encountered conflicts")
+              ) {
+                throw e
+              }
+          }
+        }
+      }
+
+      val mergeInto1 = Future {
+        for (_ <- 1 to 10) {
+          doMerge()
+        }
+      }
+
+      val mergeInto2 = Future {
+        for (_ <- 1 to 10) {
+          doMerge()
+        }
+      }
+
+      Await.result(mergeInto1, 60.seconds)
+      Await.result(mergeInto2, 60.seconds)
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 20, 20)))
+    }
+  }
+
+  test("Data Evolution: concurrent merge with disjoint update columns") {
+    withTable("sb", "sc", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1)).toDF("id", "b").createOrReplaceTempView("sb")
+      Seq((1, 1)).toDF("id", "c").createOrReplaceTempView("sc")
+
+      val mergeB = Future {
+        for (_ <- 1 to 10) {
+          sql(s"""
+                 |MERGE INTO t
+                 |USING sb
+                 |ON t.id = sb.id
+                 |WHEN MATCHED THEN
+                 |UPDATE SET t.b = sb.b + t.b
+                 |""".stripMargin).collect()
+        }
+      }
+
+      val mergeC = Future {
+        for (_ <- 1 to 10) {
+          sql(s"""
+                 |MERGE INTO t
+                 |USING sc
+                 |ON t.id = sc.id
+                 |WHEN MATCHED THEN
+                 |UPDATE SET t.c = sc.c + t.c
+                 |""".stripMargin).collect()
+        }
+      }
+
+      Await.result(mergeB, 60.seconds)
+      Await.result(mergeC, 60.seconds)
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10, 10)))
+    }
+  }
+
+  test("Data Evolution: concurrent merge and small files compact") {
+    withTable("s", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'compaction.min.file-num' = '2',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
+
+      def doWithRetry(doAction: () => Unit): Unit = {
+        var success = false
+        while (!success) {
+          try {
+            doAction.apply()
+            success = true
+          } catch {
+            case e: Exception =>
+              if (!e.getMessage.contains("multiple 'MERGE INTO' and 'COMPACT' operations")) {
+                throw e
+              }
+          }
+        }
+      }
+
+      val mergeInto = Future {
+        for (i <- 1 to 10) {
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING s
+                                   |ON t.id = s.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                                   |""".stripMargin).collect())
+          if (i > 1) {
+            sql(s"INSERT INTO t VALUES ($i, $i, $i)")
+          }
+        }
+      }
+
+      val t = loadTable("t")
+
+      def canBeCompacted: Boolean = {
+        val split = t.newSnapshotReader().read().splits().get(0).asInstanceOf[DataSplit]
+        split.dataFiles().size() > 1
+      }
+
+      val compact = Future {
+        for (_ <- 1 to 10) {
+          while (!canBeCompacted) {
+            Thread.sleep(1)
+          }
+          doWithRetry(() => sql("CALL sys.compact(table => 't')"))
+        }
+      }
+
+      Await.result(mergeInto, 60.seconds)
+      Await.result(compact, 60.seconds)
+
+      checkAnswer(
+        sql("SELECT * FROM t"),
+        Seq(
+          Row(1, 10, 10),
+          Row(2, 2, 2),
+          Row(3, 3, 3),
+          Row(4, 4, 4),
+          Row(5, 5, 5),
+          Row(6, 6, 6),
+          Row(7, 7, 7),
+          Row(8, 8, 8),
+          Row(9, 9, 9),
+          Row(10, 10, 10)))
+    }
+  }
 
   test("Row Tracking: read row Tracking") {
     withTable("t") {
@@ -141,6 +369,22 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 22, 0, 2), Row(2, 22, 1, 2), Row(3, 22, 2, 2))
+      )
+    }
+  }
+
+  test("Row Tracking: update") {
+    withTable("s", "t") {
+      spark.sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      spark.sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+      spark.sql("UPDATE t SET data = 22 WHERE id = 2")
+
+      spark.sql("INSERT INTO t VALUES (4, 4), (5, 5)")
+
+      checkAnswer(
+        spark.sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, 1, 0, 1), Row(2, 22, 1, 2), Row(3, 3, 2, 1), Row(4, 4, 3, 3), Row(5, 5, 4, 3))
       )
     }
   }
@@ -295,9 +539,38 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution: merge into table with data-evolution") {
+    Seq("parquet", "avro").foreach {
+      format =>
+        withTable("s", "t") {
+          sql("CREATE TABLE s (id INT, b INT)")
+          sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+
+          sql(s"""CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES
+                 |('row-tracking.enabled' = 'true',
+                 |'data-evolution.enabled' = 'true',
+                 |'file.format' = '$format'
+                 |)""".stripMargin)
+          sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+          sql("""
+                |MERGE INTO t
+                |USING s
+                |ON t.id = s.id
+                |WHEN MATCHED THEN UPDATE SET t.b = s.b
+                |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+                |""".stripMargin)
+          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
+          checkAnswer(
+            sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+            Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+          )
+        }
+    }
+  }
+
+  test("Data Evolution: merge into table with data-evolution for any source table") {
     withTable("s", "t") {
-      sql("CREATE TABLE s (id INT, b INT)")
-      sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+      Seq((1, 11), (2, 22)).toDF("id", "b").createOrReplaceTempView("s")
 
       sql(
         "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
@@ -396,13 +669,20 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      var findSplitsPlan: LogicalPlan = null
+      val latch = new CountDownLatch(1)
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans += qe.analyzed
+          if (qe.analyzed.collectFirst { case _: Deduplicate => true }.nonEmpty) {
+            latch.countDown()
+            findSplitsPlan = qe.analyzed
+          }
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans += qe.analyzed
+          if (qe.analyzed.collectFirst { case _: Deduplicate => true }.nonEmpty) {
+            latch.countDown()
+            findSplitsPlan = qe.analyzed
+          }
         }
       }
       spark.listenerManager.register(listener)
@@ -415,9 +695,10 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
              |WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (target_ROW_ID, b * 1.1, c)
              |WHEN NOT MATCHED THEN INSERT (a, b, c) VALUES (target_ROW_ID, b, c)
              |""".stripMargin)
+      assert(latch.await(10, TimeUnit.SECONDS), "await timeout")
       // Assert that no Join operator was used during
       // `org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.targetRelatedSplits`
-      assert(capturedPlans.head.collect { case plan: Join => plan }.isEmpty)
+      assert(findSplitsPlan != null && findSplitsPlan.collect { case plan: Join => plan }.isEmpty)
       spark.listenerManager.unregister(listener)
 
       checkAnswer(
@@ -441,13 +722,20 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql(
         "INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
 
-      val capturedPlans: mutable.ListBuffer[LogicalPlan] = mutable.ListBuffer.empty
+      var updatePlan: LogicalPlan = null
+      val latch = new CountDownLatch(1)
       val listener = new QueryExecutionListener {
         override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-          capturedPlans += qe.analyzed
+          if (qe.analyzed.collectFirst { case _: MergeRows => true }.nonEmpty) {
+            latch.countDown()
+            updatePlan = qe.analyzed
+          }
         }
         override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-          capturedPlans += qe.analyzed
+          if (qe.analyzed.collectFirst { case _: MergeRows => true }.nonEmpty) {
+            latch.countDown()
+            updatePlan = qe.analyzed
+          }
         }
       }
       spark.listenerManager.register(listener)
@@ -459,17 +747,17 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
              |WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET b = source.b * 3,
              |c = concat(target.c, source.c)
              |""".stripMargin).collect()
+      assert(latch.await(10, TimeUnit.SECONDS), "await timeout")
       // Assert no shuffle/join/sort was used in
       // 'org.apache.paimon.spark.commands.MergeIntoPaimonDataEvolutionTable.updateActionInvoke'
       assert(
-        capturedPlans.forall(
-          plan =>
-            plan.collectFirst {
-              case p: Join => p
-              case p: Sort => p
-              case p: RepartitionByExpression => p
-            }.isEmpty),
-        s"Found unexpected Join/Sort/Exchange in plan:\n${capturedPlans.head}"
+        updatePlan != null &&
+          updatePlan.collectFirst {
+            case p: Join => p
+            case p: Sort => p
+            case p: RepartitionByExpression => p
+          }.isEmpty,
+        s"Found unexpected Join/Sort/Exchange in plan: $updatePlan"
       )
       spark.listenerManager.unregister(listener)
 
@@ -542,10 +830,26 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             Row(2, 200, "c2", 1, 2),
             Row(3, 300, "c33", 2, 2),
             Row(5, 550, "c5", 4, 2),
-            Row(7, 700, "c77", 9, 2),
-            Row(9, 990, "c99", 10, 2))
+            Row(7, 700, "c77", 5, 2),
+            Row(9, 990, "c99", 6, 2))
         )
       }
+    }
+  }
+
+  test("Row Tracking: query row_tracking system table with filter pushdown") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 10), (2, 20), (3, 30)")
+
+      val query = s"SELECT a, b FROM `t$$row_tracking` WHERE a > 1 ORDER BY a"
+      checkAnswer(sql(query), Seq(Row(2, 20), Row(3, 30)))
+
+      val scan = getScan(query)
+      assert(
+        scan.description().contains("DataFilters"),
+        s"Expected predicate pushdown (DataFilters) in scan description, but got: ${scan.description()}"
+      )
     }
   }
 
@@ -577,7 +881,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql("CALL paimon.sys.compact(table => 't')")
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 11, 111, 2, 3), Row(2, 22, 2, 0, 3), Row(3, 3, 3, 1, 3))
+        Seq(Row(1, 11, 111, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
       )
 
       checkAnswer(
@@ -586,4 +890,125 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       )
     }
   }
+
+  test("Data Evolution: compact sort throw exception") {
+    withTable("s", "t") {
+      sql(
+        s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 1, 1)")
+      assert(
+        intercept[Exception](
+          sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+            .collect()).getMessage
+          .contains("Data Evolution table cannot be sorted!"))
+
+    }
+  }
+
+  test("Data Evolution: test global indexed column update action -- throw error") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING, pt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |  PARTITIONED BY (pt)
+                  |""".stripMargin)
+
+      // write two partitions: p0 & p1
+      var values =
+        (0 until 65000).map(i => s"($i, 'name_$i', 'p0')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      values = (0 until 35000).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      // create global index for p0
+      val output =
+        spark
+          .sql(
+            "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
+              " partitions => 'pt=\"p0\"', options => 'btree-index.records-per-range=1000')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      // call merge into to update global-indexed partition
+      assert(intercept[RuntimeException] {
+        sql(s"""
+               |MERGE INTO T
+               |USING T AS source
+               |ON T._ROW_ID = source._ROW_ID AND T.pt = 'p0'
+               |WHEN MATCHED AND T.id = 500 THEN UPDATE SET name = 'updatedName'
+               |""".stripMargin)
+      }.getMessage
+        .contains("MergeInto: update columns contain globally indexed columns, not supported now."))
+
+      // call merge into to update non-indexed partition
+      sql(s"""
+             |MERGE INTO T
+             |USING T AS source
+             |ON T._ROW_ID = source._ROW_ID AND T.pt = 'p1'
+             |WHEN MATCHED AND T.id = 500 THEN UPDATE SET name = 'updatedName'
+             |""".stripMargin)
+    }
+  }
+
+  test("Data Evolution: test global indexed column update action -- drop partition index") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING, pt STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'global-index.column-update-action' = 'DROP_PARTITION_INDEX')
+                  |  PARTITIONED BY (pt)
+                  |""".stripMargin)
+
+      // write two partitions: p0 & p1
+      var values =
+        (0 until 65000).map(i => s"($i, 'name_$i', 'p0')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      values = (0 until 35000).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      // create global index for all parts
+      val output =
+        spark
+          .sql(
+            "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
+              " options => 'btree-index.records-per-range=1000')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      // call merge into to update some data of p1
+      sql(s"""
+             |MERGE INTO T
+             |USING T AS source
+             |ON T._ROW_ID = source._ROW_ID AND T.pt = 'p1'
+             |WHEN MATCHED AND T.id = 500 THEN UPDATE SET name = 'updatedName'
+             |""".stripMargin)
+
+      val table = loadTable("T")
+      val indexEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "btree")
+
+      // all modified partitions' index entries should have been removed
+      assert(indexEntries.exists(entry => entry.partition().getString(0).toString.equals("p0")))
+      assert(!indexEntries.exists(entry => entry.partition().getString(0).toString.equals("p1")))
+    }
+  }
+
 }

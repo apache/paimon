@@ -841,6 +841,12 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
 
     @Test
     @Timeout(60)
+    public void testMetadataColumn() throws Exception {
+        testMetadataColumn(CANAL);
+    }
+
+    @Test
+    @Timeout(60)
     public void testTypeMappingToString() throws Exception {
         final String topic = "map-to-string";
         createTestTopic(topic, 1, 1);

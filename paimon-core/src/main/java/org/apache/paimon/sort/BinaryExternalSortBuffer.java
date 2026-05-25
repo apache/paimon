@@ -32,7 +32,6 @@ import org.apache.paimon.disk.FileChannelUtil;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -101,30 +100,9 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int pageSize,
             int maxNumFileHandles,
             CompressOptions compression,
-            MemorySize maxDiskSize,
-            boolean sequenceOrder) {
-        return create(
-                ioManager,
-                rowType,
-                keyFields,
-                new HeapMemorySegmentPool(bufferSize, pageSize),
-                maxNumFileHandles,
-                compression,
-                maxDiskSize,
-                sequenceOrder);
-    }
-
-    public static BinaryExternalSortBuffer create(
-            IOManager ioManager,
-            RowType rowType,
-            int[] keyFields,
-            MemorySegmentPool pool,
-            int maxNumFileHandles,
-            CompressOptions compression,
-            MemorySize maxDiskSize,
-            boolean sequenceOrder) {
-        RecordComparator comparator =
-                newRecordComparator(rowType.getFieldTypes(), keyFields, sequenceOrder);
+            MemorySize maxDiskSize) {
+        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
+        HeapMemorySegmentPool pool = new HeapMemorySegmentPool(bufferSize, pageSize);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
                         newNormalizedKeyComputer(rowType.getFieldTypes(), keyFields),

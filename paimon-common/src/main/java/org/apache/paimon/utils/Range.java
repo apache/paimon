@@ -22,11 +22,14 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
 /** Range represents from (inclusive) and to (inclusive). */
 public class Range implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     public final long from;
     public final long to;
@@ -44,6 +47,10 @@ public class Range implements Serializable {
 
     public Range addOffset(long offset) {
         return new Range(from + offset, to + offset);
+    }
+
+    public boolean hasIntersection(Range range) {
+        return from <= range.to && to >= range.from;
     }
 
     public boolean isBefore(Range other) {
@@ -175,6 +182,32 @@ public class Range implements Serializable {
         result.add(current);
 
         return result;
+    }
+
+    public static List<Range> toRanges(Iterable<Long> ids) {
+        List<Range> ranges = new ArrayList<>();
+        Iterator<Long> iterator = ids.iterator();
+
+        if (!iterator.hasNext()) {
+            return ranges;
+        }
+
+        long rangeStart = iterator.next();
+        long rangeEnd = rangeStart;
+
+        while (iterator.hasNext()) {
+            long current = iterator.next();
+            if (current != rangeEnd + 1) {
+                // Save the current range and start a new one
+                ranges.add(new Range(rangeStart, rangeEnd));
+                rangeStart = current;
+            }
+            rangeEnd = current;
+        }
+        // Add the last range
+        ranges.add(new Range(rangeStart, rangeEnd));
+
+        return ranges;
     }
 
     /**

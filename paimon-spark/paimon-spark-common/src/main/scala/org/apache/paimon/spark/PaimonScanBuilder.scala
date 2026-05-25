@@ -22,7 +22,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
-import org.apache.paimon.spark.scan.PaimonLocalScan
+import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions}
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
 import org.apache.spark.sql.connector.expressions
@@ -35,7 +35,8 @@ import scala.collection.JavaConverters._
 class PaimonScanBuilder(val table: InnerTable)
   extends PaimonBaseScanBuilder
   with SupportsPushDownAggregates
-  with SupportsPushDownTopN {
+  with SupportsPushDownTopN
+  with PaimonSupportsPushDownVariantExtractions {
 
   private var localScan: Option[Scan] = None
 
@@ -128,13 +129,31 @@ class PaimonScanBuilder(val table: InnerTable)
     localScan match {
       case Some(scan) => scan
       case None =>
+        val (actualTable, vectorSearch, fullTextSearch) = table match {
+          case vst: org.apache.paimon.table.VectorSearchTable =>
+            val tableVectorSearch = Option(vst.vectorSearch())
+            val vs = (tableVectorSearch, pushedVectorSearch) match {
+              case (Some(_), _) => tableVectorSearch
+              case (None, Some(_)) => pushedVectorSearch
+              case (None, None) => None
+            }
+            (vst.origin(), vs, None)
+          case ftst: org.apache.paimon.table.FullTextSearchTable =>
+            (ftst.origin(), None, Option(ftst.fullTextSearch()))
+          case _ => (table, pushedVectorSearch, pushedFullTextSearch)
+        }
+
         PaimonScan(
-          table,
+          actualTable,
           requiredSchema,
           pushedPartitionFilters,
           pushedDataFilters,
           pushedLimit,
-          pushedTopN)
+          pushedTopN,
+          vectorSearch,
+          fullTextSearch,
+          acceptedVariantExtractions
+        )
     }
   }
 }

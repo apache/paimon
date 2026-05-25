@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -67,7 +66,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
     private final long asyncThreshold;
-
+    private final boolean ignoreCorruptFiles;
+    private final boolean ignoreLostFiles;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
@@ -80,9 +80,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             RowType valueType,
             FormatReaderMapping.Builder formatReaderMappingBuilder,
             DataFilePathFactory pathFactory,
-            long asyncThreshold,
             BinaryRow partition,
-            DeletionVector.Factory dvFactory) {
+            DeletionVector.Factory dvFactory,
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -90,7 +90,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.valueType = valueType;
         this.formatReaderMappingBuilder = formatReaderMappingBuilder;
         this.pathFactory = pathFactory;
-        this.asyncThreshold = asyncThreshold;
+        this.asyncThreshold = coreOptions.fileReaderAsyncThreshold().getBytes();
+        this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
+        this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.partition = partition;
         this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
@@ -149,6 +151,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
+                        ignoreCorruptFiles,
+                        ignoreLostFiles,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
                         PartitionUtils.create(
@@ -242,6 +246,19 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     options);
         }
 
+        public Builder copyWithoutValue() {
+            return new Builder(
+                    fileIO,
+                    schemaManager,
+                    schema,
+                    keyType,
+                    RowType.of(),
+                    formatDiscover,
+                    pathFactory,
+                    extractor,
+                    options);
+        }
+
         public Builder withReadKeyType(RowType readKeyType) {
             this.readKeyType = readKeyType;
             return this;
@@ -262,7 +279,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public KeyValueFileReaderFactory build(
                 BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
-            return build(partition, bucket, dvFactory, true, Collections.emptyList(), null);
+            return build(partition, bucket, dvFactory, true, Collections.emptyList());
         }
 
         public KeyValueFileReaderFactory build(
@@ -270,10 +287,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 int bucket,
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
-                @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess) {
-            FormatReaderMapping.Builder builder =
-                    formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+                @Nullable List<Predicate> filters) {
+            FormatReaderMapping.Builder builder = formatReaderMappingBuilder(projectKeys, filters);
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
@@ -282,15 +297,13 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     readValueType,
                     builder,
                     pathFactory.createDataFilePathFactory(partition, bucket),
-                    options.fileReaderAsyncThreshold().getBytes(),
                     partition,
-                    dvFactory);
+                    dvFactory,
+                    options);
         }
 
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(
-                boolean projectKeys,
-                @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess) {
+                boolean projectKeys, @Nullable List<Predicate> filters) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             List<DataField> readTableFields =
                     KeyValue.createKeyValueFields(
@@ -302,17 +315,15 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
                     };
             return new FormatReaderMapping.Builder(
-                    formatDiscover,
-                    readTableFields,
-                    fieldsExtractor,
-                    filters,
-                    null,
-                    null,
-                    variantAccess);
+                    formatDiscover, readTableFields, fieldsExtractor, filters, null, null);
         }
 
         public FileIO fileIO() {
             return fileIO;
+        }
+
+        public CoreOptions options() {
+            return options;
         }
     }
 }

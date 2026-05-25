@@ -34,6 +34,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.Filter;
@@ -53,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static java.util.Collections.emptyList;
 import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -165,7 +167,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         Integer numBuckets = queryExecutor.numBuckets(partition);
         if (numBuckets == null) {
             // no data, just return none
-            return Collections.emptyList();
+            return emptyList();
         }
         int bucket = bucket(numBuckets, adjustedKey);
 
@@ -176,7 +178,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
         InternalRow kv = queryExecutor.lookup(partition, bucket, trimmedKey);
         if (kv == null) {
-            return Collections.emptyList();
+            return emptyList();
         } else {
             return Collections.singletonList(kv);
         }
@@ -195,6 +197,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     @Override
     public void specifyCacheRowFilter(Filter<InternalRow> filter) {
         this.cacheRowFilter = filter;
+    }
+
+    @Override
+    public Long nextSnapshotId() {
+        return this.queryExecutor.nextSnapshotId();
     }
 
     @Override
@@ -243,6 +250,10 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
         void refresh();
+
+        default Long nextSnapshotId() {
+            return Long.MAX_VALUE;
+        }
     }
 
     static class LocalQueryExecutor implements QueryExecutor {
@@ -310,19 +321,26 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 }
 
                 for (Split split : splits) {
-                    refreshSplit((DataSplit) split);
+                    refreshSplit(split);
                 }
             }
         }
 
         @VisibleForTesting
-        void refreshSplit(DataSplit split) {
+        void refreshSplit(Split split) {
+            if (split instanceof DataSplit) {
+                refreshSplit((DataSplit) split);
+            } else {
+                refreshSplit((IncrementalSplit) split);
+            }
+        }
+
+        private void refreshSplit(DataSplit split) {
             BinaryRow partition = split.partition();
             int bucket = split.bucket();
-            List<DataFileMeta> before = split.beforeFiles();
             List<DataFileMeta> after = split.dataFiles();
 
-            tableQuery.refreshFiles(partition, bucket, before, after);
+            tableQuery.refreshFiles(partition, bucket, emptyList(), after);
             Integer totalBuckets = split.totalBuckets();
             if (totalBuckets == null) {
                 // Just for compatibility with older versions
@@ -332,6 +350,18 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 totalBuckets = defaultNumBuckets;
             }
             numBuckets.put(partition, totalBuckets);
+        }
+
+        private void refreshSplit(IncrementalSplit split) {
+            BinaryRow partition = split.partition();
+            tableQuery.refreshFiles(
+                    partition, split.bucket(), split.beforeFiles(), split.afterFiles());
+            numBuckets.put(partition, split.totalBuckets());
+        }
+
+        @Override
+        public Long nextSnapshotId() {
+            return this.scan.checkpoint();
         }
 
         @Override
@@ -345,11 +375,15 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 return;
             }
 
-            DataSplit dataSplit = (DataSplit) splits.get(0);
+            Split split = splits.get(0);
+            long snapshotId =
+                    split instanceof DataSplit
+                            ? ((DataSplit) split).snapshotId()
+                            : ((IncrementalSplit) split).snapshotId();
             LOG.info(
                     "LocalQueryExecutor get splits from {} with snapshotId {}.",
                     tableName,
-                    dataSplit.snapshotId());
+                    snapshotId);
         }
     }
 

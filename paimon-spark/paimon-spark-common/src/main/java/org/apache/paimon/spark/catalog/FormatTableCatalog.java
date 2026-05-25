@@ -20,6 +20,7 @@ package org.apache.paimon.spark.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.SparkTypeUtils;
@@ -35,10 +36,12 @@ import org.apache.spark.sql.execution.PartitionedCSVTable;
 import org.apache.spark.sql.execution.PartitionedJsonTable;
 import org.apache.spark.sql.execution.PartitionedOrcTable;
 import org.apache.spark.sql.execution.PartitionedParquetTable;
+import org.apache.spark.sql.execution.PartitionedTextTable;
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
 import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
 import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
+import org.apache.spark.sql.execution.datasources.text.TextFileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -86,6 +89,15 @@ public interface FormatTableCatalog {
         CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
         if (formatTable.format() == FormatTable.Format.CSV) {
             options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
+            options.set("lineSep", options.get(CsvOptions.LINE_DELIMITER));
+            options.set("quote", options.get(CsvOptions.QUOTE_CHARACTER));
+            options.set("header", options.get(CsvOptions.INCLUDE_HEADER).toString());
+            options.set("escape", options.get(CsvOptions.ESCAPE_CHARACTER));
+            options.set("nullvalue", options.get(CsvOptions.NULL_LITERAL));
+            options.set("mode", options.get(CsvOptions.MODE).getValue());
+            if (options.contains(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)) {
+                options.set("compression", options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION));
+            }
             dsOptions = new CaseInsensitiveStringMap(options.toMap());
             return new PartitionedCSVTable(
                     ident.name(),
@@ -94,6 +106,20 @@ public interface FormatTableCatalog {
                     scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
                     scala.Option.apply(schema),
                     CSVFileFormat.class,
+                    partitionSchema);
+        } else if (formatTable.format() == FormatTable.Format.TEXT) {
+            options.set("lineSep", options.get(TextOptions.LINE_DELIMITER));
+            dsOptions = new CaseInsensitiveStringMap(options.toMap());
+            if (options.contains(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION)) {
+                options.set("compression", options.get(CoreOptions.FORMAT_TABLE_FILE_COMPRESSION));
+            }
+            return new PartitionedTextTable(
+                    ident.name(),
+                    spark,
+                    dsOptions,
+                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
+                    scala.Option.apply(schema),
+                    TextFileFormat.class,
                     partitionSchema);
         } else if (formatTable.format() == FormatTable.Format.ORC) {
             return new PartitionedOrcTable(

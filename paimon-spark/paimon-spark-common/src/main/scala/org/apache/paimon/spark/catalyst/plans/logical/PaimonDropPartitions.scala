@@ -20,11 +20,10 @@ package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.spark.SparkTable
 
-import org.apache.spark.sql.{types, PaimonUtils}
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.analysis.{PartitionSpec, ResolvedPartitionSpec}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, V2PartitionCommand}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Implicits.TableHelper
-import org.apache.spark.sql.types.StructType;
 
 /** Drop partitions command. */
 case class PaimonDropPartitions(

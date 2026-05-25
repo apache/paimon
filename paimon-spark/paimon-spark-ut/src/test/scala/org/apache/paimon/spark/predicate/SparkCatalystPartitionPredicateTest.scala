@@ -32,8 +32,10 @@ import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.assertj.core.api.Assertions.assertThat
 
 import java.util.{List => JList}
+import java.util.concurrent.{CountDownLatch, Executors, ExecutorService}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 
 class SparkCatalystPartitionPredicateTest extends PaimonSparkTestBase {
 
@@ -191,6 +193,88 @@ class SparkCatalystPartitionPredicateTest extends PaimonSparkTestBase {
         extractSupportedPartitionFilters(extractCatalystFilters(q2), partitionRowType)
       val partitionPredicate2 = SparkCatalystPartitionPredicate(partitionFilters2, partitionRowType)
       assert(getFilteredPartitions(table, partitionRowType, partitionPredicate2).isEmpty)
+    }
+  }
+
+  test("SparkCatalystPartitionPredicate: thread safety") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, value INT, year STRING, month STRING, day STRING)
+            |PARTITIONED BY (year, month, day)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t values
+            |(1, 100, '2024', '01', '01'),
+            |(2, 200, '2024', '01', '02'),
+            |(3, 300, '2024', '01', '03'),
+            |(4, 400, '2024', '02', '01'),
+            |(5, 500, '2024', '02', '02'),
+            |(6, 600, '2024', '03', '01')
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      val partitionRowType = table.rowType().project(table.partitionKeys())
+
+      val q =
+        """
+          |SELECT * FROM t
+          |WHERE CONCAT_WS('-', year, month)
+          |BETWEEN '2024-01' AND '2024-01'
+          |""".stripMargin
+
+      val partitionFilters =
+        extractSupportedPartitionFilters(extractCatalystFilters(q), partitionRowType)
+      val partitionPredicate = SparkCatalystPartitionPredicate(partitionFilters, partitionRowType)
+
+      val allPartitions = table.newScan().listPartitions().asScala.toSeq
+
+      val threadCount = 10
+      val iterationsPerThread = 100
+      val executor: ExecutorService = Executors.newFixedThreadPool(threadCount)
+      val latch = new CountDownLatch(threadCount)
+      val errors = new ArrayBuffer[Throwable]()
+
+      try {
+        for (_ <- 0 until threadCount) {
+          executor.submit(new Runnable {
+            override def run(): Unit = {
+              try {
+                for (_ <- 0 until iterationsPerThread) {
+                  // Directly test the predicate.test() method which is the core of thread safety
+                  val matchedPartitions = allPartitions.filter(p => partitionPredicate.test(p))
+                  val results =
+                    matchedPartitions.map(r => internalRowToString(r, partitionRowType)).toSet
+
+                  // Verify that all results match expected partitions
+                  val expected = Set("+I[2024, 01, 01]", "+I[2024, 01, 02]", "+I[2024, 01, 03]")
+                  if (results != expected) {
+                    throw new AssertionError(
+                      s"Expected $expected but got $results in thread ${Thread.currentThread().getName}")
+                  }
+                }
+              } catch {
+                case e: Throwable =>
+                  errors.synchronized {
+                    errors += e
+                  }
+              } finally {
+                latch.countDown()
+              }
+            }
+          })
+        }
+
+        latch.await()
+
+        // Check if there were any errors
+        if (errors.nonEmpty) {
+          fail(s"Thread safety test failed with ${errors.size} errors: ${errors.head.getMessage}")
+        }
+      } finally {
+        executor.shutdown()
+        executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)
+      }
     }
   }
 

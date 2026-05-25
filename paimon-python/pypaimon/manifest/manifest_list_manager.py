@@ -1,26 +1,24 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
 import fastavro
-
 from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -40,7 +38,10 @@ class ManifestListManager:
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
 
-    def read_all(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+    def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
+        """Read base + delta manifest lists for full file state."""
+        if snapshot is None:
+            return []
         manifest_files = []
         base_manifests = self.read(snapshot.base_manifest_list)
         manifest_files.extend(base_manifests)
@@ -48,10 +49,24 @@ class ManifestListManager:
         manifest_files.extend(delta_manifests)
         return manifest_files
 
+    def read_base(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read only the base manifest list for the given snapshot."""
+        return self.read(snapshot.base_manifest_list)
+
     def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
         return self.read(snapshot.delta_manifest_list)
 
+    def read_changelog(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read changelog manifest files from snapshot, or empty list if none."""
+        if snapshot.changelog_manifest_list is None:
+            return []
+        return self.read(snapshot.changelog_manifest_list)
+
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        return self._read_from_storage(manifest_list_name)
+
+    def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        """Read manifest list from storage."""
         manifest_files = []
 
         manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
@@ -79,6 +94,8 @@ class ManifestListManager:
                 num_deleted_files=record['_NUM_DELETED_FILES'],
                 partition_stats=partition_stats,
                 schema_id=record['_SCHEMA_ID'],
+                min_row_id=record.get('_MIN_ROW_ID'),
+                max_row_id=record.get('_MAX_ROW_ID'),
             )
             manifest_files.append(manifest_file_meta)
 
@@ -99,6 +116,8 @@ class ManifestListManager:
                     "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
                 "_SCHEMA_ID": meta.schema_id,
+                "_MIN_ROW_ID": meta.min_row_id,
+                "_MAX_ROW_ID": meta.max_row_id,
             }
             avro_records.append(avro_record)
 

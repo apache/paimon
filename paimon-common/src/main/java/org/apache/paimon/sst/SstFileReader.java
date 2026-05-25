@@ -20,9 +20,6 @@ package org.apache.paimon.sst;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockDecompressor;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
@@ -48,39 +45,19 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class SstFileReader implements Closeable {
 
     private final Comparator<MemorySlice> comparator;
-    private final Path filePath;
     private final BlockCache blockCache;
     private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
 
     public SstFileReader(
             Comparator<MemorySlice> comparator,
-            long fileSize,
-            Path filePath,
-            SeekableInputStream input,
-            CacheManager cacheManager)
-            throws IOException {
+            BlockCache blockCache,
+            BlockHandle indexBlockHandle,
+            @Nullable FileBasedBloomFilter bloomFilter) {
         this.comparator = comparator;
-        this.filePath = filePath;
-        this.blockCache = new BlockCache(filePath, input, cacheManager);
-        MemorySegment footerData =
-                blockCache.getBlock(
-                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
-        Footer footer = Footer.readFooter(MemorySlice.wrap(footerData).toInput());
-        this.indexBlock = readBlock(footer.getIndexBlockHandle(), true);
-        BloomFilterHandle handle = footer.getBloomFilterHandle();
-        if (handle == null) {
-            this.bloomFilter = null;
-        } else {
-            this.bloomFilter =
-                    new FileBasedBloomFilter(
-                            input,
-                            filePath,
-                            cacheManager,
-                            handle.expectedEntries(),
-                            handle.offset(),
-                            handle.size());
-        }
+        this.blockCache = blockCache;
+        this.indexBlock = readBlock(indexBlockHandle, true);
+        this.bloomFilter = bloomFilter;
     }
 
     /**
@@ -154,8 +131,8 @@ public class SstFileReader implements Closeable {
         checkArgument(
                 blockTrailer.getCrc32c() == crc32cCode,
                 String.format(
-                        "Expected CRC32C(%d) but found CRC32C(%d) for file(%s)",
-                        blockTrailer.getCrc32c(), crc32cCode, filePath));
+                        "Expected CRC32C(%d) but found CRC32C(%d)",
+                        blockTrailer.getCrc32c(), crc32cCode));
 
         // decompress data
         BlockCompressionFactory compressionFactory =
@@ -184,11 +161,11 @@ public class SstFileReader implements Closeable {
             bloomFilter.close();
         }
         blockCache.close();
-        // do not need to close input, since it will be closed by outer classes
     }
 
     /** An Iterator for range queries. */
     public class SstFileIterator {
+
         private final BlockIterator indexIterator;
         private @Nullable BlockIterator seekedDataBlock = null;
 

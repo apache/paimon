@@ -21,7 +21,6 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -43,7 +42,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Util for merging manifest files. */
@@ -239,27 +241,19 @@ public class ManifestFileMerger {
 
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
+        Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
+                file ->
+                        singletonList(
+                                readForFullCompaction(
+                                        file, manifestFile, mustChange, deleteEntries));
         Exception exception = null;
         try {
-            for (ManifestFileMeta file : toBeMerged) {
-                List<ManifestEntry> entries = new ArrayList<>();
-                boolean requireChange = mustChange.test(file);
-                for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
-                    if (entry.kind() == FileKind.DELETE) {
-                        continue;
-                    }
-
-                    if (deleteEntries.contains(entry.identifier())) {
-                        requireChange = true;
-                    } else {
-                        entries.add(entry);
-                    }
-                }
-
-                if (requireChange) {
-                    writer.write(entries);
+            for (FullCompactionReadResult readResult :
+                    sequentialBatchedExecute(reader, toBeMerged, manifestReadParallelism)) {
+                if (readResult.requireChange) {
+                    writer.write(readResult.entries);
                 } else {
-                    result.add(file);
+                    result.add(readResult.file);
                 }
             }
         } catch (Exception e) {
@@ -278,11 +272,48 @@ public class ManifestFileMerger {
         return Optional.of(result);
     }
 
+    private static FullCompactionReadResult readForFullCompaction(
+            ManifestFileMeta file,
+            ManifestFile manifestFile,
+            Filter<ManifestFileMeta> mustChange,
+            Set<FileEntry.Identifier> deleteEntries) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        boolean requireChange = mustChange.test(file);
+        for (ManifestEntry entry :
+                manifestFile.read(
+                        file.fileName(),
+                        file.fileSize(),
+                        FileEntry.addFilter(),
+                        Filter.alwaysTrue())) {
+            if (deleteEntries.contains(entry.identifier())) {
+                requireChange = true;
+            } else {
+                entries.add(entry);
+            }
+        }
+
+        return new FullCompactionReadResult(file, requireChange, entries);
+    }
+
     private static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {
         Set<BinaryRow> partitions = new HashSet<>();
         for (FileEntry.Identifier identifier : deleteEntries) {
             partitions.add(identifier.partition);
         }
         return partitions;
+    }
+
+    private static class FullCompactionReadResult {
+
+        private final ManifestFileMeta file;
+        private final boolean requireChange;
+        private final List<ManifestEntry> entries;
+
+        private FullCompactionReadResult(
+                ManifestFileMeta file, boolean requireChange, List<ManifestEntry> entries) {
+            this.file = file;
+            this.requireChange = requireChange;
+            this.entries = entries;
+        }
     }
 }

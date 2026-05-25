@@ -61,6 +61,10 @@ public final class MemorySlice implements Comparable<MemorySlice> {
         return segment.getInt(offset + position);
     }
 
+    public short readShort(int position) {
+        return segment.getShort(offset + position);
+    }
+
     public long readLong(int position) {
         return segment.getLong(offset + position);
     }

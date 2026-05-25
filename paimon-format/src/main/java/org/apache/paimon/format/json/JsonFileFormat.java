@@ -91,6 +91,7 @@ public class JsonFileFormat extends FileFormat {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
             case ARRAY:
+            case VECTOR:
             case MAP:
             case ROW:
                 // All types are supported in JSON

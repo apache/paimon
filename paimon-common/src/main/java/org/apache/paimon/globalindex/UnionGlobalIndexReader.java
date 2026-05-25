@@ -23,7 +23,9 @@ import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * A {@link GlobalIndexReader} that combines results from multiple readers by performing a union
@@ -38,90 +40,115 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public GlobalIndexResult visitIsNotNull(FieldRef fieldRef) {
+    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
         return union(reader -> reader.visitIsNotNull(fieldRef));
     }
 
     @Override
-    public GlobalIndexResult visitIsNull(FieldRef fieldRef) {
+    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
         return union(reader -> reader.visitIsNull(fieldRef));
     }
 
     @Override
-    public GlobalIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitStartsWith(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitEndsWith(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitEndsWith(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitContains(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitContains(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitLike(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitLike(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitLessThan(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitLessThan(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitGreaterOrEqual(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitNotEqual(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitNotEqual(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitLessOrEqual(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitEqual(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitEqual(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitGreaterThan(FieldRef fieldRef, Object literal) {
+    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
         return union(reader -> reader.visitGreaterThan(fieldRef, literal));
     }
 
     @Override
-    public GlobalIndexResult visitIn(FieldRef fieldRef, List<Object> literals) {
+    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
         return union(reader -> reader.visitIn(fieldRef, literals));
     }
 
     @Override
-    public GlobalIndexResult visitNotIn(FieldRef fieldRef, List<Object> literals) {
+    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
         return union(reader -> reader.visitNotIn(fieldRef, literals));
     }
 
     @Override
-    public GlobalIndexResult visitVectorSearch(VectorSearch vectorSearch) {
-        return union(reader -> reader.visitVectorSearch(vectorSearch));
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        return union(reader -> reader.visitBetween(fieldRef, from, to));
     }
 
-    private GlobalIndexResult union(Function<GlobalIndexReader, GlobalIndexResult> visitor) {
-        GlobalIndexResult result = null;
-        for (GlobalIndexReader reader : readers) {
-            GlobalIndexResult current = visitor.apply(reader);
-            if (current == null) {
-                throw new IllegalStateException("Reader should not return null");
+    @Override
+    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+        Optional<ScoredGlobalIndexResult> result = Optional.empty();
+        List<Optional<ScoredGlobalIndexResult>> results =
+                executeAllReaders(reader -> reader.visitVectorSearch(vectorSearch));
+        for (Optional<ScoredGlobalIndexResult> current : results) {
+            if (!current.isPresent()) {
+                continue;
             }
-            result = result == null ? current : result.or(current);
+            if (!result.isPresent()) {
+                result = current;
+            }
+            result = Optional.of(result.get().or(current.get()));
         }
         return result;
+    }
+
+    private Optional<GlobalIndexResult> union(
+            Function<GlobalIndexReader, Optional<GlobalIndexResult>> visitor) {
+        Optional<GlobalIndexResult> result = Optional.empty();
+        List<Optional<GlobalIndexResult>> results = executeAllReaders(visitor);
+        for (Optional<GlobalIndexResult> current : results) {
+            if (!current.isPresent()) {
+                continue;
+            }
+            if (!result.isPresent()) {
+                result = current;
+            }
+            result = Optional.of(result.get().or(current.get()));
+        }
+        return result;
+    }
+
+    private <R> List<R> executeAllReaders(Function<GlobalIndexReader, R> function) {
+        return readers.stream().map(function).collect(Collectors.toList());
     }
 
     @Override

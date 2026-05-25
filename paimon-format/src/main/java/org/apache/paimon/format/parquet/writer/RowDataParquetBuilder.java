@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.parquet.ColumnConfigParser;
+import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
@@ -30,6 +31,8 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.OutputFile;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
@@ -37,18 +40,25 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     private final RowType rowType;
     private final Configuration conf;
+    @Nullable private RowType shreddingSchemas;
 
     public RowDataParquetBuilder(RowType rowType, Options options) {
         this.rowType = rowType;
         this.conf = new Configuration(false);
+        this.shreddingSchemas = VariantUtils.shreddingSchemasFromOptions(options);
         options.toMap().forEach(conf::set);
+    }
+
+    public RowDataParquetBuilder withShreddingSchemas(RowType shreddingSchemas) {
+        this.shreddingSchemas = shreddingSchemas;
+        return this;
     }
 
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
         ParquetRowDataBuilder builder =
-                new ParquetRowDataBuilder(out, rowType)
+                new ParquetRowDataBuilder(out, rowType, shreddingSchemas)
                         .withConf(conf)
                         .withCompressionCodec(
                                 CompressionCodecName.fromConf(getCompression(compression)))
@@ -86,7 +96,23 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                         .withBloomFilterEnabled(
                                 conf.getBoolean(
                                         ParquetOutputFormat.BLOOM_FILTER_ENABLED,
-                                        ParquetProperties.DEFAULT_BLOOM_FILTER_ENABLED));
+                                        ParquetProperties.DEFAULT_BLOOM_FILTER_ENABLED))
+                        .withMinRowCountForPageSizeCheck(
+                                conf.getInt(
+                                        ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK,
+                                        ParquetProperties.DEFAULT_MINIMUM_RECORD_COUNT_FOR_CHECK))
+                        .withMaxRowCountForPageSizeCheck(
+                                conf.getInt(
+                                        ParquetOutputFormat.MAX_ROW_COUNT_FOR_PAGE_SIZE_CHECK,
+                                        ParquetProperties.DEFAULT_MAXIMUM_RECORD_COUNT_FOR_CHECK))
+                        .withStatisticsTruncateLength(
+                                conf.getInt(
+                                        ParquetOutputFormat.STATISTICS_TRUNCATE_LENGTH,
+                                        ParquetProperties.DEFAULT_STATISTICS_TRUNCATE_LENGTH))
+                        .withColumnIndexTruncateLength(
+                                conf.getInt(
+                                        ParquetOutputFormat.COLUMN_INDEX_TRUNCATE_LENGTH,
+                                        ParquetProperties.DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH));
         new ColumnConfigParser()
                 .withColumnConfig(
                         ParquetOutputFormat.ENABLE_DICTIONARY,

@@ -25,11 +25,15 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilderImpl;
 import org.apache.paimon.table.sink.WriteSelector;
+import org.apache.paimon.table.source.FullTextSearchBuilder;
+import org.apache.paimon.table.source.FullTextSearchBuilderImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ReadBuilderImpl;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.VectorSearchBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 
 import java.util.Optional;
 
@@ -51,6 +55,16 @@ public interface InnerTable extends Table {
     @Override
     default ReadBuilder newReadBuilder() {
         return new ReadBuilderImpl(this);
+    }
+
+    @Override
+    default VectorSearchBuilder newVectorSearchBuilder() {
+        return new VectorSearchBuilderImpl(this);
+    }
+
+    @Override
+    default FullTextSearchBuilder newFullTextSearchBuilder() {
+        return new FullTextSearchBuilderImpl(this);
     }
 
     @Override

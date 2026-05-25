@@ -1,23 +1,23 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from typing import List
+from typing import Callable, List, Optional
 
 import fastavro
 
@@ -48,20 +48,23 @@ class ManifestFileManager:
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
 
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
-                              drop_stats=True, max_workers=8) -> List[ManifestEntry]:
+                              drop_stats=True, max_workers=8,
+                              early_entry_filter: Optional[Callable[[int, int], bool]] = None
+                              ) -> List[ManifestEntry]:
 
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
-            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
+            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats,
+                             early_entry_filter=early_entry_filter)
 
-        def _entry_identifier(entry: ManifestEntry) -> tuple:
+        def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
-                tuple(entry.partition.values),
-                entry.bucket,
-                entry.file.level,
-                entry.file.file_name,
-                tuple(entry.file.extra_files) if entry.file.extra_files else (),
-                entry.file.embedded_index,
-                entry.file.external_path,
+                tuple(e.partition.values),
+                e.bucket,
+                e.file.level,
+                e.file.file_name,
+                tuple(e.file.extra_files) if e.file.extra_files else (),
+                e.file.embedded_index,
+                e.file.external_path,
             )
 
         deleted_entry_keys = set()
@@ -81,7 +84,19 @@ class ManifestFileManager:
         ]
         return final_entries
 
-    def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
+    def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True,
+             early_entry_filter: Optional[Callable[[int, int], bool]] = None
+             ) -> List[ManifestEntry]:
+        """
+        early_entry_filter: optional ``(bucket, total_buckets) -> bool``
+        called immediately after the avro record is parsed. Mirrors
+        Java ``BucketFilter`` applied at the InternalRow stage in
+        ``ManifestEntryCache``: when it returns False, the entry's
+        ``_FILE`` block / partition / stats are never deserialized.
+        Caller is responsible for soundness (any non-pruning rule must
+        return True). The full ``manifest_entry_filter`` still runs on
+        the survivors.
+        """
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
@@ -91,6 +106,15 @@ class ManifestFileManager:
         reader = fastavro.reader(buffer)
 
         for record in reader:
+            if early_entry_filter is not None:
+                try:
+                    bucket = record['_BUCKET']
+                    total_buckets = record['_TOTAL_BUCKETS']
+                except KeyError:
+                    pass
+                else:
+                    if not early_entry_filter(bucket, total_buckets):
+                        continue
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(

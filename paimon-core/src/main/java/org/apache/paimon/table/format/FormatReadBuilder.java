@@ -20,7 +20,6 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -31,7 +30,6 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -44,6 +42,7 @@ import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -126,11 +125,6 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public ReadBuilder withProjection(int[] projection) {
         if (projection == null) {
             return this;
@@ -195,6 +189,8 @@ public class FormatReadBuilder implements ReadBuilder {
             return new DataFileRecordReader(
                     readType(),
                     reader,
+                    options.scanIgnoreCorruptFile(),
+                    options.scanIgnoreLostFile(),
                     null,
                     null,
                     PartitionUtils.create(partitionMapping, dataSplit.partition()),
@@ -202,7 +198,8 @@ public class FormatReadBuilder implements ReadBuilder {
                     null,
                     0,
                     Collections.emptyMap(),
-                    null);
+                    null,
+                    formatReaderContext.filePath());
         } catch (Exception e) {
             FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
             throw e;
@@ -249,8 +246,8 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
-        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
+    public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRangeIndex.");
     }
 
     @Override

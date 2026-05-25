@@ -417,12 +417,15 @@ public class TestCachedClientPool {
                                                 String metastoreClientClass =
                                                         "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
 
-                                                return new HiveCatalog(
-                                                        fileIO,
-                                                        hiveConf,
-                                                        metastoreClientClass,
-                                                        CatalogContext.create(options),
-                                                        warehouse);
+                                                HiveCatalog hCata =
+                                                        new HiveCatalog(
+                                                                fileIO,
+                                                                hiveConf,
+                                                                metastoreClientClass,
+                                                                CatalogContext.create(options),
+                                                                warehouse);
+                                                hCata.listDatabases();
+                                                return hCata;
                                             } catch (Exception e) {
                                                 throw new RuntimeException(e);
                                             }

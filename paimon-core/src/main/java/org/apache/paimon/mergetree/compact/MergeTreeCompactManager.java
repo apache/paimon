@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -67,6 +68,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
     private final boolean forceRewriteAllFiles;
+    private final boolean forceKeepDelete;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -83,7 +85,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             boolean lazyGenDeletionFile,
             boolean needLookup,
             @Nullable RecordLevelExpire recordLevelExpire,
-            boolean forceRewriteAllFiles) {
+            boolean forceRewriteAllFiles,
+            boolean forceKeepDelete) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -97,6 +100,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
+        this.forceKeepDelete = forceKeepDelete;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -114,7 +118,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void addNewFile(DataFileMeta file) {
-        levels.addLevel0File(file);
+        // if overwrite an empty partition, the snapshot will be changed to APPEND, then its files
+        // might be upgraded to high level, thus we should use #update
+        levels.update(Collections.emptyList(), Collections.singletonList(file));
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
@@ -171,7 +177,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                      * See CompactStrategy.pick.
                      */
                     boolean dropDelete =
-                            unit.outputLevel() != 0
+                            !forceKeepDelete
+                                    && unit.outputLevel() != 0
                                     && (unit.outputLevel() >= levels.nonEmptyHighestLevel()
                                             || dvMaintainer != null);
 

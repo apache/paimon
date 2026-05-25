@@ -1,22 +1,22 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from collections import defaultdict
-from typing import List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
@@ -24,6 +24,9 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+
+if TYPE_CHECKING:
+    from ray.data import Dataset
 
 
 class TableWrite:
@@ -68,15 +71,62 @@ class TableWrite:
         self.file_store_write.write_cols = write_cols
         return self
 
+    def write_ray(
+        self,
+        dataset: "Dataset",
+        overwrite: bool = False,
+        concurrency: Optional[int] = None,
+        ray_remote_args: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Write a Ray Dataset to Paimon table.
+        
+        Args:
+            dataset: Ray Dataset to write. This is a distributed data collection
+                from Ray Data (ray.data.Dataset).
+            overwrite: Whether to overwrite existing data. Defaults to False.
+            concurrency: Optional max number of Ray tasks to run concurrently.
+                By default, dynamically decided based on available resources.
+            ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
+                For example, ``{"num_cpus": 2, "max_retries": 3}``.
+        """
+        from pypaimon.write.ray_datasink import PaimonDatasink
+        datasink = PaimonDatasink(self.table, overwrite=overwrite)
+        dataset.write_datasink(
+            datasink,
+            concurrency=concurrency,
+            ray_remote_args=ray_remote_args,
+        )
+
     def close(self):
         self.file_store_write.close()
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
-        if data_schema != self.table_pyarrow_schema and data_schema.names != self.file_store_write.write_cols:
-            raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
-                             f"Input schema is: {data_schema} "
-                             f"Table schema is: {self.table_pyarrow_schema} "
-                             f"Write cols is: {self.file_store_write.write_cols}")
+        if data_schema == self.table_pyarrow_schema:
+            return
+        if data_schema.names == self.file_store_write.write_cols:
+            return
+        # Allow compatible binary types: binary, fixed_size_binary[N] are interchangeable
+        if data_schema.names == self.table_pyarrow_schema.names:
+            compatible = True
+            for i in range(len(data_schema)):
+                input_type = data_schema.field(i).type
+                table_type = self.table_pyarrow_schema.field(i).type
+                if input_type != table_type:
+                    if self._is_binary_family(input_type) and self._is_binary_family(table_type):
+                        continue
+                    compatible = False
+                    break
+            if compatible:
+                return
+        raise ValueError(f"Input schema isn't consistent with table schema and write cols. "
+                         f"Input schema is: {data_schema} "
+                         f"Table schema is: {self.table_pyarrow_schema} "
+                         f"Write cols is: {self.file_store_write.write_cols}")
+
+    @staticmethod
+    def _is_binary_family(arrow_type) -> bool:
+        return pa.types.is_binary(arrow_type) or pa.types.is_fixed_size_binary(arrow_type)
 
 
 class BatchTableWrite(TableWrite):

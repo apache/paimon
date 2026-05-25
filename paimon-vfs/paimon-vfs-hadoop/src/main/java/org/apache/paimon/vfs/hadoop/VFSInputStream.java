@@ -19,6 +19,7 @@
 package org.apache.paimon.vfs.hadoop;
 
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 
 import org.apache.hadoop.fs.FSInputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -28,9 +29,7 @@ import java.io.IOException;
 /**
  * VFSInputStream wrap over paimon SeekableInputStream to support hadoop FSDataInputStream. TODO:
  * SeekableInputStream interface is too simple to fully support all FSDataInputStream operations: 1.
- * ByteBufferReadable and ByteBufferPositionedReadable should be implemented for full support. 2.
- * Positioned read is not supported in SeekableInputStream, so it is by default implemented by
- * sequence read, which is not a good solution.
+ * ByteBufferReadable and ByteBufferPositionedReadable should be implemented for full support.
  */
 public class VFSInputStream extends FSInputStream {
     private SeekableInputStream in;
@@ -55,6 +54,18 @@ public class VFSInputStream extends FSInputStream {
     @Override
     public boolean seekToNewSource(long var1) throws IOException {
         return false;
+    }
+
+    @Override
+    public int read(long position, byte[] buffer, int offset, int length) throws IOException {
+        if (in instanceof VectoredReadable) {
+            int byteRead = ((VectoredReadable) in).pread(position, buffer, offset, length);
+            if (statistics != null && byteRead >= 0) {
+                statistics.incrementBytesRead(byteRead);
+            }
+            return byteRead;
+        }
+        return super.read(position, buffer, offset, length);
     }
 
     @Override

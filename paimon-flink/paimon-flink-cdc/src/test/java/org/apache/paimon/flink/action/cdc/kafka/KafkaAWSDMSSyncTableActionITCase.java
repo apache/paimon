@@ -76,6 +76,12 @@ public class KafkaAWSDMSSyncTableActionITCase extends KafkaSyncTableActionITCase
 
     @Test
     @Timeout(60)
+    public void testMetadataColumn() throws Exception {
+        testMetadataColumn(AWSDMS);
+    }
+
+    @Test
+    @Timeout(60)
     public void testFieldValNullSyncTable() throws Exception {
         testTableFiledValNull(AWSDMS);
     }

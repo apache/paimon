@@ -29,6 +29,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -297,5 +298,15 @@ public class RESTApiJsonTest {
         String requestStr = RESTApi.toJson(request);
         AlterFunctionRequest parseData = RESTApi.fromJson(requestStr, AlterFunctionRequest.class);
         assertEquals(parseData.changes().size(), request.changes().size());
+    }
+
+    @Test
+    public void authTableQueryResponseParseTest() throws Exception {
+        AuthTableQueryResponse response = MockRESTMessage.authTableQueryResponse();
+        String responseStr = RESTApi.toJson(response);
+        AuthTableQueryResponse parseData =
+                RESTApi.fromJson(responseStr, AuthTableQueryResponse.class);
+        assertEquals(response.filter(), parseData.filter());
+        assertEquals(response.columnMasking(), parseData.columnMasking());
     }
 }

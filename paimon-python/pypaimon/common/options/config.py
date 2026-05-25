@@ -1,23 +1,26 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from pypaimon.common.options.config_options import ConfigOptions
 
 
 class OssOptions:
+    OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("jindo").with_description(
+        "OSS filesystem implementation: legacy or jindo")
     OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
         "OSS access key ID")
     OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
@@ -38,6 +41,22 @@ class S3Options:
         "S3 security token")
     S3_ENDPOINT = ConfigOptions.key("fs.s3.endpoint").string_type().no_default_value().with_description("S3 endpoint")
     S3_REGION = ConfigOptions.key("fs.s3.region").string_type().no_default_value().with_description("S3 region")
+
+
+class GcsOptions:
+    GCS_ACCESS_TOKEN = (
+        ConfigOptions.key("gcs.access-token").string_type().no_default_value()
+        .with_description(
+            "GCS access token. If not set, ADC (Application Default Credentials) is used "
+            "automatically."))
+    GCS_ACCESS_TOKEN_EXPIRATION = (
+        ConfigOptions.key("gcs.access-token.expiration").string_type().no_default_value()
+        .with_description(
+            "ISO 8601 expiration datetime for the GCS access token. "
+            "Required when gcs.access-token is set."))
+    GCS_PROJECT_ID = (
+        ConfigOptions.key("gcs.project-id").string_type().no_default_value()
+        .with_description("GCP project ID for GCS requests."))
 
 
 class PVFSOptions:
@@ -74,7 +93,68 @@ class CatalogOptions:
         "dlf.token-ecs-role-name").string_type().no_default_value().with_description("DLF ECS role name")
     DLF_TOKEN_ECS_METADATA_URL = ConfigOptions.key(
         "dlf.token-ecs-metadata-url").string_type().no_default_value().with_description("DLF ECS metadata URL")
+    DLF_SIGNING_ALGORITHM = ConfigOptions.key(
+        "dlf.signing-algorithm").string_type().default_value("default").with_description(
+        "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
+        "'openapi' (for DlfNext/2026-01-18). "
+        "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class SecurityOptions:
+    KERBEROS_PRINCIPAL = (
+        ConfigOptions.key("security.kerberos.login.principal")
+        .string_type()
+        .no_default_value()
+        .with_description("Kerberos principal name associated with the keytab")
+    )
+    KERBEROS_KEYTAB = (
+        ConfigOptions.key("security.kerberos.login.keytab")
+        .string_type()
+        .no_default_value()
+        .with_description("Absolute path to a Kerberos keytab file that contains the user credentials")
+    )
+    KERBEROS_USE_TICKET_CACHE = (
+        ConfigOptions.key("security.kerberos.login.use-ticket-cache")
+        .boolean_type()
+        .default_value(True)
+        .with_description("Whether to read from the Kerberos ticket cache")
+    )
+
+
+class FuseOptions:
+    """FUSE configuration options."""
+
+    FUSE_ENABLED = (
+        ConfigOptions.key("fuse.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable FUSE local path mapping")
+    )
+
+    FUSE_ROOT = (
+        ConfigOptions.key("fuse.root")
+        .string_type()
+        .no_default_value()
+        .with_description("FUSE mounted local root path, e.g., /mnt/fuse/warehouse")
+    )
+
+    FUSE_VALIDATION_MODE = (
+        ConfigOptions.key("fuse.validation-mode")
+        .string_type()
+        .default_value("strict")
+        .with_description("Validation mode: strict, warn, or none")
+    )
+
+    FUSE_MODE = (
+        ConfigOptions.key("fuse.mode")
+        .string_type()
+        .default_value("pvfs")
+        .with_description(
+            "FUSE path mode: 'pvfs' uses database/table logical names, "
+            "'raw' uses URI path segments directly"
+        )
+    )

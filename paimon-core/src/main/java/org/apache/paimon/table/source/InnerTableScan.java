@@ -19,14 +19,15 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -37,10 +38,6 @@ import java.util.Map;
 public interface InnerTableScan extends TableScan {
 
     InnerTableScan withFilter(Predicate predicate);
-
-    default InnerTableScan withVectorSearch(VectorSearch vectorSearch) {
-        return this;
-    }
 
     default InnerTableScan withReadType(@Nullable RowType readType) {
         return this;
@@ -66,7 +63,20 @@ public interface InnerTableScan extends TableScan {
         return this;
     }
 
+    default InnerTableScan withPartitionFilter(Predicate predicate) {
+        return this;
+    }
+
     default InnerTableScan withRowRanges(List<Range> rowRanges) {
+        return this;
+    }
+
+    default InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        return this;
+    }
+
+    @Override
+    default InnerTableScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
         return this;
     }
 
@@ -95,5 +105,10 @@ public interface InnerTableScan extends TableScan {
     default InnerTableScan dropStats() {
         // do nothing, should implement this if need
         return this;
+    }
+
+    @Nullable
+    default String readProtectionTagName() {
+        return null;
     }
 }

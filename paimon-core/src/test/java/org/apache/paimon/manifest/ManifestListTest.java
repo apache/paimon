@@ -175,7 +175,10 @@ public class ManifestListTest {
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
                 null,
-                false);
+                CoreOptions.ExternalPathStrategy.NONE,
+                null,
+                false,
+                null);
     }
 
     private ManifestList createManifestList(String pathStr) {

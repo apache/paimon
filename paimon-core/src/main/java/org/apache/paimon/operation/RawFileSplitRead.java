@@ -18,9 +18,9 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
@@ -46,6 +46,8 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -81,12 +83,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
+    private final boolean ignoreCorruptFiles;
+    private final boolean ignoreLostFiles;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private VariantAccessInfo[] variantAccess;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -95,16 +98,17 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
-            boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled) {
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
-        this.fileIndexReadEnabled = fileIndexReadEnabled;
-        this.rowTrackingEnabled = rowTrackingEnabled;
+        this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
+        this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
+        this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
+        this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.readRowType = rowType;
     }
 
@@ -121,12 +125,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withReadType(RowType readRowType) {
         this.readRowType = readRowType;
-        return this;
-    }
-
-    @Override
-    public SplitRead<InternalRow> withVariantAccess(VariantAccessInfo[] variantAccess) {
-        this.variantAccess = variantAccess;
         return this;
     }
 
@@ -152,19 +150,38 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
-        DataSplit split = (DataSplit) s;
-        if (!split.beforeFiles().isEmpty()) {
-            LOG.info("Ignore split before files: {}", split.beforeFiles());
+        if (s instanceof DataSplit) {
+            DataSplit split = (DataSplit) s;
+            return createReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.dataFiles(),
+                    split.deletionFiles().orElse(null));
+        } else {
+            IncrementalSplit split = (IncrementalSplit) s;
+            if (!split.beforeFiles().isEmpty()) {
+                LOG.info("Ignore split before files: {}", split.beforeFiles());
+            }
+            return createReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.afterFiles(),
+                    split.afterDeletionFiles());
         }
+    }
 
-        List<DataFileMeta> files = split.dataFiles();
-        DeletionVector.Factory dvFactory =
-                DeletionVector.factory(fileIO, files, split.deletionFiles().orElse(null));
+    public RecordReader<InternalRow> createReader(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            List<DeletionFile> deletionFiles)
+            throws IOException {
+        DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = new HashMap<>();
         for (DataFileMeta file : files) {
             dvFactories.put(file.fileName(), () -> dvFactory.create(file.fileName()).orElse(null));
         }
-        return createReader(split.partition(), split.bucket(), split.dataFiles(), dvFactories);
+        return createReader(partition, bucket, files, dvFactories);
     }
 
     public RecordReader<InternalRow> createReader(
@@ -183,15 +200,16 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         readRowType.getFields(),
                         schema -> {
                             if (rowTrackingEnabled) {
-                                return rowTypeWithRowTracking(schema.logicalRowType(), true)
+                                // maybe file has no row id and sequence number, but in manifest
+                                // entry
+                                return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
                                         .getFields();
                             }
                             return schema.fields();
                         },
                         filters,
                         topN,
-                        limit,
-                        variantAccess);
+                        limit);
 
         for (DataFileMeta file : files) {
             suppliers.add(
@@ -271,6 +289,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
+                        ignoreCorruptFiles,
+                        ignoreLostFiles,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
                         PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),

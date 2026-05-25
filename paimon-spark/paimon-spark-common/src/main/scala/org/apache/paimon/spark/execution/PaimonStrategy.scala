@@ -22,18 +22,18 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
+import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ShowCreateTable}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
 import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
-import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
+import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
@@ -50,6 +50,12 @@ case class PaimonStrategy(spark: SparkSession)
 
     case ctas: CreateTableAsSelect =>
       PaimonCreateTableAsSelectStrategy(spark)(ctas)
+
+    case rtas: ReplaceTableAsSelect =>
+      PaimonReplaceTableAsSelectStrategy(spark)(rtas)
+
+    case rt: ReplaceTable =>
+      PaimonReplaceTableStrategy(spark)(rt)
 
     case c @ PaimonCallCommand(procedure, args) =>
       val input = buildInternalRow(args)
@@ -142,6 +148,28 @@ case class PaimonStrategy(spark: SparkSession)
           table: Table,
           partitionPredicate: Option[PartitionPredicate]) =>
       TruncatePaimonTableWithFilterExec(table, partitionPredicate) :: Nil
+
+    case c @ CopyIntoTableCommand(PaimonCatalogAndIdentifier(catalog, ident), _, _, _, _, _) =>
+      CopyIntoTableExec(
+        spark,
+        catalog,
+        ident,
+        c.sourcePath,
+        c.columns,
+        c.fileFormat,
+        c.pattern,
+        c.force,
+        c.output) :: Nil
+
+    case c @ CopyIntoLocationCommand(_, PaimonCatalogAndIdentifier(catalog, ident), _, _) =>
+      CopyIntoLocationExec(
+        spark,
+        catalog,
+        ident,
+        c.targetPath,
+        c.fileFormat,
+        c.overwrite,
+        c.output) :: Nil
 
     case _ => Nil
   }

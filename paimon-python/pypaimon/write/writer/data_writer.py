@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import pyarrow as pa
 import pyarrow.compute as pc
 import uuid
@@ -56,6 +56,7 @@ class DataWriter(ABC):
         )
         self.file_format = self.options.file_format(default_format)
         self.compression = self.options.file_compression()
+        self.zstd_level = self.options.file_compression_zstd_level()
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
         self.pending_data: Optional[pa.Table] = None
@@ -69,6 +70,22 @@ class DataWriter(ABC):
         )
         # Store the current generated external path to preserve scheme in metadata
         self._current_external_path: Optional[str] = None
+        # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
+        self._variant_shredding: Dict[str, Tuple] = {}
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
+                and self.options.variant_shredding_enabled():
+            shredding_json = self.options.variant_shredding_schema()
+            if shredding_json:
+                from pypaimon.data.variant_shredding import (
+                    parse_shredding_schema_option, shredding_schema_to_arrow_type)
+                col_schemas = parse_shredding_schema_option(shredding_json)
+                for col_name, obj_fields in col_schemas.items():
+                    target_type = shredding_schema_to_arrow_type(obj_fields)
+                    self._variant_shredding[col_name] = (obj_fields, target_type)
+
+        # Paimon field id map, used by _apply_variant_shredding; built once since
+        # the table schema is fixed for the lifetime of this writer.
+        self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -141,19 +158,17 @@ class DataWriter(ABC):
         """Merge existing data with new data. Must be implemented by subclasses."""
 
     def _check_and_roll_if_needed(self):
-        if self.pending_data is None:
-            return
-
-        current_size = self.pending_data.nbytes
-        if current_size > self.target_file_size:
+        while self.pending_data is not None:
+            current_size = self.pending_data.nbytes
+            if current_size <= self.target_file_size:
+                break
             split_row = self._find_optimal_split_point(self.pending_data, self.target_file_size)
-            if split_row > 0:
-                data_to_write = self.pending_data.slice(0, split_row)
-                remaining_data = self.pending_data.slice(split_row)
-
-                self._write_data_to_file(data_to_write)
-                self.pending_data = remaining_data
-                self._check_and_roll_if_needed()
+            if split_row <= 0:
+                break
+            data_to_write = self.pending_data.slice(0, split_row)
+            remaining_data = self.pending_data.slice(split_row)
+            self._write_data_to_file(data_to_write)
+            self.pending_data = remaining_data
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
@@ -168,16 +183,21 @@ class DataWriter(ABC):
         else:
             external_path_str = None
 
+        if self._variant_shredding:
+            data = self._apply_variant_shredding(data)
+
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data, compression=self.compression)
+            self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(file_path, data, compression=self.compression)
+            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data)
+            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
-            self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
+            self.file_io.write_blob(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
             self.file_io.write_lance(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
+            self.file_io.write_vortex(file_path, data)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
@@ -191,22 +211,23 @@ class DataWriter(ABC):
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
         # key stats & value stats
-        data_fields = self.table.fields if self.table.is_primary_key_table \
-            else PyarrowFieldParser.to_paimon_schema(data.schema)
+        value_stats_enabled = self.options.metadata_stats_enabled()
+        if value_stats_enabled:
+            stats_fields = self.table.fields if self.table.is_primary_key_table \
+                else PyarrowFieldParser.to_paimon_schema(data.schema)
+        else:
+            stats_fields = self.table.trimmed_primary_keys_fields
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
-            for field in data_fields
+            for field in stats_fields
         }
-        all_fields = data_fields
-        min_value_stats = [column_stats[field.name]['min_values'] for field in all_fields]
-        max_value_stats = [column_stats[field.name]['max_values'] for field in all_fields]
-        value_null_counts = [column_stats[field.name]['null_counts'] for field in all_fields]
         key_fields = self.trimmed_primary_keys_fields
-        min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
-        max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
-        key_null_counts = [column_stats[field.name]['null_counts'] for field in key_fields]
-        if not all(count == 0 for count in key_null_counts):
+        key_stats = self._collect_value_stats(data, key_fields, column_stats)
+        if not all(count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
+
+        value_fields = stats_fields if value_stats_enabled else []
+        value_stats = self._collect_value_stats(data, value_fields, column_stats)
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
@@ -217,16 +238,8 @@ class DataWriter(ABC):
             row_count=data.num_rows,
             min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
             max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=SimpleStats(
-                GenericRow(min_key_stats, self.trimmed_primary_keys_fields),
-                GenericRow(max_key_stats, self.trimmed_primary_keys_fields),
-                key_null_counts,
-            ),
-            value_stats=SimpleStats(
-                GenericRow(min_value_stats, data_fields),
-                GenericRow(max_value_stats, data_fields),
-                value_null_counts,
-            ),
+            key_stats=key_stats,
+            value_stats=value_stats,
             min_sequence_number=min_seq,
             max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
@@ -235,13 +248,38 @@ class DataWriter(ABC):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=None,  # None means all columns in the data have statistics
+            value_stats_cols=None if value_stats_enabled else [],
             external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,
             # None means all columns in the table have been written
             file_path=file_path,
         ))
+
+    def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
+        """Transform VARIANT columns into shredded Parquet format.
+
+        Each shredded parent column is tagged with a ``PARQUET:field_id`` so that
+        the Java ``ParquetSchemaConverter.convertToPaimonField`` (called from
+        ``VariantUtils.variantFileType``) can read ``parquetType.getId().intValue()``
+        without a NullPointerException.
+        """
+        from pypaimon.data.variant_shredding import shred_variant_column
+        columns = list(data.columns)
+        fields = list(data.schema)
+        changed = False
+
+        for i, f in enumerate(fields):
+            if f.name in self._variant_shredding:
+                obj_fields, target_type = self._variant_shredding[f.name]
+                columns[i] = shred_variant_column(columns[i], obj_fields, target_type)
+                pid = self._paimon_field_id.get(f.name)
+                parent_meta = {b'PARQUET:field_id': str(pid).encode()} if pid is not None else None
+                fields[i] = pa.field(f.name, target_type, nullable=f.nullable, metadata=parent_meta)
+                changed = True
+        if not changed:
+            return data
+        return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
@@ -274,6 +312,27 @@ class DataWriter(ABC):
 
         return best_split
 
+    def _collect_value_stats(self, data: pa.Table, fields: List,
+                             column_stats: Optional[Dict[str, Dict]] = None) -> SimpleStats:
+        if not fields:
+            return SimpleStats.empty_stats()
+        
+        if column_stats is None or not column_stats:
+            column_stats = {
+                field.name: self._get_column_stats(data, field.name)
+                for field in fields
+            }
+        
+        min_stats = [column_stats[field.name]['min_values'] for field in fields]
+        max_stats = [column_stats[field.name]['max_values'] for field in fields]
+        null_counts = [column_stats[field.name]['null_counts'] for field in fields]
+        
+        return SimpleStats(
+            GenericRow(min_stats, fields),
+            GenericRow(max_stats, fields),
+            null_counts
+        )
+
     @staticmethod
     def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
         column_array = record_batch.column(column_name)
@@ -283,6 +342,19 @@ class DataWriter(ABC):
                 "max_values": None,
                 "null_counts": column_array.null_count,
             }
+        
+        column_type = column_array.type
+        supports_minmax = not (
+            pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type)
+        )
+        
+        if not supports_minmax:
+            return {
+                "min_values": None,
+                "max_values": None,
+                "null_counts": column_array.null_count,
+            }
+        
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
         null_counts = column_array.null_count

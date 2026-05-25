@@ -46,8 +46,10 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
@@ -58,6 +60,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -99,6 +102,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Nullable private final DVMetaCache dvMetaCache;
 
     private ScanMode scanMode = ScanMode.ALL;
+    private boolean hasNonPartitionFilter;
     private RecordComparator lazyPartitionComparator;
     private CacheMetrics dvMetaCacheMetrics;
 
@@ -236,8 +240,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
             scan.withPartitionFilter(pair.getLeft().get());
         }
         if (!pair.getRight().isEmpty()) {
+            this.hasNonPartitionFilter = true;
             nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pair.getRight()));
         }
+        scan.withCompleteFilter(predicate);
         return this;
     }
 
@@ -305,8 +311,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withRowRanges(List<Range> rowRanges) {
-        scan.withRowRanges(rowRanges);
+    public SnapshotReader withRowRanges(List<Range> sortedPushdownRowRanges) {
+        scan.withRowRanges(sortedPushdownRowRanges);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        scan.withRowRangeIndex(rowRangeIndex);
         return this;
     }
 
@@ -326,6 +338,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     public SnapshotReader withLimit(int limit) {
         scan.withLimit(limit);
         return this;
+    }
+
+    @Override
+    public boolean hasNonPartitionFilter() {
+        return hasNonPartitionFilter;
     }
 
     @Override
@@ -409,9 +426,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
+
+                // Calculate bucketPath once per bucket to avoid repeated computation
+                String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
-                    String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
@@ -457,41 +476,42 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(plan.files(FileKind.DELETE));
-        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
         LazyField<Snapshot> beforeSnapshot =
                 new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
-        return toChangesPlan(true, plan, beforeSnapshot, beforeFiles, dataFiles);
+        return toIncrementalPlan(
+                true, beforeSnapshot, beforeFiles, plan.snapshot(), plan.watermark(), afterFiles);
     }
 
-    private Plan toChangesPlan(
+    private Plan toIncrementalPlan(
             boolean isStreaming,
-            FileStoreScan.Plan plan,
             LazyField<Snapshot> beforeSnapshot,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles,
-            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles) {
-        Snapshot snapshot = plan.snapshot();
-        List<DataSplit> splits = new ArrayList<>();
+            @Nullable Snapshot afterSnapshot,
+            @Nullable Long afterWatermark,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
+        List<Split> splits = new ArrayList<>();
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
         beforeFiles.forEach(
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
-        dataFiles.forEach(
+        afterFiles.forEach(
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
         // Read deletion indexes at once to reduce file IO
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> beforeDeletionFilesMap = null;
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFilesMap = null;
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> afterDeletionFilesMap = null;
         if (!isStreaming && deletionVectors) {
             beforeDeletionFilesMap =
                     beforeSnapshot.get() != null
                             ? scanDvIndex(beforeSnapshot.get(), toPartBuckets(beforeFiles))
                             : Collections.emptyMap();
-            deletionFilesMap =
-                    snapshot != null
-                            ? scanDvIndex(snapshot, toPartBuckets(dataFiles))
+            afterDeletionFilesMap =
+                    afterSnapshot != null
+                            ? scanDvIndex(afterSnapshot, toPartBuckets(afterFiles))
                             : Collections.emptyMap();
         }
 
@@ -503,12 +523,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
                 List<ManifestEntry> dataEntries =
-                        dataFiles
+                        afterFiles
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
-
-                // deduplicate
-                beforeEntries.removeIf(dataEntries::remove);
 
                 Integer totalBuckets = null;
                 if (!dataEntries.isEmpty()) {
@@ -517,54 +534,69 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
                 }
 
+                // deduplicate: remove entries common to both lists
+                deduplicate(beforeEntries, dataEntries);
+
                 List<DataFileMeta> before =
                         beforeEntries.stream()
                                 .map(ManifestEntry::file)
                                 .collect(Collectors.toList());
-                List<DataFileMeta> data =
+                List<DataFileMeta> after =
                         dataEntries.stream().map(ManifestEntry::file).collect(Collectors.toList());
 
-                DataSplit.Builder builder =
-                        DataSplit.builder()
-                                .withSnapshot(snapshot.id())
-                                .withPartition(part)
-                                .withBucket(bucket)
-                                .withTotalBuckets(totalBuckets)
-                                .withBeforeFiles(before)
-                                .withDataFiles(data)
-                                .isStreaming(isStreaming)
-                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString());
+                List<DeletionFile> beforeDeletionFiles = null;
                 if (deletionVectors && beforeDeletionFilesMap != null) {
-                    builder.withBeforeDeletionFiles(
+                    beforeDeletionFiles =
                             getDeletionFiles(
                                     before,
                                     beforeDeletionFilesMap.getOrDefault(
-                                            Pair.of(part, bucket), Collections.emptyMap())));
+                                            Pair.of(part, bucket), Collections.emptyMap()));
                 }
-                if (deletionVectors && deletionFilesMap != null) {
-                    builder.withDataDeletionFiles(
+
+                List<DeletionFile> afterDeletionFiles = null;
+                if (deletionVectors && afterDeletionFilesMap != null) {
+                    afterDeletionFiles =
                             getDeletionFiles(
-                                    data,
-                                    deletionFilesMap.getOrDefault(
-                                            Pair.of(part, bucket), Collections.emptyMap())));
+                                    after,
+                                    afterDeletionFilesMap.getOrDefault(
+                                            Pair.of(part, bucket), Collections.emptyMap()));
                 }
-                splits.add(builder.build());
+
+                IncrementalSplit split =
+                        new IncrementalSplit(
+                                afterSnapshot.id(),
+                                part,
+                                bucket,
+                                totalBuckets,
+                                before,
+                                beforeDeletionFiles,
+                                after,
+                                afterDeletionFiles,
+                                isStreaming);
+
+                splits.add(split);
             }
         }
 
         return new PlanImpl(
-                plan.watermark(), snapshot == null ? null : snapshot.id(), (List) splits);
+                afterWatermark, afterSnapshot == null ? null : afterSnapshot.id(), splits);
     }
 
     @Override
     public Plan readIncrementalDiff(Snapshot before) {
         withMode(ScanMode.ALL);
         FileStoreScan.Plan plan = scan.plan();
-        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
-        return toChangesPlan(false, plan, new LazyField<>(() -> before), beforeFiles, dataFiles);
+        return toIncrementalPlan(
+                false,
+                new LazyField<>(() -> before),
+                beforeFiles,
+                plan.snapshot(),
+                plan.watermark(),
+                afterFiles);
     }
 
     private RecordComparator partitionComparator() {
@@ -672,5 +704,24 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
         return deletionFiles;
+    }
+
+    /**
+     * Remove entries common to both lists using HashSet for O(n+m) complexity instead of O(n*m)
+     * with List.remove().
+     */
+    private static void deduplicate(
+            List<ManifestEntry> beforeEntries, List<ManifestEntry> dataEntries) {
+        Set<ManifestEntry> afterSet = new HashSet<>(dataEntries);
+        Set<ManifestEntry> commonEntries = new HashSet<>();
+        beforeEntries.removeIf(
+                entry -> {
+                    if (afterSet.contains(entry)) {
+                        commonEntries.add(entry);
+                        return true;
+                    }
+                    return false;
+                });
+        dataEntries.removeAll(commonEntries);
     }
 }

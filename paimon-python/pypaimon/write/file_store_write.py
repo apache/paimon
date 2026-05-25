@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import random
 from typing import Dict, List, Tuple
 
@@ -46,6 +46,11 @@ class FileStoreWrite:
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
                               f"-s-{random.randint(0, 2 ** 31 - 2)}-w-"))
 
+    def disable_rolling(self):
+        """Disable file rolling by setting target_file_size to max."""
+        self.options.set(
+            CoreOptions.TARGET_FILE_SIZE, str(2 ** 63 - 1))
+
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
         if key not in self.data_writers:
@@ -64,7 +69,8 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=0,
-                options=options
+                options=options,
+                write_cols=self.write_cols,
             )
         elif self.table.is_primary_key_table:
             return KeyValueDataWriter(

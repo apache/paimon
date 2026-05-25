@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 import os
 import pickle
 import shutil
@@ -43,12 +43,18 @@ class SerializableTest(unittest.TestCase):
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])
+        cls.pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int32(), nullable=False),
+            ('item_id', pa.int32()),
+            ('behavior', pa.string()),
+            pa.field('dt', pa.string(), nullable=False)
+        ])
         cls.expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3, 4, 5, 7, 8],
             'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
             'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
-        }, schema=cls.pa_schema)
+        }, schema=cls.pk_pa_schema)
 
     @classmethod
     def tearDownClass(cls):
@@ -86,7 +92,7 @@ class SerializableTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', None],
             'dt': ['p1', 'p1', 'p2', 'p1'],
         }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data1, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -100,7 +106,7 @@ class SerializableTest(unittest.TestCase):
             'behavior': ['e', 'b-new', 'g', 'h'],
             'dt': ['p2', 'p1', 'p1', 'p2']
         }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data1, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()

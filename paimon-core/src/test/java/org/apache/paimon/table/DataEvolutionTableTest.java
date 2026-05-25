@@ -21,66 +21,56 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
-import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
-import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.types.DataField;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** Test for table with data evolution. */
-public class DataEvolutionTableTest extends TableTestBase {
+public class DataEvolutionTableTest extends DataEvolutionTestBase {
 
     @Test
     public void testBasic() throws Exception {
@@ -106,8 +96,20 @@ public class DataEvolutionTableTest extends TableTestBase {
         }
 
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        // assert merged row count
+        long noMergedRowCount = plan.splits().stream().mapToLong(Split::rowCount).sum();
+        long mergedRowCount =
+                plan.splits().stream()
+                        .map(Split::mergedRowCount)
+                        .filter(OptionalLong::isPresent)
+                        .mapToLong(OptionalLong::getAsLong)
+                        .sum();
+        assertThat(noMergedRowCount).isEqualTo(2);
+        assertThat(mergedRowCount).isEqualTo(1);
+
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
         assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
         reader.forEachRemaining(
                 r -> {
@@ -124,10 +126,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                         .newRead()
                         .createReader(readBuilder.newScan().plan());
         AtomicInteger cnt = new AtomicInteger(0);
-        reader.forEachRemaining(
-                r -> {
-                    cnt.incrementAndGet();
-                });
+        reader.forEachRemaining(r -> cnt.incrementAndGet());
         assertThat(cnt.get()).isEqualTo(1);
 
         // projection with an empty read type
@@ -138,10 +137,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                         .newRead()
                         .createReader(readBuilder.newScan().plan());
         AtomicInteger cnt1 = new AtomicInteger(0);
-        reader.forEachRemaining(
-                r -> {
-                    cnt1.incrementAndGet();
-                });
+        reader.forEachRemaining(r -> cnt1.incrementAndGet());
         assertThat(cnt1.get()).isEqualTo(1);
     }
 
@@ -381,23 +377,6 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(readRows.get(1).getString(2).toString()).isEqualTo("d");
     }
 
-    private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {
-        commitables.forEach(
-                c -> {
-                    CommitMessageImpl commitMessage = (CommitMessageImpl) c;
-                    List<DataFileMeta> newFiles =
-                            new ArrayList<>(commitMessage.newFilesIncrement().newFiles());
-                    commitMessage.newFilesIncrement().newFiles().clear();
-                    commitMessage
-                            .newFilesIncrement()
-                            .newFiles()
-                            .addAll(
-                                    newFiles.stream()
-                                            .map(s -> s.assignFirstRowId(firstRowId))
-                                            .collect(Collectors.toList()));
-                });
-    }
-
     @Test
     public void testMoreData() throws Exception {
         createTableDefault();
@@ -483,6 +462,94 @@ public class DataEvolutionTableTest extends TableTestBase {
         predicate = predicateBuilder.notEqual(2, BinaryString.fromString("c"));
         readBuilder.withFilter(predicate);
         assertThat(readBuilder.newScan().plan().splits().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testLimitPushDownWithoutFilter() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        // Write three commits through normal path and verify limit pushdown can reduce scanned
+        // files.
+        for (int i = 0; i < 30; i++) {
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                write.write(GenericRow.of(i * 2 + 1, BinaryString.fromString("v" + (i * 2 + 1))));
+                write.write(GenericRow.of(i * 2 + 2, BinaryString.fromString("v" + (i * 2 + 2))));
+
+                BatchTableCommit commit = builder.newCommit();
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        for (int i = 0; i < 2; i++) {
+            try (BatchTableWrite write =
+                    builder.newWrite().withWriteType(writeType.project("f1"))) {
+                write.write(GenericRow.of(BinaryString.fromString("v" + (i * 2 + 1))));
+                write.write(GenericRow.of(BinaryString.fromString("v" + (i * 2 + 2))));
+
+                BatchTableCommit commit = builder.newCommit();
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                setFirstRowId(commitMessages, 0L);
+                commit.commit(commitMessages);
+            }
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        TableScan.Plan fullPlan = readBuilder.newScan().plan();
+        TableScan.Plan limitPlan = readBuilder.withLimit(3).newScan().plan();
+
+        int fullFiles =
+                fullPlan.splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .mapToInt(split -> split.dataFiles().size())
+                        .sum();
+        int limitedFiles =
+                limitPlan.splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .mapToInt(split -> split.dataFiles().size())
+                        .sum();
+
+        assertThat(fullFiles).isEqualTo(32);
+        assertThat(limitedFiles).isEqualTo(4);
+        assertThat(limitedFiles).isLessThan(fullFiles);
+    }
+
+    @Test
+    public void testLimitPushDownWithFilterShouldNotEarlyStop() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        // Three manifests with different values on f1, only the last one matches filter.
+        for (int i = 0; i < 3; i++) {
+            String value = i == 0 ? "a" : (i == 1 ? "b" : "c");
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                write.write(GenericRow.of(i * 2 + 1, BinaryString.fromString(value)));
+                write.write(GenericRow.of(i * 2 + 2, BinaryString.fromString(value)));
+
+                BatchTableCommit commit = builder.newCommit();
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(schema.rowType());
+        Predicate predicate = predicateBuilder.equal(1, BinaryString.fromString("c"));
+
+        TableScan.Plan plan = readBuilder.withFilter(predicate).withLimit(1).newScan().plan();
+        assertThat(plan.splits().isEmpty()).isFalse();
+
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
+        AtomicInteger rowCount = new AtomicInteger(0);
+        reader.forEachRemaining(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("c");
+                    rowCount.incrementAndGet();
+                });
+        assertThat(rowCount.get()).isGreaterThan(0);
     }
 
     @Test
@@ -787,6 +854,75 @@ public class DataEvolutionTableTest extends TableTestBase {
     }
 
     @Test
+    public void testPartitionGroupedRowIdsWithBlobFiles() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.partitionKeys("pt");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "128 MB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        byte[] blobBytes = new byte[1];
+        Arrays.fill(blobBytes, (byte) 1);
+        String[] partitionOrder =
+                new String[] {
+                    "pt1", "pt0", "pt2", "pt1", "pt2", "pt0",
+                    "pt0", "pt2", "pt1", "pt2", "pt0", "pt1",
+                    "pt1", "pt2", "pt0", "pt0", "pt1", "pt2"
+                };
+
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < partitionOrder.length; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partitionOrder[i]),
+                                i,
+                                BinaryString.fromString("v" + i),
+                                new BlobData(blobBytes)));
+            }
+
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        Map<String, List<DataFileMeta>> filesByPartition = new HashMap<>();
+        for (ManifestEntry entry : table.store().newScan().plan().files()) {
+            String partition = entry.partition().getString(0).toString();
+            filesByPartition.computeIfAbsent(partition, k -> new ArrayList<>()).add(entry.file());
+        }
+
+        assertThat(filesByPartition.size()).isEqualTo(3);
+        for (List<DataFileMeta> files : filesByPartition.values()) {
+            List<DataFileMeta> regularFiles =
+                    files.stream()
+                            .filter(file -> !"blob".equals(file.fileFormat()))
+                            .collect(Collectors.toList());
+            List<DataFileMeta> blobFiles =
+                    files.stream()
+                            .filter(file -> "blob".equals(file.fileFormat()))
+                            .collect(Collectors.toList());
+
+            assertThat(regularFiles.size()).isEqualTo(1);
+            assertThat(blobFiles.size()).isGreaterThan(1);
+
+            Range regularRange = assertContinuousRowIdRange(regularFiles);
+            Range blobRange = assertContinuousRowIdRange(blobFiles);
+            assertThat(regularRange.count()).isEqualTo(6L);
+            assertThat(blobRange).isEqualTo(regularRange);
+        }
+    }
+
+    @Test
     public void testNonNullColumn() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
@@ -828,79 +964,6 @@ public class DataEvolutionTableTest extends TableTestBase {
     }
 
     @Test
-    public void testGlobalIndex() throws Exception {
-        write(100000L);
-
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
-
-        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(1);
-        Assertions.assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
-
-        Predicate predicate2 =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400")));
-
-        rowIds = globalIndexScan(table, predicate2);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(3);
-        Assertions.assertThat(rowIds.toRangeList())
-                .containsExactlyInAnyOrder(
-                        new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
-
-        DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
-        RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
-
-        List<String> readF1 = new ArrayList<>();
-        table.newRead()
-                .createReader(scan.plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
-    }
-
-    @Test
-    public void testGlobalIndexWithCoreScan() throws Exception {
-        write(100000L);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-
-        Predicate predicate =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400")));
-
-        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-
-        List<String> readF1 = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
-    }
-
-    @Test
     public void testCompactCoordinator() throws Exception {
         for (int i = 0; i < 10; i++) {
             write(100000L);
@@ -908,16 +971,20 @@ public class DataEvolutionTableTest extends TableTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         // Create coordinator and call plan multiple times
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false);
+                new DataEvolutionCompactCoordinator(table, false, false);
 
         // Each plan() call processes one manifest group
         List<DataEvolutionCompactTask> allTasks = new ArrayList<>();
         List<DataEvolutionCompactTask> tasks;
-        while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
-            allTasks.addAll(tasks);
-            if (tasks.isEmpty()) {
-                break;
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
+                allTasks.addAll(tasks);
+                if (tasks.isEmpty()) {
+                    break;
+                }
             }
+        } catch (EndOfScanException ingore) {
+
         }
 
         // Verify no exceptions were thrown and tasks list is valid (may be empty)
@@ -935,15 +1002,18 @@ public class DataEvolutionTableTest extends TableTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         // Create coordinator and call plan multiple times
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false);
+                new DataEvolutionCompactCoordinator(table, false, false);
 
         // Each plan() call processes one manifest group
         List<CommitMessage> commitMessages = new ArrayList<>();
         List<DataEvolutionCompactTask> tasks;
-        while (!(tasks = coordinator.plan()).isEmpty()) {
-            for (DataEvolutionCompactTask task : tasks) {
-                commitMessages.add(task.doCompact(table));
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    commitMessages.add(task.doCompact(table, "test-commit"));
+                }
             }
+        } catch (EndOfScanException ignore) {
         }
 
         table.newBatchWriteBuilder().newCommit().commit(commitMessages);
@@ -959,114 +1029,526 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
     }
 
-    private void write(long count) throws Exception {
+    @Test
+    public void testIndexPath() throws Exception {
         createTableDefault();
+        FileStoreTable table = getTableDefault();
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
+        Path path0 = indexPathFactory.toPath("test-file");
+        assertThat(path0.toString().contains(warehouse.toString())).isTrue();
+        String testExternalpath = "file:/external/path/test-file-dir";
+        Path path1 =
+                indexPathFactory.toPath(
+                        new IndexFileMeta(
+                                "test-type",
+                                "test-file",
+                                1024L,
+                                100L,
+                                null,
+                                testExternalpath,
+                                null));
+        assertThat(path1.toString()).isEqualTo(testExternalpath);
+
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), testExternalpath));
+
+        indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+        Path path3 = indexPathFactory.toPath("test-file");
+        assertThat(path3.toString()).isEqualTo(testExternalpath + "/test-file");
+
+        String testExternalpath2 = "file:/external/path2/test-file";
+        Path path4 =
+                indexPathFactory.toPath(
+                        new IndexFileMeta(
+                                "test-type",
+                                "test-file",
+                                1024L,
+                                100L,
+                                null,
+                                testExternalpath2,
+                                null));
+        assertThat(path4.toString()).isEqualTo(testExternalpath2);
+    }
+
+    @Test
+    public void testProjectionPushdown() throws Exception {
+        createTableDefault();
         Schema schema = schemaDefault();
-        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
-        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
         BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+
+        // Write f0 and f1 together
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
         try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
-            for (int i = 0; i < count; i++) {
-                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            write0.write(GenericRow.of(1, BinaryString.fromString("a")));
+            write0.write(GenericRow.of(2, BinaryString.fromString("b")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write0.prepareCommit();
+            commit.commit(commitables);
+        }
+
+        // Write f2 separately with same firstRowId
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("x")));
+            write1.write(GenericRow.of(BinaryString.fromString("y")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        // Project only f0 - should filter out the f2-only file
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder().withProjection(new int[] {0});
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        DataSplit dataSplit = (DataSplit) plan.splits().get(0);
+        assertThat(dataSplit.dataFiles().size()).isEqualTo(1);
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows.size()).isEqualTo(2);
+
+        // Project only f2 - should filter out the f0,f1-only file
+        readBuilder = getTableDefault().newReadBuilder().withProjection(new int[] {2});
+        plan = readBuilder.newScan().plan();
+        dataSplit = (DataSplit) plan.splits().get(0);
+        assertThat(dataSplit.dataFiles().size()).isEqualTo(1);
+        reader = readBuilder.newRead().createReader(plan);
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows.size()).isEqualTo(2);
+
+        // Project f0 and f2 (skip f1) - needs both files
+        readBuilder = getTableDefault().newReadBuilder().withProjection(new int[] {0, 2});
+        plan = readBuilder.newScan().plan();
+        dataSplit = (DataSplit) plan.splits().get(0);
+        assertThat(dataSplit.dataFiles().size()).isEqualTo(2);
+        reader = readBuilder.newRead().createReader(plan);
+        RowType projectedType = schema.rowType().project(Arrays.asList("f0", "f2"));
+        InternalRowSerializer serializer = new InternalRowSerializer(projectedType);
+        List<InternalRow> projectedRows = new ArrayList<>();
+        reader.forEachRemaining(r -> projectedRows.add(serializer.copy(r)));
+        assertThat(projectedRows.size()).isEqualTo(2);
+        projectedRows.sort(Comparator.comparingInt(r -> r.getInt(0)));
+        assertThat(projectedRows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(projectedRows.get(0).getString(1).toString()).isEqualTo("x");
+        assertThat(projectedRows.get(1).getInt(0)).isEqualTo(2);
+        assertThat(projectedRows.get(1).getString(1).toString()).isEqualTo("y");
+    }
+
+    @Test
+    public void testSequenceNumberConflictResolution() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+
+        // Write all columns first
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("old")));
+            write.write(
+                    GenericRow.of(2, BinaryString.fromString("b"), BinaryString.fromString("old")));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+
+        // Overwrite f2 with a new value (higher sequence number)
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("new")));
+            write1.write(GenericRow.of(BinaryString.fromString("new")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        // Read and verify f2 shows the new value (higher seq number wins)
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        InternalRowSerializer serializer = new InternalRowSerializer(schema.rowType());
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(r -> rows.add(serializer.copy(r)));
+        assertThat(rows.size()).isEqualTo(2);
+        rows.sort(Comparator.comparingInt(r -> r.getInt(0)));
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("a");
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("new");
+        assertThat(rows.get(1).getInt(0)).isEqualTo(2);
+        assertThat(rows.get(1).getString(1).toString()).isEqualTo("b");
+        assertThat(rows.get(1).getString(2).toString()).isEqualTo("new");
+    }
+
+    @Test
+    public void testMultipleOverwritesSameColumn() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+
+        // Write initial data with all columns
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(
+                            1, BinaryString.fromString("a"), BinaryString.fromString("version1")));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+
+        // Overwrite f2 - second time
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("version2")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        // Overwrite f2 - third time
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("version3")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 0L);
+            commit.commit(commitables);
+        }
+
+        // Read and verify only the latest version is visible
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("a");
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("version3");
+    }
+
+    @Test
+    public void testCompactThenReadCorrectness() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            write(100000L);
+        }
+        FileStoreTable table = getTableDefault();
+
+        // Run compaction
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        List<DataEvolutionCompactTask> tasks;
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    commitMessages.add(task.doCompact(table, "test-compact"));
+                }
             }
+        } catch (EndOfScanException ignore) {
+        }
+        assertThat(commitMessages.isEmpty()).isFalse();
+        table.newBatchWriteBuilder().newCommit().commit(commitMessages);
+
+        // Verify data after compaction
+        Schema schema = schemaDefault();
+        table = getTableDefault();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
+        InternalRowSerializer serializer = new InternalRowSerializer(schema.rowType());
+        List<InternalRow> rowsAfter = new ArrayList<>();
+        reader.forEachRemaining(r -> rowsAfter.add(serializer.copy(r)));
+        assertThat(rowsAfter.size()).isEqualTo(500000);
+
+        // Each write produces rows with f0=0..99999, so 5 writes gives 5 copies of each
+        rowsAfter.sort(Comparator.comparingInt(r -> r.getInt(0)));
+        // First 5 rows should all have f0=0 with correct f1 and f2
+        for (int i = 0; i < 5; i++) {
+            assertThat(rowsAfter.get(i).getInt(0)).isEqualTo(0);
+            assertThat(rowsAfter.get(i).getString(1).toString()).isEqualTo("a0");
+            assertThat(rowsAfter.get(i).getString(2).toString()).isEqualTo("b0");
+        }
+        // Spot check other values
+        for (int i = 5; i < 10; i++) {
+            assertThat(rowsAfter.get(i).getInt(0)).isEqualTo(1);
+            assertThat(rowsAfter.get(i).getString(1).toString()).isEqualTo("a1");
+            assertThat(rowsAfter.get(i).getString(2).toString()).isEqualTo("b1");
+        }
+
+        // After compaction, only 1 file should remain
+        assertThat(plan.splits().size()).isEqualTo(1);
+        DataSplit dataSplit = (DataSplit) plan.splits().get(0);
+        assertThat(dataSplit.dataFiles().size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testStreamingRead() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        StreamTableScan streamScan = readBuilder.newStreamScan();
+
+        // Initial plan should be empty (no snapshots yet), or return existing data
+        // Write first batch - full row
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+
+        // Streaming plan should return the new data
+        TableScan.Plan plan = streamScan.plan();
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("a");
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("b");
+
+        // Write a partial-column append for new row
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(GenericRow.of(2, BinaryString.fromString("c")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write0.prepareCommit();
+            setFirstRowId(commitables, 1L);
+            commit.commit(commitables);
+        }
+
+        // Streaming plan returns only the new incremental data
+        plan = streamScan.plan();
+        reader = readBuilder.newRead().createReader(plan);
+        List<InternalRow> rows2 = new ArrayList<>();
+        reader.forEachRemaining(rows2::add);
+        assertThat(rows2.size()).isEqualTo(1);
+        assertThat(rows2.get(0).getInt(0)).isEqualTo(2);
+        assertThat(rows2.get(0).getString(1).toString()).isEqualTo("c");
+        assertThat(rows2.get(0).isNullAt(2)).isTrue();
+    }
+
+    @Test
+    public void testPartitionedTable() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("pt", DataTypes.STRING());
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.STRING());
+        schemaBuilder.partitionKeys("pt");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        RowType fullType = table.rowType();
+        RowType writeType0 = fullType.project(Arrays.asList("pt", "f0", "f1"));
+        RowType writeType1 = fullType.project(Arrays.asList("pt", "f2"));
+
+        // Write f0, f1 for partition p1 only
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(
+                    GenericRow.of(BinaryString.fromString("p1"), 1, BinaryString.fromString("a")));
+            write0.write(
+                    GenericRow.of(BinaryString.fromString("p1"), 2, BinaryString.fromString("b")));
             BatchTableCommit commit = builder.newCommit();
             commit.commit(write0.prepareCommit());
         }
 
-        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
-        builder = getTableDefault().newBatchWriteBuilder();
+        long p1RowId =
+                table.snapshotManager().latestSnapshot().nextRowId() - 2; // 2 rows written for p1
+
+        // Write f2 for p1 with matching firstRowId
         try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
-            for (int i = 0; i < count; i++) {
-                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
-            }
+            write1.write(
+                    GenericRow.of(BinaryString.fromString("p1"), BinaryString.fromString("x")));
+            write1.write(
+                    GenericRow.of(BinaryString.fromString("p1"), BinaryString.fromString("y")));
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write1.prepareCommit();
-            setFirstRowId(commitables, rowId);
+            setFirstRowId(commitables, p1RowId);
             commit.commit(commitables);
         }
 
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        FileIO fileIO = table.fileIO();
-        ReadBuilder readBuilder =
-                table.newReadBuilder()
-                        .withReadType(
-                                SpecialFields.rowTypeWithRowTracking(
-                                        table.rowType().project("f1")));
+        // Write f0, f1 for partition p2
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(
+                    GenericRow.of(BinaryString.fromString("p2"), 3, BinaryString.fromString("c")));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+
+        long p2RowId =
+                table.snapshotManager().latestSnapshot().nextRowId() - 1; // 1 row written to p2
+
+        // Write f2 for p2 with matching firstRowId
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(
+                    GenericRow.of(BinaryString.fromString("p2"), BinaryString.fromString("z")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, p2RowId);
+            commit.commit(commitables);
+        }
+
+        // Read all and verify
+        ReadBuilder readBuilder = table.newReadBuilder();
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        InternalRowSerializer serializer = new InternalRowSerializer(fullType);
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(r -> rows.add(serializer.copy(r)));
+        rows.sort(Comparator.comparingInt(r -> r.getInt(1)));
 
-        GlobalIndexFileReadWrite indexFileReadWrite =
-                new GlobalIndexFileReadWrite(
-                        fileIO,
-                        table.store().pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0));
+        assertThat(rows.size()).isEqualTo(3);
+        // p1 rows
+        assertThat(rows.get(0).getString(0).toString()).isEqualTo("p1");
+        assertThat(rows.get(0).getInt(1)).isEqualTo(1);
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("a");
+        assertThat(rows.get(0).getString(3).toString()).isEqualTo("x");
 
-        DataField indexField = table.rowType().getField("f1");
+        assertThat(rows.get(1).getString(0).toString()).isEqualTo("p1");
+        assertThat(rows.get(1).getInt(1)).isEqualTo(2);
+        assertThat(rows.get(1).getString(2).toString()).isEqualTo("b");
+        assertThat(rows.get(1).getString(3).toString()).isEqualTo("y");
 
-        GlobalIndexerFactory globalIndexerFactory =
-                GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
-        GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField, new Options());
-        GlobalIndexWriter globaIndexBuilder = globalIndexer.createWriter(indexFileReadWrite);
-
-        reader.forEachRemaining(r -> globaIndexBuilder.write(r.getString(0)));
-
-        List<GlobalIndexWriter.ResultEntry> results = globaIndexBuilder.finish();
-
-        List<IndexFileMeta> indexFileMetaList = new ArrayList<>();
-        for (GlobalIndexWriter.ResultEntry result : results) {
-            String fileName = result.fileName();
-            Range range = result.rowRange();
-            long fileSize = fileIO.getFileSize(indexFileReadWrite.filePath(fileName));
-            GlobalIndexMeta globalIndexMeta =
-                    new GlobalIndexMeta(range.from, range.to, indexField.id(), null, result.meta());
-            indexFileMetaList.add(
-                    new IndexFileMeta(
-                            BitmapGlobalIndexerFactory.IDENTIFIER,
-                            fileName,
-                            fileSize,
-                            count,
-                            globalIndexMeta));
-        }
-
-        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetaList);
-
-        CommitMessage commitMessage =
-                new CommitMessageImpl(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        null,
-                        dataIncrement,
-                        CompactIncrement.emptyIncrement());
-
-        table.newBatchWriteBuilder().newCommit().commit(Collections.singletonList(commitMessage));
+        // p2 row
+        assertThat(rows.get(2).getString(0).toString()).isEqualTo("p2");
+        assertThat(rows.get(2).getInt(1)).isEqualTo(3);
+        assertThat(rows.get(2).getString(2).toString()).isEqualTo("c");
+        assertThat(rows.get(2).getString(3).toString()).isEqualTo("z");
     }
 
-    private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
-            throws Exception {
-        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<Range> ranges = indexScanBuilder.shardList();
-        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
-        for (Range range : ranges) {
-            try (RowRangeGlobalIndexScanner scanner =
-                    indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
-                if (!globalIndexResult.isPresent()) {
-                    throw new RuntimeException("Can't find index result by scan");
-                }
-                globalFileIndexResult = globalFileIndexResult.or(globalIndexResult.get());
-            }
+    @Test
+    public void testSchemaEvolution() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+
+        // Write initial data with original schema (f0, f1, f2)
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("a"), BinaryString.fromString("b")));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
         }
 
-        return globalFileIndexResult.results();
+        // Add a new column f3
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+
+        // Reload table to pick up new schema
+        FileStoreTable table = getTableDefault();
+        builder = table.newBatchWriteBuilder();
+
+        // Write data with new schema (f0, f1, f2, f3)
+        try (BatchTableWrite write = builder.newWrite()) {
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryString.fromString("c"),
+                            BinaryString.fromString("d"),
+                            BinaryString.fromString("e")));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+
+        // Read and verify - old rows should have null for f3
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        rows.sort(Comparator.comparingInt(r -> r.getInt(0)));
+
+        assertThat(rows.size()).isEqualTo(2);
+        // Old row - f3 should be null
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("a");
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("b");
+        assertThat(rows.get(0).isNullAt(3)).isTrue();
+
+        // New row - all columns present
+        assertThat(rows.get(1).getInt(0)).isEqualTo(2);
+        assertThat(rows.get(1).getString(1).toString()).isEqualTo("c");
+        assertThat(rows.get(1).getString(2).toString()).isEqualTo("d");
+        assertThat(rows.get(1).getString(3).toString()).isEqualTo("e");
     }
 
-    protected Schema schemaDefault() {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f0", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.STRING());
-        schemaBuilder.column("f2", DataTypes.STRING());
-        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        return schemaBuilder.build();
+    @Test
+    public void testReadAfterMultipleAppendsToDifferentColumnSets() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+
+        // Commit 1: Write only f0 for row 0
+        RowType writeType0 = schema.rowType().project(Collections.singletonList("f0"));
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            write0.write(GenericRow.of(1));
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+
+        // Commit 2: Write only f1 for row 1 (different row)
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f1"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            write1.write(GenericRow.of(BinaryString.fromString("a")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, 1L);
+            commit.commit(commitables);
+        }
+
+        // Commit 3: Write only f2 for row 2 (different row)
+        RowType writeType2 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write2 = builder.newWrite().withWriteType(writeType2)) {
+            write2.write(GenericRow.of(BinaryString.fromString("b")));
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write2.prepareCommit();
+            setFirstRowId(commitables, 2L);
+            commit.commit(commitables);
+        }
+
+        // Read all rows - each row should have only its written column with others null
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+
+        assertThat(rows.size()).isEqualTo(3);
+
+        // Row 0: only f0 is set
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).isNullAt(1)).isTrue();
+        assertThat(rows.get(0).isNullAt(2)).isTrue();
+
+        // Row 1: only f1 is set
+        assertThat(rows.get(1).isNullAt(0)).isTrue();
+        assertThat(rows.get(1).getString(1).toString()).isEqualTo("a");
+        assertThat(rows.get(1).isNullAt(2)).isTrue();
+
+        // Row 2: only f2 is set
+        assertThat(rows.get(2).isNullAt(0)).isTrue();
+        assertThat(rows.get(2).isNullAt(1)).isTrue();
+        assertThat(rows.get(2).getString(2).toString()).isEqualTo("b");
+    }
+
+    private Range assertContinuousRowIdRange(List<DataFileMeta> files) {
+        files.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
+        long start = files.get(0).nonNullFirstRowId();
+        long expectedStart = start;
+        for (DataFileMeta file : files) {
+            assertThat(file.nonNullFirstRowId()).isEqualTo(expectedStart);
+            expectedStart += file.rowCount();
+        }
+        return new Range(start, expectedStart - 1);
     }
 }

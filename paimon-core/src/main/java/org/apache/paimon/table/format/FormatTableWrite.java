@@ -21,6 +21,7 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -43,14 +44,13 @@ import java.util.stream.Collectors;
 /** {@link TableWrite} implementation for format table. */
 public class FormatTableWrite implements BatchTableWrite {
 
-    private RowType rowType;
+    private final RowType rowType;
     private final FormatTableFileWriter write;
     private final FormatTableRowPartitionKeyExtractor partitionKeyExtractor;
 
     private final int[] notNullFieldIndex;
     private final @Nullable DefaultValueRow defaultValueRow;
     private final ProjectedRow projectedRow;
-    private final RowType writeRowType;
 
     public FormatTableWrite(
             FileIO fileIO,
@@ -68,7 +68,7 @@ public class FormatTableWrite implements BatchTableWrite {
                         .collect(Collectors.toList());
         this.notNullFieldIndex = rowType.getFieldIndices(notNullColumnNames);
         this.defaultValueRow = DefaultValueRow.create(rowType);
-        this.writeRowType =
+        RowType writeRowType =
                 rowType.project(
                         rowType.getFieldNames().stream()
                                 .filter(name -> !partitionType.getFieldNames().contains(name))
@@ -115,6 +115,11 @@ public class FormatTableWrite implements BatchTableWrite {
     @Override
     public TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         return this;
+    }
+
+    @Override
+    public TableWrite withBlobConsumer(BlobConsumer blobConsumer) {
+        throw new UnsupportedOperationException();
     }
 
     @Override

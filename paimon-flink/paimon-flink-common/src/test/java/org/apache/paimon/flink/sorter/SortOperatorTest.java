@@ -65,8 +65,7 @@ public class SortOperatorTest {
                         128,
                         CompressOptions.defaultOptions(),
                         1,
-                        MemorySize.MAX_VALUE,
-                        true) {};
+                        MemorySize.MAX_VALUE) {};
 
         OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
         harness.open();
@@ -115,8 +114,7 @@ public class SortOperatorTest {
                         128,
                         CompressOptions.defaultOptions(),
                         1,
-                        MemorySize.MAX_VALUE,
-                        true) {};
+                        MemorySize.MAX_VALUE) {};
         OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
         harness.open();
         File[] files = harness.getEnvironment().getIOManager().getSpillingDirectories();

@@ -35,6 +35,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -211,27 +212,27 @@ class IcebergDataFieldTest {
     void testTimestampPrecisionValidation() {
         // Test invalid precision (<= 3)
         DataField invalidTimestampField =
-                new DataField(1, "timestamp", new TimestampType(false, 3));
+                new DataField(1, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
 
         // Test invalid precision (<= 3)
         DataField invalidTimestampField2 =
-                new DataField(2, "timestamp", new TimestampType(false, 3));
+                new DataField(2, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
 
         // Test invalid local timezone timestamp precision (<= 3)
         DataField invalidTimestampLtzField =
-                new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 3));
+                new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampLtzField))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9");
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
 
         // Test valid precision boundaries
         DataField validTimestamp4 = new DataField(4, "timestamp", new TimestampType(false, 4));
@@ -544,5 +545,40 @@ class IcebergDataFieldTest {
         assertThat(icebergStruct.fields()).hasSize(2);
         assertThat(icebergStruct.fields().get(0).type()).isEqualTo("int");
         assertThat(icebergStruct.fields().get(1).type()).isEqualTo("string");
+    }
+
+    @Test
+    @DisplayName("Test doc field serialization with null value")
+    void testDocFieldSerializationWithNullValue() {
+        // Test doc field is null
+        DataField dataFieldWithoutDoc = new DataField(1, "test_field", new IntType(false));
+        IcebergDataField originalField = new IcebergDataField(dataFieldWithoutDoc);
+
+        String json = JsonSerdeUtil.toJson(originalField);
+        IcebergDataField deserializedField = JsonSerdeUtil.fromJson(json, IcebergDataField.class);
+
+        assertThat(deserializedField.id()).isEqualTo(1);
+        assertThat(deserializedField.name()).isEqualTo("test_field");
+        assertThat(deserializedField.required()).isTrue();
+        assertThat(deserializedField.type()).isEqualTo("int");
+        assertThat(deserializedField.doc()).isNull();
+    }
+
+    @Test
+    @DisplayName("Test doc field serialization with non-null value")
+    void testDocFieldSerializationWithNonNullValue() {
+        // Test doc field is not null
+        DataField dataFieldWithDoc =
+                new DataField(1, "test_field", new IntType(false), "test description");
+        IcebergDataField originalField = new IcebergDataField(dataFieldWithDoc);
+
+        String json = JsonSerdeUtil.toJson(originalField);
+        IcebergDataField deserializedField = JsonSerdeUtil.fromJson(json, IcebergDataField.class);
+
+        assertThat(deserializedField.id()).isEqualTo(1);
+        assertThat(deserializedField.name()).isEqualTo("test_field");
+        assertThat(deserializedField.required()).isTrue();
+        assertThat(deserializedField.type()).isEqualTo("int");
+        assertThat(deserializedField.doc()).isEqualTo("test description");
     }
 }

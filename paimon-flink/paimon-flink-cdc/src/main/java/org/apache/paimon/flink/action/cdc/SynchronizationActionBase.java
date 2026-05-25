@@ -72,6 +72,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
     // in paimon schema if pkeys are not specified in action command
     protected boolean syncPKeysFromSourceSchema = true;
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
+    protected String metadataColumnPrefix = "";
 
     public SynchronizationActionBase(
             String database,
@@ -101,7 +102,18 @@ public abstract class SynchronizationActionBase extends ActionBase {
         this.metadataConverters =
                 metadataColumns.stream()
                         .map(this.syncJobHandler::provideMetadataConverter)
+                        .map(
+                                converter ->
+                                        metadataColumnPrefix.isEmpty()
+                                                ? converter
+                                                : new PrefixedMetadataConverter(
+                                                        converter, metadataColumnPrefix))
                         .toArray(CdcMetadataConverter[]::new);
+        return this;
+    }
+
+    public SynchronizationActionBase withMetadataColumnPrefix(String prefix) {
+        this.metadataColumnPrefix = prefix != null ? prefix : "";
         return this;
     }
 

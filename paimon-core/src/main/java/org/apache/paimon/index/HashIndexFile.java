@@ -54,7 +54,8 @@ public class HashIndexFile extends IndexFile {
                 fileSize(path),
                 count,
                 null,
-                isExternalPath() ? path.toString() : null);
+                isExternalPath() ? path.toString() : null,
+                null);
     }
 
     public IndexFileMeta write(int[] ints) throws IOException {

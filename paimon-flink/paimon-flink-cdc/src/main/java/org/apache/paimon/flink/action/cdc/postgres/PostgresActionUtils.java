@@ -143,6 +143,26 @@ public class PostgresActionUtils {
                 .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
                 .ifPresent(sourceBuilder::splitSize);
         postgresConfig
+                .getOptional(PostgresSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE)
+                .ifPresent(sourceBuilder::fetchSize);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.CHUNK_META_GROUP_SIZE)
+                .ifPresent(sourceBuilder::splitMetaGroupSize);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SPLIT_KEY_EVEN_DISTRIBUTION_FACTOR_UPPER_BOUND)
+                .ifPresent(sourceBuilder::distributionFactorUpper);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SPLIT_KEY_EVEN_DISTRIBUTION_FACTOR_LOWER_BOUND)
+                .ifPresent(sourceBuilder::distributionFactorLower);
+        postgresConfig
+                .getOptional(
+                        PostgresSourceOptions
+                                .SCAN_INCREMENTAL_SNAPSHOT_UNBOUNDED_CHUNK_FIRST_ENABLED)
+                .ifPresent(sourceBuilder::assignUnboundedChunkFirst);
+        postgresConfig
+                .getOptional(PostgresSourceOptions.SCAN_NEWLY_ADDED_TABLE_ENABLED)
+                .ifPresent(sourceBuilder::scanNewlyAddedTableEnabled);
+        postgresConfig
                 .getOptional(PostgresSourceOptions.CONNECT_TIMEOUT)
                 .ifPresent(sourceBuilder::connectTimeout);
         postgresConfig

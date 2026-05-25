@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
@@ -26,19 +25,19 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -52,15 +51,19 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -68,6 +71,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class ConflictDetection {
 
     private static final Logger LOG = LoggerFactory.getLogger(ConflictDetection.class);
+    private static final int SAME_BUCKET_CHECK_CACHE_MAX_SIZE = 1000;
 
     private final String tableName;
     private final String commitUser;
@@ -76,10 +80,21 @@ public class ConflictDetection {
     private final @Nullable Comparator<InternalRow> keyComparator;
     private final BucketMode bucketMode;
     private final boolean deletionVectorsEnabled;
+    private final boolean dataEvolutionEnabled;
+    private final boolean pkClusteringOverride;
     private final IndexFileHandler indexFileHandler;
-    private final FileStoreScan scan;
+    private final SnapshotManager snapshotManager;
+    private final CommitScanner commitScanner;
+    private final Map<BinaryRow, Boolean> sameBucketCheckedPartitions =
+            new LinkedHashMap<BinaryRow, Boolean>(SAME_BUCKET_CHECK_CACHE_MAX_SIZE, 0.75f, false) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<BinaryRow, Boolean> eldest) {
+                    return size() > SAME_BUCKET_CHECK_CACHE_MAX_SIZE;
+                }
+            };
 
     private @Nullable PartitionExpire partitionExpire;
+    private @Nullable Long rowIdCheckFromSnapshot = null;
 
     public ConflictDetection(
             String tableName,
@@ -89,8 +104,11 @@ public class ConflictDetection {
             @Nullable Comparator<InternalRow> keyComparator,
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
+            boolean dataEvolutionEnabled,
+            boolean pkClusteringOverride,
             IndexFileHandler indexFileHandler,
-            FileStoreScan scan) {
+            SnapshotManager snapshotManager,
+            CommitScanner commitScanner) {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
@@ -98,8 +116,19 @@ public class ConflictDetection {
         this.keyComparator = keyComparator;
         this.bucketMode = bucketMode;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.dataEvolutionEnabled = dataEvolutionEnabled;
+        this.pkClusteringOverride = pkClusteringOverride;
         this.indexFileHandler = indexFileHandler;
-        this.scan = scan;
+        this.snapshotManager = snapshotManager;
+        this.commitScanner = commitScanner;
+    }
+
+    public void setRowIdCheckFromSnapshot(@Nullable Long rowIdCheckFromSnapshot) {
+        this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
+    }
+
+    public boolean hasRowIdCheckFromSnapshot() {
+        return rowIdCheckFromSnapshot != null;
     }
 
     @Nullable
@@ -111,66 +140,30 @@ public class ConflictDetection {
         this.partitionExpire = partitionExpire;
     }
 
-    public void commitStrictModeCheck(
-            @Nullable Long strictModeLastSafeSnapshot,
-            long newSnapshotId,
-            CommitKind newCommitKind,
-            SnapshotManager snapshotManager) {
-        if (strictModeLastSafeSnapshot == null || strictModeLastSafeSnapshot < 0) {
-            return;
-        }
-
-        for (long id = strictModeLastSafeSnapshot + 1; id < newSnapshotId; id++) {
-            Snapshot snapshot = snapshotManager.snapshot(id);
-            if (snapshot.commitUser().equals(commitUser)) {
-                continue;
-            }
-            if (snapshot.commitKind() == CommitKind.COMPACT
-                    || snapshot.commitKind() == CommitKind.OVERWRITE) {
-                throw new RuntimeException(
-                        String.format(
-                                "When trying to commit snapshot %d, "
-                                        + "commit user %s has found a %s snapshot (id: %d) by another user %s. "
-                                        + "Giving up committing as %s is set.",
-                                newSnapshotId,
-                                commitUser,
-                                snapshot.commitKind().name(),
-                                id,
-                                snapshot.commitUser(),
-                                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
-            }
-            if (snapshot.commitKind() == CommitKind.APPEND
-                    && newCommitKind == CommitKind.OVERWRITE) {
-                Iterator<ManifestEntry> entries =
-                        scan.withSnapshot(snapshot)
-                                .withKind(ScanMode.DELTA)
-                                .onlyReadRealBuckets()
-                                .dropStats()
-                                .readFileIterator();
-                if (entries.hasNext()) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "When trying to commit snapshot %d, "
-                                            + "commit user %s has found a APPEND snapshot (id: %d) by another user %s "
-                                            + "which committed files to fixed bucket. Giving up committing as %s is set.",
-                                    newSnapshotId,
-                                    commitUser,
-                                    id,
-                                    snapshot.commitUser(),
-                                    CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key()));
-                }
+    public <T extends FileEntry> boolean shouldBeOverwriteCommit(
+            List<T> appendFileEntries, List<IndexManifestEntry> appendIndexFiles) {
+        for (T appendFileEntry : appendFileEntries) {
+            if (appendFileEntry.kind().equals(FileKind.DELETE)) {
+                return true;
             }
         }
+        for (IndexManifestEntry appendIndexFile : appendIndexFiles) {
+            if (appendIndexFile.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    public void checkNoConflictsOrFail(
-            Snapshot snapshot,
+    public Optional<RuntimeException> checkConflicts(
+            Snapshot latestSnapshot,
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
+            @Nullable RowIdColumnConflictChecker rowIdColumnConflictChecker,
             CommitKind commitKind) {
-        String baseCommitUser = snapshot.commitUser();
-        if (checkForDeletionVector()) {
+        String baseCommitUser = latestSnapshot.commitUser();
+        if (deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE)) {
             // Enrich dvName in fileEntry to checker for base ADD dv and delta DELETE dv.
             // For example:
             // If the base file is <ADD baseFile1, ADD dv1>,
@@ -181,49 +174,115 @@ public class ConflictDetection {
                 baseEntries =
                         buildBaseEntriesWithDV(
                                 baseEntries,
-                                snapshot.indexManifest() == null
+                                latestSnapshot.indexManifest() == null
                                         ? Collections.emptyList()
-                                        : indexFileHandler.readManifest(snapshot.indexManifest()));
+                                        : indexFileHandler.readManifest(
+                                                latestSnapshot.indexManifest()));
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
-                throw conflictException(commitUser, baseEntries, deltaEntries).apply(e);
+                return Optional.of(
+                        conflictException(commitUser, baseEntries, deltaEntries).apply(e));
             }
         }
 
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(deltaEntries);
 
-        checkBucketKeepSame(baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
+        Optional<RuntimeException> exception =
+                checkBucketKeepSame(
+                        baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
+        if (exception.isPresent()) {
+            return exception;
+        }
 
         Function<Throwable, RuntimeException> conflictException =
                 conflictException(baseCommitUser, baseEntries, deltaEntries);
+
+        try {
+            // check the delta, it is important not to delete and add the same file. Since scan
+            // relies on map for deduplication, this may result in the loss of this file
+            FileEntry.mergeEntries(deltaEntries);
+        } catch (Throwable e) {
+            throw conflictException.apply(e);
+        }
+
         Collection<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = FileEntry.mergeEntries(allEntries);
         } catch (Throwable e) {
-            throw conflictException.apply(e);
+            return Optional.of(conflictException.apply(e));
         }
 
-        checkNoDeleteInMergedEntries(mergedEntries, conflictException);
-        checkKeyRangeNoConflicts(baseEntries, deltaEntries, mergedEntries, baseCommitUser);
+        exception = checkDeleteInEntries(mergedEntries, conflictException);
+        if (exception.isPresent()) {
+            return exception;
+        }
+        exception = checkKeyRange(baseEntries, deltaEntries, mergedEntries, baseCommitUser);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        exception = checkRowIdRangeConflicts(commitKind, mergedEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        return checkForRowIdFromSnapshot(
+                latestSnapshot, deltaEntries, deltaIndexEntries, rowIdColumnConflictChecker);
     }
 
-    private void checkBucketKeepSame(
+    public <T extends FileEntry> Map<BinaryRow, Integer> collectUncheckedBucketPartitions(
+            List<T> deltaEntries) {
+        Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
+        for (T entry : deltaEntries) {
+            if (entry.kind() != FileKind.ADD
+                    || entry.totalBuckets() <= 0
+                    || sameBucketCheckedPartitions.containsKey(entry.partition())) {
+                continue;
+            }
+
+            Integer previous = totalBuckets.putIfAbsent(entry.partition(), entry.totalBuckets());
+            if (previous != null && previous != entry.totalBuckets()) {
+                throwBucketNumMismatch(entry.partition(), entry.totalBuckets(), previous);
+            }
+        }
+        return totalBuckets;
+    }
+
+    public Optional<RuntimeException> checkSameBucketByTotalBuckets(
+            Map<BinaryRow, Integer> expectedTotalBuckets,
+            Map<BinaryRow, Integer> previousTotalBuckets) {
+        for (Map.Entry<BinaryRow, Integer> entry : expectedTotalBuckets.entrySet()) {
+            Integer previous = previousTotalBuckets.get(entry.getKey());
+            if (previous != null && !Objects.equals(previous, entry.getValue())) {
+                return Optional.of(bucketNumMismatch(entry.getKey(), entry.getValue(), previous));
+            }
+        }
+        for (BinaryRow partition : expectedTotalBuckets.keySet()) {
+            sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkBucketKeepSame(
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             CommitKind commitKind,
             List<SimpleFileEntry> allEntries,
             String baseCommitUser) {
         if (commitKind == CommitKind.OVERWRITE) {
-            return;
+            return Optional.empty();
         }
 
         // total buckets within the same partition should remain the same
         Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
         for (SimpleFileEntry entry : allEntries) {
             if (entry.totalBuckets() <= 0) {
+                continue;
+            }
+            if (sameBucketCheckedPartitions.containsKey(entry.partition())) {
                 continue;
             }
 
@@ -240,7 +299,7 @@ public class ConflictDetection {
             Pair<RuntimeException, RuntimeException> conflictException =
                     createConflictException(
                             "Total buckets of partition "
-                                    + entry.partition()
+                                    + partToSimpleString(partitionType, entry.partition(), "-", 200)
                                     + " changed from "
                                     + old
                                     + " to "
@@ -251,18 +310,45 @@ public class ConflictDetection {
                             deltaEntries,
                             null);
             LOG.warn("", conflictException.getLeft());
-            throw conflictException.getRight();
+            return Optional.of(conflictException.getRight());
         }
+        for (BinaryRow partition : totalBuckets.keySet()) {
+            sameBucketCheckedPartitions.put(partition, Boolean.TRUE);
+        }
+        return Optional.empty();
     }
 
-    private void checkKeyRangeNoConflicts(
+    private void throwBucketNumMismatch(
+            BinaryRow partition, int numBuckets, int previousNumBuckets) {
+        throw bucketNumMismatch(partition, numBuckets, previousNumBuckets);
+    }
+
+    private RuntimeException bucketNumMismatch(
+            BinaryRow partition, int numBuckets, int previousNumBuckets) {
+        String partInfo =
+                partitionType.getFieldCount() > 0
+                        ? "partition {" + pathFactory.getPartitionString(partition) + "}"
+                        : "table";
+        return new RuntimeException(
+                String.format(
+                        "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
+                                + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                        partInfo, numBuckets, previousNumBuckets));
+    }
+
+    private Optional<RuntimeException> checkKeyRange(
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             Collection<SimpleFileEntry> mergedEntries,
             String baseCommitUser) {
         // fast exit for file store without keys
         if (keyComparator == null) {
-            return;
+            return Optional.empty();
+        }
+
+        // Not clustering by pk, no need to check key range
+        if (pkClusteringOverride) {
+            return Optional.empty();
         }
 
         // group entries by partitions, buckets and levels
@@ -296,10 +382,11 @@ public class ConflictDetection {
                                     null);
 
                     LOG.warn("", conflictException.getLeft());
-                    throw conflictException.getRight();
+                    return Optional.of(conflictException.getRight());
                 }
             }
         }
+        return Optional.empty();
     }
 
     private Function<Throwable, RuntimeException> conflictException(
@@ -319,11 +406,7 @@ public class ConflictDetection {
         };
     }
 
-    private boolean checkForDeletionVector() {
-        return deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE);
-    }
-
-    private void checkNoDeleteInMergedEntries(
+    private Optional<RuntimeException> checkDeleteInEntries(
             Collection<SimpleFileEntry> mergedEntries,
             Function<Throwable, RuntimeException> exceptionFunction) {
         try {
@@ -335,12 +418,17 @@ public class ConflictDetection {
                         tableName);
             }
         } catch (Throwable e) {
-            assertConflictForPartitionExpire(mergedEntries);
-            throw exceptionFunction.apply(e);
+            Optional<RuntimeException> exception = checkConflictForPartitionExpire(mergedEntries);
+            if (exception.isPresent()) {
+                return exception;
+            }
+            return Optional.of(exceptionFunction.apply(e));
         }
+        return Optional.empty();
     }
 
-    private void assertConflictForPartitionExpire(Collection<SimpleFileEntry> mergedEntries) {
+    private Optional<RuntimeException> checkConflictForPartitionExpire(
+            Collection<SimpleFileEntry> mergedEntries) {
         if (partitionExpire != null && partitionExpire.isValueExpiration()) {
             Set<BinaryRow> deletedPartitions = new HashSet<>();
             for (SimpleFileEntry entry : mergedEntries) {
@@ -356,13 +444,100 @@ public class ConflictDetection {
                                                 partToSimpleString(
                                                         partitionType, partition, "-", 200))
                                 .collect(Collectors.toList());
-                throw new RuntimeException(
-                        "You are writing data to expired partitions, and you can filter this data to avoid job failover."
-                                + " Otherwise, continuous expired records will cause the job to failover restart continuously."
-                                + " Expired partitions are: "
-                                + expiredPartitions);
+                return Optional.of(
+                        new RuntimeException(
+                                "You are writing data to expired partitions, and you can filter this data to avoid job failover."
+                                        + " Otherwise, continuous expired records will cause the job to failover restart continuously."
+                                        + " Expired partitions are: "
+                                        + expiredPartitions));
             }
         }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkRowIdRangeConflicts(
+            CommitKind commitKind, Collection<SimpleFileEntry> mergedEntries) {
+        if (!dataEvolutionEnabled) {
+            return Optional.empty();
+        }
+        if (rowIdCheckFromSnapshot == null && commitKind != CommitKind.COMPACT) {
+            return Optional.empty();
+        }
+
+        List<SimpleFileEntry> entries =
+                mergedEntries.stream()
+                        .filter(file -> file.firstRowId() != null)
+                        .collect(Collectors.toList());
+
+        RangeHelper<SimpleFileEntry> rangeHelper =
+                new RangeHelper<>(SimpleFileEntry::nonNullRowIdRange);
+        List<List<SimpleFileEntry>> merged = rangeHelper.mergeOverlappingRanges(entries);
+        for (List<SimpleFileEntry> group : merged) {
+            List<SimpleFileEntry> dataFiles = new ArrayList<>();
+            for (SimpleFileEntry f : group) {
+                if (!dedicatedStorageFile(f.fileName())) {
+                    dataFiles.add(f);
+                }
+            }
+            if (!rangeHelper.areAllRangesSame(dataFiles)) {
+                return Optional.of(
+                        new RuntimeException(
+                                "For Data Evolution table, multiple 'MERGE INTO' and 'COMPACT' operations "
+                                        + "have encountered conflicts, data files: "
+                                        + dataFiles));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkForRowIdFromSnapshot(
+            Snapshot latestSnapshot,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries,
+            @Nullable RowIdColumnConflictChecker columnChecker) {
+        if (!dataEvolutionEnabled) {
+            return Optional.empty();
+        }
+        if (rowIdCheckFromSnapshot == null) {
+            return Optional.empty();
+        }
+        if (columnChecker == null || columnChecker.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
+
+        // check history row id ranges
+        Long checkNextRowId = snapshotManager.snapshot(rowIdCheckFromSnapshot).nextRowId();
+        checkState(
+                checkNextRowId != null,
+                "Next row id cannot be null for snapshot %s.",
+                rowIdCheckFromSnapshot);
+        for (long i = rowIdCheckFromSnapshot + 1; i <= latestSnapshot.id(); i++) {
+            Snapshot snapshot = snapshotManager.snapshot(i);
+            if (snapshot.commitKind() == CommitKind.COMPACT) {
+                continue;
+            }
+            List<ManifestEntry> changes =
+                    commitScanner.readIncrementalEntries(snapshot, changedPartitions);
+            for (ManifestEntry entry : changes) {
+                DataFileMeta file = entry.file();
+                if (file.firstRowId() != null
+                        && file.nonNullRowIdRange().from < checkNextRowId
+                        && columnChecker.conflictsWith(file)) {
+                    return Optional.of(
+                            new RuntimeException(
+                                    "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
+                                            + " updating the same file, which can render some updates ineffective."));
+                }
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    private static boolean dedicatedStorageFile(String fileName) {
+        return isBlobFile(fileName) || isVectorStoreFile(fileName);
     }
 
     static List<SimpleFileEntry> buildBaseEntriesWithDV(
@@ -594,20 +769,8 @@ public class ConflictDetection {
         }
     }
 
-    /** Should do conflict check. */
-    public interface ConflictCheck {
-        boolean shouldCheck(long latestSnapshot);
-    }
-
-    public static ConflictCheck hasConflictChecked(@Nullable Long checkedLatestSnapshotId) {
-        return latestSnapshot -> !Objects.equals(latestSnapshot, checkedLatestSnapshotId);
-    }
-
-    public static ConflictCheck noConflictCheck() {
-        return latestSnapshot -> false;
-    }
-
-    public static ConflictCheck mustConflictCheck() {
-        return latestSnapshot -> true;
+    /** Factory to create {@link ConflictDetection}. */
+    public interface Factory {
+        ConflictDetection create(CommitScanner scanner);
     }
 }

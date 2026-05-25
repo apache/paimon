@@ -1,0 +1,17 @@
+Paimon : Tantivy JNI
+Copyright 2023-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This product includes software from the Tantivy project
+(https://github.com/quickwit-oss/tantivy), licensed under the
+MIT License.
+
+This product includes software from the jni crate
+(https://github.com/jni-rs/jni-rs), licensed under the
+MIT License / Apache License, Version 2.0.
+
+This product includes software from the serde_json crate
+(https://github.com/serde-rs/json), licensed under the
+MIT License / Apache License, Version 2.0.

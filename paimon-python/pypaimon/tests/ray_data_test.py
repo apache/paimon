@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import os
 import tempfile
@@ -22,10 +21,12 @@ import unittest
 import shutil
 
 import pyarrow as pa
+import pyarrow.types as pa_types
 import ray
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.schema.data_types import PyarrowFieldParser
 
 
 class RayDataTest(unittest.TestCase):
@@ -109,7 +110,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify Ray dataset
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
@@ -121,6 +122,59 @@ class RayDataTest(unittest.TestCase):
 
         # Convert to pandas for verification
         df = ray_dataset.to_pandas()
+        self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
+        # Sort by id to ensure order-independent comparison
+        df_sorted = df.sort_values(by='id').reset_index(drop=True)
+        self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4, 5], "ID column should match")
+        self.assertEqual(
+            list(df_sorted['name']),
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            "Name column should match"
+        )
+
+    def test_basic_ray_data_write(self):
+        """Test basic Ray Data write from PyPaimon table."""
+        # Create schema
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_ray_write', schema, False)
+        table = self.catalog.get_table('default.test_ray_write')
+
+        # Write test data
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'value': [100, 200, 300, 400, 500],
+        }, schema=pa_schema)
+        
+        from ray.data.read_api import from_arrow
+        ds = from_arrow(test_data)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_ray(ds, concurrency=2)
+        # Read using Ray Data
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        arrow_result = table_read.to_arrow(splits)
+
+        # Verify PyArrow table
+        self.assertIsNotNone(arrow_result, "Arrow table should not be None")
+        self.assertEqual(arrow_result.num_rows, 5, "Should have 5 rows")
+
+        # Test basic operations - get first 3 rows
+        sample_table = arrow_result.slice(0, 3)
+        self.assertEqual(sample_table.num_rows, 3, "Should have 3 sample rows")
+
+        # Convert to pandas for verification
+        df = arrow_result.to_pandas()
         self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
         # Sort by id to ensure order-independent comparison
         df_sorted = df.sort_values(by='id').reset_index(drop=True)
@@ -169,7 +223,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -215,7 +269,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify projection
         self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")
@@ -256,7 +310,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Apply map operation (double the value)
         def double_value(row):
@@ -303,7 +357,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Apply filter operation (score >= 80)
         filtered_dataset = ray_dataset.filter(lambda row: row['score'] >= 80)
@@ -346,8 +400,8 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset_distributed = table_read.to_ray(splits, parallelism=2)
-        ray_dataset_simple = table_read.to_ray(splits, parallelism=1)
+        ray_dataset_distributed = table_read.to_ray(splits, override_num_blocks=2)
+        ray_dataset_simple = table_read.to_ray(splits, override_num_blocks=1)
 
         # Both should produce the same results
         self.assertEqual(ray_dataset_distributed.count(), 3, "Distributed mode should have 3 rows")
@@ -366,7 +420,7 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_basic(self):
         """Test Ray Data read from PrimaryKey table."""
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
             ('value', pa.int64()),
         ])
@@ -394,7 +448,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
@@ -411,7 +465,7 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_update(self):
         """Test Ray Data read from PrimaryKey table with updates (upsert behavior)."""
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
             ('value', pa.int64()),
         ])
@@ -453,7 +507,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -471,10 +525,10 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_with_predicate(self):
         """Test Ray Data read from PrimaryKey table with predicate filtering."""
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('category', pa.string()),
             ('amount', pa.int64()),
-            ('dt', pa.string()),
+            pa.field('dt', pa.string(), nullable=False),
         ])
 
         schema = Schema.from_pyarrow_schema(
@@ -510,7 +564,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -528,7 +582,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
 
         # Verify filtered results by partition
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows in partition 2024-01-01")
@@ -539,7 +593,7 @@ class RayDataTest(unittest.TestCase):
         """Test Ray Data read from PrimaryKey table with small target_split_size."""
 
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
             ('value', pa.int64()),
         ])
@@ -588,7 +642,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -604,7 +658,6 @@ class RayDataTest(unittest.TestCase):
         self.assertEqual(list(df_sorted['value']), [150, 250, 300, 400], "Value column should reflect updates")
 
     def test_ray_data_invalid_parallelism(self):
-        """Test that invalid parallelism values raise ValueError."""
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -633,20 +686,153 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        # Test with parallelism = 0
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=0)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=0)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
-        # Test with parallelism < 0
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=-1)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=-1)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
-        # Test with parallelism = -10
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=-10)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=-10)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
+
+    def test_dict_return_loses_large_binary_type(self):
+        # Original data with large_binary
+        original = pa.table({
+            'data': pa.array([b'hello', b'world'], type=pa.large_binary())
+        })
+        self.assertTrue(
+            pa_types.is_large_binary(original.schema.field('data').type),
+            "Original should be large_binary"
+        )
+
+        # Simulate map_batches returning dict: convert to Python list then rebuild
+        d = {'data': original['data'].to_pylist()}
+        rebuilt = pa.Table.from_pydict(d)
+        self.assertTrue(
+            pa_types.is_binary(rebuilt.schema.field('data').type),
+            f"Rebuilt from dict should be binary (PyArrow default), but got {rebuilt.schema.field('data').type}"
+        )
+        self.assertFalse(
+            pa_types.is_large_binary(rebuilt.schema.field('data').type),
+            "large_binary type should be lost after dict roundtrip"
+        )
+
+    def test_ray_data_read_and_write_with_blob(self):
+        import time
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('name', pa.string()),
+            ('data', pa.large_binary()),  # Table uses large_binary for blob
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-field': 'data',
+            }
+        )
+
+        table_name = f'default.test_ray_read_write_blob_{int(time.time() * 1000000)}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        # Step 1: Write data to Paimon table using write_arrow (large_binary type)
+        initial_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'data': [b'blob_data_1', b'blob_data_2', b'blob_data_3'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Step 2: Read from Paimon table using to_ray()
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        ray_dataset = table_read.to_ray(splits)
+
+        # Verify Ray blocks preserve large_binary type from Paimon
+        for batch in ray_dataset.iter_batches(batch_size=10, batch_format="pyarrow"):
+            ray_data_field = batch.schema.field('data')
+            self.assertTrue(
+                pa_types.is_large_binary(ray_data_field.type),
+                f"Ray block should preserve large_binary() from Paimon, but got {ray_data_field.type}"
+            )
+            break
+
+        # Verify Paimon table schema is large_binary (BLOB)
+        table_pa_schema = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+        self.assertTrue(
+            pa_types.is_large_binary(table_pa_schema.field('data').type),
+            "Paimon table should have large_binary() for BLOB field"
+        )
+
+        # Step 3: Simulate user pipeline: map_batches returns Python dict,
+        def process_blob(batch):
+            return {
+                'id': batch['id'].to_pylist(),
+                'name': batch['name'].to_pylist(),
+                'data': batch['data'].to_pylist(),  # Python bytes -> binary
+            }
+
+        mapped_dataset = ray_dataset.map_batches(process_blob, batch_format="pyarrow")
+
+        # Verify map_batches caused type downgrade: large_binary -> binary
+        for batch in mapped_dataset.iter_batches(batch_size=10, batch_format="pyarrow"):
+            mapped_data_field = batch.schema.field('data')
+            self.assertTrue(
+                pa_types.is_binary(mapped_data_field.type),
+                f"After map_batches returning dict, data should be binary(), but got {mapped_data_field.type}"
+            )
+            break
+
+        # Step 4: Write mapped dataset back via write_ray().
+        write_builder2 = table.new_batch_write_builder()
+        writer2 = write_builder2.new_write()
+
+        writer2.write_ray(
+            mapped_dataset,
+            overwrite=False,
+            concurrency=1
+        )
+        writer2.close()
+
+        # Step 5: Verify the data was written correctly
+        read_builder2 = table.new_read_builder()
+        table_read2 = read_builder2.new_read()
+        result = table_read2.to_arrow(read_builder2.new_scan().plan().splits())
+
+        self.assertEqual(result.num_rows, 6, "Table should have 6 rows after roundtrip")
+
+        result_df = result.to_pandas()
+        result_df_sorted = result_df.sort_values(by='id').reset_index(drop=True)
+
+        self.assertEqual(list(result_df_sorted['id']), [1, 1, 2, 2, 3, 3], "ID column should match")
+        self.assertEqual(
+            list(result_df_sorted['name']),
+            ['Alice', 'Alice', 'Bob', 'Bob', 'Charlie', 'Charlie'],
+            "Name column should match"
+        )
+
+        written_data_values = [bytes(d) if d is not None else None for d in result_df_sorted['data']]
+        self.assertEqual(
+            written_data_values,
+            [b'blob_data_1', b'blob_data_1', b'blob_data_2', b'blob_data_2', b'blob_data_3', b'blob_data_3'],
+            "Blob data column should match"
+        )
 
 
 if __name__ == '__main__':

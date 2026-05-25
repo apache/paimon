@@ -1,22 +1,25 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+import sys
 from enum import Enum
-from typing import Dict
+from typing import Dict, Optional
+
+from datetime import timedelta
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -33,6 +36,26 @@ class ExternalPathStrategy(str, Enum):
     SPECIFIC_FS = "specific-fs"
 
 
+class ChangelogProducer(str, Enum):
+    """
+    Available changelog producer modes.
+    """
+    NONE = "none"
+    INPUT = "input"
+    FULL_COMPACTION = "full-compaction"
+    LOOKUP = "lookup"
+
+
+class MergeEngine(str, Enum):
+    """
+    Specifies the merge engine for table with primary key.
+    """
+    DEDUPLICATE = "deduplicate"
+    PARTIAL_UPDATE = "partial-update"
+    AGGREGATE = "aggregation"
+    FIRST_ROW = "first-row"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -41,6 +64,7 @@ class CoreOptions:
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_LANCE: str = "lance"
+    FILE_FORMAT_VORTEX: str = "vortex"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -94,6 +118,25 @@ class CoreOptions:
         )
     )
 
+    DYNAMIC_BUCKET_TARGET_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("dynamic-bucket.target-row-num")
+        .int_type()
+        .default_value(2000000)
+        .with_description(
+            "In dynamic bucket mode (bucket=-1), target row number per bucket; "
+            "when exceeded, a new bucket is created (aligned with Java SimpleHashBucketAssigner)."
+        )
+    )
+
+    DYNAMIC_BUCKET_MAX_BUCKETS: ConfigOption[int] = (
+        ConfigOptions.key("dynamic-bucket.max-buckets")
+        .int_type()
+        .default_value(-1)
+        .with_description(
+            "In dynamic bucket mode, max buckets per partition. -1 means unlimited."
+        )
+    )
+
     SCAN_MANIFEST_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("scan.manifest.parallelism")
         .int_type()
@@ -112,8 +155,18 @@ class CoreOptions:
     FILE_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("file.compression")
         .string_type()
-        .default_value("lz4")
-        .with_description("Default file compression format.")
+        .default_value("zstd")
+        .with_description("Default file compression format. For faster read and write, it is recommended to use zstd.")
+    )
+
+    FILE_COMPRESSION_ZSTD_LEVEL: ConfigOption[int] = (
+        ConfigOptions.key("file.compression.zstd-level")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Default file compression zstd level. For higher compression rates, it can be configured to 9, "
+            "but the read and write speed will significantly decrease."
+        )
     )
 
     FILE_COMPRESSION_PER_LEVEL: ConfigOption[Dict[str, str]] = (
@@ -143,11 +196,28 @@ class CoreOptions:
         .with_description("Define the data block size.")
     )
 
+    METADATA_STATS_MODE: ConfigOption[str] = (
+        ConfigOptions.key("metadata.stats-mode")
+        .string_type()
+        .default_value("none")
+        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+    )
+
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
         ConfigOptions.key("blob-as-descriptor")
         .boolean_type()
         .default_value(False)
-        .with_description("Whether to use blob as descriptor.")
+        .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
+    )
+
+    BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-descriptor-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names that should be stored as serialized BlobDescriptor bytes "
+            "inline in normal data files."
+        )
     )
 
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
@@ -184,6 +254,53 @@ class CoreOptions:
         .with_description("The timestamp range for incremental reading.")
     )
 
+    SCAN_TAG_NAME: ConfigOption[str] = (
+        ConfigOptions.key("scan.tag-name")
+        .string_type()
+        .no_default_value()
+        .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
+    )
+
+    SCAN_SNAPSHOT_ID: ConfigOption[int] = (
+        ConfigOptions.key("scan.snapshot-id")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional snapshot id used in case of 'from-snapshot' or "
+            "'from-snapshot-full' scan mode."
+        )
+    )
+
+    SCAN_TIMESTAMP_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.timestamp-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp in milliseconds used for time travel to the "
+            "latest snapshot equal to or earlier than the given timestamp."
+        )
+    )
+
+    SCAN_TIMESTAMP: ConfigOption[str] = (
+        ConfigOptions.key("scan.timestamp")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp string (e.g. '2023-12-01 12:00:00') used for "
+            "time travel. Will be converted to milliseconds internally."
+        )
+    )
+
+    SCAN_WATERMARK: ConfigOption[int] = (
+        ConfigOptions.key("scan.watermark")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional watermark used for time travel to the first snapshot "
+            "with watermark greater than or equal to the given value."
+        )
+    )
+
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("source.split.target-size")
         .memory_type()
@@ -206,12 +323,56 @@ class CoreOptions:
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
     )
+
+    CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
+        ConfigOptions.key("changelog-producer")
+        .enum_type(ChangelogProducer)
+        .default_value(ChangelogProducer.NONE)
+        .with_description("The changelog producer for streaming reads. "
+                          "Options: none, input, full-compaction, lookup.")
+    )
+
+    MERGE_ENGINE: ConfigOption[MergeEngine] = (
+        ConfigOptions.key("merge-engine")
+        .enum_type(MergeEngine)
+        .default_value(MergeEngine.DEDUPLICATE)
+        .with_description("Specify the merge engine for table with primary key. "
+                          "Options: deduplicate, partial-update, aggregation, first-row.")
+    )
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
         .string_type()
         .no_default_value()
         .with_description("The prefix for commit user.")
+    )
+
+    COMMIT_MAX_RETRIES: ConfigOption[int] = (
+        ConfigOptions.key("commit.max-retries")
+        .int_type()
+        .default_value(10)
+        .with_description("Maximum number of retries for commit operations.")
+    )
+
+    COMMIT_TIMEOUT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.timeout")
+        .duration_type()
+        .no_default_value()
+        .with_description("Timeout for commit operations (e.g., '10s', '5m'). If not set, effectively unlimited.")
+    )
+
+    COMMIT_MIN_RETRY_WAIT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.min-retry-wait")
+        .duration_type()
+        .default_value(timedelta(milliseconds=10))
+        .with_description("Minimum wait time between commit retries (e.g., '10ms', '100ms').")
+    )
+
+    COMMIT_MAX_RETRY_WAIT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.max-retry-wait")
+        .duration_type()
+        .default_value(timedelta(seconds=10))
+        .with_description("Maximum wait time between commit retries (e.g., '1s', '10s').")
     )
 
     ROW_TRACKING_ENABLED: ConfigOption[bool] = (
@@ -249,6 +410,144 @@ class CoreOptions:
         .with_description("Specific filesystem for external paths when using specific-fs strategy.")
     )
 
+    # Global Index options
+    GLOBAL_INDEX_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("global-index.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description("Whether to enable global index for scan.")
+    )
+
+    GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
+        ConfigOptions.key("global-index.thread-num")
+        .int_type()
+        .no_default_value()
+        .with_description(
+            "The maximum number of concurrent scanner for global index. "
+            "By default is the number of processors available."
+        )
+    )
+
+    LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("local-cache.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable local block cache for file reads. "
+            "If local-cache.dir is configured, disk cache is used; otherwise memory cache is used."
+        )
+    )
+
+    LOCAL_CACHE_DIR: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory for local block cache on disk. "
+            "If not configured, memory cache is used instead."
+        )
+    )
+
+    LOCAL_CACHE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("local-cache.max-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Maximum total size of the local block cache. Unlimited by default.")
+    )
+
+    LOCAL_CACHE_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("local-cache.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description("Block size for local cache.")
+    )
+
+    LOCAL_CACHE_WHITELIST: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.whitelist")
+        .string_type()
+        .default_value("meta,global-index")
+        .with_description(
+            "Comma-separated list of file types to cache. "
+            "Supported values: meta, global-index, bucket-index, data, file-index."
+        )
+    )
+
+    READ_BATCH_SIZE: ConfigOption[int] = (
+        ConfigOptions.key("read.batch-size")
+        .int_type()
+        .default_value(1024)
+        .with_description("Read batch size for any file format if it supports.")
+    )
+
+    READ_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("read.parallelism")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Parallelism for reading splits within a single TableRead call. "
+            "The value 1 (default) keeps reads serial. Values >= 2 enable a "
+            "thread pool that reads splits concurrently and assembles the "
+            "result in input order. Has no effect when fewer than 2 splits "
+            "are passed.")
+    )
+
+    ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
+        ConfigOptions.key("add-column-before-partition")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "When adding a new column, if the table has partition keys, "
+            "insert the new column before the first partition column by default."
+        )
+    )
+
+    VARIANT_SHREDDING_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("variant.shredding.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to enable VARIANT shredding. When True (default), writes apply the "
+            "shredding schema configured via 'variant.shreddingSchema', and reads "
+            "automatically reassemble shredded columns back to the standard "
+            "struct<value, metadata> form. Set to False to bypass both behaviours."
+        )
+    )
+
+    VARIANT_SHREDDING_SCHEMA: ConfigOption[str] = (
+        ConfigOptions.key("variant.shreddingSchema")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "JSON-encoded ROW type specifying which VARIANT sub-fields to shred when "
+            "writing Parquet (static shredding mode). The top-level fields map VARIANT "
+            "column names to their sub-field schemas. "
+            "Alias: 'parquet.variant.shreddingSchema'. "
+            "Example: '{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"payload\","
+            "\"type\":{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"age\","
+            "\"type\":\"BIGINT\"}]}}]}'"
+        )
+    )
+
+    PARTITION_DEFAULT_NAME: ConfigOption[str] = (
+        ConfigOptions.key("partition.default-name")
+        .string_type()
+        .default_value("__DEFAULT_PARTITION__")
+        .with_description(
+            "The default partition name in case the dynamic partition"
+            " column value is null/empty string."
+        )
+    )
+
+    DYNAMIC_PARTITION_OVERWRITE: ConfigOption[bool] = (
+        ConfigOptions.key("dynamic-partition-overwrite")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether only overwrite dynamic partition when overwriting a partitioned table "
+            "with dynamic partition columns. Works only when the table has partition keys."
+        )
+    )
+
     def __init__(self, options: Options):
         self.options = options
 
@@ -281,6 +580,12 @@ class CoreOptions:
     def bucket_key(self, default=None):
         return self.options.get(CoreOptions.BUCKET_KEY, default)
 
+    def dynamic_bucket_target_row_num(self, default=None):
+        return self.options.get(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, default)
+
+    def dynamic_bucket_max_buckets(self, default=None):
+        return self.options.get(CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS, default)
+
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
 
@@ -289,6 +594,9 @@ class CoreOptions:
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)
+
+    def file_compression_zstd_level(self, default=None):
+        return self.options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL, default)
 
     def file_compression_per_level(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION_PER_LEVEL, default)
@@ -299,8 +607,31 @@ class CoreOptions:
     def file_block_size(self, default=None):
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
 
+    def metadata_stats_enabled(self, default=None):
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
+
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
+
+    def variant_shredding_enabled(self) -> bool:
+        return self.options.get(CoreOptions.VARIANT_SHREDDING_ENABLED, True)
+
+    def variant_shredding_schema(self) -> Optional[str]:
+        val = self.options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA)
+        if val is None:
+            # Support alias used by Java: parquet.variant.shreddingSchema
+            val = self.options.data.get("parquet.variant.shreddingSchema")
+        return val
+
+    def blob_descriptor_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
 
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
@@ -330,6 +661,21 @@ class CoreOptions:
     def incremental_between_timestamp(self, default=None):
         return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP, default)
 
+    def scan_tag_name(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
+
+    def scan_snapshot_id(self, default=None):
+        return self.options.get(CoreOptions.SCAN_SNAPSHOT_ID, default)
+
+    def scan_timestamp_millis(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TIMESTAMP_MILLIS, default)
+
+    def scan_timestamp(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TIMESTAMP, default)
+
+    def scan_watermark(self, default=None):
+        return self.options.get(CoreOptions.SCAN_WATERMARK, default)
+
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()
 
@@ -348,6 +694,12 @@ class CoreOptions:
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
 
+    def changelog_producer(self, default=None):
+        return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
+
+    def merge_engine(self, default=None):
+        return self.options.get(CoreOptions.MERGE_ENGINE, default)
+
     def data_file_external_paths(self, default=None):
         external_paths_str = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS, default)
         if not external_paths_str:
@@ -359,3 +711,53 @@ class CoreOptions:
 
     def data_file_external_paths_specific_fs(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
+
+    def commit_max_retries(self) -> int:
+        return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)
+
+    def commit_timeout(self) -> int:
+        timeout = self.options.get(CoreOptions.COMMIT_TIMEOUT)
+        if timeout is None:
+            return sys.maxsize
+        return int(timeout.total_seconds() * 1000)
+
+    def commit_min_retry_wait(self) -> int:
+        wait = self.options.get(CoreOptions.COMMIT_MIN_RETRY_WAIT)
+        return int(wait.total_seconds() * 1000)
+
+    def commit_max_retry_wait(self) -> int:
+        wait = self.options.get(CoreOptions.COMMIT_MAX_RETRY_WAIT)
+        return int(wait.total_seconds() * 1000)
+
+    def global_index_enabled(self, default=None):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_ENABLED, default)
+
+    def global_index_thread_num(self) -> Optional[int]:
+        return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def local_cache_enabled(self) -> bool:
+        return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)
+
+    def local_cache_dir(self) -> Optional[str]:
+        return self.options.get(CoreOptions.LOCAL_CACHE_DIR)
+
+    def local_cache_max_size(self) -> Optional[MemorySize]:
+        return self.options.get(CoreOptions.LOCAL_CACHE_MAX_SIZE)
+
+    def local_cache_block_size(self) -> MemorySize:
+        return self.options.get(CoreOptions.LOCAL_CACHE_BLOCK_SIZE)
+
+    def local_cache_whitelist(self) -> str:
+        return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
+
+    def read_batch_size(self, default=None) -> int:
+        return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def read_parallelism(self, default=None) -> int:
+        return self.options.get(CoreOptions.READ_PARALLELISM, default)
+
+    def add_column_before_partition(self) -> bool:
+        return self.options.get(CoreOptions.ADD_COLUMN_BEFORE_PARTITION, False)
+
+    def dynamic_partition_overwrite(self) -> bool:
+        return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)

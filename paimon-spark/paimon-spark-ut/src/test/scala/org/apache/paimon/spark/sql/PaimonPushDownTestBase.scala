@@ -18,21 +18,22 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase, SparkTable}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.spark.{PaimonInputPartition, PaimonScan, PaimonSparkTestBase, SparkTable}
+import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.apache.spark.sql.catalyst.trees.TreePattern.{DYNAMIC_PRUNING_SUBQUERY, LIMIT, SORT}
-import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit, SupportsPushDownTopN}
+import org.apache.spark.sql.connector.read.{InputPartition, ScanBuilder, SupportsPushDownLimit, SupportsPushDownTopN}
+import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.assertj.core.api.{Assertions => assertj}
 import org.junit.jupiter.api.Assertions
 
-import java.util.UUID
-
-abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
+abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
   import testImplicits._
 
@@ -129,6 +130,72 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test(s"Paimon push down: apply TRIM/LTRM/RTRIM") {
+    // Spark support push down TRIM/LTRM/RTRIM since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, 'chelloc'), (1, 100, 'caa'), (1, 100, 'bbc')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM('c', dt) = 'hello'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "chelloc"))
+        )
+
+        val q1 =
+          """
+            |SELECT * FROM t
+            |WHERE LTRIM('c', dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q1))
+
+        checkAnswer(
+          spark.sql(q1),
+          Seq(Row(1, 100, "caa"))
+        )
+
+        val q2 =
+          """
+            |SELECT * FROM t
+            |WHERE RTRIM('c', dt) = 'bb'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q2),
+          Seq(Row(1, 100, "bbc"))
+        )
+
+        val q3 =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM(LEADING 'c' FROM dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q3),
+          Seq(Row(1, 100, "caa"))
+        )
+      }
+    }
+  }
+
   test(s"Paimon push down: apply UPPER") {
     // Spark support push down UPPER since Spark 3.4.
     if (gteqSpark3_4) {
@@ -154,6 +221,78 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
         checkAnswer(
           spark.sql(q),
           Seq(Row(1, 100, "hello"))
+        )
+      }
+    }
+  }
+
+  test(s"Paimon push down: apply LOWER") {
+    // Spark support push down LOWER since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, 'hello')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE LOWER(dt) = 'hello'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "hello"))
+        )
+      }
+    }
+  }
+
+  test(s"Paimon push down: apply SUBSTRING") {
+    // Spark support push down LOWER since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, '_hello')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE SUBSTRING(dt, 2) = 'hello'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "_hello"))
+        )
+
+        val q1 =
+          """
+            |SELECT * FROM t
+            |WHERE SUBSTRING(dt, 2, 2) = 'he'
+            |""".stripMargin
+        assert(!checkFilterExists(q1))
+
+        checkAnswer(
+          spark.sql(q1),
+          Seq(Row(1, 100, "_hello"))
         )
       }
     }
@@ -374,6 +513,100 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
       Assertions.assertTrue(qe2.optimizedPlan.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
       Assertions.assertTrue(qe2.sparkPlan.containsPattern(DYNAMIC_PRUNING_SUBQUERY))
       checkAnswer(df2, Row(5, "e", "2025", "x5") :: Nil)
+    }
+  }
+
+  test("Paimon pushDown: combine runtime partition filter and partition filter") {
+    withTable("fact_table", "dim_table", "filter_table") {
+      sql("""
+            |CREATE TABLE fact_table (
+            |  id INT,
+            |  amount DOUBLE,
+            |  category STRING,
+            |  date_pt STRING
+            |)
+            |PARTITIONED BY (date_pt)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE dim_table (
+            |  category STRING,
+            |  category_name STRING,
+            |  region STRING,
+            |  pt STRING
+            |)
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE filter_table (
+            |  region STRING,
+            |  date_pt STRING
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO fact_table VALUES
+            |(1, 100.0, 'A', '2023-01-01'),
+            |(2, 200.0, 'B', '2023-01-02'),
+            |(3, 150.0, 'A', '2023-01-15'),
+            |(4, 250.0, 'C', '2023-02-01'),
+            |(5, 300.0, 'A', '2023-02-15'),
+            |(6, 180.0, 'B', '2024-01-01'),
+            |(7, 220.0, 'A', '2024-01-15'),
+            |(8, 400.0, 'C', '2024-02-01'),
+            |(9, 350.0, 'B', '2024-02-15'),
+            |(10, 500.0, 'A', '2025-03-01'),
+            |(11, 450.0, 'C', '2025-03-15'),
+            |(12, 600.0, 'B', '2025-04-01')
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO dim_table VALUES
+            |('A', 'Category A', 'East', '2023-01'),
+            |('B', 'Category B', 'West', '2023-01'),
+            |('C', 'Category C', 'North', '2023-02'),
+            |('A', 'Category A', 'East', '2024-01'),
+            |('B', 'Category B', 'West', '2024-02'),
+            |('C', 'Category C', 'North', '2024-02')
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO filter_table VALUES
+            |('East', '2023-01-01'),
+            |('East', '2023-01-15'),
+            |('East', '2024-01-15')
+            |""".stripMargin)
+
+      val df = sql("""
+                     |SELECT
+                     |  f.id,
+                     |  f.amount,
+                     |  f.category,
+                     |  d.category_name,
+                     |  d.region,
+                     |  f.date_pt
+                     |FROM fact_table f
+                     |JOIN dim_table d
+                     |  ON f.category = d.category
+                     |  AND SUBSTRING(f.date_pt, 1, 7) = d.pt
+                     |JOIN filter_table ft
+                     |  ON d.region = ft.region
+                     |  AND f.date_pt = ft.date_pt
+                     |WHERE d.region = 'East' AND f.date_pt < '2024-01-15'
+                     |ORDER BY f.id
+                     |""".stripMargin)
+
+      checkAnswer(
+        df,
+        Seq(
+          Row(1, 100.0, "A", "Category A", "East", "2023-01-01"),
+          Row(3, 150.0, "A", "Category A", "East", "2023-01-15")
+        )
+      )
+
+      val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "fact_table")
+      assert(filteredSplits.size == 2)
     }
   }
 
@@ -599,6 +832,88 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test(s"Paimon pushdown: parquet decimal filter") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a DECIMAL(18,4), b STRING) using paimon TBLPROPERTIES
+                   |(
+                   |'file.format' = 'parquet',
+                   |'parquet.block.size' = '100',
+                   |'target-file-size' = '10g'
+                   |)
+                   |""".stripMargin)
+
+      spark.sql("""INSERT INTO T VALUES
+                  |(CAST(100.1234 AS DECIMAL(18,4)), 'a'),
+                  |(CAST(200.5678 AS DECIMAL(18,4)), 'b'),
+                  |(CAST(300.9999 AS DECIMAL(18,4)), 'c'),
+                  |(CAST(150.0000 AS DECIMAL(18,4)), 'd')
+                  |""".stripMargin)
+
+      // Test equals filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a = CAST(100.1234 AS DECIMAL(18,4))"),
+        Row(new java.math.BigDecimal("100.1234"), "a") :: Nil
+      )
+
+      // Test comparison filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a < CAST(200.0000 AS DECIMAL(18,4)) ORDER BY a"),
+        Row(new java.math.BigDecimal("100.1234"), "a") ::
+          Row(new java.math.BigDecimal("150.0000"), "d") :: Nil
+      )
+
+      // Test in filter
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM T WHERE a IN (CAST(100.1234 AS DECIMAL(18,4)), CAST(300.9999 AS DECIMAL(18,4))) ORDER BY a"),
+        Row(new java.math.BigDecimal("100.1234"), "a") ::
+          Row(new java.math.BigDecimal("300.9999"), "c") :: Nil
+      )
+    }
+  }
+
+  test(s"Paimon pushdown: parquet timestamp filter") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a TIMESTAMP, b STRING) using paimon TBLPROPERTIES
+                   |(
+                   |'file.format' = 'parquet',
+                   |'parquet.block.size' = '100',
+                   |'target-file-size' = '10g'
+                   |)
+                   |""".stripMargin)
+
+      spark.sql("""INSERT INTO T VALUES
+                  |(TIMESTAMP '2024-01-01 00:00:00', 'a'),
+                  |(TIMESTAMP '2024-01-02 12:30:00', 'b'),
+                  |(TIMESTAMP '2024-01-03 23:59:59', 'c'),
+                  |(TIMESTAMP '2024-01-01 12:00:00', 'd')
+                  |""".stripMargin)
+
+      // Test equals filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a = TIMESTAMP '2024-01-01 00:00:00'"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") :: Nil
+      )
+
+      // Test comparison filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a < TIMESTAMP '2024-01-02 00:00:00' ORDER BY a"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") ::
+          Row(java.sql.Timestamp.valueOf("2024-01-01 12:00:00"), "d") :: Nil
+      )
+
+      // Test between filter
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM T WHERE a BETWEEN TIMESTAMP '2024-01-01 00:00:00' AND TIMESTAMP '2024-01-02 00:00:00' ORDER BY a"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") ::
+          Row(java.sql.Timestamp.valueOf("2024-01-01 12:00:00"), "d") :: Nil
+      )
+    }
+  }
+
   private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
     SparkTable(loadTable(tableName)).newScanBuilder(CaseInsensitiveStringMap.empty())
   }
@@ -619,6 +934,25 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
           case _ => false
         }
       case _ => false
+    }
+  }
+
+  def collectFilteredInputSplits(plan: SparkPlan, tableName: String): Seq[Split] = {
+    flatMap(plan) {
+      case s: BatchScanExec =>
+        s.scan match {
+          case p: PaimonScan if p.table.name() == tableName =>
+            val filteredPartitionsField = s.getClass.getDeclaredField("filteredPartitions")
+            filteredPartitionsField.setAccessible(true)
+            val filteredPartitions = if (gteqSpark3_3) {
+              filteredPartitionsField.get(s).asInstanceOf[Seq[Seq[InputPartition]]].flatten
+            } else {
+              filteredPartitionsField.get(s).asInstanceOf[Seq[InputPartition]]
+            }
+            filteredPartitions.flatMap { case p: PaimonInputPartition => p.splits }
+          case _ => Nil
+        }
+      case _ => Nil
     }
   }
 }

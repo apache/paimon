@@ -137,6 +137,11 @@ public abstract class ManifestFileMetaTestBase {
     protected ManifestFile createManifestFile(String pathStr) {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
+        return createManifestFile(pathStr, fileIO);
+    }
+
+    protected ManifestFile createManifestFile(String pathStr, FileIO fileIO) {
+        Path path = new Path(pathStr);
         return new ManifestFile.Factory(
                         fileIO,
                         new SchemaManager(fileIO, path),
@@ -155,7 +160,10 @@ public abstract class ManifestFileMetaTestBase {
                                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                                 null,
                                 null,
-                                false),
+                                CoreOptions.ExternalPathStrategy.NONE,
+                                null,
+                                false,
+                                null),
                         Long.MAX_VALUE,
                         null)
                 .create();
