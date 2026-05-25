@@ -32,16 +32,16 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 
 /** Predicate for filtering data using global indexes. */
 public class GlobalIndexEvaluator
@@ -50,12 +50,8 @@ public class GlobalIndexEvaluator
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
-    @Nullable private final ExecutorService executorService;
-
-    public GlobalIndexEvaluator(
-            RowType rowType, IntFunction<Collection<GlobalIndexReader>> readersFunction) {
-        this(rowType, readersFunction, null);
-    }
+    private final Map<Integer, Object> fieldLocks;
+    private final ExecutorService executorService;
 
     public GlobalIndexEvaluator(
             RowType rowType,
@@ -63,13 +59,27 @@ public class GlobalIndexEvaluator
             @Nullable ExecutorService executorService) {
         this.rowType = rowType;
         this.readersFunction = readersFunction;
-        this.executorService = executorService;
-        this.indexReadersCache =
-                executorService != null ? new ConcurrentHashMap<>() : new HashMap<>();
+        this.executorService =
+                executorService == null ? newDirectExecutorService() : executorService;
+        this.indexReadersCache = new ConcurrentHashMap<>();
+        this.fieldLocks = new ConcurrentHashMap<>();
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
-        return predicate == null ? Optional.empty() : predicate.visit(this);
+        if (predicate == null) {
+            return Optional.empty();
+        }
+        try {
+            return visitAsync(predicate).get();
+        } catch (Exception e) {
+            if (e.getCause() instanceof RuntimeException) {
+                throw (RuntimeException) e.getCause();
+            }
+            if (e.getCause() instanceof Error) {
+                throw (Error) e.getCause();
+            }
+            throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
+        }
     }
 
     @Override
@@ -78,11 +88,12 @@ public class GlobalIndexEvaluator
         if (!fieldRefOptional.isPresent()) {
             return Optional.empty();
         }
-        Optional<GlobalIndexResult> compoundResult = Optional.empty();
         FieldRef fieldRef = fieldRefOptional.get();
         int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+
+        Optional<GlobalIndexResult> compoundResult = Optional.empty();
         for (GlobalIndexReader fileIndexReader : readers) {
             Optional<GlobalIndexResult> childResult =
                     predicate.function().visit(fileIndexReader, fieldRef, predicate.literals());
@@ -91,11 +102,8 @@ public class GlobalIndexEvaluator
             }
 
             GlobalIndexResult result = childResult.get();
-
-            // AND Operation
             if (compoundResult.isPresent()) {
-                GlobalIndexResult r1 = compoundResult.get();
-                compoundResult = Optional.of(r1.and(result));
+                compoundResult = Optional.of(compoundResult.get().and(result));
             } else {
                 compoundResult = Optional.of(result);
             }
@@ -109,77 +117,51 @@ public class GlobalIndexEvaluator
 
     @Override
     public Optional<GlobalIndexResult> visit(CompoundPredicate predicate) {
-        if (executorService != null && predicate.children().size() > 1) {
-            return visitParallel(predicate);
-        }
-        return visitSequential(predicate);
+        throw new UnsupportedOperationException("Use visitAsync for compound predicates");
     }
 
-    private Optional<GlobalIndexResult> visitSequential(CompoundPredicate predicate) {
-        if (predicate.function() instanceof Or) {
-            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
-            for (Predicate predicate1 : predicate.children()) {
-                Optional<GlobalIndexResult> childResult = predicate1.visit(this);
+    private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(Predicate predicate) {
+        if (predicate instanceof LeafPredicate) {
+            return visitLeafAsync((LeafPredicate) predicate);
+        }
+        return visitCompoundAsync((CompoundPredicate) predicate);
+    }
 
-                if (!childResult.isPresent()) {
-                    return Optional.empty();
-                }
-                compoundResult = compoundResult.or(childResult.get());
-            }
-            return Optional.of(compoundResult);
-        } else {
-            Optional<GlobalIndexResult> compoundResult = Optional.empty();
-            for (Predicate predicate1 : predicate.children()) {
-                Optional<GlobalIndexResult> childResult = predicate1.visit(this);
-
-                // AND Operation
-                if (childResult.isPresent()) {
-                    if (compoundResult.isPresent()) {
-                        GlobalIndexResult r1 = compoundResult.get();
-                        GlobalIndexResult r2 = childResult.get();
-                        compoundResult = Optional.of(r1.and(r2));
-                    } else {
-                        compoundResult = childResult;
+    private CompletableFuture<Optional<GlobalIndexResult>> visitLeafAsync(LeafPredicate predicate) {
+        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+        if (!fieldRefOptional.isPresent()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        int fieldId = rowType.getField(fieldRefOptional.get().name()).id();
+        Object lock = fieldLocks.computeIfAbsent(fieldId, k -> new Object());
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    synchronized (lock) {
+                        return visit(predicate);
                     }
-                }
-
-                // if not remain, no need to test anymore
-                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
-                    return compoundResult;
-                }
-            }
-            return compoundResult;
-        }
+                },
+                executorService);
     }
 
-    private Optional<GlobalIndexResult> visitParallel(CompoundPredicate predicate) {
+    private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
+            CompoundPredicate predicate) {
         List<Predicate> children = flattenChildren(predicate);
-        List<List<Predicate>> groups = groupByField(children);
-        List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(groups.size());
-        for (List<Predicate> group : groups) {
-            futures.add(
-                    executorService.submit(() -> evaluateGroupWithoutParallel(group, predicate)));
-        }
+        List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
+                children.stream().map(this::visitAsync).collect(Collectors.toList());
 
-        List<Optional<GlobalIndexResult>> results = new ArrayList<>(children.size());
-        for (Future<Optional<GlobalIndexResult>> future : futures) {
-            try {
-                results.add(future.get());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                if (cause instanceof RuntimeException) {
-                    throw (RuntimeException) cause;
-                }
-                if (cause instanceof Error) {
-                    throw (Error) cause;
-                }
-                throw new RuntimeException(cause);
-            }
-        }
+        return CompletableFuture.allOf(childFutures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        v -> {
+                            List<Optional<GlobalIndexResult>> results = new ArrayList<>();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> f : childFutures) {
+                                results.add(f.join());
+                            }
+                            return combineResults(results, predicate);
+                        });
+    }
 
+    private Optional<GlobalIndexResult> combineResults(
+            List<Optional<GlobalIndexResult>> results, CompoundPredicate predicate) {
         if (predicate.function() instanceof Or) {
             GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
             for (Optional<GlobalIndexResult> childResult : results) {
@@ -192,125 +174,6 @@ public class GlobalIndexEvaluator
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<GlobalIndexResult> childResult : results) {
-                if (childResult.isPresent()) {
-                    if (compoundResult.isPresent()) {
-                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
-                    } else {
-                        compoundResult = childResult;
-                    }
-                }
-                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
-                    return compoundResult;
-                }
-            }
-            return compoundResult;
-        }
-    }
-
-    private List<List<Predicate>> groupByField(List<Predicate> children) {
-        List<List<Predicate>> groups = new ArrayList<>();
-        List<java.util.Set<String>> groupFields = new ArrayList<>();
-
-        for (Predicate child : children) {
-            java.util.Set<String> fields = collectFields(child);
-            int mergedIdx = -1;
-            for (int i = 0; i < groups.size(); i++) {
-                if (!java.util.Collections.disjoint(groupFields.get(i), fields)) {
-                    if (mergedIdx == -1) {
-                        groups.get(i).add(child);
-                        groupFields.get(i).addAll(fields);
-                        mergedIdx = i;
-                    } else {
-                        groups.get(mergedIdx).addAll(groups.get(i));
-                        groupFields.get(mergedIdx).addAll(groupFields.get(i));
-                        groups.remove(i);
-                        groupFields.remove(i);
-                        i--;
-                    }
-                }
-            }
-            if (mergedIdx == -1) {
-                List<Predicate> newGroup = new ArrayList<>();
-                newGroup.add(child);
-                groups.add(newGroup);
-                groupFields.add(fields);
-            }
-        }
-        return groups;
-    }
-
-    private java.util.Set<String> collectFields(Predicate predicate) {
-        java.util.Set<String> fields = new java.util.HashSet<>();
-        collectFieldsRecursive(predicate, fields);
-        return fields;
-    }
-
-    private void collectFieldsRecursive(Predicate predicate, java.util.Set<String> fields) {
-        if (predicate instanceof LeafPredicate) {
-            Optional<FieldRef> ref = ((LeafPredicate) predicate).fieldRefOptional();
-            if (ref.isPresent()) {
-                fields.add(ref.get().name());
-            }
-        } else if (predicate instanceof CompoundPredicate) {
-            for (Predicate child : ((CompoundPredicate) predicate).children()) {
-                collectFieldsRecursive(child, fields);
-            }
-        }
-    }
-
-    private Optional<GlobalIndexResult> evaluateGroupWithoutParallel(
-            List<Predicate> group, CompoundPredicate parent) {
-        if (group.size() == 1) {
-            return evaluateWithoutParallel(group.get(0));
-        }
-        if (parent.function() instanceof Or) {
-            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
-            for (Predicate child : group) {
-                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
-                if (!childResult.isPresent()) {
-                    return Optional.empty();
-                }
-                compoundResult = compoundResult.or(childResult.get());
-            }
-            return Optional.of(compoundResult);
-        } else {
-            Optional<GlobalIndexResult> compoundResult = Optional.empty();
-            for (Predicate child : group) {
-                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
-                if (childResult.isPresent()) {
-                    if (compoundResult.isPresent()) {
-                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
-                    } else {
-                        compoundResult = childResult;
-                    }
-                }
-                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
-                    return compoundResult;
-                }
-            }
-            return compoundResult;
-        }
-    }
-
-    private Optional<GlobalIndexResult> evaluateWithoutParallel(Predicate predicate) {
-        if (predicate instanceof LeafPredicate) {
-            return visit((LeafPredicate) predicate);
-        }
-        CompoundPredicate compound = (CompoundPredicate) predicate;
-        if (compound.function() instanceof Or) {
-            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
-            for (Predicate child : compound.children()) {
-                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
-                if (!childResult.isPresent()) {
-                    return Optional.empty();
-                }
-                compoundResult = compoundResult.or(childResult.get());
-            }
-            return Optional.of(compoundResult);
-        } else {
-            Optional<GlobalIndexResult> compoundResult = Optional.empty();
-            for (Predicate child : compound.children()) {
-                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
                 if (childResult.isPresent()) {
                     if (compoundResult.isPresent()) {
                         compoundResult = Optional.of(compoundResult.get().and(childResult.get()));

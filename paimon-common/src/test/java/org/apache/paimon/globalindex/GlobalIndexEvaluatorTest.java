@@ -83,7 +83,9 @@ class GlobalIndexEvaluatorTest {
         GlobalIndexResult expected = resultOf(1, 2, 3);
         GlobalIndexEvaluator evaluator =
                 new GlobalIndexEvaluator(
-                        rowType, fieldId -> Collections.singletonList(readerReturning(expected)));
+                        rowType,
+                        fieldId -> Collections.singletonList(readerReturning(expected)),
+                        null);
 
         PredicateBuilder builder = new PredicateBuilder(rowType);
         Predicate predicate = builder.equal(0, 42);
@@ -252,7 +254,8 @@ class GlobalIndexEvaluatorTest {
                             callCount.incrementAndGet();
                             return Collections.singletonList(
                                     readerReturning(resultOf(fieldId, fieldId + 10)));
-                        });
+                        },
+                        null);
 
         PredicateBuilder builder = new PredicateBuilder(rowType);
         Predicate predicate = PredicateBuilder.and(builder.equal(0, 1), builder.equal(1, 2));
@@ -540,7 +543,7 @@ class GlobalIndexEvaluatorTest {
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =
-                new GlobalIndexEvaluator(rowType, fieldId -> Collections.emptyList());
+                new GlobalIndexEvaluator(rowType, fieldId -> Collections.emptyList(), null);
 
         Optional<GlobalIndexResult> result = evaluator.evaluate(null);
 

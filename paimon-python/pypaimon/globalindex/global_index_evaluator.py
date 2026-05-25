@@ -27,10 +27,24 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField
 
 
+class _DirectExecutor(Executor):
+    """Executor that runs callables in the calling thread."""
+
+    def submit(self, fn, *args, **kwargs):
+        f = Future()
+        try:
+            result = fn(*args, **kwargs)
+            f.set_result(result)
+        except Exception as e:
+            f.set_exception(e)
+        return f
+
+    def shutdown(self, wait=True):
+        pass
+
+
 class GlobalIndexEvaluator:
-    """
-    Predicate evaluator for filtering data using global indexes.
-    """
+    """Predicate evaluator for filtering data using global indexes."""
 
     def __init__(
         self,
@@ -42,65 +56,91 @@ class GlobalIndexEvaluator:
         self._field_by_name = {f.name: f for f in fields}
         self._readers_function = readers_function
         self._index_readers_cache: Dict[int, Collection[GlobalIndexReader]] = {}
-        self._cache_lock = threading.Lock()
-        self._executor = executor
+        self._field_locks: Dict[int, threading.Lock] = {}
+        self._meta_lock = threading.Lock()
+        self._executor = executor if executor is not None else _DirectExecutor()
 
     def evaluate(
         self,
         predicate: Optional[Predicate]
     ) -> Optional[GlobalIndexResult]:
-        compound_result: Optional[GlobalIndexResult] = None
-        
-        # Evaluate predicate first
-        if predicate is not None:
-            compound_result = self._visit_predicate(predicate)
-        
-        return compound_result
+        if predicate is None:
+            return None
+        future = self._visit_async(predicate)
+        return future.result()
 
-    def _visit_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
-        """Visit a predicate and return the index result."""
-        if predicate.method == 'and':
-            children = predicate.literals
-            if self._executor is not None and len(children) > 1:
-                return self._visit_and_parallel(children)
-            return self._visit_and_sequential(children)
+    def _visit_async(self, predicate) -> Future:
+        if isinstance(predicate, Predicate) and predicate.method in ('and', 'or'):
+            return self._visit_compound_async(predicate)
+        return self._visit_leaf_async(predicate)
 
-        elif predicate.method == 'or':
-            children = predicate.literals
-            if self._executor is not None and len(children) > 1:
-                return self._visit_or_parallel(children)
-            return self._visit_or_sequential(children)
+    def _visit_leaf_async(self, predicate: Predicate) -> Future:
+        field = self._field_by_name.get(predicate.field)
+        if field is None:
+            f = Future()
+            f.set_result(None)
+            return f
 
+        field_id = field.id
+        lock = self._get_field_lock(field_id)
+
+        def task():
+            with lock:
+                return self._visit_leaf_predicate(predicate)
+
+        return self._executor.submit(task)
+
+    def _visit_compound_async(self, predicate: Predicate) -> Future:
+        children = self._flatten_children(predicate.method, predicate.literals)
+        child_futures = [self._visit_async(child) for child in children]
+
+        def combine():
+            results = [f.result() for f in child_futures]
+            return self._combine_results(results, predicate.method)
+
+        all_done = Future()
+        if not child_futures:
+            all_done.set_result(None)
+            return all_done
+
+        remaining = [len(child_futures)]
+        lock = threading.Lock()
+
+        def on_done(_):
+            with lock:
+                remaining[0] -= 1
+                if remaining[0] == 0:
+                    try:
+                        all_done.set_result(combine())
+                    except Exception as e:
+                        all_done.set_exception(e)
+
+        for cf in child_futures:
+            cf.add_done_callback(on_done)
+
+        return all_done
+
+    def _combine_results(
+        self, results: List[Optional[GlobalIndexResult]], method: str
+    ) -> Optional[GlobalIndexResult]:
+        if method == 'or':
+            compound_result = GlobalIndexResult.create_empty()
+            for child_result in results:
+                if child_result is None:
+                    return None
+                compound_result = compound_result.or_(child_result)
+            return compound_result
         else:
-            return self._visit_leaf_predicate(predicate)
-
-    def _visit_and_sequential(self, children) -> Optional[GlobalIndexResult]:
-        compound_result: Optional[GlobalIndexResult] = None
-        for child in children:
-            child_result = self._visit_predicate(child)
-
-            if child_result is not None:
-                if compound_result is not None:
-                    compound_result = compound_result.and_(child_result)
-                else:
-                    compound_result = child_result
-
-            if compound_result is not None and compound_result.is_empty():
-                return compound_result
-
-        return compound_result
-
-    def _visit_or_sequential(self, children) -> Optional[GlobalIndexResult]:
-        compound_result = GlobalIndexResult.create_empty()
-        for child in children:
-            child_result = self._visit_predicate(child)
-
-            if child_result is None:
-                return None
-
-            compound_result = compound_result.or_(child_result)
-
-        return compound_result
+            compound_result: Optional[GlobalIndexResult] = None
+            for child_result in results:
+                if child_result is not None:
+                    if compound_result is not None:
+                        compound_result = compound_result.and_(child_result)
+                    else:
+                        compound_result = child_result
+                if compound_result is not None and compound_result.is_empty():
+                    return compound_result
+            return compound_result
 
     def _flatten_children(self, method: str, children) -> list:
         result = []
@@ -111,160 +151,45 @@ class GlobalIndexEvaluator:
                 result.append(child)
         return result
 
-    def _evaluate_without_parallel(self, predicate):
-        if not isinstance(predicate, Predicate) or predicate.method not in ('and', 'or'):
-            return self._visit_predicate(predicate)
-        if predicate.method == 'and':
-            compound_result = None
-            for child in predicate.literals:
-                child_result = self._evaluate_without_parallel(child)
-                if child_result is not None:
-                    if compound_result is not None:
-                        compound_result = compound_result.and_(child_result)
-                    else:
-                        compound_result = child_result
-                if compound_result is not None and compound_result.is_empty():
-                    return compound_result
-            return compound_result
-        else:
-            compound_result = GlobalIndexResult.create_empty()
-            for child in predicate.literals:
-                child_result = self._evaluate_without_parallel(child)
-                if child_result is None:
-                    return None
-                compound_result = compound_result.or_(child_result)
-            return compound_result
-
-    def _collect_fields(self, predicate) -> set:
-        if not isinstance(predicate, Predicate):
-            return set()
-        if predicate.method in ('and', 'or'):
-            fields = set()
-            for child in predicate.literals:
-                fields.update(self._collect_fields(child))
-            return fields
-        return {predicate.field} if predicate.field else set()
-
-    def _group_by_field(self, children) -> list:
-        groups = []
-        group_fields = []
-
-        for child in children:
-            fields = self._collect_fields(child)
-            merged_idx = -1
-            i = 0
-            while i < len(groups):
-                if group_fields[i] & fields:
-                    if merged_idx == -1:
-                        groups[i].append(child)
-                        group_fields[i].update(fields)
-                        merged_idx = i
-                    else:
-                        groups[merged_idx].extend(groups[i])
-                        group_fields[merged_idx].update(group_fields[i])
-                        groups.pop(i)
-                        group_fields.pop(i)
-                        continue
-                i += 1
-            if merged_idx == -1:
-                groups.append([child])
-                group_fields.append(set(fields))
-
-        return groups
-
-    def _evaluate_group_without_parallel(self, group, method) -> Optional[GlobalIndexResult]:
-        if len(group) == 1:
-            return self._evaluate_without_parallel(group[0])
-        if method == 'or':
-            compound_result = GlobalIndexResult.create_empty()
-            for child in group:
-                child_result = self._evaluate_without_parallel(child)
-                if child_result is None:
-                    return None
-                compound_result = compound_result.or_(child_result)
-            return compound_result
-        else:
-            compound_result = None
-            for child in group:
-                child_result = self._evaluate_without_parallel(child)
-                if child_result is not None:
-                    if compound_result is not None:
-                        compound_result = compound_result.and_(child_result)
-                    else:
-                        compound_result = child_result
-                if compound_result is not None and compound_result.is_empty():
-                    return compound_result
-            return compound_result
-
-    def _submit_groups(self, groups, method) -> List[Future]:
-        return [self._executor.submit(self._evaluate_group_without_parallel, group, method) for group in groups]
-
-    def _collect_results(self, futures: List[Future]) -> List[Optional[GlobalIndexResult]]:
-        return [f.result() for f in futures]
-
-    def _visit_and_parallel(self, children) -> Optional[GlobalIndexResult]:
-        children = self._flatten_children('and', children)
-        groups = self._group_by_field(children)
-        results = self._collect_results(self._submit_groups(groups, 'and'))
-
-        compound_result: Optional[GlobalIndexResult] = None
-        for child_result in results:
-            if child_result is not None:
-                if compound_result is not None:
-                    compound_result = compound_result.and_(child_result)
-                else:
-                    compound_result = child_result
-
-            if compound_result is not None and compound_result.is_empty():
-                return compound_result
-
-        return compound_result
-
-    def _visit_or_parallel(self, children) -> Optional[GlobalIndexResult]:
-        children = self._flatten_children('or', children)
-        groups = self._group_by_field(children)
-        results = self._collect_results(self._submit_groups(groups, 'or'))
-
-        compound_result = GlobalIndexResult.create_empty()
-        for child_result in results:
-            if child_result is None:
-                return None
-            compound_result = compound_result.or_(child_result)
-
-        return compound_result
+    def _get_field_lock(self, field_id: int) -> threading.Lock:
+        lock = self._field_locks.get(field_id)
+        if lock is not None:
+            return lock
+        with self._meta_lock:
+            lock = self._field_locks.get(field_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._field_locks[field_id] = lock
+            return lock
 
     def _visit_leaf_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
-        """Visit a leaf predicate and return the index result."""
         field = self._field_by_name.get(predicate.field)
         if field is None:
             return None
-        
+
         field_id = field.id
         readers = self._index_readers_cache.get(field_id)
         if readers is None:
-            with self._cache_lock:
-                readers = self._index_readers_cache.get(field_id)
-                if readers is None:
-                    readers = self._readers_function(field)
-                    self._index_readers_cache[field_id] = readers
-        
+            readers = self._readers_function(field)
+            self._index_readers_cache[field_id] = readers
+
         field_ref = FieldRef(predicate.index, predicate.field, str(field.type))
-        
+
         compound_result: Optional[GlobalIndexResult] = None
-        
+
         for reader in readers:
             child_result = self._visit_function(reader, predicate, field_ref)
             if child_result is None:
                 continue
-            
+
             if compound_result is not None:
-                compound_result = compound_result.or_(child_result)
+                compound_result = compound_result.and_(child_result)
             else:
                 compound_result = child_result
-            
+
             if compound_result.is_empty():
                 return compound_result
-        
+
         return compound_result
 
     def _visit_function(
@@ -273,10 +198,9 @@ class GlobalIndexEvaluator:
         predicate: Predicate,
         field_ref: FieldRef
     ) -> Optional[GlobalIndexResult]:
-        """Visit a predicate function with the given reader."""
         method = predicate.method
         literals = predicate.literals
-        
+
         if method == 'equal':
             return reader.visit_equal(field_ref, literals[0])
         elif method == 'notEqual':
@@ -311,7 +235,6 @@ class GlobalIndexEvaluator:
         return None
 
     def close(self) -> None:
-        """Close the evaluator and release resources."""
         for readers in self._index_readers_cache.values():
             for reader in readers:
                 try:
