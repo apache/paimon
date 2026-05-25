@@ -107,8 +107,6 @@ class VectorOnlyTableTest(unittest.TestCase):
             pa_schema,
             options={
                 'vector.file.format': 'parquet',
-                'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true',
                 'bucket': '-1',
             }
         )
