@@ -1080,7 +1080,7 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         // verify internal order: within the single output file, rows must be
         // sorted ascending by (a, b) since parallelism=1 guarantees all data is in one task
         assertThat(afterCluster)
-                .containsExactlyInAnyOrderElementsOf(
+                .containsExactlyElementsOf(
                         Lists.newArrayList(
                                 "+I[0, 0]",
                                 "+I[0, 1]",
