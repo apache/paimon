@@ -32,7 +32,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Range;
 
 import java.io.Closeable;
@@ -61,7 +60,6 @@ public class GlobalIndexScanner implements Closeable {
 
     private final Options options;
     private final ExecutorService executor;
-    private final ExecutorService evaluatorExecutor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
 
@@ -72,12 +70,10 @@ public class GlobalIndexScanner implements Closeable {
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> indexFiles) {
         this.options = options;
-        this.executor =
-                ManifestReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         Integer threadNum = options.get(GLOBAL_INDEX_THREAD_NUM);
         int parallelism =
                 threadNum != null ? threadNum : Runtime.getRuntime().availableProcessors();
-        this.evaluatorExecutor = createCachedThreadPool(parallelism, "GLOBAL-INDEX-EVALUATOR-POOL");
+        this.executor = createCachedThreadPool(parallelism, "GLOBAL-INDEX-POOL");
         this.indexPathFactory = indexPathFactory;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
@@ -100,8 +96,7 @@ public class GlobalIndexScanner implements Closeable {
                                 indexFileReader,
                                 indexMetas.get(fieldId),
                                 rowType.getField(fieldId));
-        this.globalIndexEvaluator =
-                new GlobalIndexEvaluator(rowType, readersFunction, evaluatorExecutor);
+        this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction, executor);
     }
 
     public static Optional<GlobalIndexScanner> create(
@@ -183,7 +178,7 @@ public class GlobalIndexScanner implements Closeable {
                     unionReader.add(innerReader);
                 }
 
-                readers.add(new UnionGlobalIndexReader(unionReader, executor));
+                readers.add(new UnionGlobalIndexReader(unionReader));
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create global index reader", e);
@@ -202,6 +197,6 @@ public class GlobalIndexScanner implements Closeable {
     @Override
     public void close() throws IOException {
         globalIndexEvaluator.close();
-        evaluatorExecutor.shutdownNow();
+        executor.shutdownNow();
     }
 }
