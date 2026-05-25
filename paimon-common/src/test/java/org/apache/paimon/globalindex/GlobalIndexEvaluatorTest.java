@@ -373,6 +373,49 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testDeepMixedNestedPredicateDoesNotDeadlockWithSmallPool() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexResult resultA = resultOf(1, 2, 3, 4, 5);
+        GlobalIndexResult resultB = resultOf(2, 3, 4, 5, 6);
+        GlobalIndexResult resultC = resultOf(3, 4, 5, 6, 7);
+
+        ConcurrentHashMap<Integer, GlobalIndexResult> fieldResults = new ConcurrentHashMap<>();
+        fieldResults.put(0, resultA);
+        fieldResults.put(1, resultB);
+        fieldResults.put(2, resultC);
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        readerReturning(fieldResults.get(fieldId))),
+                        executor);
+
+        // AND(OR(AND(a, b), c), OR(AND(a, c), b)) — deep mixed nesting
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.or(
+                                PredicateBuilder.and(builder.equal(0, 1), builder.equal(1, 2)),
+                                builder.equal(2, 3)),
+                        PredicateBuilder.or(
+                                PredicateBuilder.and(builder.equal(0, 4), builder.equal(2, 5)),
+                                builder.equal(1, 6)));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        // OR(AND(a,b), c): AND(a,b)={2,3,4,5}, c={3..7} => union={2,3,4,5,6,7}
+        // OR(AND(a,c), b): AND(a,c)={3,4,5}, b={2..6} => union={2,3,4,5,6}
+        // top AND: intersection = {2,3,4,5,6}
+        assertBitmapContainsExactly(result.get().results(), 2L, 3L, 4L, 5L, 6L);
+        evaluator.close();
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =

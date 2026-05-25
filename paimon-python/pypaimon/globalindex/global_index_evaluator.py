@@ -111,16 +111,32 @@ class GlobalIndexEvaluator:
                 result.append(child)
         return result
 
-    def _evaluate_child_sequentially(self, child):
-        if isinstance(child, Predicate) and child.method in ('and', 'or'):
-            if child.method == 'and':
-                return self._visit_and_sequential(child.literals)
-            else:
-                return self._visit_or_sequential(child.literals)
-        return self._visit_predicate(child)
+    def _evaluate_without_parallel(self, predicate):
+        if not isinstance(predicate, Predicate) or predicate.method not in ('and', 'or'):
+            return self._visit_predicate(predicate)
+        if predicate.method == 'and':
+            compound_result = None
+            for child in predicate.literals:
+                child_result = self._evaluate_without_parallel(child)
+                if child_result is not None:
+                    if compound_result is not None:
+                        compound_result = compound_result.and_(child_result)
+                    else:
+                        compound_result = child_result
+                if compound_result is not None and compound_result.is_empty():
+                    return compound_result
+            return compound_result
+        else:
+            compound_result = GlobalIndexResult.create_empty()
+            for child in predicate.literals:
+                child_result = self._evaluate_without_parallel(child)
+                if child_result is None:
+                    return None
+                compound_result = compound_result.or_(child_result)
+            return compound_result
 
     def _submit_children(self, children) -> List[Future]:
-        return [self._executor.submit(self._evaluate_child_sequentially, child) for child in children]
+        return [self._executor.submit(self._evaluate_without_parallel, child) for child in children]
 
     def _collect_results(self, futures: List[Future]) -> List[Optional[GlobalIndexResult]]:
         return [f.result() for f in futures]

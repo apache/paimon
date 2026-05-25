@@ -156,7 +156,7 @@ public class GlobalIndexEvaluator
         List<Predicate> children = flattenChildren(predicate);
         List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(children.size());
         for (Predicate child : children) {
-            futures.add(executorService.submit(() -> evaluateChildSequentially(child)));
+            futures.add(executorService.submit(() -> evaluateWithoutParallel(child)));
         }
 
         List<Optional<GlobalIndexResult>> results = new ArrayList<>(children.size());
@@ -205,11 +205,38 @@ public class GlobalIndexEvaluator
         }
     }
 
-    private Optional<GlobalIndexResult> evaluateChildSequentially(Predicate child) {
-        if (child instanceof CompoundPredicate) {
-            return visitSequential((CompoundPredicate) child);
+    private Optional<GlobalIndexResult> evaluateWithoutParallel(Predicate predicate) {
+        if (predicate instanceof LeafPredicate) {
+            return visit((LeafPredicate) predicate);
         }
-        return child.visit(this);
+        CompoundPredicate compound = (CompoundPredicate) predicate;
+        if (compound.function() instanceof Or) {
+            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
+            for (Predicate child : compound.children()) {
+                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
+                if (!childResult.isPresent()) {
+                    return Optional.empty();
+                }
+                compoundResult = compoundResult.or(childResult.get());
+            }
+            return Optional.of(compoundResult);
+        } else {
+            Optional<GlobalIndexResult> compoundResult = Optional.empty();
+            for (Predicate child : compound.children()) {
+                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
+                if (childResult.isPresent()) {
+                    if (compoundResult.isPresent()) {
+                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
+                    } else {
+                        compoundResult = childResult;
+                    }
+                }
+                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
+                    return compoundResult;
+                }
+            }
+            return compoundResult;
+        }
     }
 
     private List<Predicate> flattenChildren(CompoundPredicate predicate) {
