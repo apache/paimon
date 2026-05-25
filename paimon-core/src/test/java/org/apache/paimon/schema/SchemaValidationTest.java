@@ -519,4 +519,13 @@ class SchemaValidationTest {
                 .hasMessageContaining(
                         "Cannot enable deletion-vectors.merge-on-read together with visibility-callback.enabled");
     }
+
+    @Test
+    public void testMergeOnReadRequiresDvEnabled() {
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.merge-on-read", "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true");
+    }
 }

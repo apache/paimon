@@ -281,6 +281,10 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
+        } else {
+            checkArgument(
+                    !options.deletionVectorsMergeOnRead(),
+                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
         // vector field names must point to vector type
@@ -622,8 +626,7 @@ public class SchemaValidation {
         }
 
         checkArgument(
-                !(options.toConfiguration().get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)
-                        && options.visibilityCallbackEnabled()),
+                !(options.deletionVectorsMergeOnRead() && options.visibilityCallbackEnabled()),
                 "Cannot enable deletion-vectors.merge-on-read together with visibility-callback.enabled. "
                         + "The former makes DV level-0 files visible at read time, "
                         + "while the latter waits for compaction before returning commits.");

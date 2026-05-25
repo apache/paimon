@@ -3659,9 +3659,13 @@ public class CoreOptions implements Serializable {
         return options.get(FORCE_LOOKUP);
     }
 
+    public boolean deletionVectorsMergeOnRead() {
+        return options.get(DELETION_VECTORS_MERGE_ON_READ);
+    }
+
     public boolean batchScanSkipLevel0() {
         if (deletionVectorsEnabled()) {
-            return !options.get(DELETION_VECTORS_MERGE_ON_READ);
+            return !deletionVectorsMergeOnRead();
         }
         return mergeEngine() == FIRST_ROW;
     }

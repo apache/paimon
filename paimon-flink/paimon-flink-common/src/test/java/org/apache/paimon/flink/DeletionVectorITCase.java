@@ -213,7 +213,7 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                 String.format(
                         "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
                                 + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
-                                + "'deletion-vectors.bitmap64' = '%s', 'write-only' = 'true')",
+                                + "'deletion-vectors.bitmap64' = '%s', 'write-only' = 'true', 'bucket' = '1')",
                         changelogProducer, dvBitmap64));
 
         sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
@@ -222,10 +222,8 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO T VALUES (2, '2_2'), (4, '4_1')");
 
-        // without merge-on-read, level 0 data is not visible (write-only, no compaction)
-        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='3') */"))
-                .containsExactlyInAnyOrder(
-                        Row.of(1, "111111111"), Row.of(2, "2"), Row.of(3, "3"), Row.of(4, "4"));
+        // write-only with fixed bucket, all files at level 0, not visible without merge-on-read
+        assertThat(batchSql("SELECT * FROM T")).isEmpty();
 
         // with merge-on-read enabled, level 0 data becomes visible via MOR
         assertThat(
