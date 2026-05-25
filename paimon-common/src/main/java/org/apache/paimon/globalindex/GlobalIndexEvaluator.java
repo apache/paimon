@@ -185,7 +185,7 @@ public class GlobalIndexEvaluator implements Closeable {
         for (Predicate child : predicate.children()) {
             if (child instanceof CompoundPredicate) {
                 CompoundPredicate compound = (CompoundPredicate) child;
-                if (compound.function().getClass() == predicate.function().getClass()) {
+                if (compound.function().equals(predicate.function())) {
                     result.addAll(flattenChildren(compound));
                     continue;
                 }
