@@ -879,6 +879,56 @@ def cmd_table_drop_partition(args):
         sys.exit(1)
 
 
+def cmd_table_expire_snapshots(args):
+    """Execute the 'table expire-snapshots' command."""
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.table.file_store_table import FileStoreTable
+    from pypaimon.options.expire_config import ExpireConfig
+
+    config = load_catalog_config(args.config)
+    catalog = create_catalog(config)
+    table_identifier = args.table
+
+    try:
+        table = catalog.get_table(table_identifier)
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not isinstance(table, FileStoreTable):
+        print(f"Error: Table '{table_identifier}' is not a FileStoreTable.", file=sys.stderr)
+        sys.exit(1)
+
+    expire_config = ExpireConfig(
+        snapshot_retain_max=getattr(args, 'retain_max', None) or sys.maxsize,
+        snapshot_retain_min=getattr(args, 'retain_min', None) or 1,
+        snapshot_time_retain_millis=_parse_duration_millis(
+            getattr(args, 'time_retain', None)),
+        snapshot_max_deletes=getattr(args, 'max_deletes', None) or sys.maxsize,
+    )
+
+    expired = table.new_expire_snapshots().config(expire_config).expire()
+    print(JSON.to_json({"expired_snapshot_count": expired}, indent=2))
+
+
+def _parse_duration_millis(duration_str):
+    if not duration_str:
+        return sys.maxsize
+    unit = duration_str[-1].lower()
+    multipliers = {'d': 86400000, 'h': 3600000, 'm': 60000, 's': 1000}
+    if unit not in multipliers:
+        print(f"Error: Unknown duration unit '{unit}'. Use d/h/m/s (e.g. 7d, 24h).",
+              file=sys.stderr)
+        sys.exit(1)
+    try:
+        value = int(duration_str[:-1])
+    except ValueError:
+        print(f"Error: Invalid duration value '{duration_str}'. Use format like 7d, 24h.",
+              file=sys.stderr)
+        sys.exit(1)
+    return value * multipliers[unit]
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -1170,3 +1220,22 @@ def add_table_subcommands(table_parser):
     update_comment_parser = alter_subparsers.add_parser('update-comment', help='Update table comment')
     update_comment_parser.add_argument('--comment', '-c', required=True, help='New table comment')
     update_comment_parser.set_defaults(func=cmd_table_alter)
+
+    # table expire-snapshots command
+    expire_parser = table_subparsers.add_parser(
+        'expire-snapshots', help='Expire old snapshots and clean up files'
+    )
+    expire_parser.add_argument('table', help='Table identifier in format: database.table')
+    expire_parser.add_argument(
+        '--retain-max', type=int, default=None,
+        help='Maximum number of snapshots to retain')
+    expire_parser.add_argument(
+        '--retain-min', type=int, default=None,
+        help='Minimum number of snapshots to retain')
+    expire_parser.add_argument(
+        '--time-retain', type=str, default=None,
+        help='Minimum time to retain snapshots (e.g. 7d, 24h)')
+    expire_parser.add_argument(
+        '--max-deletes', type=int, default=None,
+        help='Maximum number of snapshots to delete per run')
+    expire_parser.set_defaults(func=cmd_table_expire_snapshots)
