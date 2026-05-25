@@ -787,6 +787,9 @@ public class SchemaValidation {
         if (vectorFileFormat != null) {
             Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
             checkArgument(
+                    fields.size() > vectorStoreNames.size(),
+                    "Table with VECTOR type column must have other normal columns.");
+            checkArgument(
                     schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
                     "The vector-store columns can not be part of partition keys.");
             checkArgument(

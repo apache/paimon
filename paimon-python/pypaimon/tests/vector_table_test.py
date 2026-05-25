@@ -82,73 +82,24 @@ class VectorFileDetectionTest(unittest.TestCase):
 
 
 class VectorOnlyTableTest(unittest.TestCase):
-    """Regression test: tables with only VECTOR columns must not silently drop data."""
+    """Vector-only tables (no normal columns) must be rejected at schema creation."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.temp_dir = tempfile.mkdtemp()
-        cls.warehouse = os.path.join(cls.temp_dir, 'warehouse')
-        cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
-        cls.catalog.create_database('test_db', False)
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            shutil.rmtree(cls.temp_dir)
-        except OSError:
-            pass
-
-    def test_vector_only_table_write_read(self):
+    def test_vector_only_table_rejected(self):
         pa_schema = pa.schema([
             ('embed1', pa.list_(pa.float32(), 3)),
             ('embed2', pa.list_(pa.float32(), 2)),
         ])
-        schema = Schema.from_pyarrow_schema(
-            pa_schema,
-            options={
-                'vector.file.format': 'parquet',
-                'bucket': '-1',
-            }
-        )
-        self.catalog.create_table('test_db.vector_only', schema, False)
-        table = self.catalog.get_table('test_db.vector_only')
-
-        test_data = pa.table({
-            'embed1': pa.FixedSizeListArray.from_arrays(
-                pa.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], type=pa.float32()), 3
-            ),
-            'embed2': pa.FixedSizeListArray.from_arrays(
-                pa.array([10.0, 20.0, 30.0, 40.0], type=pa.float32()), 2
-            ),
-        })
-
-        write_builder = table.new_batch_write_builder()
-        writer = write_builder.new_write()
-        writer.write_arrow(test_data)
-        commit_messages = writer.prepare_commit()
-
-        all_files = []
-        for msg in commit_messages:
-            all_files.extend(msg.new_files)
-
-        self.assertGreater(len(all_files), 0, "Should have committed files")
-        for f in all_files:
-            self.assertTrue(
-                DataFileMeta.is_vector_file(f.file_name),
-                f"All files should be vector files, got: {f.file_name}"
+        with self.assertRaises(ValueError) as ctx:
+            Schema.from_pyarrow_schema(
+                pa_schema,
+                options={
+                    'vector.file.format': 'parquet',
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true',
+                    'bucket': '-1',
+                }
             )
-
-        write_builder.new_commit().commit(commit_messages)
-        writer.close()
-
-        read_builder = table.new_read_builder()
-        splits = read_builder.new_scan().plan().splits()
-        result = read_builder.new_read().to_arrow(splits)
-
-        self.assertEqual(result.num_rows, 2)
-        embed1_values = [result.column('embed1')[i].as_py() for i in range(2)]
-        self.assertIn([1.0, 2.0, 3.0], embed1_values)
-        self.assertIn([4.0, 5.0, 6.0], embed1_values)
+        self.assertIn("must have other normal columns", str(ctx.exception))
 
 
 class VectorTableWriteReadTest(unittest.TestCase):
