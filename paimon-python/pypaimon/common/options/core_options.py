@@ -233,6 +233,21 @@ class CoreOptions:
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description("The target file size for blob files.")
     )
+
+    VECTOR_FILE_FORMAT: ConfigOption[str] = (
+        ConfigOptions.key("vector.file.format")
+        .string_type()
+        .no_default_value()
+        .with_description("Store VECTOR type columns separately in the specified file format.")
+    )
+
+    VECTOR_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("vector.target-file-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Target file size for vector data. Default is 10 * target-file-size.")
+    )
+
     DATA_FILE_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("data-file.prefix")
         .string_type()
@@ -651,6 +666,20 @@ class CoreOptions:
             return MemorySize.parse(default).get_bytes()
         else:
             return self.target_file_size(has_primary_key=False)
+
+    def vector_file_format(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
+
+    def with_vector_format(self) -> bool:
+        return self.options.contains(CoreOptions.VECTOR_FILE_FORMAT)
+
+    def vector_target_file_size(self, default=None):
+        if self.options.contains(CoreOptions.VECTOR_TARGET_FILE_SIZE):
+            return self.options.get(CoreOptions.VECTOR_TARGET_FILE_SIZE, None).get_bytes()
+        elif default is not None:
+            return MemorySize.parse(default).get_bytes()
+        else:
+            return 10 * self.target_file_size(has_primary_key=False)
 
     def data_file_prefix(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_PREFIX, default)

@@ -767,12 +767,13 @@ class FileStoreCommit:
                     entry.file.file_source == 0 and  # APPEND file source
                     entry.file.first_row_id is None):  # No existing first_row_id
 
-                if DataFileMeta.is_blob_file(entry.file.file_name):
-                    # Handle blob files specially. Each blob field tracks row ids independently.
+                if (DataFileMeta.is_blob_file(entry.file.file_name)
+                        or DataFileMeta.is_vector_file(entry.file.file_name)):
+                    # Handle blob/vector files specially. Each field tracks row ids independently.
                     if current_data_start >= start:
                         raise RuntimeError(
-                            f"This is a bug, blobStart {current_data_start} should be less than start {start} "
-                            f"when assigning a blob entry file."
+                            f"This is a bug, specialStart {current_data_start} should be less than start {start} "
+                            f"when assigning a blob/vector entry file."
                         )
                     row_count = entry.file.row_count
                     blob_field_key = tuple(entry.file.write_cols or [])
