@@ -124,7 +124,10 @@ class GlobalIndexEvaluator:
 
     def _visit_reader(self, reader, predicate, field_ref, lock):
         with lock:
-            return self._visit_function(reader, predicate, field_ref)
+            result = self._visit_function(reader, predicate, field_ref)
+            if result is not None:
+                result.results()
+            return result
 
     def _combine_reader_results(
         self, reader_futures: List[Future]

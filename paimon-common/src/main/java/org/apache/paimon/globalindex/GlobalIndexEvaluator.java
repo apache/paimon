@@ -102,9 +102,15 @@ public class GlobalIndexEvaluator implements Closeable {
                     CompletableFuture.supplyAsync(
                             () -> {
                                 synchronized (reader) {
-                                    return predicate
-                                            .function()
-                                            .visit(reader, fieldRef, predicate.literals());
+                                    Optional<GlobalIndexResult> result =
+                                            predicate
+                                                    .function()
+                                                    .visit(
+                                                            reader,
+                                                            fieldRef,
+                                                            predicate.literals());
+                                    result.ifPresent(GlobalIndexResult::results);
+                                    return result;
                                 }
                             },
                             executorService));

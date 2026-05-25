@@ -519,6 +519,65 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testLazyResultNotMaterializedConcurrently() {
+        executor = Executors.newFixedThreadPool(4);
+        RowType rowType = rowType();
+
+        AtomicInteger concurrency = new AtomicInteger(0);
+        AtomicInteger maxConcurrency = new AtomicInteger(0);
+
+        GlobalIndexReader lazyReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public Optional<GlobalIndexResult> visitEqual(
+                            FieldRef fieldRef, Object literal) {
+                        return Optional.of(
+                                GlobalIndexResult.create(
+                                        () -> {
+                                            int c = concurrency.incrementAndGet();
+                                            maxConcurrency.updateAndGet(cur -> Math.max(cur, c));
+                                            try {
+                                                Thread.sleep(50);
+                                            } catch (InterruptedException e) {
+                                                Thread.currentThread().interrupt();
+                                            }
+                                            concurrency.decrementAndGet();
+                                            RoaringNavigableMap64 bm = new RoaringNavigableMap64();
+                                            bm.add(1);
+                                            bm.add(2);
+                                            bm.add(3);
+                                            return bm;
+                                        }));
+                    }
+                };
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            if (fieldId == 0) {
+                                return Collections.singletonList(lazyReader);
+                            }
+                            return Collections.singletonList(
+                                    readerReturning(resultOf(1, 2, 3, 4, 5)));
+                        },
+                        executor);
+
+        // AND(OR(a=1, b=2), OR(a=3, c=4)) — field a in both OR subtrees
+        // lazy results for field a must not be materialized concurrently
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.or(builder.equal(0, 1), builder.equal(1, 2)),
+                        PredicateBuilder.or(builder.equal(0, 3), builder.equal(2, 4)));
+
+        evaluator.evaluate(predicate);
+
+        assertThat(maxConcurrency.get()).isEqualTo(1);
+        evaluator.close();
+    }
+
+    @Test
     void testNonFieldLeafPredicateDoesNotThrow() {
         executor = Executors.newFixedThreadPool(2);
         RowType rowType = rowType();
