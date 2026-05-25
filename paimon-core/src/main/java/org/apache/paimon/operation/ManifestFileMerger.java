@@ -97,7 +97,8 @@ public class ManifestFileMerger {
                 partitionType,
                 manifestReadParallelism,
                 manifestMergeSorted,
-                CoreOptions.MANIFEST_MERGE_SORT_BUFFER.defaultValue().getBytes());
+                CoreOptions.MANIFEST_MERGE_SORT_BUFFER.defaultValue().getBytes(),
+                null);
     }
 
     public static List<ManifestFileMeta> merge(
@@ -219,7 +220,8 @@ public class ManifestFileMerger {
                 partitionType,
                 manifestReadParallelism,
                 manifestMergeSorted,
-                CoreOptions.MANIFEST_MERGE_SORT_BUFFER.defaultValue().getBytes());
+                CoreOptions.MANIFEST_MERGE_SORT_BUFFER.defaultValue().getBytes(),
+                null);
     }
 
     public static Optional<List<ManifestFileMeta>> tryFullCompaction(
@@ -231,7 +233,8 @@ public class ManifestFileMerger {
             RowType partitionType,
             @Nullable Integer manifestReadParallelism,
             boolean manifestMergeSorted,
-            long manifestMergeSortBufferSize)
+            long manifestMergeSortBufferSize,
+            @Nullable IOManager ioManager)
             throws Exception {
         checkArgument(sizeTrigger > 0, "Manifest full compaction size trigger cannot be zero.");
 
@@ -322,6 +325,7 @@ public class ManifestFileMerger {
                                 manifestFile,
                                 partitionType,
                                 manifestMergeSortBufferSize,
+                                ioManager,
                                 writer,
                                 result);
             } else {
@@ -427,10 +431,10 @@ public class ManifestFileMerger {
             ManifestFile manifestFile,
             RowType partitionType,
             long manifestMergeSortBufferSize,
+            @Nullable IOManager ioManager,
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer,
             List<ManifestFileMeta> result)
             throws Exception {
-        IOManager ioManager = null;
         BinaryExternalSortBuffer sortBuffer = null;
         RowType sortRowType = null;
         ManifestEntrySerializer entrySerializer = new ManifestEntrySerializer();
@@ -456,7 +460,9 @@ public class ManifestFileMerger {
                 if (requireChange) {
                     if (sortBuffer == null) {
                         sortRowType = manifestEntrySortRowType(partitionType);
-                        ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
+                        if (ioManager == null) {
+                            ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
+                        }
                         sortBuffer =
                                 createManifestEntrySortBuffer(
                                         ioManager,

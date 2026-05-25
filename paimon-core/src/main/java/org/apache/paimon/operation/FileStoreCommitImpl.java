@@ -961,7 +961,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             partitionType,
                             options.scanManifestParallelism(),
                             options.manifestMergeSorted() && options.manifestMergeSortOnCommit(),
-                            options.manifestMergeSortBufferSize());
+                            options.manifestMergeSortBufferSize(),
+                            null);
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -1198,7 +1199,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         partitionType,
                         options.scanManifestParallelism(),
                         options.manifestMergeSorted(),
-                        options.manifestMergeSortBufferSize());
+                        options.manifestMergeSortBufferSize(),
+                        null);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened
