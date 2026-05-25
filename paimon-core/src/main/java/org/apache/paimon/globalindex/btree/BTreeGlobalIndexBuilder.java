@@ -62,7 +62,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -305,23 +304,32 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());
     }
 
-    public static Pair<Range, Split> calcRowRangeWithRowIndex(
+    public static List<Pair<Range, Split>> splitByRowRangeIndex(
             RowRangeIndex rowRangeIndex, DataSplit dataSplit) {
-        if (rowRangeIndex != null) {
-            IndexedSplit indexedSplit =
-                    (IndexedSplit)
-                            DataEvolutionBatchScan.wrapToIndexSplits(
-                                            Arrays.asList(dataSplit), rowRangeIndex, null)
-                                    .splits()
-                                    .get(0);
-            checkArgument(
-                    indexedSplit.rowRanges().size() == 1,
-                    "Expected exactly one row range for the split, but found: %s",
-                    indexedSplit.rowRanges());
-            return Pair.of(indexedSplit.rowRanges().get(0), indexedSplit);
+        if (rowRangeIndex == null) {
+            Range range = calcRowRange(dataSplit);
+            return range == null
+                    ? Collections.emptyList()
+                    : Collections.singletonList(Pair.of(range, dataSplit));
         }
 
-        return Pair.of(calcRowRange(dataSplit), dataSplit);
+        List<Pair<Range, Split>> result = new ArrayList<>();
+        for (Split split :
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Collections.singletonList(dataSplit), rowRangeIndex, null)
+                        .splits()) {
+            IndexedSplit indexedSplit = (IndexedSplit) split;
+            for (Range rowRange : indexedSplit.rowRanges()) {
+                result.add(
+                        Pair.of(
+                                rowRange,
+                                new IndexedSplit(
+                                        indexedSplit.dataSplit(),
+                                        Collections.singletonList(rowRange),
+                                        null)));
+            }
+        }
+        return result;
     }
 
     public static Range calcRowRange(DataSplit dataSplit) {
@@ -354,16 +362,17 @@ public class BTreeGlobalIndexBuilder implements Serializable {
             RowRangeIndex rowRangeIndex, List<DataSplit> splits) {
         Map<BinaryRow, List<Pair<Range, Split>>> partitionSplitRanges = new HashMap<>();
         for (DataSplit split : splits) {
-            Pair<Range, Split> keyPair = calcRowRangeWithRowIndex(rowRangeIndex, split);
-            Range splitRange = keyPair.getKey();
-            Split splitWithRange = keyPair.getValue();
-            if (splitRange == null) {
-                continue;
+            for (Pair<Range, Split> keyPair : splitByRowRangeIndex(rowRangeIndex, split)) {
+                Range splitRange = keyPair.getKey();
+                Split splitWithRange = keyPair.getValue();
+                if (splitRange == null) {
+                    continue;
+                }
+                BinaryRow partition = split.partition();
+                partitionSplitRanges
+                        .computeIfAbsent(partition, p -> new ArrayList<>())
+                        .add(Pair.of(splitRange, splitWithRange));
             }
-            BinaryRow partition = split.partition();
-            partitionSplitRanges
-                    .computeIfAbsent(partition, p -> new ArrayList<>())
-                    .add(Pair.of(splitRange, splitWithRange));
         }
 
         Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();

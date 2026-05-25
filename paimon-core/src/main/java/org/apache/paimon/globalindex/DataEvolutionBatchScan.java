@@ -295,14 +295,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private static IndexedSplit wrap(
             DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<DataFileMeta> files = dataSplit.dataFiles();
-        long min = files.get(0).nonNullFirstRowId();
-        long max =
-                files.get(files.size() - 1).nonNullFirstRowId()
-                        + files.get(files.size() - 1).rowCount()
-                        - 1;
 
-        List<Range> expected = rowRangeIndex.intersectedRanges(min, max);
+        List<Range> expected = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            Range fileRange = file.nonNullRowIdRange();
+            expected.addAll(rowRangeIndex.intersectedRanges(fileRange.from, fileRange.to));
+        }
+        expected = Range.sortAndMergeOverlap(expected, true);
         if (expected.isEmpty()) {
+            long min = files.stream().mapToLong(f -> f.nonNullRowIdRange().from).min().orElse(-1L);
+            long max = files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(-1L);
             throw new IllegalStateException(
                     String.format(
                             "This is a bug, there should be intersected ranges for split with min row id %d and max row id %d.",
