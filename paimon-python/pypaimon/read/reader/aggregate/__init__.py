@@ -74,3 +74,11 @@ def create_field_aggregator(
             )
         )
     return factory(field_type, field_name, options)
+
+
+# Eager-import the built-in aggregator module so its top-level
+# ``register_aggregator(...)`` calls populate ``_FACTORIES`` before any
+# caller looks anything up. Placed at the bottom of the module so the
+# names ``register_aggregator`` / ``FieldAggregator`` aggregators
+# imports back from here are already defined when its import runs.
+from pypaimon.read.reader.aggregate import aggregators  # noqa: E402, F401
