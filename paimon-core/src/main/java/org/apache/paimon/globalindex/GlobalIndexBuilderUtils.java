@@ -38,6 +38,8 @@ import java.util.List;
 /** Utils for global index build. */
 public class GlobalIndexBuilderUtils {
 
+    public static final int MULTI_COLUMN_INDEX_FIELD_ID = -1;
+
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
@@ -60,13 +62,15 @@ public class GlobalIndexBuilderUtils {
             String indexType,
             List<ResultEntry> entries)
             throws IOException {
-        int indexFieldId = fields.get(0).id();
-        int[] extraFieldIds =
-                fields.size() > 1
-                        ? fields.subList(1, fields.size()).stream()
-                                .mapToInt(DataField::id)
-                                .toArray()
-                        : null;
+        int indexFieldId;
+        int[] extraFieldIds;
+        if (fields.size() > 1) {
+            indexFieldId = MULTI_COLUMN_INDEX_FIELD_ID;
+            extraFieldIds = fields.stream().mapToInt(DataField::id).toArray();
+        } else {
+            indexFieldId = fields.get(0).id();
+            extraFieldIds = null;
+        }
         return toIndexFileMetas(
                 fileIO,
                 indexPathFactory,

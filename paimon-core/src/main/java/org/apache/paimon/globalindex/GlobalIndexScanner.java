@@ -53,8 +53,10 @@ import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
@@ -98,6 +100,13 @@ public class GlobalIndexScanner implements Closeable {
                         Arrays.stream(meta.extraFieldIds())
                                 .boxed()
                                 .collect(Collectors.toList());
+                // Validate consistency: all files in the same group must have identical extraFieldIds
+                if (fieldToGroup.containsKey(fieldIds.get(0))) {
+                    List<Integer> existingGroup = fieldToGroup.get(fieldIds.get(0));
+                    checkArgument(
+                            existingGroup.equals(fieldIds),
+                            "Inconsistent extraFieldIds across index files.");
+                }
                 multiColumnMetas
                         .computeIfAbsent(fieldIds, k -> new HashMap<>())
                         .computeIfAbsent(indexType, k -> new HashMap<>())
