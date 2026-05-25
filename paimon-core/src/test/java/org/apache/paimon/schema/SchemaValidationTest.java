@@ -510,14 +510,39 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testMergeOnReadConflictWithVisibilityCallback() {
+    public void testMergeOnReadCoexistsWithVisibilityCallback() {
         Map<String, String> options = new HashMap<>();
         options.put("deletion-vectors.enabled", "true");
         options.put("deletion-vectors.merge-on-read", "true");
         options.put("visibility-callback.enabled", "true");
-        assertThatThrownBy(() -> validateTableSchemaExec(options))
-                .hasMessageContaining(
-                        "Cannot enable deletion-vectors.merge-on-read together with visibility-callback.enabled");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testMergeOnReadCoexistsWithVisibilityCallbackAndPostponeBucket() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.enabled", "true");
+        options.put("deletion-vectors.merge-on-read", "true");
+        options.put("visibility-callback.enabled", "true");
+        options.put(BUCKET.key(), String.valueOf(-2));
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                singletonList("f1"),
+                                                options,
+                                                "")))
+                .doesNotThrowAnyException();
     }
 
     @Test
