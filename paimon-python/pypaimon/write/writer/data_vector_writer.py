@@ -139,8 +139,7 @@ class DataVectorWriter(DataWriter):
         if self.closed:
             return
         try:
-            if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
-                self._close_current_writers()
+            self._close_current_writers()
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
@@ -167,18 +166,21 @@ class DataVectorWriter(DataWriter):
         return self.pending_normal_data.nbytes > self.target_file_size
 
     def _close_current_writers(self):
-        if self.pending_normal_data is None or self.pending_normal_data.num_rows == 0:
-            return
+        has_normal = self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0
 
-        normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+        normal_meta = None
+        if has_normal:
+            normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+            self.committed_files.append(normal_meta)
 
-        vector_metas = []
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
-            self._validate_consistency(normal_meta, vector_metas)
+            self.vector_writer.committed_files.clear()
+            if vector_metas:
+                if normal_meta is not None:
+                    self._validate_consistency(normal_meta, vector_metas)
+                self.committed_files.extend(vector_metas)
 
-        self.committed_files.append(normal_meta)
-        self.committed_files.extend(vector_metas)
         self.pending_normal_data = None
 
     def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:

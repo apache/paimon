@@ -769,17 +769,19 @@ class FileStoreCommit:
 
                 if (DataFileMeta.is_blob_file(entry.file.file_name)
                         or DataFileMeta.is_vector_file(entry.file.file_name)):
-                    # Handle blob/vector files specially. Each field tracks row ids independently.
-                    if current_data_start >= start:
-                        raise RuntimeError(
-                            f"This is a bug, specialStart {current_data_start} should be less than start {start} "
-                            f"when assigning a blob/vector entry file."
-                        )
                     row_count = entry.file.row_count
                     blob_field_key = tuple(entry.file.write_cols or [])
-                    field_blob_start = blob_start_by_field.get(blob_field_key, current_data_start)
-                    row_id_assigned.append(entry.assign_first_row_id(field_blob_start))
-                    blob_start_by_field[blob_field_key] = field_blob_start + row_count
+                    if current_data_start < start:
+                        # Normal case: blob/vector file follows a normal data file
+                        field_blob_start = blob_start_by_field.get(blob_field_key, current_data_start)
+                        row_id_assigned.append(entry.assign_first_row_id(field_blob_start))
+                        blob_start_by_field[blob_field_key] = field_blob_start + row_count
+                    else:
+                        # Vector/blob-only table: no normal data file before this entry
+                        field_blob_start = blob_start_by_field.get(blob_field_key, start)
+                        row_id_assigned.append(entry.assign_first_row_id(field_blob_start))
+                        blob_start_by_field[blob_field_key] = field_blob_start + row_count
+                        start = max(start, field_blob_start + row_count)
                 else:
                     # Handle regular files
                     row_count = entry.file.row_count
@@ -791,4 +793,7 @@ class FileStoreCommit:
                 # For compact files or files that already have first_row_id, don't assign
                 row_id_assigned.append(entry)
 
-        return row_id_assigned, start
+        next_row_id = start
+        if blob_start_by_field:
+            next_row_id = max(next_row_id, max(blob_start_by_field.values()))
+        return row_id_assigned, next_row_id
