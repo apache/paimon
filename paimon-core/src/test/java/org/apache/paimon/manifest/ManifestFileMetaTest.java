@@ -502,7 +502,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         getPartitionType(),
                         null,
                         true,
-                        bufferSize)
+                        bufferSize,
+                        null)
                 .get();
 
         assertThat(newMetas).hasSize(1);
