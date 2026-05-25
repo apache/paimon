@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.schema.data_types import DataField, AtomicType
 from pypaimon.utils.range import Range
