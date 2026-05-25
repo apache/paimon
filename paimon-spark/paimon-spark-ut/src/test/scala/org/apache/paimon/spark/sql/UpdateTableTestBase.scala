@@ -353,7 +353,7 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
 
     assertThatThrownBy(
       () => spark.sql("UPDATE T SET s.c2 = 'a_new', s = struct(11, 'a_new') WHERE s.c1 = 1"))
-      .hasMessageContaining("Conflicting update/insert on attrs: s.c2, s")
+      .hasMessageContaining("Conflicting assignments for 's'")
   }
 
   test("Paimon update: update table with char type") {
@@ -361,6 +361,26 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
     sql("INSERT INTO T VALUES (1, 's', 'a')")
     sql("UPDATE T SET c = 'b' WHERE id = 1")
     checkAnswer(sql("SELECT * FROM T"), Seq(Row(1, "s", "b")))
+  }
+
+  test("Paimon update: overlong CHAR value throws (same as INSERT)") {
+    withTable("t_char") {
+      sql("CREATE TABLE t_char (id INT, c CHAR(2))")
+      sql("INSERT INTO t_char VALUES (1, 'aa')")
+      assertThatThrownBy(() => sql("UPDATE t_char SET c = 'abc' WHERE id = 1"))
+        .hasMessageContaining("char/varchar")
+      checkAnswer(sql("SELECT * FROM t_char"), Seq(Row(1, "aa")))
+    }
+  }
+
+  test("Paimon update: overlong VARCHAR value throws (same as INSERT)") {
+    withTable("t_varchar") {
+      sql("CREATE TABLE t_varchar (id INT, v VARCHAR(2))")
+      sql("INSERT INTO t_varchar VALUES (1, 'bb')")
+      assertThatThrownBy(() => sql("UPDATE t_varchar SET v = 'abc' WHERE id = 1"))
+        .hasMessageContaining("char/varchar")
+      checkAnswer(sql("SELECT * FROM t_varchar"), Seq(Row(1, "bb")))
+    }
   }
 
   test("Paimon update: non pk table commit kind") {
