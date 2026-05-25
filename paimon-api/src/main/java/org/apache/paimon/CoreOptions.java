@@ -2225,6 +2225,25 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<String> DATA_EVOLUTION_UPSERT_KEYS =
+            key("data-evolution.upsert-keys")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated list of column names used as business key for "
+                                    + "streaming upsert in data evolution mode. When set, incoming "
+                                    + "records are deduplicated by this key: existing rows are "
+                                    + "updated via partial write, new rows are appended.");
+
+    public static final ConfigOption<Integer> DATA_EVOLUTION_UPSERT_INDEX_PARALLELISM =
+            key("data-evolution.upsert-index-parallelism")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "The number of subtasks each partition can be distributed to "
+                                    + "in the upsert classify phase. Higher values increase "
+                                    + "throughput but also increase index memory usage.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -3696,6 +3715,18 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public List<String> dataEvolutionUpsertKeyColumns() {
+        String keys = options.get(DATA_EVOLUTION_UPSERT_KEYS);
+        if (keys == null || keys.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        return Arrays.asList(keys.split(","));
+    }
+
+    public int dataEvolutionUpsertIndexParallelism() {
+        return options.get(DATA_EVOLUTION_UPSERT_INDEX_PARALLELISM);
     }
 
     public boolean blobCompactionEnabled() {

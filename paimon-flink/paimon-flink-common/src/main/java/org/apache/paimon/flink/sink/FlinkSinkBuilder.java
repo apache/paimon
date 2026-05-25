@@ -339,6 +339,26 @@ public class FlinkSinkBuilder {
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
 
+        List<String> upsertKeys = table.coreOptions().dataEvolutionUpsertKeyColumns();
+        if (!upsertKeys.isEmpty()) {
+            checkArgument(
+                    table.coreOptions().dataEvolutionEnabled(),
+                    "data-evolution.upsert-keys requires data-evolution.enabled = true.");
+            checkArgument(
+                    table.coreOptions().rowTrackingEnabled(),
+                    "data-evolution.upsert-keys requires row-tracking.enabled = true.");
+            DataStream<InternalRow> keyed =
+                    partition(
+                            input,
+                            new UpsertKeyChannelComputer(
+                                    table.schema(),
+                                    upsertKeys,
+                                    table.coreOptions().dataEvolutionUpsertIndexParallelism()),
+                            parallelism);
+            return new DataEvolutionUpsertSink(table, overwritePartition, upsertKeys)
+                    .sinkFrom(keyed);
+        }
+
         if (!table.partitionKeys().isEmpty()) {
             PartitionSinkStrategy strategy = table.coreOptions().partitionSinkStrategy();
             if (strategy == PartitionSinkStrategy.HASH) {

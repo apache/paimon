@@ -149,6 +149,112 @@ Note that:
 * `_ROW_ID` is only available via the `$row_tracking` system table.
 * Self-merge only supports `WHEN MATCHED THEN UPDATE` semantics.
 
+## Streaming Upsert
+
+Data Evolution also supports streaming upsert for Append tables. By specifying `data-evolution.upsert-keys`, Paimon
+classifies incoming records as INSERT or UPDATE based on a business key lookup, and writes them accordingly.
+
+### Basic Usage
+
+```sql
+CREATE TABLE T (id INT, name STRING, `value` DOUBLE) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'bucket' = '-1'
+);
+
+-- Initial batch load
+INSERT INTO T VALUES (1, 'a', 1.0), (2, 'b', 2.0), (3, 'c', 3.0);
+
+-- Streaming upsert: update existing rows and insert new ones
+INSERT INTO T /*+ OPTIONS('data-evolution.upsert-keys'='id') */
+VALUES (1, 'a_new', 10.0), (4, 'd', 4.0);
+
+SELECT * FROM T ORDER BY id;
++----+-------+-------+
+| id | name  | value |
++----+-------+-------+
+| 1  | a_new | 10.0  |
+| 2  | b     | 2.0   |
+| 3  | c     | 3.0   |
+| 4  | d     | 4.0   |
+```
+
+### Partial Column Update
+
+Streaming upsert supports **partial column updates based on NULL detection**. When an update row has NULL in certain
+columns, those NULLs are treated as "don't change" rather than actual NULL values. Only the non-NULL columns are
+written to a new partial file, and the original files are kept for merge-on-read.
+
+This is especially useful when you only need to update a few columns without touching the rest. Simply specify
+only the columns you want to update in the `INSERT INTO` column list — unspecified columns are treated as "don't change":
+
+```sql
+-- Update only 'name' column; 'value' is not specified, meaning "don't change"
+INSERT INTO T (id, name) /*+ OPTIONS('data-evolution.upsert-keys'='id') */
+VALUES (1, 'a_updated'), (3, 'c_updated');
+
+SELECT * FROM T ORDER BY id;
++----+-----------+-------+
+| id | name      | value |
++----+-----------+-------+
+| 1  | a_updated | 1.0   |
+| 2  | b         | 2.0   |
+| 3  | c_updated | 3.0   |
+```
+
+In this example, only `id` and `name` are written to the new file. The `value` column data is read from the original
+files during merge-on-read, avoiding unnecessary I/O.
+
+You can also perform successive partial updates on different column sets:
+
+```sql
+-- First: update only 'name'
+INSERT INTO T (id, name) /*+ OPTIONS('data-evolution.upsert-keys'='id') */
+VALUES (1, 'name_v2');
+
+-- Second: update only 'value'
+INSERT INTO T (id, `value`) /*+ OPTIONS('data-evolution.upsert-keys'='id') */
+VALUES (1, 100.0);
+
+SELECT * FROM T WHERE id = 1;
++----+---------+-------+
+| id | name    | value |
++----+---------+-------+
+| 1  | name_v2 | 100.0 |
+```
+
+Note that:
+* NULL in an update row means "don't change this column". You cannot explicitly set a column to NULL via this mechanism.
+* If all columns are non-NULL, the update performs a full rewrite of the file (original files are replaced).
+* Partial column updates and new inserts can be mixed in the same upsert batch.
+
+### Index Parallelism
+
+Streaming upsert internally maintains a business-key-to-row-id index for classifying records as INSERT or UPDATE.
+By default, each partition's index is loaded on exactly one subtask (`data-evolution.upsert-index-parallelism = 1`),
+which minimizes memory usage since the index is not duplicated. However, this means all records for a given partition
+are processed by a single subtask, which can become a throughput bottleneck for large partitions.
+
+You can increase `data-evolution.upsert-index-parallelism` to spread the load across more subtasks per partition.
+Each partition can then be distributed to up to `indexParallelism` subtasks, improving throughput at the cost of
+loading the index multiple times:
+
+```sql
+INSERT INTO T /*+ OPTIONS(
+    'data-evolution.upsert-keys'='id',
+    'data-evolution.upsert-index-parallelism'='4'
+) */ VALUES ...;
+```
+
+| indexParallelism | Behavior |
+|:---|:---|
+| 1 (default) | Each partition maps to exactly one subtask. Index loaded once per partition, lowest memory usage. |
+| N | Each partition can be distributed to up to N subtasks. Higher throughput, but the index is loaded N times, increasing memory usage. |
+
+Choosing the right value depends on your workload: use the default for partitions with moderate data volume,
+and increase it when a single subtask cannot keep up with the incoming record rate.
+
 ## File Group Spec
 
 Through the RowId metadata, files are organized into a file group.
