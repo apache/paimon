@@ -291,4 +291,46 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT count(1) FROM `t$snapshots`"), Seq(Row(5)))
     }
   }
+
+  test("Postpone bucket table: skip clustering in writing phase") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'false',
+            |  'clustering.columns' = 'k',
+            |  'clustering.strategy' = 'order'
+            |)
+            |""".stripMargin)
+
+      val before = System.currentTimeMillis()
+
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(4) */
+            |id AS k,
+            |CAST(id AS STRING) AS v
+            |FROM range (0, 100)
+            |""".stripMargin)
+
+      // Verify no Sort operator in the plan (clustering is skipped)
+      val executions = spark.sharedState.statusStore.executionsList()
+      val hasSort = executions.exists {
+        e =>
+          e.submissionTime > before &&
+          e.physicalPlanDescription != null &&
+          e.physicalPlanDescription.toLowerCase.contains("sort")
+      }
+      assert(!hasSort, "Postpone table should skip clustering (no sort in plan)")
+
+      // Verify data was written to postpone directory (bucket=-2)
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets`"),
+        Seq(Row(-2))
+      )
+    }
+  }
 }

@@ -201,13 +201,15 @@ public class TagsTable implements ReadonlyTable {
         private final FileIO fileIO;
         private RowType readType;
 
+        @Nullable private Predicate postFilter;
+
         public TagsRead(FileIO fileIO) {
             this.fileIO = fileIO;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.postFilter = predicate;
             return this;
         }
 
@@ -272,6 +274,11 @@ public class TagsTable implements ReadonlyTable {
 
             Iterator<InternalRow> rows =
                     Iterators.transform(nameToSnapshot.entrySet().iterator(), this::toRow);
+
+            if (postFilter != null) {
+                rows = Iterators.filter(rows, postFilter::test);
+            }
+
             if (readType != null) {
                 rows =
                         Iterators.transform(

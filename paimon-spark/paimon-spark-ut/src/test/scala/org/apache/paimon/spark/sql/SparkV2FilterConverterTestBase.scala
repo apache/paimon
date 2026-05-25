@@ -355,9 +355,11 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 4)
   }
 
-  private def paimonAlwaysTrue: org.apache.paimon.predicate.Predicate = builder.alwaysTrue()
+  private def paimonAlwaysTrue: org.apache.paimon.predicate.Predicate =
+    PredicateBuilder.alwaysTrue()
 
-  private def paimonAlwaysFalse: org.apache.paimon.predicate.Predicate = builder.alwaysFalse()
+  private def paimonAlwaysFalse: org.apache.paimon.predicate.Predicate =
+    PredicateBuilder.alwaysFalse()
 
   test("V2Filter: AlwaysTrue") {
     val sparkAlwaysTrue =

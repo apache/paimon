@@ -59,6 +59,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     @Nullable private PositionOutputStream out;
 
     @Nullable private Long outputBytes;
+    @Nullable private Object writerMetadata;
     private long recordCount;
     protected boolean closed;
 
@@ -193,6 +194,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         try {
             if (writer != null) {
                 writer.close();
+                writerMetadata = writer.writerMetadata();
                 writer = null;
             }
             if (out != null) {
@@ -215,5 +217,14 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             outputBytes = fileIO.getFileSize(path);
         }
         return outputBytes;
+    }
+
+    /**
+     * Returns cached writer metadata from the format writer. Available after {@link #close()} is
+     * called. Can be used by stats extractors to avoid re-reading the file from object storage.
+     */
+    @Nullable
+    protected Object writerMetadata() {
+        return writerMetadata;
     }
 }

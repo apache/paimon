@@ -92,25 +92,22 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
                 val msg1 = intercept[Exception] {
                   sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2 as col1 FROM t1")
                 }
-                assert(msg1.getMessage.contains("due to column name conflicts"))
+                assert(msg1.getMessage.contains("due to ambiguous column name `col1`"))
                 // name does not match
                 val msg2 = intercept[Exception] {
                   sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2 as colx FROM t1")
                 }
-                assert(msg2.getMessage.contains("due to unknown column names"))
+                assert(msg2.getMessage.contains("extra columns: `colx`"))
                 // query column size bigger than table's
                 val msg3 = intercept[Exception] {
                   sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2, col3, col4, col4 as col5 FROM t1")
                 }
-                assert(
-                  msg3.getMessage.contains(
-                    "the number of data columns don't match with the table schema"))
+                assert(msg3.getMessage.contains("extra columns: `col5`"))
                 // non-nullable column has no specified value
                 val msg4 = intercept[Exception] {
                   sql("INSERT INTO TABLE t2 BY NAME SELECT col2 FROM t2")
                 }
-                assert(
-                  msg4.getMessage.contains("non-nullable column `col1` has no specified value"))
+                assert(msg4.getMessage.contains("Cannot write null to non-null column(col1)"))
 
                 // by position
                 // column size does not match
@@ -119,11 +116,100 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
                 }
                 assert(
                   msg5.getMessage.contains(
-                    "the number of data columns don't match with the table schema"))
+                    "the number of data columns (1) doesn't match the table schema's (4)"))
               }
             }
           }
       }
+  }
+
+  test("Paimon: insert by name with case-insensitive nested struct field matching") {
+    assume(gteqSpark3_5)
+    withTable("t1", "t2") {
+      // Source struct field order / types differ from target so paimonWriteResolved
+      // falls through schemaCompatible and we actually exercise addCastToStructByName.
+      spark.sql("""CREATE TABLE t1 (id INT NOT NULL, info STRUCT<Age: INT, Name: STRING>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+      spark.sql("""CREATE TABLE t2 (id INT NOT NULL, info STRUCT<name: STRING, age: INT>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+
+      sql("INSERT INTO t1 VALUES (1, struct(30, 'Alice')), (2, struct(25, 'Bob'))")
+
+      sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
+      checkAnswer(
+        sql("SELECT * FROM t2 ORDER BY id"),
+        Row(1, Row("Alice", 30)) :: Row(2, Row("Bob", 25)) :: Nil)
+    }
+  }
+
+  test("Paimon: insert by name reorders same-type nested struct fields") {
+    assume(gteqSpark3_5)
+    withTable("t1", "t2") {
+      spark.sql("""CREATE TABLE t1 (id INT NOT NULL, info STRUCT<Nick: STRING, Name: STRING>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+      spark.sql("""CREATE TABLE t2 (id INT NOT NULL, info STRUCT<name: STRING, nick: STRING>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+
+      sql("INSERT INTO t1 VALUES (1, struct('Ally', 'Alice'))")
+
+      sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
+      checkAnswer(sql("SELECT * FROM t2"), Row(1, Row("Alice", "Ally")) :: Nil)
+    }
+  }
+
+  test("Paimon: insert by name with case-insensitive matching inside array<struct<...>>") {
+    assume(gteqSpark3_5)
+    withTable("t1", "t2") {
+      spark.sql("""CREATE TABLE t1 (id INT NOT NULL, items ARRAY<STRUCT<Age: INT, Name: STRING>>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+      spark.sql("""CREATE TABLE t2 (id INT NOT NULL, items ARRAY<STRUCT<name: STRING, age: INT>>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+
+      sql("INSERT INTO t1 VALUES (1, array(struct(30, 'Alice'), struct(25, 'Bob')))")
+
+      sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
+      checkAnswer(sql("SELECT * FROM t2"), Row(1, Seq(Row("Alice", 30), Row("Bob", 25))) :: Nil)
+    }
+  }
+
+  test("Paimon: insert by name with case-insensitive matching inside nested struct") {
+    assume(gteqSpark3_5)
+    withTable("t1", "t2") {
+      spark.sql("""CREATE TABLE t1 (
+                  |  id INT NOT NULL,
+                  |  info STRUCT<details: STRUCT<Age: INT, Name: STRING>>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+      spark.sql("""CREATE TABLE t2 (
+                  |  id INT NOT NULL,
+                  |  info STRUCT<details: STRUCT<name: STRING, age: INT>>)
+                  |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+
+      sql("INSERT INTO t1 VALUES (1, struct(struct(30, 'Alice')))")
+
+      sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
+      checkAnswer(sql("SELECT * FROM t2"), Row(1, Row(Row("Alice", 30))) :: Nil)
+    }
+  }
+
+  test("Paimon: insert by name rejects ambiguous source nested struct fields") {
+    assume(gteqSpark3_5)
+    withSparkSQLConf("spark.sql.caseSensitive" -> "true") {
+      withTable("t1", "t2") {
+        // source has both `name` and `Name`, legal when session is case-sensitive
+        spark.sql("""CREATE TABLE t1 (id INT NOT NULL, info STRUCT<name: STRING, Name: STRING>)
+                    |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+        spark.sql("""CREATE TABLE t2 (id INT NOT NULL, info STRUCT<name: STRING>)
+                    |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
+        sql("INSERT INTO t1 VALUES (1, struct('Alice', 'Bob'))")
+
+        withSparkSQLConf("spark.sql.caseSensitive" -> "false") {
+          val msg = intercept[Exception] {
+            sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
+          }.getMessage
+          assert(msg.contains("due to ambiguous column name `info.name`"))
+        }
+      }
+    }
   }
 
   withPk.foreach {

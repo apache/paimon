@@ -267,7 +267,7 @@ public class CompactAction extends TableActionBase {
             predicate =
                     predicate
                             .visit(
-                                    new PredicateProjectionConverter(
+                                    PredicateProjectionConverter.fromProjection(
                                             table.rowType().projectIndexes(table.partitionKeys())))
                             .orElseThrow(
                                     () ->

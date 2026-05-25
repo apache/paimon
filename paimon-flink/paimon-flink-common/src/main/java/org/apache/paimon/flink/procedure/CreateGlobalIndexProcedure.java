@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
+import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -91,20 +92,36 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
 
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
-        if ("btree".equals(indexType)) {
-            BTreeIndexTopoBuilder.buildIndex(
-                    procedureContext.getExecutionEnvironment(),
-                    table,
-                    indexColumn,
-                    partitionPredicate,
-                    userOptions);
-            return new String[] {
-                "BTree global index created successfully for table: " + table.name()
-            };
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unsupported index type: " + indexType + ". Supported types: btree, bitmap");
+        try {
+            if ("btree".equals(indexType)) {
+                BTreeIndexTopoBuilder.buildIndexAndExecute(
+                        procedureContext.getExecutionEnvironment(),
+                        table,
+                        indexColumn,
+                        partitionPredicate,
+                        userOptions);
+                return new String[] {
+                    "BTree global index created successfully for table: " + table.name()
+                };
+            } else {
+                GenericIndexTopoBuilder.buildIndexAndExecute(
+                        procedureContext.getExecutionEnvironment(),
+                        table,
+                        indexColumn,
+                        indexType,
+                        partitionPredicate,
+                        userOptions);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to create %s index for column '%s' on table '%s'.",
+                            indexType, indexColumn, table.name()),
+                    e);
         }
+        return new String[] {
+            indexType + " global index created successfully for table: " + table.name()
+        };
     }
 
     private PartitionPredicate parsePartitionPredicate(FileStoreTable table, String partitions) {

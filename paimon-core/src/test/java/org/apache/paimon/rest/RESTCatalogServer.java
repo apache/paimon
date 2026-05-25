@@ -61,8 +61,11 @@ import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -104,10 +107,12 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TimeUtils;
 import org.apache.paimon.view.View;
@@ -117,7 +122,6 @@ import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -192,6 +196,7 @@ public class RESTCatalogServer {
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
     private final List<String> noPermissionTables = new ArrayList<>();
+    private final List<String> noPermissionViews = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
@@ -271,6 +276,10 @@ public class RESTCatalogServer {
 
     public void addNoPermissionTable(Identifier identifier) {
         noPermissionTables.add(identifier.getFullName());
+    }
+
+    public void addNoPermissionView(Identifier identifier) {
+        noPermissionViews.add(identifier.getFullName());
     }
 
     public void addTableColumnAuth(Identifier identifier, List<String> select) {
@@ -417,6 +426,14 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.ROLLBACK.equals(resources[3]);
+                        boolean isRollbackSchema =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "rollback-schema".equals(resources[3]);
+                        boolean isReplaceTable =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "replace".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -538,6 +555,10 @@ public class RESTCatalogServer {
                                                 .getTagName();
                                 return rollbackTableByTagNameHandle(identifier, tagName);
                             }
+                        } else if (isRollbackSchema) {
+                            return rollbackSchemaHandle(identifier, restAuthParameter.data());
+                        } else if (isReplaceTable) {
+                            return replaceTableHandle(identifier, restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),
@@ -618,6 +639,14 @@ public class RESTCatalogServer {
                     response =
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_TABLE,
+                                    e.identifier().getTableName(),
+                                    e.getMessage(),
+                                    403);
+                    return mockResponse(response, 403);
+                } catch (Catalog.ViewNoPermissionException e) {
+                    response =
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_VIEW,
                                     e.identifier().getTableName(),
                                     e.getMessage(),
                                     403);
@@ -1007,6 +1036,30 @@ public class RESTCatalogServer {
         }
         return mockResponse(
                 new ErrorResponse(ErrorResponse.RESOURCE_TYPE_TAG, "" + tagName, "", 404), 404);
+    }
+
+    private MockResponse rollbackSchemaHandle(Identifier identifier, String data) throws Exception {
+        RollbackSchemaRequest requestBody = RESTApi.fromJson(data, RollbackSchemaRequest.class);
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        FileStoreTable table = getFileTable(identifier);
+        long schemaId = requestBody.getSchemaId();
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        try {
+            schemaManager.rollbackTo(
+                    schemaId,
+                    table.snapshotManager(),
+                    table.tagManager(),
+                    new ChangelogManager(table.fileIO(), table.location(), null));
+        } catch (Exception e) {
+            return mockResponse(new ErrorResponse(null, null, e.getMessage(), 500), 500);
+        }
+
+        return new MockResponse().setResponseCode(200);
     }
 
     private void cleanSnapshot(Identifier identifier, Long snapshotId, Long latestSnapshotId)
@@ -1427,9 +1480,7 @@ public class RESTCatalogServer {
                     Identifier identifier = requestBody.getIdentifier();
                     Schema schema = requestBody.getSchema();
                     TableMetadata tableMetadata;
-                    if (isFormatTable(schema)) {
-                        tableMetadata = createFormatTable(identifier, schema);
-                    } else if (isObjectTable(schema)) {
+                    if (isObjectTable(schema)) {
                         tableMetadata = createObjectTable(identifier, schema);
                     } else {
                         catalog.createTable(identifier, schema, false);
@@ -1710,6 +1761,38 @@ public class RESTCatalogServer {
         }
     }
 
+    private MockResponse replaceTableHandle(Identifier identifier, String data) throws Exception {
+        ReplaceTableRequest requestBody = RESTApi.fromJson(data, ReplaceTableRequest.class);
+        Schema newSchema = requestBody.getSchema();
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (isFormatTable(tableMetadata.schema().toSchema()) || isFormatTable(newSchema)) {
+            throw new UnsupportedOperationException("replaceTable does not support format tables.");
+        }
+        catalog.replaceTable(identifier, newSchema, false);
+        TableSchema replacedSchema = catalog.loadTableSchema(identifier);
+        TableMetadata newTableMetadata =
+                createTableMetadata(
+                        identifier,
+                        replacedSchema.id(),
+                        replacedSchema.toSchema(),
+                        tableMetadata.uuid(),
+                        tableMetadata.isExternal());
+        tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Snapshot truncateSnapshot = table.snapshotManager().latestSnapshot();
+        if (truncateSnapshot != null) {
+            tableLatestSnapshotStore.put(
+                    identifier.getFullName(), new TableSnapshot(truncateSnapshot, 0L, 0L, 0L, 0L));
+        } else {
+            tableLatestSnapshotStore.remove(identifier.getFullName());
+        }
+        tablePartitionsStore.remove(identifier.getFullName());
+        return new MockResponse().setResponseCode(200);
+    }
+
     private MockResponse renameTableHandle(String data) throws Exception {
         RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromTable = requestBody.getSource();
@@ -1805,15 +1888,42 @@ public class RESTCatalogServer {
                 case "POST":
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
-                        branchManager.fastForward(branch);
-                        branchIdentifier =
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getTableName(),
-                                        branch);
-                        tableLatestSnapshotStore.put(
-                                identifier.getFullName(),
-                                tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        if ("rename".equals(resources[5])) {
+                            // Rename branch: /branches/{branch}/rename
+                            RenameBranchRequest requestBody =
+                                    RESTApi.fromJson(data, RenameBranchRequest.class);
+                            String toBranch = requestBody.toBranch();
+                            table.renameBranch(branch, toBranch);
+                            // Update store for renamed branch
+                            Identifier fromBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            Identifier toBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            toBranch);
+                            tableLatestSnapshotStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableLatestSnapshotStore.get(
+                                            fromBranchIdentifier.getFullName()));
+                            tableMetadataStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableMetadataStore.get(fromBranchIdentifier.getFullName()));
+                        } else if ("forward".equals(resources[5])) {
+                            // Fast forward branch
+                            branchManager.fastForward(branch);
+                            branchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            tableLatestSnapshotStore.put(
+                                    identifier.getFullName(),
+                                    tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        }
                     } else {
                         CreateBranchRequest requestBody =
                                 RESTApi.fromJson(data, CreateBranchRequest.class);
@@ -2267,6 +2377,9 @@ public class RESTCatalogServer {
     private MockResponse viewHandle(String method, Identifier identifier, String requestData)
             throws Exception {
         RESTResponse response;
+        if (noPermissionViews.contains(identifier.getFullName())) {
+            throw new Catalog.ViewNoPermissionException(identifier);
+        }
         if (viewStore.containsKey(identifier.getFullName())) {
             switch (method) {
                 case "GET":
@@ -2371,6 +2484,9 @@ public class RESTCatalogServer {
         RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromView = requestBody.getSource();
         Identifier toView = requestBody.getDestination();
+        if (noPermissionViews.contains(fromView.getFullName())) {
+            throw new Catalog.ViewNoPermissionException(fromView);
+        }
         if (!viewStore.containsKey(fromView.getFullName())) {
             throw new Catalog.ViewNotExistException(fromView);
         }
@@ -2641,10 +2757,6 @@ public class RESTCatalogServer {
                         options,
                         schema.comment());
         return new TableMetadata(tableSchema, isExternal, uuid);
-    }
-
-    private TableMetadata createFormatTable(Identifier identifier, Schema schema) {
-        return createTableMetadata(identifier, 1L, schema, UUID.randomUUID().toString(), true);
     }
 
     private TableMetadata createObjectTable(Identifier identifier, Schema schema) {

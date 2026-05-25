@@ -24,7 +24,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.Type;
+import org.apache.parquet.schema.Types;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -32,6 +35,7 @@ import java.util.Arrays;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToPaimonRowType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToParquetMessageType;
 import static org.apache.paimon.types.DataTypesTest.assertThat;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
 /** Test for {@link ParquetSchemaConverter}. */
 public class ParquetSchemaConverterTest {
@@ -99,6 +103,37 @@ public class ParquetSchemaConverterTest {
                                                                                             DataTypes
                                                                                                     .STRING())))
                                                                     .notNull()))))));
+
+    @Test
+    public void testParquetTimestampNanosSchemaConvert() {
+        MessageType messageType =
+                new MessageType(
+                        "origin-parquet",
+                        Types.primitive(INT64, Type.Repetition.OPTIONAL)
+                                .as(
+                                        LogicalTypeAnnotation.timestampType(
+                                                false, LogicalTypeAnnotation.TimeUnit.NANOS))
+                                .named("timestamp_nanos")
+                                .withId(0),
+                        Types.primitive(INT64, Type.Repetition.OPTIONAL)
+                                .as(
+                                        LogicalTypeAnnotation.timestampType(
+                                                true, LogicalTypeAnnotation.TimeUnit.NANOS))
+                                .named("timestamp_ltz_nanos")
+                                .withId(1));
+
+        RowType rowType = convertToPaimonRowType(messageType);
+
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(0, "timestamp_nanos", DataTypes.TIMESTAMP(9)),
+                                        new DataField(
+                                                1,
+                                                "timestamp_ltz_nanos",
+                                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9)))))
+                .isEqualTo(rowType);
+    }
 
     @Test
     public void testPaimonParquetSchemaConvert() {

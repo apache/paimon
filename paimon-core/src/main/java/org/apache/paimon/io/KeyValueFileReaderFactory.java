@@ -246,6 +246,19 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     options);
         }
 
+        public Builder copyWithoutValue() {
+            return new Builder(
+                    fileIO,
+                    schemaManager,
+                    schema,
+                    keyType,
+                    RowType.of(),
+                    formatDiscover,
+                    pathFactory,
+                    extractor,
+                    options);
+        }
+
         public Builder withReadKeyType(RowType readKeyType) {
             this.readKeyType = readKeyType;
             return this;

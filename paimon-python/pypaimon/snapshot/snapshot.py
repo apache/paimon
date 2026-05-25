@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from dataclasses import dataclass
 from typing import Optional
@@ -39,9 +38,13 @@ class Snapshot:
     commit_kind: str = json_field("commitKind")
     time_millis: int = json_field("timeMillis")
     # Optional fields with defaults
+    base_manifest_list_size: Optional[int] = optional_json_field("baseManifestListSize", "non_null")
+    delta_manifest_list_size: Optional[int] = optional_json_field("deltaManifestListSize", "non_null")
     changelog_manifest_list: Optional[str] = optional_json_field("changelogManifestList", "non_null")
+    changelog_manifest_list_size: Optional[int] = optional_json_field("changelogManifestListSize", "non_null")
     index_manifest: Optional[str] = optional_json_field("indexManifest", "non_null")
     changelog_record_count: Optional[int] = optional_json_field("changelogRecordCount", "non_null")
     watermark: Optional[int] = optional_json_field("watermark", "non_null")
     statistics: Optional[str] = optional_json_field("statistics", "non_null")
     next_row_id: Optional[int] = optional_json_field("nextRowId", "non_null")
+    properties: Optional[dict] = optional_json_field("properties", "non_null")

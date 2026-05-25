@@ -105,6 +105,15 @@ public class DataFilePathFactory {
     }
 
     private String newFileName(String prefix) {
+        return newFileName(prefix, makeExtension(compressExtension, formatIdentifier));
+    }
+
+    public Path newVectorPath(String formatIdentifier) {
+        String extension = ".vector" + makeExtension(compressExtension, formatIdentifier);
+        return newPathFromName(newFileName(dataFilePrefix, extension));
+    }
+
+    private String makeExtension(String compressExtension, String formatIdentifier) {
         String extension;
         if (compressExtension != null && isTextFormat(formatIdentifier)) {
             extension = "." + formatIdentifier + "." + compressExtension;
@@ -113,7 +122,7 @@ public class DataFilePathFactory {
         } else {
             extension = "." + formatIdentifier;
         }
-        return newFileName(prefix, extension);
+        return extension;
     }
 
     public Path newPathFromExtension(String extension) {

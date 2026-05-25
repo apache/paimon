@@ -29,6 +29,7 @@ public class BuiltInFunctions {
                 {
                     put("path_to_descriptor", PathToDescriptor.class.getName());
                     put("descriptor_to_string", DescriptorToString.class.getName());
+                    put("blob_view", BlobViewFunction.class.getName());
                 }
             };
 }

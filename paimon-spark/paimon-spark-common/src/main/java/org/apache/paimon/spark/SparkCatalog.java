@@ -61,6 +61,7 @@ import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Functio
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.StagedTable;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
@@ -69,6 +70,9 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.execution.datasources.DataSource;
+import org.apache.spark.sql.execution.datasources.FileFormat;
+import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -83,6 +87,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -122,8 +127,8 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
-        checkRequiredConfigurations();
         SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
+        checkRequiredConfigurations(sparkSession);
         this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(
@@ -385,6 +390,87 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
+    @Override
+    public StagedTable stageCreate(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        return stageCreateDirectly(ident, schema, partitions, properties);
+    }
+
+    @Override
+    public StagedTable stageReplace(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException, NoSuchTableException {
+        return stageReplaceInternal(ident, schema, partitions, properties);
+    }
+
+    @Override
+    public StagedTable stageCreateOrReplace(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException {
+        try {
+            return stageReplaceInternal(ident, schema, partitions, properties);
+        } catch (NoSuchTableException e) {
+            try {
+                return stageCreate(ident, schema, partitions, properties);
+            } catch (TableAlreadyExistsException ex) {
+                throw new RuntimeException(ex);
+            }
+        }
+    }
+
+    private StagedTable stageReplaceInternal(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws NoSuchNamespaceException, NoSuchTableException {
+        org.apache.paimon.catalog.Identifier tableIdent = toIdentifier(ident, catalogName);
+        Schema targetSchema = toInitialSchema(schema, partitions, properties);
+
+        try {
+            catalog.replaceTable(tableIdent, targetSchema, false);
+            return new RollbackStagedTable(loadTable(ident), () -> {});
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        } catch (UnsupportedOperationException e) {
+            // Catalog cannot replace in-place; fall back to drop+create, losing snapshot history.
+            LOG.warn(
+                    "Catalog {} does not support replaceTable, falling back to drop+create for {}.",
+                    catalog.getClass().getName(),
+                    tableIdent.getFullName(),
+                    e);
+            return stageReplaceByDropAndCreate(ident, tableIdent, targetSchema);
+        }
+    }
+
+    private StagedTable stageReplaceByDropAndCreate(
+            Identifier ident, org.apache.paimon.catalog.Identifier tableIdent, Schema targetSchema)
+            throws NoSuchTableException, NoSuchNamespaceException {
+        try {
+            catalog.dropTable(tableIdent, false);
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        }
+        try {
+            catalog.createTable(tableIdent, targetSchema, false);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new RuntimeException(e);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(ident.namespace());
+        }
+        return new RollbackStagedTable(loadTable(ident), () -> {});
+    }
+
     private SchemaChange toSchemaChange(TableChange change) {
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
@@ -453,10 +539,30 @@ public class SparkCatalog extends SparkBaseCatalog
         return move;
     }
 
+    private StagedTable stageCreateDirectly(
+            Identifier ident,
+            StructType schema,
+            Transform[] partitions,
+            Map<String, String> properties)
+            throws TableAlreadyExistsException, NoSuchNamespaceException {
+        org.apache.spark.sql.connector.catalog.Table table =
+                createTable(ident, schema, partitions, properties);
+        if (table == null) {
+            try {
+                table = loadTable(ident);
+            } catch (NoSuchTableException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return new RollbackStagedTable(table, () -> dropTable(ident));
+    }
+
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         List<String> blobFields = CoreOptions.blobField(properties);
+        Set<String> blobDescriptorFields = new CoreOptions(properties).blobDescriptorField();
+        List<String> blobViewFields = CoreOptions.blobViewField(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -490,7 +596,9 @@ public class SparkCatalog extends SparkBaseCatalog
         for (StructField field : schema.fields()) {
             String name = field.name();
             DataType type;
-            if (blobFields.contains(name)) {
+            if (blobFields.contains(name)
+                    || blobDescriptorFields.contains(name)
+                    || blobViewFields.contains(name)) {
                 checkArgument(
                         field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                         "The type of blob field must be binary");
@@ -662,12 +770,39 @@ public class SparkCatalog extends SparkBaseCatalog
             } else if (table instanceof LanceTable) {
                 return new SparkLanceTable(table);
             } else if (table instanceof ObjectTable) {
-                return new SparkObjectTable(table);
+                return new SparkObjectTable((ObjectTable) table);
             } else {
-                return new SparkTable(table);
+                // Access the Scala companion object explicitly: Scala's static forwarder for
+                // `SparkTable.of` is not reliably emitted on all toolchains (observed missing in
+                // the shaded `paimon-spark-3.3_2.12` jar, producing NoSuchMethodError at spark-sql
+                // startup). Going through MODULE$ always resolves to the companion's method.
+                return SparkTable$.MODULE$.of(table);
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
+        } catch (Exception e) {
+            // For SQL-on-file queries (e.g. SELECT * FROM parquet.`path`),
+            // swallow the exception to let Spark's ResolveSQLOnFile handle it.
+            if (isFileFormatNamespace(ident)) {
+                throw new NoSuchTableException(ident);
+            }
+            throw e;
+        }
+    }
+
+    /** Check if the identifier's namespace refers to a Spark FileFormat data source. */
+    private static boolean isFileFormatNamespace(Identifier ident) {
+        if (ident.namespace().length != 1) {
+            return false;
+        }
+        try {
+            SparkSession spark = SparkSession.active();
+            Class<?> cls =
+                    DataSource.lookupDataSource(ident.namespace()[0], spark.sessionState().conf());
+            return FileFormat.class.isAssignableFrom(cls)
+                    || cls.newInstance() instanceof FileDataSourceV2;
+        } catch (Exception e) {
+            return false;
         }
     }
 

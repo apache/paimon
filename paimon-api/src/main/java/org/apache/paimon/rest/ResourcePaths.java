@@ -98,6 +98,17 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, TABLES, "rename");
     }
 
+    public String replaceTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "replace");
+    }
+
     public String commitTable(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
@@ -118,6 +129,17 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 ROLLBACK);
+    }
+
+    public String rollbackSchemaTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "rollback-schema");
     }
 
     public String registerTable(String databaseName) {
@@ -249,6 +271,19 @@ public class ResourcePaths {
                 BRANCHES,
                 encodeString(branch),
                 "forward");
+    }
+
+    public String renameBranch(String databaseName, String tableName, String branch) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(tableName),
+                BRANCHES,
+                encodeString(branch),
+                "rename");
     }
 
     public String tags(String databaseName, String objectName) {

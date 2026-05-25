@@ -261,6 +261,56 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testEvolutionStatsSkipsStatsAfterColumnTypeChange() {
+        Schema baseSchema = createSchema("f0", "f1");
+        TableSchema baseTableSchema = TableSchema.create(0L, baseSchema);
+        schemas.put(0L, baseTableSchema);
+
+        Schema evolvedSchema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.STRING())
+                        .column("f1", DataTypes.STRING())
+                        .build();
+        TableSchema evolvedTableSchema = TableSchema.create(1L, evolvedSchema);
+        schemas.put(1L, evolvedTableSchema);
+
+        ManifestEntry oldTypeEntry =
+                createManifestEntry(
+                        0L,
+                        createSimpleStats(
+                                GenericRow.of(10, BinaryString.fromString("a")),
+                                GenericRow.of(99, BinaryString.fromString("z")),
+                                createBinaryArray(new int[] {0, 0}),
+                                new int[] {0, 1}));
+
+        BinaryRow newTypeMin = new BinaryRow(2);
+        BinaryRowWriter newTypeMinWriter = new BinaryRowWriter(newTypeMin);
+        newTypeMinWriter.writeString(0, BinaryString.fromString("apple"));
+        newTypeMinWriter.writeString(1, BinaryString.fromString("banana"));
+        newTypeMinWriter.complete();
+        BinaryRow newTypeMax = new BinaryRow(2);
+        BinaryRowWriter newTypeMaxWriter = new BinaryRowWriter(newTypeMax);
+        newTypeMaxWriter.writeString(0, BinaryString.fromString("yam"));
+        newTypeMaxWriter.writeString(1, BinaryString.fromString("zebra"));
+        newTypeMaxWriter.complete();
+        SimpleStats newTypeStats =
+                new SimpleStats(newTypeMin, newTypeMax, createBinaryArray(new int[] {0, 0}));
+        ManifestEntry newTypeEntry = createManifestEntry(1L, newTypeStats);
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        evolvedTableSchema,
+                        scanTableSchema,
+                        Arrays.asList(oldTypeEntry, newTypeEntry));
+
+        DataEvolutionRow minRow = (DataEvolutionRow) result.minValues();
+        DataEvolutionRow maxRow = (DataEvolutionRow) result.maxValues();
+
+        assertThat(minRow.getString(0).toString()).isEqualTo("apple");
+        assertThat(maxRow.getString(0).toString()).isEqualTo("yam");
+    }
+
+    @Test
     public void testIntersectsRowRanges() {
         List<Range> rowRanges =
                 Arrays.asList(

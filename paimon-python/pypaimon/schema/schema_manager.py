@@ -1,22 +1,23 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import Optional, List
 
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.catalog.catalog_exception import ColumnAlreadyExistException, ColumnNotExistException
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
@@ -135,6 +136,18 @@ def _assert_not_updating_primary_keys(
         raise ValueError(f"Cannot {operation} primary key")
 
 
+def _assert_not_renaming_blob_column(
+        new_fields: List[DataField], field_names: List[str]):
+    if len(field_names) > 1:
+        return
+    field_name = field_names[0]
+    for field in new_fields:
+        if field.name == field_name and str(field.type) == 'BLOB':
+            raise ValueError(
+                f"Cannot rename BLOB column: [{field_name}]"
+            )
+
+
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
     field_name = change.field_names[-1]
     new_name = change.new_name
@@ -216,12 +229,24 @@ def _handle_add_column(
 
 class SchemaManager:
 
-    def __init__(self, file_io: FileIO, table_path: str):
+    def __init__(self, file_io: FileIO, table_path: str, branch: str = DEFAULT_MAIN_BRANCH):
+        from pypaimon.branch.branch_manager import BranchManager
         self.schema_prefix = "schema-"
         self.file_io = file_io
         self.table_path = table_path
-        self.schema_path = f"{table_path.rstrip('/')}/schema"
+        self.branch = BranchManager.normalize_branch(branch)
+        self.schema_path = f"{self.branch_path}/schema"
         self.schema_cache = {}
+
+    @property
+    def branch_path(self) -> str:
+        """Get the branch path for this schema manager."""
+        from pypaimon.branch.branch_manager import BranchManager
+        return BranchManager.branch_path(self.table_path, self.branch)
+
+    def copy_with_branch(self, branch_name: str) -> 'SchemaManager':
+        """Create a copy of SchemaManager for a different branch."""
+        return SchemaManager(self.file_io, self.table_path, branch_name)
 
     def latest(self) -> Optional['TableSchema']:
         try:
@@ -233,6 +258,20 @@ class SchemaManager:
             return self.get_schema(max_version)
         except Exception as e:
             raise RuntimeError(f"Failed to load schema from path: {self.schema_path}") from e
+
+    def list_all(self) -> List['TableSchema']:
+        """Return every committed schema in ascending ID order.
+
+        Missing IDs (deleted on disk after expiry, for instance) are
+        skipped.
+        """
+        ids = sorted(self._list_versioned_files())
+        schemas: List['TableSchema'] = []
+        for schema_id in ids:
+            schema = self.get_schema(schema_id)
+            if schema is not None:
+                schemas.append(schema)
+        return schemas
 
     def create_table(self, schema: Schema) -> TableSchema:
         while True:
@@ -342,6 +381,7 @@ class SchemaManager:
                 _assert_not_updating_partition_keys(
                     old_table_schema, change.field_names, "rename"
                 )
+                _assert_not_renaming_blob_column(new_fields, change.field_names)
                 _handle_rename_column(change, new_fields)
             elif isinstance(change, DropColumn):
                 _drop_column_validation(old_table_schema, change)

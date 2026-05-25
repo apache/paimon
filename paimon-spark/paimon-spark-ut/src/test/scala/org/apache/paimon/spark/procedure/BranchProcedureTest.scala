@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
 class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
@@ -179,6 +179,56 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
       checkAnswer(
         sql("SELECT * FROM T ORDER BY amount"),
         Seq(Row("20240725", "apple", 5), Row("20240725", "banana", 7)))
+    }
+  }
+
+  test("Paimon Procedure: rename branch") {
+    withTable("T") {
+      sql("CREATE TABLE T (a INT, b STRING) TBLPROPERTIES ('primary-key'='a', 'bucket'='3')")
+
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
+
+      // create tag
+      sql("CALL sys.create_tag(table => 'test.T', tag => 'tag1', snapshot => 1)")
+
+      // create branch from tag
+      sql("CALL sys.create_branch(table => 'test.T', branch => 'branch1', tag => 'tag1')")
+
+      // verify branch exists
+      val table = loadTable("T")
+      assert(table.branchManager().branchExists("branch1"))
+
+      // rename branch
+      checkAnswer(
+        sql(
+          "CALL sys.rename_branch(table => 'test.T', from_branch => 'branch1', to_branch => 'branch2')"),
+        Row(true) :: Nil
+      )
+
+      // verify old branch does not exist
+      assert(!table.branchManager().branchExists("branch1"))
+
+      // verify new branch exists
+      assert(table.branchManager().branchExists("branch2"))
+
+      // verify data in renamed branch
+      checkAnswer(
+        sql("SELECT * FROM `T$branch_branch2` ORDER BY a"),
+        Row(1, "a") :: Row(2, "b") :: Nil
+      )
+
+      // rename non-existent branch should fail
+      intercept[Exception] {
+        sql(
+          "CALL sys.rename_branch(table => 'test.T', from_branch => 'nonexistent', to_branch => 'new_branch')")
+      }
+
+      // rename to existing branch should fail
+      sql("CALL sys.create_branch(table => 'test.T', branch => 'branch3')")
+      intercept[Exception] {
+        sql(
+          "CALL sys.rename_branch(table => 'test.T', from_branch => 'branch2', to_branch => 'branch3')")
+      }
     }
   }
 }

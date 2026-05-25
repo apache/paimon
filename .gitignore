@@ -39,7 +39,15 @@ metastore_db/
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log
+paimon-spark/paimon-spark-ut/PaimonLambdaFunctionfunction_test.java
 
 ### Misc ###
 *.swp
 .cache
+
+### Rust ###
+Cargo.lock
+### Vortex lib ###
+*libvortex_jni*
+### Tantivy lib ###
+*libtantivy_jni*

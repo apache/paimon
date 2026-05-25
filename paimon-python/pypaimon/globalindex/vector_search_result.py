@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """Vector search global index result."""
 
@@ -70,13 +69,45 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
         other_score_getter = other.score_getter()
         
         result_or = RoaringBitmap64.or_(this_row_ids, other_row_ids)
-        
-        def combined_score_getter(row_id: int) -> Optional[float]:
-            if row_id in this_row_ids:
-                return this_score_getter(row_id)
-            return other_score_getter(row_id)
-        
-        return SimpleScoredGlobalIndexResult(result_or, combined_score_getter)
+
+        merged_scores = {}
+        for row_id in other_row_ids:
+            merged_scores[row_id] = other_score_getter(row_id)
+        for row_id in this_row_ids:
+            merged_scores[row_id] = this_score_getter(row_id)
+
+        return SimpleScoredGlobalIndexResult(result_or, lambda row_id: merged_scores.get(row_id))
+
+    def top_k(self, k: int) -> 'ScoredGlobalIndexResult':
+        """Return the top-k results by score."""
+        import heapq
+
+        row_ids = self.results()
+        if row_ids.cardinality() <= k:
+            return self
+
+        score_getter_fn = self.score_getter()
+        # Use a min-heap of size k to find top-k scores in O(n log k)
+        heap = []
+        for row_id in row_ids:
+            score = score_getter_fn(row_id)
+            if score is None:
+                score = 0.0
+            if len(heap) < k:
+                heapq.heappush(heap, (score, row_id))
+            elif score > heap[0][0]:
+                heapq.heapreplace(heap, (score, row_id))
+
+        top_k_bitmap = RoaringBitmap64()
+        for _, row_id in heap:
+            top_k_bitmap.add(row_id)
+
+        return SimpleScoredGlobalIndexResult(top_k_bitmap, score_getter_fn)
+
+    @staticmethod
+    def create_empty() -> 'ScoredGlobalIndexResult':
+        """Returns an empty ScoredGlobalIndexResult."""
+        return SimpleScoredGlobalIndexResult(RoaringBitmap64(), lambda row_id: 0.0)
 
     @staticmethod
     def create(

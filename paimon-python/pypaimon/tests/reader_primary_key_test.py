@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import os
 import shutil
@@ -26,7 +25,6 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class PkReaderTest(unittest.TestCase):
@@ -271,6 +269,102 @@ class PkReaderTest(unittest.TestCase):
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
+    def _assert_value_only_projection_works(self, file_format: str, table_suffix: str):
+        # Two commits force the split through the merge path. The merge
+        # reader still needs the PK column to assemble its key, even
+        # though the user-visible projection drops it — regress the
+        # case where narrowing to value-only fields broke the file
+        # column lookup.
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '2', 'file.format': file_format})
+        self.catalog.create_table(
+            'default.test_pk_projection_no_pk_' + table_suffix, schema, False)
+        table = self.catalog.get_table(
+            'default.test_pk_projection_no_pk_' + table_suffix)
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['behavior'])
+        actual = self._read_test_table(read_builder)
+        expected = self.expected.select(['behavior'])
+        # Projection drops PKs so we can only compare bag semantics.
+        self.assertEqual(
+            sorted([r['behavior'] for r in actual.to_pylist()],
+                   key=lambda v: '' if v is None else v),
+            sorted([r['behavior'] for r in expected.to_pylist()],
+                   key=lambda v: '' if v is None else v))
+
+    def test_pk_reader_with_projection_excluding_pk(self):
+        self._assert_value_only_projection_works('parquet', 'parquet')
+
+    def test_pk_reader_with_projection_excluding_pk_orc(self):
+        self._assert_value_only_projection_works('orc', 'orc')
+
+    def test_pk_reader_with_projection_excluding_pk_avro(self):
+        # Avro path resolves DataField names through ``full_fields_map``
+        # built from ``self.read_fields``; the alias-safe lookup must also
+        # cover the bare PK name (``user_id``) the file actually stores.
+        self._assert_value_only_projection_works('avro', 'avro')
+
+    def test_pk_reader_with_limit(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema,
+                                            partition_keys=['dt'],
+                                            primary_keys=['user_id', 'dt'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_limit', schema, False)
+        table = self.catalog.get_table('default.test_pk_limit')
+
+        num_commits = 5
+        rows_per_commit = 25
+
+        for commit_idx in range(num_commits):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+
+            start_id = commit_idx * rows_per_commit
+            end_id = start_id + rows_per_commit
+
+            if commit_idx > 0:
+                start_id -= 10
+
+            batch = pa.Table.from_pydict({
+                'user_id': list(range(start_id, end_id)),
+                'item_id': [1000 + i for i in range(start_id, end_id)],
+                'behavior': [f'val-{i}' for i in range(start_id, end_id)],
+                'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(start_id, end_id)],
+            }, schema=self.pa_schema)
+
+            writer.write_arrow(batch)
+            commit_messages = writer.prepare_commit()
+            commit = write_builder.new_commit()
+            commit.commit(commit_messages)
+            writer.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        all_splits = table_scan.plan().splits()
+        merge_splits = [s for s in all_splits if not s.raw_convertible]
+        self.assertGreater(
+            len(merge_splits), 0,
+            "Should have at least one merge split to test limit with merge scenario")
+
+        for limit in [5, 10, 20, 50]:
+            read_builder = table.new_read_builder().with_limit(limit)
+            table_read = read_builder.new_read()
+            table_scan = read_builder.new_scan()
+            splits = table_scan.plan().splits()
+            self.assertGreater(
+                len(splits), 0,
+                f"with_limit({limit}) should not produce empty splits for PK table")
+            result = table_read.to_arrow(splits)
+            row_count = result.num_rows if result is not None else 0
+            self.assertEqual(
+                row_count, limit,
+                f"with_limit({limit}) on PK table must return exactly "
+                f"{limit} rows now that the read-level limit is wired")
+
     def test_incremental_timestamp(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
                                             partition_keys=['dt'],
@@ -281,7 +375,7 @@ class PkReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
@@ -328,7 +422,7 @@ class PkReaderTest(unittest.TestCase):
             table_write.close()
             table_commit.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
         t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
 
@@ -354,7 +448,7 @@ class PkReaderTest(unittest.TestCase):
 
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
@@ -517,7 +611,7 @@ class PkReaderTest(unittest.TestCase):
                              f"Iteration {test_iteration}: User IDs mismatch")
 
             # Verify snapshot count (should have num_threads snapshots)
-            snapshot_manager = SnapshotManager(table)
+            snapshot_manager = table.snapshot_manager()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")

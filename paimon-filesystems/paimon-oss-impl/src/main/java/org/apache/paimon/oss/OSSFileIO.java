@@ -20,6 +20,7 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
@@ -47,7 +48,7 @@ import java.util.function.Supplier;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 
 /** OSS {@link FileIO}. */
-public class OSSFileIO extends HadoopCompliantFileIO {
+public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsProvider {
 
     private static final long serialVersionUID = 2L;
 
@@ -128,6 +129,11 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     }
 
     public Options hadoopOptions() {
+        return hadoopOptions;
+    }
+
+    @Override
+    public Options hadoopOptions(Path path, String opType) {
         return hadoopOptions;
     }
 

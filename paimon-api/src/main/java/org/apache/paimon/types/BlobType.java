@@ -85,6 +85,12 @@ public final class BlobType extends DataType {
                 .collect(Collectors.toList());
     }
 
+    public static Set<String> fieldNamesInBlobFile(RowType rowType, Set<String> descriptorFields) {
+        return fieldsInBlobFile(rowType, descriptorFields).stream()
+                .map(DataField::name)
+                .collect(Collectors.toSet());
+    }
+
     /**
      * Retrieve fields stored in blob files.
      *

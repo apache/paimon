@@ -1,0 +1,180 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>cache-enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Controls whether the catalog will cache databases, tables, manifests and partitions.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.deletion-vectors.max-num</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Integer</td>
+            <td>Controls the maximum number of deletion vector meta that can be cached.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.expire-after-access</h5></td>
+            <td style="word-wrap: break-word;">10 min</td>
+            <td>Duration</td>
+            <td>Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last access.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.expire-after-write</h5></td>
+            <td style="word-wrap: break-word;">30 min</td>
+            <td>Duration</td>
+            <td>Cache expiration policy: marks cache entries to expire after a specified duration has passed since their last refresh.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.max-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Controls the maximum memory to cache manifest content.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.small-file-memory</h5></td>
+            <td style="word-wrap: break-word;">128 mb</td>
+            <td>MemorySize</td>
+            <td>Controls the cache memory to cache small manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.manifest.small-file-threshold</h5></td>
+            <td style="word-wrap: break-word;">1 mb</td>
+            <td>MemorySize</td>
+            <td>Controls the threshold of small manifest file.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.partition.max-num</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Long</td>
+            <td>Controls the max number for which partitions in the catalog are cached.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.snapshot.max-num-per-table</h5></td>
+            <td style="word-wrap: break-word;">20</td>
+            <td>Integer</td>
+            <td>Controls the max number for snapshots per table in the catalog are cached.</td>
+        </tr>
+        <tr>
+            <td><h5>case-sensitive</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Indicates whether this catalog is case-sensitive.</td>
+        </tr>
+        <tr>
+            <td><h5>client-pool-size</h5></td>
+            <td style="word-wrap: break-word;">2</td>
+            <td>Integer</td>
+            <td>Configure the size of the connection pool.</td>
+        </tr>
+        <tr>
+            <td><h5>file-io.allow-cache</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to allow static cache in file io implementation. If not allowed, this means that there may be a large number of FileIO instances generated, enabling caching can lead to resource leakage.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in the metastore and need to be manually added as separate partition operations.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.block-size</h5></td>
+            <td style="word-wrap: break-word;">1 mb</td>
+            <td>MemorySize</td>
+            <td>Block size for local cache.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Directory for local block cache on disk. If not configured, memory cache is used instead.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable local block cache for file reads. If local-cache.dir is configured, disk cache is used; otherwise memory cache is used.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.max-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of the local block cache. Unlimited by default.</td>
+        </tr>
+        <tr>
+            <td><h5>local-cache.whitelist</h5></td>
+            <td style="word-wrap: break-word;">"meta,global-index"</td>
+            <td>String</td>
+            <td>Comma-separated list of file types to cache. Supported values: meta, global-index, bucket-index, data, file-index.</td>
+        </tr>
+        <tr>
+            <td><h5>lock-acquire-timeout</h5></td>
+            <td style="word-wrap: break-word;">8 min</td>
+            <td>Duration</td>
+            <td>The maximum time to wait for acquiring the lock.</td>
+        </tr>
+        <tr>
+            <td><h5>lock-check-max-sleep</h5></td>
+            <td style="word-wrap: break-word;">8 s</td>
+            <td>Duration</td>
+            <td>The maximum sleep time when retrying to check the lock.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.enabled</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Enable Catalog Lock.</td>
+        </tr>
+        <tr>
+            <td><h5>lock.type</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The Lock Type for Catalog, such as 'hive', 'zookeeper'.</td>
+        </tr>
+        <tr>
+            <td><h5>metastore</h5></td>
+            <td style="word-wrap: break-word;">"filesystem"</td>
+            <td>String</td>
+            <td>Metastore of paimon catalog, supports filesystem, hive and jdbc.</td>
+        </tr>
+        <tr>
+            <td><h5>resolving-file-io.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable resolving fileio, when this option is enabled, in conjunction with the table's property data-file.external-paths, Paimon can read and write to external storage paths, such as OSS or S3. In order to access these external paths correctly, you also need to configure the corresponding access key and secret key.</td>
+        </tr>
+        <tr>
+            <td><h5>sync-all-properties</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Sync all table properties to the catalog metastore (e.g. Hive metastore, JDBC catalog store)</td>
+        </tr>
+        <tr>
+            <td><h5>table.type</h5></td>
+            <td style="word-wrap: break-word;">managed</td>
+            <td><p>Enum</p></td>
+            <td>Type of table.<br /><br />Possible values:<ul><li>"managed": Paimon owned table where the entire lifecycle of the table data is managed.</li><li>"external": The table where Paimon has loose coupling with the data stored in external locations.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>uri</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Uri of metastore server.</td>
+        </tr>
+        <tr>
+            <td><h5>warehouse</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The warehouse root path of catalog.</td>
+        </tr>
+    </tbody>
+</table>

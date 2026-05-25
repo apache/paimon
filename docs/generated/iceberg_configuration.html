@@ -1,0 +1,114 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>metadata.iceberg.compaction.max.file-num</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>If number of small Iceberg manifest metadata files exceeds this limit, always trigger manifest metadata compaction regardless of their total size.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.compaction.min.file-num</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Minimum number of Iceberg manifest metadata files to trigger manifest metadata compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.database</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Metastore database name for Iceberg Catalog. Set this as an iceberg database alias if using a centralized Catalog. Multiple databases can be specified with semicolons, e.g. 'db1;db2'. The table will be registered in each database.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.delete-after-commit.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to delete old metadata files after each table commit</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.format-version</h5></td>
+            <td style="word-wrap: break-word;">2</td>
+            <td>Integer</td>
+            <td>The format version of iceberg table, the value can be 2 or 3. Note that only version 3 supports deletion vector.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.glue.skip-archive</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Skip archive for AWS Glue catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hadoop-conf-dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>hadoop-conf-dir for Iceberg Hive catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hive-client-class</h5></td>
+            <td style="word-wrap: break-word;">"org.apache.hadoop.hive.metastore.HiveMetaStoreClient"</td>
+            <td>String</td>
+            <td>Hive client class name for Iceberg Hive Catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hive-conf-dir</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>hive-conf-dir for Iceberg Hive catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.hive-skip-update-stats</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Skip updating Hive stats.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.manifest-compression</h5></td>
+            <td style="word-wrap: break-word;">"snappy"</td>
+            <td>String</td>
+            <td>Compression for Iceberg manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.manifest-legacy-version</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Should use the legacy manifest version to generate Iceberg's 1.4 manifest files.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.previous-versions-max</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>The number of old metadata files to keep after each table commit. For rest-catalog, it will keep 1 old metadata at least.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.storage</h5></td>
+            <td style="word-wrap: break-word;">disabled</td>
+            <td><p>Enum</p></td>
+            <td>When set, produce Iceberg metadata after a snapshot is committed, so that Iceberg readers can read Paimon's raw data files.<br /><br />Possible values:<ul><li>"disabled": Disable Iceberg compatibility support.</li><li>"table-location": Store Iceberg metadata in each table's directory.</li><li>"hadoop-catalog": Store Iceberg metadata in a separate directory. This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.</li><li>"hive-catalog": Not only store Iceberg metadata like hadoop-catalog, but also create Iceberg external table in Hive.</li><li>"rest-catalog": Store Iceberg metadata in a REST catalog. This allows integration with Iceberg REST catalog services.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.storage-location</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td><p>Enum</p></td>
+            <td>To store Iceberg metadata in a separate directory or under table location<br /><br />Possible values:<ul><li>"table-location": Store Iceberg metadata in each table's directory. Useful for standalone Iceberg tables or Java API access. Can also be used with Hive Catalog</li><li>"catalog-location": Store Iceberg metadata in a separate directory. Allows integration with Hive Catalog or Hadoop Catalog.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.table</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Metastore table name for Iceberg Catalog.Set this as an iceberg table alias if using a centralized Catalog.</td>
+        </tr>
+        <tr>
+            <td><h5>metadata.iceberg.uri</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Hive metastore uri for Iceberg Hive catalog.</td>
+        </tr>
+    </tbody>
+</table>

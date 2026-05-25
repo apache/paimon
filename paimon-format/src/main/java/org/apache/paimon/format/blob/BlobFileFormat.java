@@ -36,6 +36,7 @@ import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -74,7 +75,7 @@ public class BlobFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new BlobFormatReaderFactory(blobAsDescriptor);
+        return new BlobFormatReaderFactory(blobAsDescriptor, projectedRowType);
     }
 
     @Override
@@ -114,9 +115,16 @@ public class BlobFileFormat extends FileFormat {
     private static class BlobFormatReaderFactory implements FormatReaderFactory {
 
         private final boolean blobAsDescriptor;
+        private final int fieldCount;
+        private final int blobIndex;
 
-        public BlobFormatReaderFactory(boolean blobAsDescriptor) {
+        public BlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
             this.blobAsDescriptor = blobAsDescriptor;
+            this.fieldCount = projectedRowType.getFieldCount();
+            this.blobIndex = findBlobFieldIndex(projectedRowType);
+            Preconditions.checkState(
+                    this.blobIndex >= 0,
+                    "Read type of a blob format does not contain any blob field.");
         }
 
         @Override
@@ -134,7 +142,17 @@ public class BlobFileFormat extends FileFormat {
                     in = null;
                 }
             }
-            return new BlobFormatReader(fileIO, filePath, fileMeta, in);
+
+            return new BlobFormatReader(fileIO, filePath, fileMeta, in, fieldCount, blobIndex);
+        }
+
+        private static int findBlobFieldIndex(RowType rowType) {
+            for (int i = 0; i < rowType.getFieldCount(); i++) {
+                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                    return i;
+                }
+            }
+            return -1;
         }
     }
 }

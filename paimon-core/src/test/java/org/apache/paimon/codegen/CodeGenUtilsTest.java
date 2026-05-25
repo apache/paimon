@@ -85,7 +85,7 @@ class CodeGenUtilsTest {
     @Test
     public void testRecordComparatorCodegenCache() {
         assertClassEquals(
-                () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true));
+                () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
     }
 
     @Test
@@ -93,23 +93,25 @@ class CodeGenUtilsTest {
         assertClassEquals(
                 () ->
                         newRecordComparator(
-                                Arrays.asList(STRING(), VECTOR(3, INT())), new int[] {0, 1}, true));
+                                Arrays.asList(STRING(), VECTOR(3, INT())), new int[] {0, 1}));
     }
 
     @Test
     public void testRecordComparatorCodegenCacheMiss() {
         assertClassNotEquals(
-                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
-                newRecordComparator(
-                        Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}, true));
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
+                newRecordComparator(Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}));
     }
 
     @Test
     public void testRecordComparatorOrderCacheMiss() {
         RecordComparator ascending =
-                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true);
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1});
         RecordComparator descending =
-                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, false);
+                newRecordComparator(
+                        Arrays.asList(STRING(), INT()),
+                        new int[] {0, 1},
+                        new boolean[] {false, false});
 
         InternalRow row1 = GenericRow.of(BinaryString.fromString("a"), 1);
         InternalRow row2 = GenericRow.of(BinaryString.fromString("b"), 1);
@@ -134,7 +136,7 @@ class CodeGenUtilsTest {
     @Test
     public void testHybridNotEqual() {
         assertClassNotEquals(
-                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
                 newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
     }
 

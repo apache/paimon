@@ -172,6 +172,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        wrapped.replaceTable(identifier, newSchema, ignoreIfNotExists);
+    }
+
+    @Override
     public void registerTable(Identifier identifier, String path)
             throws TableAlreadyExistException {
         wrapped.registerTable(identifier, path);
@@ -223,6 +229,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        wrapped.rollbackSchema(identifier, schemaId);
+    }
+
+    @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         wrapped.createBranch(identifier, branch, fromTag);
@@ -238,6 +250,12 @@ public abstract class DelegateCatalog implements Catalog {
     @Override
     public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
         wrapped.dropBranch(identifier, branch);
+    }
+
+    @Override
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException {
+        wrapped.renameBranch(identifier, fromBranch, toBranch);
     }
 
     @Override

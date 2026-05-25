@@ -18,10 +18,16 @@
 
 package org.apache.spark.sql.execution
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.iceberg.IcebergOptions
+
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.catalog.CatalogUtils
 import org.apache.spark.sql.catalyst.plans.logical.TableSpec
 import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
+
+import scala.collection.JavaConverters._
 
 trait PaimonStrategyHelper {
 
@@ -34,8 +40,23 @@ trait PaimonStrategyHelper {
       spark.sharedState.hadoopConf)
   }
 
-  protected def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
-    tableSpec.copy(location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
+  protected def qualifyTableSpec(
+      tableSpec: TableSpec,
+      tableOptions: Map[String, String]): TableSpec = {
+    SparkShimLoader.shim.copyTableSpec(
+      tableSpec,
+      tableOptions,
+      tableSpec.location.map(makeQualifiedDBObjectPath))
   }
+}
 
+object PaimonStrategyHelper {
+  private val tableOptionKeys: Set[String] =
+    (CoreOptions.getOptions.asScala.map(_.key()) ++ IcebergOptions.getOptions.asScala.map(
+      _.key())).toSet
+
+  def splitTableAndWriteOptions(
+      options: Map[String, String]): (Map[String, String], Map[String, String]) = {
+    options.partition { case (key, _) => tableOptionKeys.contains(key) }
+  }
 }

@@ -19,7 +19,9 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.source.ScanMode
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{InternalRowPartitionComputer, TypeUtils}
 
@@ -136,7 +138,31 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
   }
 
   override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
-    Map.empty[String, String].asJava
+    table match {
+      case fileStoreTable: FileStoreTable =>
+        val partitionSpec = toPaimonPartitions(Array(ident)).head
+        val partitionEntries = fileStoreTable
+          .newSnapshotReader()
+          .withMode(ScanMode.ALL)
+          .withPartitionFilter(partitionSpec)
+          .partitionEntries()
+
+        if (!partitionEntries.isEmpty) {
+          val entry = partitionEntries.get(0)
+          Map(
+            PartitionStatistics.FIELD_RECORD_COUNT -> entry.recordCount().toString,
+            PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> entry.fileSizeInBytes().toString,
+            PartitionStatistics.FIELD_FILE_COUNT -> entry.fileCount().toString,
+            PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> entry
+              .lastFileCreationTime()
+              .toString
+          ).asJava
+        } else {
+          Map.empty[String, String].asJava
+        }
+      case _ =>
+        Map.empty[String, String].asJava
+    }
   }
 
   override def listPartitionIdentifiers(

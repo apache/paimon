@@ -52,8 +52,11 @@ import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.Operators.DoubleColumn;
+import org.apache.parquet.filter2.predicate.Operators.FloatColumn;
 import org.apache.parquet.io.api.Binary;
 
+import java.io.Serializable;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -95,6 +98,18 @@ public class ParquetFilters {
         @Override
         public FilterPredicate visitIsNull(FieldRef fieldRef) {
             return new Operators.Eq<>(toParquetColumn(fieldRef), null);
+        }
+
+        @Override
+        public FilterPredicate visitIsNaN(FieldRef fieldRef) {
+            Operators.Column<?> column = toParquetColumn(fieldRef);
+            if (column instanceof DoubleColumn) {
+                return FilterApi.userDefined((DoubleColumn) column, new IsNaNDoublePredicate());
+            }
+            if (column instanceof FloatColumn) {
+                return FilterApi.userDefined((FloatColumn) column, new IsNaNFloatPredicate());
+            }
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -439,6 +454,48 @@ public class ParquetFilters {
         @Override
         public Operators.Column<?> visit(RowType rowType) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /** user defined predicate that keeps double rows where the value is nan. */
+    public static class IsNaNDoublePredicate extends UserDefinedPredicate<Double>
+            implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean keep(Double value) {
+            return value != null && Double.isNaN(value);
+        }
+
+        @Override
+        public boolean canDrop(Statistics<Double> statistics) {
+            return false;
+        }
+
+        @Override
+        public boolean inverseCanDrop(Statistics<Double> statistics) {
+            return false;
+        }
+    }
+
+    /** user defined predicate that keeps float rows where the value is nan. */
+    public static class IsNaNFloatPredicate extends UserDefinedPredicate<Float>
+            implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean keep(Float value) {
+            return value != null && Float.isNaN(value);
+        }
+
+        @Override
+        public boolean canDrop(Statistics<Float> statistics) {
+            return false;
+        }
+
+        @Override
+        public boolean inverseCanDrop(Statistics<Float> statistics) {
+            return false;
         }
     }
 }

@@ -25,9 +25,9 @@ import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.{DataFrame, PaimonUtils, SparkSession}
-import org.apache.spark.sql.functions.{col, lit}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{Column, DataFrame, PaimonUtils, SparkSession}
+import org.apache.spark.sql.functions.{col, lit, struct, transform, transform_values}
+import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructField, StructType}
 
 import scala.collection.JavaConverters._
 
@@ -41,16 +41,10 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
 
   def mergeSchema(sparkSession: SparkSession, input: DataFrame, options: Options): DataFrame = {
     val dataSchema = SparkSystemColumns.filterSparkSystemColumns(input.schema)
-    val newTableSchema = mergeSchema(input.schema, options)
-    if (!PaimonUtils.sameType(newTableSchema, dataSchema)) {
+    val writeSchema = mergeSchema(dataSchema, options)
+    if (!PaimonUtils.sameType(writeSchema, dataSchema)) {
       val resolve = sparkSession.sessionState.conf.resolver
-      val cols = newTableSchema.map {
-        field =>
-          dataSchema.find(f => resolve(f.name, field.name)) match {
-            case Some(f) => col(f.name)
-            case _ => lit(null).as(field.name)
-          }
-      }
+      val cols = SchemaHelper.alignColumns(writeSchema, dataSchema, resolve)
       input.select(cols: _*)
     } else {
       input
@@ -67,10 +61,11 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
     val filteredDataSchema = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
     val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST) || OptionUtils
       .writeMergeSchemaExplicitCastEnabled()
-    mergeAndCommitSchema(filteredDataSchema, allowExplicitCast)
+    SchemaHelper.mergeAndCommitSchema(table, filteredDataSchema, allowExplicitCast).foreach {
+      updatedTable => newTable = Some(updatedTable)
+    }
 
     val writeSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
-
     if (!PaimonUtils.sameType(writeSchema, filteredDataSchema)) {
       writeSchema
     } else {
@@ -78,14 +73,87 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
     }
   }
 
-  private def mergeAndCommitSchema(dataSchema: StructType, allowExplicitCast: Boolean): Unit = {
+  def updateTableWithOptions(options: Map[String, String]): Unit = {
+    newTable = Some(table.copy(options.asJava))
+  }
+}
+
+private[spark] object SchemaHelper {
+
+  /**
+   * Merge the given dataSchema into the table's schema. If the schema changed, commit the change
+   * and return the updated table; otherwise return None.
+   */
+  def mergeAndCommitSchema(
+      table: FileStoreTable,
+      dataSchema: StructType,
+      allowExplicitCast: Boolean): Option[FileStoreTable] = {
     val dataRowType = SparkTypeUtils.toPaimonType(dataSchema).asInstanceOf[RowType]
     if (table.store().mergeSchema(dataRowType, allowExplicitCast)) {
-      newTable = Some(table.copyWithLatestSchema())
+      Some(table.copyWithLatestSchema())
+    } else {
+      None
     }
   }
 
-  def updateTableWithOptions(options: Map[String, String]): Unit = {
-    newTable = Some(table.copy(options.asJava))
+  /**
+   * Recursively align columns from dataSchema to targetSchema by name. For nested struct fields,
+   * reorder and fill nulls for missing sub-fields.
+   */
+  def alignColumns(
+      targetSchema: StructType,
+      dataSchema: StructType,
+      resolve: (String, String) => Boolean): Seq[Column] = {
+    targetSchema.map {
+      targetField =>
+        dataSchema.find(f => resolve(f.name, targetField.name)) match {
+          case Some(dataField) =>
+            alignColumn(col(dataField.name), dataField.dataType, targetField, resolve)
+          case _ =>
+            lit(null).cast(targetField.dataType).as(targetField.name)
+        }
+    }
+  }
+
+  private def alignColumn(
+      sourceCol: Column,
+      sourceType: DataType,
+      targetField: StructField,
+      resolve: (String, String) => Boolean): Column = {
+    (sourceType, targetField.dataType) match {
+      case (s: StructType, t: StructType) if !PaimonUtils.sameType(s, t) =>
+        alignStruct(sourceCol, s, t, resolve).as(targetField.name)
+      case (ArrayType(s: StructType, _), ArrayType(t: StructType, _))
+          if !PaimonUtils.sameType(s, t) =>
+        transform(sourceCol, elem => alignStruct(elem, s, t, resolve))
+          .as(targetField.name)
+      case (MapType(sKey, sVal: StructType, _), MapType(tKey, tVal: StructType, _))
+          if !PaimonUtils.sameType(sVal, tVal) =>
+        transform_values(sourceCol, (_, v) => alignStruct(v, sVal, tVal, resolve))
+          .as(targetField.name)
+      case _ =>
+        sourceCol.as(targetField.name)
+    }
+  }
+
+  private def alignStruct(
+      sourceCol: Column,
+      sourceType: StructType,
+      targetType: StructType,
+      resolve: (String, String) => Boolean): Column = {
+    val subCols = targetType.map {
+      subTargetField =>
+        sourceType.find(f => resolve(f.name, subTargetField.name)) match {
+          case Some(subDataField) =>
+            alignColumn(
+              sourceCol.getField(subDataField.name),
+              subDataField.dataType,
+              subTargetField,
+              resolve)
+          case _ =>
+            lit(null).cast(subTargetField.dataType).as(subTargetField.name)
+        }
+    }
+    struct(subCols: _*)
   }
 }

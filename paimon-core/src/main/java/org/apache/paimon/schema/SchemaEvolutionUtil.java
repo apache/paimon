@@ -223,12 +223,15 @@ public class SchemaEvolutionUtil {
         boolean castExist = false;
 
         for (int i = 0; i < tableFields.size(); i++) {
+            DataField tableField = tableFields.get(i);
             int dataIndex = indexMapping == null ? i : indexMapping[i];
             if (dataIndex < 0) {
                 converterMapping[i] =
-                        new CastFieldGetter(row -> null, CastExecutors.identityCastExecutor());
+                        new CastFieldGetter(
+                                row -> null,
+                                CastExecutors.identityCastExecutor(),
+                                tableField.name());
             } else {
-                DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
                 if (!dataField.type().equalsIgnoreNullable(tableField.type())) {
                     castExist = true;
@@ -238,7 +241,8 @@ public class SchemaEvolutionUtil {
                 converterMapping[i] =
                         new CastFieldGetter(
                                 InternalRowUtils.createNullCheckingFieldGetter(dataField.type(), i),
-                                createCastExecutor(dataField.type(), tableField.type()));
+                                createCastExecutor(dataField.type(), tableField.type()),
+                                tableField.name());
             }
         }
 

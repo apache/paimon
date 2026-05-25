@@ -163,6 +163,12 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
     protected void buildSink(
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory) {
+        createCdcSinkBuilder(input, parserFactory).build();
+    }
+
+    protected CdcSinkBuilder<RichCdcMultiplexRecord> createCdcSinkBuilder(
+            DataStream<RichCdcMultiplexRecord> input,
+            EventParser.Factory<RichCdcMultiplexRecord> parserFactory) {
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()
                         .withInput(input)
@@ -175,7 +181,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
-        sinkBuilder.build();
+        return sinkBuilder;
     }
 
     private void checkConstraints() {

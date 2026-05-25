@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 import uuid
@@ -49,6 +48,8 @@ class DataBlobWriter(DataWriter):
     - One normal data file may correspond to multiple blob data files
     - Blob data is written immediately to disk to prevent memory corruption
     - Blob file metadata is stored as separate DataFileMeta objects after normal file metadata
+    - When TableWrite.with_write_type narrows columns, incoming batches only carry that subset;
+      column lists are narrowed accordingly so splitting never selects missing columns.
 
     Rolling behavior:
     - Normal data rolls: Both normal and blob writers are closed together, blob metadata added after normal metadata
@@ -77,8 +78,9 @@ class DataBlobWriter(DataWriter):
     # Constant for checking rolling condition periodically
     CHECK_ROLLING_RECORD_CNT = 1000
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None):
-        super().__init__(table, partition, bucket, max_seq_number, options)
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
+                 write_cols: Optional[List[str]] = None):
+        super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols)
 
         # Determine blob columns from table schema
         self.blob_column_names = self._get_blob_columns_from_schema()
@@ -94,16 +96,31 @@ class DataBlobWriter(DataWriter):
             )
 
         # Blob fields that should still be written to `.blob` files.
-        self.blob_file_column_names = [
+        full_blob_file_column_names = [
             col for col in self.blob_column_names if col not in self.blob_descriptor_fields
         ]
-
+        full_blob_file_set = set(full_blob_file_column_names)
         all_column_names = self.table.field_names
-        self.normal_column_names = [
-            col for col in all_column_names if col not in self.blob_file_column_names
-        ]
+
+        # Narrow columns when TableWrite.with_write_type(...) supplies a partial column list.
+        # Incoming RecordBatches only contain those columns; selecting full normal/blob lists
+        # would raise KeyError.
+        if write_cols is not None:
+            write_col_set = set(write_cols)
+            self.blob_file_column_names = [
+                col for col in full_blob_file_column_names if col in write_col_set
+            ]
+            self.normal_column_names = [
+                col for col in write_cols if col not in full_blob_file_set
+            ]
+        else:
+            self.blob_file_column_names = list(full_blob_file_column_names)
+            self.normal_column_names = [
+                col for col in all_column_names if col not in full_blob_file_set
+            ]
+        normal_name_set = set(self.normal_column_names)
         self.normal_columns = [
-            field for field in self.table.table_schema.fields if field.name in self.normal_column_names
+            field for field in self.table.table_schema.fields if field.name in normal_name_set
         ]
         self.write_cols = self.normal_column_names
 

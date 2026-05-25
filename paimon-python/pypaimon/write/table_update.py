@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
@@ -25,8 +25,10 @@ from pypaimon.common.memory_size import MemorySize
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
@@ -86,6 +88,15 @@ def _divide_ranges(
 
 
 class TableUpdate:
+    """Common base for batch and stream table-update builders.
+
+    Holds the shared configuration (``update_cols``, ``projection``) and the
+    canonical ``commit_identifier``-aware implementations of the update /
+    upsert operations. The concrete subclasses
+    :class:`BatchTableUpdate` and :class:`StreamTableUpdate` expose
+    mode-specific public method signatures.
+    """
+
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -122,10 +133,88 @@ class TableUpdate:
             total_shard_count,
         )
 
+    def _update_by_arrow_with_row_id(
+            self, table: pa.Table, commit_identifier: int
+    ) -> List[CommitMessage]:
+        """Shared implementation for ``update_by_arrow_with_row_id``.
+
+        The public method lives on the concrete subclasses so each can
+        expose the signature appropriate to its mode (batch vs stream).
+        Produced commit messages are tagged with ``commit_identifier``.
+        """
+        return TableUpdateByRowId(
+            self.table, self.commit_user, commit_identifier,
+        ).update_columns(table, self.update_cols)
+
+    def _upsert_by_arrow_with_key(
+            self,
+            table: pa.Table,
+            upsert_keys: List[str],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Shared implementation for ``upsert_by_arrow_with_key``.
+
+        For each row in the input Arrow table:
+
+        * If a row with the same composite ``upsert_keys`` value already
+          exists → update that row in-place.
+        * Otherwise → append as a new row.
+
+        The public method lives on the concrete subclasses so each can
+        expose the signature appropriate to its mode (batch vs stream).
+
+        Args:
+            table: Input Arrow table containing rows to upsert.
+            upsert_keys: One or more column names forming the composite match key.
+            commit_identifier: Identifier to tag the produced commit messages with.
+
+        Returns:
+            List of :class:`CommitMessage` objects to be committed.
+        """
+        return TableUpsertByKey(
+            self.table, self.commit_user, commit_identifier
+        ).upsert(table, upsert_keys, self.update_cols)
+
+
+class BatchTableUpdate(TableUpdate):
+    """Batch-mode table update; commit messages always use
+    :data:`BATCH_COMMIT_IDENTIFIER`."""
+
     def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
-        update_by_row_id = TableUpdateByRowId(self.table, self.commit_user)
-        update_by_row_id.update_columns(table, self.update_cols)
-        return update_by_row_id.commit_messages
+        """Apply column updates keyed by ``_ROW_ID`` to existing rows."""
+        return self._update_by_arrow_with_row_id(table, BATCH_COMMIT_IDENTIFIER)
+
+    def upsert_by_arrow_with_key(
+            self, table: pa.Table, upsert_keys: List[str]
+    ) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by one or more key columns."""
+        return self._upsert_by_arrow_with_key(
+            table, upsert_keys, BATCH_COMMIT_IDENTIFIER
+        )
+
+
+class StreamTableUpdate(TableUpdate):
+    """Stream-mode table update; the same instance may drive many rounds,
+    each tagged with its own ``commit_identifier``."""
+
+    def update_by_arrow_with_row_id(
+            self, table: pa.Table, commit_identifier: int
+    ) -> List[CommitMessage]:
+        """Apply column updates keyed by ``_ROW_ID`` to existing rows,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._update_by_arrow_with_row_id(table, commit_identifier)
+
+    def upsert_by_arrow_with_key(
+            self,
+            table: pa.Table,
+            upsert_keys: List[str],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by one or more key columns,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._upsert_by_arrow_with_key(
+            table, upsert_keys, commit_identifier
+        )
 
 
 class ShardTableUpdator:
@@ -152,7 +241,9 @@ class ShardTableUpdator:
         self.dict = defaultdict(list)
 
         scanner = self.table.new_read_builder().new_scan()
-        splits = scanner.plan().splits()
+        plan = scanner.plan()
+        self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        splits = plan.splits()
         splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
         self.splits = splits
 
@@ -178,7 +269,7 @@ class ShardTableUpdator:
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []
         for (partition, files) in self.dict.items():
-            commit_messages.append(CommitMessage(partition, 0, files))
+            commit_messages.append(CommitMessage(partition, 0, files, self.snapshot_id))
         return commit_messages
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):

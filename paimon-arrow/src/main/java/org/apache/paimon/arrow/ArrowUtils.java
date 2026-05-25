@@ -48,6 +48,7 @@ import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Instant;
@@ -276,11 +277,15 @@ public class ArrowUtils {
         return ArrowCStruct.of(array, schema);
     }
 
+    public static byte[] serializeToIpc(VectorSchemaRoot vsr) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        serializeToIpc(vsr, out);
+        return out.toByteArray();
+    }
+
     public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
         try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
-            writer.start();
             writer.writeBatch();
-            writer.end();
         } catch (IOException e) {
             throw new RuntimeException("Failed to serialize VectorSchemaRoot to IPC", e);
         }

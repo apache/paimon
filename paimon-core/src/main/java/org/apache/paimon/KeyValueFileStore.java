@@ -33,7 +33,6 @@ import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -48,18 +47,12 @@ import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.predicate.PredicateBuilder.and;
-import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     private final boolean crossPartitionUpdate;
-    private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
@@ -74,7 +67,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             boolean crossPartitionUpdate,
             CoreOptions options,
             RowType partitionType,
-            RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
@@ -83,7 +75,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             CatalogEnvironment catalogEnvironment) {
         super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
-        this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
@@ -203,25 +194,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        BucketMode bucketMode = bucketMode();
         BucketSelectConverter bucketSelectConverter =
-                keyFilter -> {
-                    if (bucketMode != BucketMode.HASH_FIXED
-                            && bucketMode != BucketMode.POSTPONE_MODE) {
-                        return Optional.empty();
-                    }
-
-                    List<Predicate> bucketFilters =
-                            pickTransformFieldMapping(
-                                    splitAnd(keyFilter),
-                                    keyType.getFieldNames(),
-                                    bucketKeyType.getFieldNames());
-                    if (!bucketFilters.isEmpty()) {
-                        return BucketSelectConverter.create(
-                                and(bucketFilters), bucketKeyType, options.bucketFunctionType());
-                    }
-                    return Optional.empty();
-                };
+                new BucketSelectConverter(
+                        bucketMode(),
+                        options.bucketFunctionType(),
+                        schema.logicalRowType(),
+                        partitionType,
+                        schema.logicalBucketKeyType());
 
         return new KeyValueFileStoreScan(
                 newManifestsReader(),

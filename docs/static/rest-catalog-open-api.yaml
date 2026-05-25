@@ -383,7 +383,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: tableNamePattern
@@ -659,7 +659,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -667,6 +667,42 @@ paths:
                   $ref: '#/components/examples/SnapshotNotExistError'
                 TagNotExist:
                   $ref: '#/components/examples/TagNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/rollback-schema:
+    post:
+      tags:
+        - table
+      summary: Rollback table schema
+      operationId: rollbackSchema
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackSchemaRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
@@ -749,7 +785,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -794,7 +830,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -846,7 +882,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1101,7 +1137,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1145,6 +1181,49 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/rename:
+    post:
+      tags:
+        - branch
+      summary: rename branch
+      operationId: renameBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "409":
+          description: Branch already exists
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
@@ -1278,7 +1357,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1580,7 +1659,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: viewNamePattern
@@ -1878,7 +1957,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: functionNamePattern
@@ -2067,7 +2146,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given database does not exist",
@@ -2081,7 +2160,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given table does not exist",
@@ -2095,7 +2174,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given snapshot does not exist",
@@ -2109,7 +2188,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given branch does not exist",
@@ -2123,7 +2202,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given tag does not exist",
@@ -2137,7 +2216,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given view does not exist",
@@ -2151,7 +2230,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given function does not exist",
@@ -2177,7 +2256,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given database already exists",
@@ -2190,7 +2269,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given table already exists",
@@ -2203,7 +2282,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given branch already exists",
@@ -2216,7 +2295,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given tag already exists",
@@ -2229,7 +2308,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given view already exists",
@@ -2242,7 +2321,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given function already exists",
@@ -2936,6 +3015,14 @@ components:
           type: integer
           format: int64
           nullable: true
+    RollbackSchemaRequest:
+      type: object
+      required:
+        - schemaId
+      properties:
+        schemaId:
+          type: integer
+          format: int64
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
@@ -3206,6 +3293,11 @@ components:
           type: string
         fromTag:
           nullable: true
+          type: string
+    RenameBranchRequest:
+      type: object
+      properties:
+        toBranch:
           type: string
     ForwardBranchRequest:
       type: object

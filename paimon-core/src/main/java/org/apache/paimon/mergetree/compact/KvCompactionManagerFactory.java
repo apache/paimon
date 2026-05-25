@@ -32,6 +32,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.mergetree.compact.clustering.ClusteringCompactManagerFactory;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -65,6 +66,15 @@ public interface KvCompactionManagerFactory extends Closeable {
             TableSchema schema,
             @Nullable RecordLevelExpire recordLevelExpire,
             CacheManager cacheManager) {
+        if (options.pkClusteringOverride()) {
+            return new ClusteringCompactManagerFactory(
+                    readerFactoryBuilder,
+                    writerFactoryBuilder,
+                    options,
+                    keyType,
+                    valueType,
+                    cacheManager);
+        }
         return new MergeTreeCompactManagerFactory(
                 readerFactoryBuilder,
                 writerFactoryBuilder,

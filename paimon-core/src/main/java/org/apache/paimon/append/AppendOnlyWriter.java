@@ -62,6 +62,8 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
+
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
@@ -71,8 +73,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileIO fileIO;
     private final long schemaId;
     private final FileFormat fileFormat;
+    private final @Nullable FileFormat vectorFileFormat;
     private final long targetFileSize;
     private final long blobTargetFileSize;
+    private final long vectorTargetFileSize;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -103,8 +107,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             @Nullable IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
+            @Nullable FileFormat vectorFileFormat,
             long targetFileSize,
             long blobTargetFileSize,
+            long vectorTargetFileSize,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -127,8 +133,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
+        this.vectorFileFormat = vectorFileFormat;
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
+        this.vectorTargetFileSize = vectorTargetFileSize;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -302,13 +310,16 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (blobContext != null) {
-            return new RollingBlobFileWriter(
+        if (blobContext != null
+                || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty()) {
+            return new DedicatedFormatRollingFileWriter(
                     fileIO,
                     schemaId,
                     fileFormat,
+                    vectorFileFormat,
                     targetFileSize,
                     blobTargetFileSize,
+                    vectorTargetFileSize,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,

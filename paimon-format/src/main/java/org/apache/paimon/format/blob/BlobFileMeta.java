@@ -98,7 +98,7 @@ public class BlobFileMeta {
     }
 
     public int returnedPosition(int i) {
-        return returnedPositions == null ? i : returnedPositions[i - 1];
+        return returnedPositions == null ? i - 1 : returnedPositions[i - 1];
     }
 
     public int recordNumber() {

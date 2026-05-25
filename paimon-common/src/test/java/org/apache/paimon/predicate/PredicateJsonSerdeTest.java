@@ -182,12 +182,12 @@ class PredicateJsonSerdeTest {
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":\"NOT_BETWEEN\",\"literals\":[3,7]}"),
 
                 // LeafPredicate - AlwaysTrue
-                TestSpec.forPredicate(builder.alwaysTrue())
+                TestSpec.forPredicate(PredicateBuilder.alwaysTrue())
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"NULL\"},\"function\":\"TRUE\",\"literals\":[]}"),
 
                 // LeafPredicate - AlwaysFalse
-                TestSpec.forPredicate(builder.alwaysFalse())
+                TestSpec.forPredicate(PredicateBuilder.alwaysFalse())
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"NULL\"},\"function\":\"FALSE\",\"literals\":[]}"),
 

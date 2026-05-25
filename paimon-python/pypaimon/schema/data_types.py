@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import re
 import threading
@@ -129,6 +129,66 @@ class ArrayType(DataType):
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
         return "ARRAY<{}>{}".format(self.element, null_suffix)
+
+
+@dataclass
+class VectorType(DataType):
+    element: DataType
+    length: int
+
+    VALID_ELEMENT_TYPES = {
+        "BOOLEAN",
+        "TINYINT",
+        "SMALLINT",
+        "INT",
+        "INTEGER",
+        "BIGINT",
+        "FLOAT",
+        "DOUBLE",
+    }
+
+    def __init__(self, nullable: bool, element_type: DataType, length: int):
+        super().__init__(nullable)
+        if length < 1:
+            raise ValueError("Vector length must be greater than or equal to 1.")
+        if not self.is_valid_element_type(element_type):
+            raise ValueError("Invalid element type for vector: {}".format(element_type))
+        self.element = element_type
+        self.length = length
+
+    @classmethod
+    def is_valid_element_type(cls, element_type: DataType) -> bool:
+        if not isinstance(element_type, AtomicType):
+            return False
+        return element_type.type.upper() in cls.VALID_ELEMENT_TYPES
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, VectorType):
+            return False
+        return (self.element == other.element
+                and self.length == other.length
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.element, self.length, self.nullable))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "VECTOR" + (" NOT NULL" if not self.nullable else ""),
+            "element": self.element.to_dict() if self.element else None,
+            "length": self.length,
+            "nullable": self.nullable
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "VectorType":
+        return DataTypeParser.parse_data_type(data)
+
+    def __str__(self) -> str:
+        null_suffix = "" if self.nullable else " NOT NULL"
+        return "VECTOR<{}, {}>{}".format(self.element, self.length, null_suffix)
 
 
 @dataclass
@@ -387,6 +447,14 @@ class DataTypeParser:
                 nullable = "NOT NULL" not in type_string
                 return ArrayType(nullable, element)
 
+            elif type_string.startswith("VECTOR"):
+                element = DataTypeParser.parse_data_type(
+                    json_data.get("element"), field_id
+                )
+                length = int(json_data.get("length"))
+                nullable = "NOT NULL" not in type_string
+                return VectorType(nullable, element, length)
+
             elif type_string.startswith("MULTISET"):
                 element = DataTypeParser.parse_data_type(
                     json_data.get("element"), field_id
@@ -454,6 +522,22 @@ class DataTypeParser:
         )
 
 
+def is_variant_struct(pa_type: pyarrow.StructType) -> bool:
+    """Return True if *pa_type* is the shredded VARIANT struct encoding.
+
+    Matches ``struct<value: binary NOT NULL, metadata: binary NOT NULL>``.
+    """
+    if pa_type.num_fields != 2:
+        return False
+    names = {pa_type[i].name for i in range(pa_type.num_fields)}
+    if names != {'value', 'metadata'}:
+        return False
+    return all(
+        pyarrow.types.is_binary(pa_type[n].type) and not pa_type[n].nullable
+        for n in ('value', 'metadata')
+    )
+
+
 class PyarrowFieldParser:
 
     @staticmethod
@@ -477,18 +561,15 @@ class PyarrowFieldParser:
                 return pyarrow.bool_()
             elif type_name == 'STRING' or type_name.startswith('CHAR') or type_name.startswith('VARCHAR'):
                 return pyarrow.string()
-            elif type_name == 'BYTES' or type_name.startswith('VARBINARY'):
+            elif type_name == 'BYTES' or type_name.startswith('VARBINARY') or type_name.startswith('BINARY'):
                 return pyarrow.binary()
             elif type_name == 'BLOB':
                 return pyarrow.large_binary()
-            elif type_name.startswith('BINARY'):
-                if type_name == 'BINARY':
-                    return pyarrow.binary(1)
-                match = re.fullmatch(r'BINARY\((\d+)\)', type_name)
-                if match:
-                    length = int(match.group(1))
-                    if length > 0:
-                        return pyarrow.binary(length)
+            elif type_name == 'VARIANT':
+                return pyarrow.struct([
+                    pyarrow.field('value', pyarrow.binary(), nullable=False),
+                    pyarrow.field('metadata', pyarrow.binary(), nullable=False),
+                ])
             elif type_name.startswith('DECIMAL'):
                 if type_name == 'DECIMAL':
                     return pyarrow.decimal128(10, 0)  # default to 10, 0
@@ -523,6 +604,8 @@ class PyarrowFieldParser:
                 return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
+        elif isinstance(data_type, VectorType):
+            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element), data_type.length)
         elif isinstance(data_type, MapType):
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
@@ -590,6 +673,10 @@ class PyarrowFieldParser:
             type_name = 'DATE'
         elif types.is_time(pa_type):
             type_name = 'TIME(0)'
+        elif types.is_fixed_size_list(pa_type):
+            pa_type: pyarrow.FixedSizeListType
+            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, pa_type.value_field.nullable)
+            return VectorType(nullable, element_type, pa_type.list_size)
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
             element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
@@ -599,6 +686,8 @@ class PyarrowFieldParser:
             key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
             value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
+        elif types.is_struct(pa_type) and is_variant_struct(pa_type):
+            return AtomicType('VARIANT', nullable)
         elif types.is_struct(pa_type):
             pa_type: pyarrow.StructType
             fields = []
@@ -682,7 +771,9 @@ class PyarrowFieldParser:
                     return {"type": "long", "logicalType": "local-timestamp-micros"}
                 else:
                     raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
-        elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):
+        elif pyarrow.types.is_fixed_size_list(field_type) or \
+                pyarrow.types.is_list(field_type) or \
+                pyarrow.types.is_large_list(field_type):
             value_field = field_type.value_field
             return {
                 "type": "array",

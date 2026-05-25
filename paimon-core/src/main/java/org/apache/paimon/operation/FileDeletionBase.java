@@ -334,6 +334,13 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             boolean deleteDataManifestLists,
             boolean deleteChangelog) {
         if (deleteDataManifestLists) {
+            // deleteDataManifestLists will be false
+            // with changelog decouple + none changelog producer.
+            // Why don't we clean base manifest in this scenario?
+            // Because cleanUnusedManifestList is compared with the earliest snapshot.
+            // For none changelog producer, changelog files are the level 0 files.
+            // Even if these files are not used by the earliest snapshot,
+            // we have to keep them as changelog, and clean then in ChangelogDeletion.
             cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
             cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
         }

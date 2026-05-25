@@ -35,12 +35,14 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -48,7 +50,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -57,6 +61,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
@@ -77,6 +83,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Nullable private final BucketedDvMaintainer.Factory dvMaintainerFactory;
     private final int numBuckets;
     private final RowType partitionType;
+
+    @Nullable private final PartitionTimestampValidator partitionTimestampValidator;
 
     @Nullable protected IOManager ioManager;
 
@@ -115,6 +123,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.tableName = tableName;
         this.writerNumberMax = options.writeMaxWritersToSpill();
         this.legacyPartitionName = options.legacyPartitionName();
+        this.partitionTimestampValidator =
+                PartitionTimestampValidator.create(options, partitionType);
     }
 
     @Override
@@ -423,6 +433,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
 
+        if (partitionTimestampValidator != null) {
+            partitionTimestampValidator.validate(partition);
+        }
+
         if (writerNumber() >= writerNumberMax) {
             try {
                 forceBufferSpill();
@@ -578,5 +592,59 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @VisibleForTesting
     public CompactionMetrics compactionMetrics() {
         return compactionMetrics;
+    }
+
+    private static class PartitionTimestampValidator {
+
+        private final PartitionTimeExtractor timeExtractor;
+        private final RowDataToObjectArrayConverter partitionConverter;
+        private final List<String> partitionKeys;
+
+        private PartitionTimestampValidator(
+                PartitionTimeExtractor timeExtractor,
+                RowDataToObjectArrayConverter partitionConverter,
+                List<String> partitionKeys) {
+            this.timeExtractor = timeExtractor;
+            this.partitionConverter = partitionConverter;
+            this.partitionKeys = partitionKeys;
+        }
+
+        @Nullable
+        private static PartitionTimestampValidator create(
+                CoreOptions options, RowType partitionType) {
+            if (!options.partitionTimestampFormatStrict()) {
+                return null;
+            }
+            String timeFormatter = options.partitionTimestampFormatter();
+            String timePattern = options.partitionTimestampPattern();
+            if ((timeFormatter != null || timePattern != null)
+                    && partitionType.getFieldCount() > 0) {
+                return new PartitionTimestampValidator(
+                        new PartitionTimeExtractor(timePattern, timeFormatter),
+                        new RowDataToObjectArrayConverter(partitionType),
+                        partitionType.getFieldNames());
+            }
+            return null;
+        }
+
+        private void validate(BinaryRow partition) {
+            Object[] array = partitionConverter.convert(partition);
+            try {
+                timeExtractor.extract(partitionKeys, Arrays.asList(array));
+            } catch (DateTimeParseException e) {
+                String partitionInfo =
+                        IntStream.range(0, partitionKeys.size())
+                                .mapToObj(i -> partitionKeys.get(i) + "=" + array[i])
+                                .collect(Collectors.joining(", "));
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Partition %s does not match the 'partition.timestamp-formatter' or "
+                                        + "'partition.timestamp-pattern' configuration. "
+                                        + "This might be caused by an incorrectly specified partition field. "
+                                        + "Please check your partition configuration.",
+                                partitionInfo),
+                        e);
+            }
+        }
     }
 }

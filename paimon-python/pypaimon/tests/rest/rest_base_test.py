@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 import glob
 import logging
 import os
@@ -26,7 +26,7 @@ import uuid
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.api.api_response import ConfigResponse
+from pypaimon.api.api_response import ConfigResponse, Partition
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
@@ -275,3 +275,96 @@ class RESTBaseTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
+
+    def test_list_partitions_paged(self):
+        """Test list_partitions_paged returns partitions from server store."""
+        identifier = Identifier.from_string('default.test_reader_iterator')
+
+        # Add test partitions to server store
+        p1 = Partition(
+            spec={"dt": "p1"},
+            record_count=4,
+            file_size_in_bytes=1024,
+            file_count=1,
+            last_file_creation_time=1000,
+            total_buckets=1,
+            done=False,
+        )
+        p2 = Partition(
+            spec={"dt": "p2"},
+            record_count=4,
+            file_size_in_bytes=2048,
+            file_count=1,
+            last_file_creation_time=2000,
+            total_buckets=1,
+            done=True,
+        )
+        p3 = Partition(
+            spec={"dt": "p3"},
+            record_count=2,
+            file_size_in_bytes=512,
+            file_count=1,
+            last_file_creation_time=3000,
+            total_buckets=1,
+            done=False,
+        )
+        self.server.table_partitions_store[identifier.get_full_name()] = [p1, p2, p3]
+
+        # Test: list all partitions
+        result = self.rest_catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 3)
+
+        # Test: list with max_results
+        result = self.rest_catalog.list_partitions_paged(identifier, max_results=2)
+        self.assertEqual(len(result.elements), 2)
+        self.assertIsNotNone(result.next_page_token)
+
+        # Test: list next page using page_token
+        result2 = self.rest_catalog.list_partitions_paged(
+            identifier, max_results=2, page_token=result.next_page_token
+        )
+        self.assertEqual(len(result2.elements), 1)
+        self.assertIsNone(result2.next_page_token)
+
+        # Test: list with pattern filter
+        result = self.rest_catalog.list_partitions_paged(
+            identifier, partition_name_pattern="dt=p1"
+        )
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec, {"dt": "p1"})
+
+        # Test: list with pattern using wildcard
+        result = self.rest_catalog.list_partitions_paged(
+            identifier, partition_name_pattern="dt=p%"
+        )
+        self.assertEqual(len(result.elements), 3)
+
+    def test_alter_database(self):
+        """Test alter_database sets and removes properties."""
+        from pypaimon.catalog.rest.property_change import PropertyChange
+        db_name = "alter_db_test"
+        self.rest_catalog.create_database(db_name, True)
+
+        # set property
+        self.rest_catalog.alter_database(
+            db_name,
+            [PropertyChange.set_property("key1", "value1"),
+             PropertyChange.set_property("key2", "value2")])
+        db = self.rest_catalog.get_database(db_name)
+        self.assertEqual(db.options.get("key1"), "value1")
+        self.assertEqual(db.options.get("key2"), "value2")
+
+        # remove property
+        self.rest_catalog.alter_database(
+            db_name,
+            [PropertyChange.remove_property("key1")])
+        db = self.rest_catalog.get_database(db_name)
+        self.assertNotIn("key1", db.options)
+        self.assertEqual(db.options.get("key2"), "value2")
+
+    def test_list_partitions_paged_empty(self):
+        """Test list_partitions_paged returns empty when no partitions."""
+        identifier = Identifier.from_string('default.test_reader_iterator')
+        result = self.rest_catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 0)
+        self.assertIsNone(result.next_page_token)

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -28,6 +29,7 @@ import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.VarBinaryType;
 
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -51,10 +53,28 @@ public class LogicalTypeConversion {
         return new BlobType();
     }
 
-    public static VectorType toVectorType(LogicalType elementType, String vectorDim) {
+    public static VectorType toVectorType(
+            String fieldName,
+            org.apache.flink.table.types.logical.LogicalType logicalType,
+            Map<String, String> options) {
+        checkArgument(
+                logicalType instanceof org.apache.flink.table.types.logical.ArrayType,
+                "Only array type can be converted to Paimon vector type.");
+        org.apache.flink.table.types.logical.LogicalType elementType =
+                ((org.apache.flink.table.types.logical.ArrayType) logicalType).getElementType();
+
+        String dimKey = String.format("field.%s.vector-dim", fieldName);
+        checkArgument(
+                options.containsKey(dimKey),
+                "When setting '"
+                        + CoreOptions.VECTOR_FIELD.key()
+                        + "', you must also set 'field.%s.vector-dim',"
+                        + " where %s is the name of the vector field.");
+        String vectorDim = options.get(dimKey);
         checkArgument(
                 !vectorDim.trim().isEmpty(),
                 "Expected an integer for vector-dim, but got empty value.");
+
         try {
             int dim = Integer.parseInt(vectorDim);
             return DataTypes.VECTOR(dim, toDataType(elementType));

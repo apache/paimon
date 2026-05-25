@@ -18,13 +18,17 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.globalindex.GlobalIndexResult
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.read.{BaseScan, PaimonSupportsRuntimeFiltering}
+import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.source.{DataTableBatchScan, InnerTableScan, Split}
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.Batch
@@ -40,14 +44,62 @@ abstract class PaimonBaseScan(table: InnerTable)
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   protected def getInputSplits: Array[Split] = {
-    readBuilder
+    val scan = readBuilder
       .newScan()
+      .withGlobalIndexResult(evalGlobalIndexSearch())
       .asInstanceOf[InnerTableScan]
       .withMetricRegistry(paimonMetricsRegistry)
-      .plan()
-      .splits()
-      .asScala
-      .toArray
+
+    val plan = scan.plan()
+
+    Option(scan.readProtectionTagName).foreach {
+      name =>
+        BatchReadTagCleanupListener
+          .getOrCreate(SparkSession.active)
+          .registerCleanup(name, table)
+    }
+
+    plan.splits().asScala.toArray
+  }
+
+  private def evalGlobalIndexSearch(): GlobalIndexResult = {
+    if (pushedVectorSearch.isDefined && pushedFullTextSearch.isDefined) {
+      throw new UnsupportedOperationException(
+        "Cannot push down both vector search and full-text search simultaneously.")
+    }
+    if (pushedVectorSearch.isDefined) {
+      return evalVectorSearch()
+    }
+    if (pushedFullTextSearch.isDefined) {
+      return evalFullTextSearch()
+    }
+    null
+  }
+
+  private def evalVectorSearch(): GlobalIndexResult = {
+    val vectorSearch = pushedVectorSearch.get
+    val vectorBuilder = table
+      .newVectorSearchBuilder()
+      .withVector(vectorSearch.vector())
+      .withVectorColumn(vectorSearch.fieldName())
+      .withLimit(vectorSearch.limit())
+    if (pushedPartitionFilters.nonEmpty) {
+      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+    }
+    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+  }
+
+  private def evalFullTextSearch(): GlobalIndexResult = {
+    val fullTextSearch = pushedFullTextSearch.get
+    val ftBuilder = table
+      .newFullTextSearchBuilder()
+      .withQueryText(fullTextSearch.queryText())
+      .withTextColumn(fullTextSearch.fieldName())
+      .withLimit(fullTextSearch.limit())
+    ftBuilder.newFullTextRead().read(ftBuilder.newFullTextScan().scan())
   }
 
   override def toBatch: Batch = {

@@ -20,13 +20,13 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -82,12 +82,12 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
                     throw new IllegalArgumentException("Null blob is not allowed.");
                 }
                 try {
-                    BlobDescriptor descriptor = blob.toDescriptor();
-                    encoder.writeBytes(descriptor.serialize());
+                    encoder.writeBytes(Blob.serializeBlob(blob));
                 } catch (Throwable t) {
                     throw new IllegalArgumentException(
-                            "blob-descriptor-field requires blob field value to be a "
-                                    + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                            "BLOB inline fields configured by blob-descriptor-field or "
+                                    + "blob-view-field require values to be a BlobDescriptor or "
+                                    + "BlobViewStruct.",
                             t);
                 }
             };
@@ -192,6 +192,22 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
             for (int i = 0; i < numElements; i += 1) {
                 encoder.startItem();
                 elementWriter.write(array, i, encoder);
+            }
+            encoder.writeArrayEnd();
+        };
+    }
+
+    @Override
+    public FieldWriter visitArrayVector(Schema schema, DataType elementType) {
+        FieldWriter elementWriter = visit(schema.getElementType(), elementType);
+        return (container, index, encoder) -> {
+            InternalVector vector = container.getVector(index);
+            encoder.writeArrayStart();
+            int numElements = vector.size();
+            encoder.setItemCount(numElements);
+            for (int i = 0; i < numElements; i += 1) {
+                encoder.startItem();
+                elementWriter.write(vector, i, encoder);
             }
             encoder.writeArrayEnd();
         };

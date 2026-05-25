@@ -25,6 +25,7 @@ import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.StagingTableCatalog;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableCatalogCapability;
@@ -39,7 +40,11 @@ import static org.apache.spark.sql.connector.catalog.TableCatalogCapability.SUPP
 
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
-        implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
+        implements TableCatalog,
+                SupportsNamespaces,
+                ProcedureCatalog,
+                WithPaimonCatalog,
+                StagingTableCatalog {
 
     protected String catalogName;
 

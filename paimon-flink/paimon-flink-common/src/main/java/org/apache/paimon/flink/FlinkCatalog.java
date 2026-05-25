@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.flink.function.BuiltInFunctions;
+import org.apache.paimon.flink.function.CatalogAwareFunction;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.flink.utils.FlinkDescriptorProperties;
@@ -56,6 +57,7 @@ import org.apache.paimon.view.ViewImpl;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -111,6 +113,9 @@ import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.factories.FunctionDefinitionFactory;
+import org.apache.flink.table.functions.UserDefinedFunction;
+import org.apache.flink.table.functions.UserDefinedFunctionHelper;
 import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.resource.ResourceType;
 import org.apache.flink.table.resource.ResourceUri;
@@ -124,11 +129,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -183,6 +190,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private final Catalog catalog;
     private final String name;
+    private final Options options;
 
     private final boolean disableCreateTableInDefaultDatabase;
 
@@ -191,6 +199,7 @@ public class FlinkCatalog extends AbstractCatalog {
         LOG.info("Creating Flink catalog: metastore={}", options.get(CatalogOptions.METASTORE));
         this.catalog = catalog;
         this.name = name;
+        this.options = new Options(options.toMap());
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         if (!disableCreateTableInDefaultDatabase) {
             try {
@@ -211,6 +220,52 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public Optional<Factory> getFactory() {
         return Optional.of(new FlinkTableFactory(this));
+    }
+
+    @Override
+    public Optional<FunctionDefinitionFactory> getFunctionDefinitionFactory() {
+        return Optional.of(
+                new CatalogAwareFunctionDefinitionFactory(name, getDefaultDatabase(), options));
+    }
+
+    private static class CatalogAwareFunctionDefinitionFactory
+            implements FunctionDefinitionFactory {
+
+        private final String catalogName;
+        private final String defaultDatabase;
+        private final Options catalogOptions;
+
+        private CatalogAwareFunctionDefinitionFactory(
+                String catalogName, String defaultDatabase, Options catalogOptions) {
+            this.catalogName = catalogName;
+            this.defaultDatabase = defaultDatabase;
+            this.catalogOptions = new Options(catalogOptions.toMap());
+        }
+
+        @SuppressWarnings("deprecation")
+        public org.apache.flink.table.functions.FunctionDefinition createFunctionDefinition(
+                String functionName, CatalogFunction catalogFunction) {
+            return createFunctionDefinition(functionName, catalogFunction, null);
+        }
+
+        @Override
+        public org.apache.flink.table.functions.FunctionDefinition createFunctionDefinition(
+                String functionName,
+                CatalogFunction catalogFunction,
+                FunctionDefinitionFactory.Context context) {
+            ClassLoader classLoader =
+                    context == null
+                            ? Thread.currentThread().getContextClassLoader()
+                            : context.getClassLoader();
+            UserDefinedFunction function =
+                    UserDefinedFunctionHelper.instantiateFunction(
+                            classLoader, new Configuration(), functionName, catalogFunction);
+            if (function instanceof CatalogAwareFunction) {
+                ((CatalogAwareFunction) function)
+                        .setCatalogContext(catalogName, defaultDatabase, catalogOptions);
+            }
+            return function;
+        }
     }
 
     @Override
@@ -509,7 +564,9 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private List<SchemaChange> toSchemaChange(
-            TableChange change, Map<String, Integer> oldTableNonPhysicalColumnIndex) {
+            TableChange change,
+            Map<String, Integer> oldTableNonPhysicalColumnIndex,
+            @Nullable String primaryKeyConstraintName) {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             if (((AddColumn) change).getColumn().isPhysical()) {
@@ -626,6 +683,15 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof MaterializedTableChange
                 && handleMaterializedTableChange(change, schemaChanges)) {
             return schemaChanges;
+        } else if (change instanceof TableChange.DropConstraint) {
+            TableChange.DropConstraint dropConstraint = (TableChange.DropConstraint) change;
+            if (primaryKeyConstraintName == null
+                    || !primaryKeyConstraintName.equals(dropConstraint.getConstraintName())) {
+                throw new UnsupportedOperationException(
+                        "Only dropping primary key constraint is supported.");
+            }
+            schemaChanges.add(SchemaChange.dropPrimaryKey());
+            return schemaChanges;
         }
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
     }
@@ -739,10 +805,17 @@ public class FlinkCatalog extends AbstractCatalog {
         checkArgument(
                 table instanceof FileStoreTable,
                 "Only support alter data table, but is: " + table.getClass());
-        validateAlterTable(toCatalogTable(table), newTable);
+        CatalogBaseTable oldCatalogTable = toCatalogTable(table);
+        validateAlterTable(oldCatalogTable, newTable);
         Map<String, Integer> oldTableNonPhysicalColumnIndex =
                 FlinkCatalogPropertiesUtil.nonPhysicalColumns(
                         table.options(), table.rowType().getFieldNames());
+        String primaryKeyConstraintName =
+                oldCatalogTable
+                        .getUnresolvedSchema()
+                        .getPrimaryKey()
+                        .map(pk -> pk.getConstraintName())
+                        .orElse(null);
 
         List<SchemaChange> changes = new ArrayList<>();
 
@@ -772,7 +845,9 @@ public class FlinkCatalog extends AbstractCatalog {
                             .flatMap(
                                     tableChange ->
                                             toSchemaChange(
-                                                    tableChange, oldTableNonPhysicalColumnIndex)
+                                                    tableChange,
+                                                    oldTableNonPhysicalColumnIndex,
+                                                    primaryKeyConstraintName)
                                                     .stream())
                             .collect(Collectors.toList());
             changes.addAll(schemaChanges);
@@ -847,10 +922,10 @@ public class FlinkCatalog extends AbstractCatalog {
         if (!table1IsMaterialized) {
             org.apache.flink.table.api.Schema ts1 = ct1.getUnresolvedSchema();
             org.apache.flink.table.api.Schema ts2 = ct2.getUnresolvedSchema();
-            boolean pkEquality = false;
+            boolean allowAlterPk = false;
 
             if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
-                pkEquality =
+                allowAlterPk =
                         Objects.equals(
                                         ts1.getPrimaryKey().get().getConstraintName(),
                                         ts2.getPrimaryKey().get().getConstraintName())
@@ -858,10 +933,14 @@ public class FlinkCatalog extends AbstractCatalog {
                                         ts1.getPrimaryKey().get().getColumnNames(),
                                         ts2.getPrimaryKey().get().getColumnNames());
             } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
-                pkEquality = true;
+                allowAlterPk = true;
+            } else if (ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
+                // dropping primary key is allowed on empty tables,
+                // SchemaManager will validate this
+                allowAlterPk = true;
             }
 
-            if (!pkEquality) {
+            if (!allowAlterPk) {
                 throw new UnsupportedOperationException(
                         "Altering primary key is not supported yet.");
             }
@@ -1013,6 +1092,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
         List<String> blobFields = CoreOptions.blobField(options);
+        Set<String> blobTypeFields = blobTypeFields(options);
         if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
@@ -1041,28 +1121,34 @@ public class FlinkCatalog extends AbstractCatalog {
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
-                                        resolveDataType(field.getName(), field.getType(), options),
+                                        resolveDataType(
+                                                field.getName(),
+                                                field.getType(),
+                                                options,
+                                                blobTypeFields),
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();
     }
 
+    private static Set<String> blobTypeFields(Map<String, String> options) {
+        Set<String> blobTypeFields = new HashSet<>(CoreOptions.blobField(options));
+        blobTypeFields.addAll(new CoreOptions(options).blobDescriptorField());
+        blobTypeFields.addAll(CoreOptions.blobViewField(options));
+        return blobTypeFields;
+    }
+
     private static org.apache.paimon.types.DataType resolveDataType(
             String fieldName,
             org.apache.flink.table.types.logical.LogicalType logicalType,
-            Map<String, String> options) {
-        List<String> blobFields = CoreOptions.blobField(options);
-        if (blobFields.contains(fieldName)) {
+            Map<String, String> options,
+            Set<String> blobTypeFields) {
+        if (blobTypeFields.contains(fieldName)) {
             return toBlobType(logicalType);
         }
-        if (logicalType instanceof org.apache.flink.table.types.logical.ArrayType) {
-            String vectorDim = options.get(String.format("field.%s.vector-dim", fieldName));
-            if (vectorDim != null) {
-                org.apache.flink.table.types.logical.LogicalType elementType =
-                        ((org.apache.flink.table.types.logical.ArrayType) logicalType)
-                                .getElementType();
-                return toVectorType(elementType, vectorDim);
-            }
+        Set<String> vectorFields = CoreOptions.vectorField(options);
+        if (vectorFields.contains(fieldName)) {
+            return toVectorType(fieldName, logicalType, options);
         }
         return toDataType(logicalType);
     }

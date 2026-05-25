@@ -25,19 +25,19 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -56,7 +56,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -94,9 +93,11 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
                 .containsExactlyInAnyOrder(
                         new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
 
-        DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
         RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
+        DataEvolutionBatchScan scan =
+                (DataEvolutionBatchScan)
+                        table.newScan()
+                                .withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
 
         List<String> readF1 = new ArrayList<>();
         table.newRead()
@@ -246,20 +247,9 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
-        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<Range> ranges = indexScanBuilder.shardList();
-        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
-        for (Range range : ranges) {
-            try (RowRangeGlobalIndexScanner scanner =
-                    indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate, null);
-                if (!globalIndexResult.isPresent()) {
-                    throw new RuntimeException("Can't find index result by scan");
-                }
-                globalFileIndexResult = globalFileIndexResult.or(globalIndexResult.get());
-            }
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+            return scanner.scan(predicate).get().results();
         }
-
-        return globalFileIndexResult.results();
     }
 }

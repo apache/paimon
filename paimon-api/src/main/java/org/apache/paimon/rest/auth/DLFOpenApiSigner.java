@@ -31,6 +31,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -65,7 +66,7 @@ public class DLFOpenApiSigner implements DLFRequestSigner {
     private static final String API_VERSION = "2026-01-18";
 
     private static final DateTimeFormatter GMT_DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'")
+            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.ENGLISH)
                     .withZone(ZoneId.of("GMT"));
 
     @Override

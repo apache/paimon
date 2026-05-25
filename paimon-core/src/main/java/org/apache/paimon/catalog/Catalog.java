@@ -358,6 +358,25 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
+    /**
+     * Replace an existing table with a new {@link Schema}.
+     *
+     * <p>For compatible FileStore tables, it truncates visible data and appends a new schema to the
+     * schema chain, preserving old schemas and snapshots for time travel. Other table kinds may
+     * fall back to drop-and-create behavior.
+     *
+     * @param identifier path of the table to be replaced
+     * @param newSchema the new {@link Schema}
+     * @param ignoreIfNotExists if true, do nothing when the table does not exist
+     * @throws TableNotExistException if the table does not exist and {@code ignoreIfNotExists} is
+     *     false
+     */
+    default void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "Catalog " + getClass().getName() + " does not support replaceTable.");
+    }
+
     // ======================= partition methods ===============================
 
     /**
@@ -663,6 +682,7 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
+     *   <li>{@link #renameBranch(Identifier, String, String)}.
      *   <li>{@link #listBranches(Identifier)}.
      *   <li>{@link #getTag(Identifier, String)}.
      *   <li>{@link #createTag(Identifier, String, Long, String, boolean)}.
@@ -810,6 +830,22 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
+     * Rollback table schema to a specific schema version. All schema versions greater than the
+     * target will be deleted. This operation will fail if any snapshot, tag, or changelog
+     * references a schema version greater than the target.
+     *
+     * @param identifier path of the table
+     * @param schemaId the target schema version to rollback to
+     * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
      * Create a new branch for this table. By default, an empty branch will be created using the
      * latest schema. If you provide {@code #fromTag}, a branch will be created from the tag and the
      * data files will be inherited from it.
@@ -858,6 +894,20 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()}
      */
     void dropBranch(Identifier identifier, String branch) throws BranchNotExistException;
+
+    /**
+     * Rename a branch for this table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param fromBranch the source branch name
+     * @param toBranch the target branch name
+     * @throws BranchNotExistException if the source branch doesn't exist
+     * @throws BranchAlreadyExistException if the target branch already exists
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException;
 
     /**
      * Fast-forward a branch to main branch.
@@ -1399,6 +1449,33 @@ public interface Catalog extends AutoCloseable {
 
         public String getTableId() {
             return tableId;
+        }
+    }
+
+    /** Exception for trying to operate on the view that doesn't have permission. */
+    class ViewNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "View %s has no permission. Caused by %s.";
+
+        private final Identifier identifier;
+
+        public ViewNoPermissionException(Identifier identifier, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.identifier = identifier;
+        }
+
+        @VisibleForTesting
+        public ViewNoPermissionException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

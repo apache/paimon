@@ -19,10 +19,10 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.VectorSearch
+import org.apache.paimon.predicate.{FullTextSearch, VectorSearch}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
-import org.apache.paimon.table.{DataTable, InnerTable, VectorSearchTable}
+import org.apache.paimon.table.{DataTable, FullTextSearchTable, InnerTable, VectorSearchTable}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
 
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -44,9 +44,15 @@ object PaimonTableValuedFunctions {
   val INCREMENTAL_BETWEEN_TIMESTAMP = "paimon_incremental_between_timestamp"
   val INCREMENTAL_TO_AUTO_TAG = "paimon_incremental_to_auto_tag"
   val VECTOR_SEARCH = "vector_search"
+  val FULL_TEXT_SEARCH = "full_text_search"
 
   val supportedFnNames: Seq[String] =
-    Seq(INCREMENTAL_QUERY, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_TO_AUTO_TAG, VECTOR_SEARCH)
+    Seq(
+      INCREMENTAL_QUERY,
+      INCREMENTAL_BETWEEN_TIMESTAMP,
+      INCREMENTAL_TO_AUTO_TAG,
+      VECTOR_SEARCH,
+      FULL_TEXT_SEARCH)
 
   private type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
 
@@ -60,6 +66,8 @@ object PaimonTableValuedFunctions {
         FunctionRegistryBase.build[IncrementalToAutoTag](fnName, since = None)
       case VECTOR_SEARCH =>
         FunctionRegistryBase.build[VectorSearchQuery](fnName, since = None)
+      case FULL_TEXT_SEARCH =>
+        FunctionRegistryBase.build[FullTextSearchQuery](fnName, since = None)
       case _ =>
         throw new Exception(s"Function $fnName isn't a supported table valued function.")
     }
@@ -90,10 +98,12 @@ object PaimonTableValuedFunctions {
     val ident: Identifier = Identifier.of(Array(dbName), tableName)
     val sparkTable = sparkCatalog.loadTable(ident)
 
-    // Handle vector_search specially
+    // Handle vector_search and full_text_search specially
     tvf match {
       case vsq: VectorSearchQuery =>
         resolveVectorSearchQuery(sparkTable, sparkCatalog, ident, vsq, args.tail)
+      case ftsq: FullTextSearchQuery =>
+        resolveFullTextSearchQuery(sparkTable, sparkCatalog, ident, ftsq, args.tail)
       case _ =>
         val options = tvf.parseArgs(args.tail)
         usingSparkIncrementQuery(tvf, sparkTable, options) match {
@@ -127,6 +137,28 @@ object PaimonTableValuedFunctions {
       case _ =>
         throw new RuntimeException(
           "vector_search only supports Paimon SparkTable backed by InnerTable, " +
+            s"but got table implementation: ${sparkTable.getClass.getName}")
+    }
+  }
+
+  private def resolveFullTextSearchQuery(
+      sparkTable: Table,
+      sparkCatalog: TableCatalog,
+      ident: Identifier,
+      ftsq: FullTextSearchQuery,
+      argsWithoutTable: Seq[Expression]): LogicalPlan = {
+    sparkTable match {
+      case st @ SparkTable(innerTable: InnerTable) =>
+        val fullTextSearch = ftsq.createFullTextSearch(innerTable, argsWithoutTable)
+        val fullTextSearchTable = FullTextSearchTable.create(innerTable, fullTextSearch)
+        DataSourceV2Relation.create(
+          st.copy(table = fullTextSearchTable),
+          Some(sparkCatalog),
+          Some(ident),
+          CaseInsensitiveStringMap.empty())
+      case _ =>
+        throw new RuntimeException(
+          "full_text_search only supports Paimon SparkTable backed by InnerTable, " +
             s"but got table implementation: ${sparkTable.getClass.getName}")
     }
   }
@@ -304,5 +336,54 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       case _ =>
         throw new RuntimeException(s"Cannot extract query vector from expression: $expr")
     }
+  }
+}
+
+/**
+ * Plan for the [[FULL_TEXT_SEARCH]] table-valued function.
+ *
+ * Usage: full_text_search(table_name, column_name, query_text, limit)
+ *   - table_name: the Paimon table to search
+ *   - column_name: the text column name
+ *   - query_text: the query text string
+ *   - limit: the number of top results to return
+ *
+ * Example: SELECT * FROM full_text_search('T', 'content', 'hello world', 10)
+ */
+case class FullTextSearchQuery(override val args: Seq[Expression])
+  extends PaimonTableValueFunction(FULL_TEXT_SEARCH) {
+
+  override def parseArgs(args: Seq[Expression]): Map[String, String] = {
+    // This method is not used for FullTextSearchQuery as we handle it specially
+    Map.empty
+  }
+
+  def createFullTextSearch(
+      innerTable: InnerTable,
+      argsWithoutTable: Seq[Expression]): FullTextSearch = {
+    if (argsWithoutTable.size != 3) {
+      throw new RuntimeException(
+        s"$FULL_TEXT_SEARCH needs three parameters after table_name: column_name, query_text, limit. " +
+          s"Got ${argsWithoutTable.size} parameters after table_name."
+      )
+    }
+    val columnName = argsWithoutTable.head.eval().toString
+    if (!innerTable.rowType().containsField(columnName)) {
+      throw new RuntimeException(
+        s"Column $columnName does not exist in table ${innerTable.name()}"
+      )
+    }
+    val queryText = argsWithoutTable(1).eval().toString
+    val limit = argsWithoutTable(2).eval() match {
+      case i: Int => i
+      case l: Long => l.toInt
+      case other => throw new RuntimeException(s"Invalid limit type: ${other.getClass.getName}")
+    }
+    if (limit <= 0) {
+      throw new IllegalArgumentException(
+        s"Limit must be a positive integer, but got: $limit"
+      )
+    }
+    new FullTextSearch(queryText, limit, columnName)
   }
 }

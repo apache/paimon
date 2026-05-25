@@ -1,0 +1,84 @@
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Key</th>
+            <th class="text-left" style="width: 15%">Default</th>
+            <th class="text-left" style="width: 10%">Type</th>
+            <th class="text-left" style="width: 55%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>read.allow.fullScan</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to allow full scan when reading a partitioned table.</td>
+        </tr>
+        <tr>
+            <td><h5>read.changelog</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read row in the form of changelog (add rowkind column in row to represent its change type).</td>
+        </tr>
+        <tr>
+            <td><h5>read.stream.maxBytesPerTrigger</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>The maximum number of bytes returned in a single batch.</td>
+        </tr>
+        <tr>
+            <td><h5>read.stream.maxFilesPerTrigger</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of files returned in a single batch.</td>
+        </tr>
+        <tr>
+            <td><h5>read.stream.maxRowsPerTrigger</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>The maximum number of rows returned in a single batch.</td>
+        </tr>
+        <tr>
+            <td><h5>read.stream.maxTriggerDelayMs</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>The maximum delay between two adjacent batches, which used to create MinRowsReadLimit with read.stream.minRowsPerTrigger together.</td>
+        </tr>
+        <tr>
+            <td><h5>read.stream.minRowsPerTrigger</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>The minimum number of rows returned in a single batch, which used to create MinRowsReadLimit with read.stream.maxTriggerDelayMs together.</td>
+        </tr>
+        <tr>
+            <td><h5>requiredSparkConfsCheck.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to verify SparkSession is initialized with required configurations.</td>
+        </tr>
+        <tr>
+            <td><h5>source.split.target-size-with-column-pruning</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to adjust the target split size based on pruned (projected) columns. If enabled, split size estimation uses only the columns actually being read.</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, merge the data schema and the table schema automatically before write data.</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.explicit-cast</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
+        </tr>
+        <tr>
+            <td><h5>write.use-v2-write</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.</td>
+        </tr>
+    </tbody>
+</table>

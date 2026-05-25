@@ -30,6 +30,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
@@ -260,8 +261,11 @@ public class AvroSchemaConverter {
                 }
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
-                ArrayType arrayType = (ArrayType) dataType;
-                DataType elementType = arrayType.getElementType();
+            case VECTOR:
+                DataType elementType =
+                        dataType.getTypeRoot() == DataTypeRoot.ARRAY
+                                ? ((ArrayType) dataType).getElementType()
+                                : ((VectorType) dataType).getElementType();
 
                 ArrayBuilder<Schema> arrayBuilder = SchemaBuilder.builder().array();
 

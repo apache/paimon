@@ -90,6 +90,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -97,7 +98,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
@@ -139,6 +139,7 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -274,6 +275,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         catalog.alterDatabase(
                                 database,
                                 Lists.newArrayList(PropertyChange.setProperty("key1", "value1")),
+                                false));
+    }
+
+    @Test
+    void testApiWhenViewNoPermission() throws Exception {
+        Identifier identifier = Identifier.create("test_view_db", "no_permission_view");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        View view = createView(identifier);
+        catalog.createView(identifier, view, false);
+        revokeViewPermission(identifier);
+        assertThrows(Catalog.ViewNoPermissionException.class, () -> catalog.getView(identifier));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class, () -> catalog.dropView(identifier, false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.renameView(
+                                identifier,
+                                Identifier.create("test_view_db", "no_permission_view2"),
+                                false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(
+                                        ViewChange.addDialect(
+                                                "flink_1", "SELECT * FROM FLINK_TABLE_1")),
                                 false));
     }
 
@@ -1752,6 +1781,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testValidTokenWithIOCacheEnabled() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IO_CACHE_ENABLED.key(), "true");
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_io_cache_enabled");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+
+        // Verify IO_CACHE_ENABLED is merged into token
+        assertEquals("true", fileDataToken.token().get(IO_CACHE_ENABLED.key()));
+    }
+
+    @Test
     void testRefreshFileIOWhenExpired() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
@@ -1912,6 +1962,97 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testRollbackSchema() throws Exception {
+        Identifier identifier = Identifier.create("test_rollback_schema", "table_for_schema");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        catalog.rollbackSchema(identifier, firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // rollback to non-existent schema should fail
+        assertThatThrownBy(() -> catalog.rollbackSchema(identifier, 999))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    public void testRollbackSchemaFromTable() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema", "table_for_schema_from_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        table.rollbackSchema(firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // get schema from new table
+        table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.schema().id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testRollbackSchemaFailedWithSnapshotReference() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema_fail", "table_for_schema_fail");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing firstSchemaId
+        StreamTableWrite write = table.newWrite("commitUser");
+        StreamTableCommit commit = table.newCommit("commitUser");
+        write.write(GenericRow.of(1));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing secondSchemaId
+        table = (FileStoreTable) catalog.getTable(identifier);
+        write = table.newWrite("commitUser");
+        commit = table.newCommit("commitUser");
+        write.write(GenericRow.of(2));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // rollback should fail because snapshot references secondSchemaId
+        assertThatThrownBy(() -> catalog.rollbackSchema(identifier, firstSchemaId))
+                .hasMessageContaining("Cannot rollback to schema " + firstSchemaId)
+                .hasMessageContaining(
+                        "schema "
+                                + secondSchemaId
+                                + " is still referenced by snapshots/tags/changelogs");
+    }
+
+    @Test
     public void testDataTokenExpired() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =
@@ -2019,7 +2160,26 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchAlreadyExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", null));
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
-        restCatalog.dropBranch(identifier, "my_branch");
+
+        // Test rename branch
+        restCatalog.renameBranch(identifier, "my_branch", "renamed_branch");
+        assertThat(restCatalog.listBranches(identifier)).containsOnly("renamed_branch");
+        assertThat(restCatalog.getTable(new Identifier(databaseName, "table", "renamed_branch")))
+                .isNotNull();
+
+        // Test rename to existing branch should fail
+        restCatalog.createBranch(identifier, "another_branch", null);
+        assertThrows(
+                Catalog.BranchAlreadyExistException.class,
+                () -> restCatalog.renameBranch(identifier, "renamed_branch", "another_branch"));
+
+        // Test rename non-existent branch should fail
+        assertThrows(
+                Catalog.BranchNotExistException.class,
+                () -> restCatalog.renameBranch(identifier, "non_existent_branch", "new_branch"));
+
+        restCatalog.dropBranch(identifier, "renamed_branch");
+        restCatalog.dropBranch(identifier, "another_branch");
 
         assertThrows(
                 Catalog.BranchNotExistException.class,
@@ -3013,6 +3173,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    @Override
+    protected boolean supportsReplaceTable() {
+        return true;
+    }
+
     // TODO implement this
     @Override
     @Test
@@ -3799,6 +3964,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             throws IOException;
 
     protected abstract void revokeTablePermission(Identifier identifier);
+
+    protected abstract void revokeViewPermission(Identifier identifier);
 
     protected abstract void authTableColumns(Identifier identifier, List<String> columns);
 

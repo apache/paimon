@@ -27,6 +27,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.BucketEntry;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -38,6 +40,7 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -48,6 +51,8 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -57,9 +62,11 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.utils.PartitionPredicateHelper.applyPartitionFilter;
 
 /** A {@link Table} for showing buckets info. */
 public class BucketsTable implements ReadonlyTable {
@@ -121,14 +128,27 @@ public class BucketsTable implements ReadonlyTable {
 
     private static class BucketsScan extends ReadOnceTableScan {
 
+        @Nullable private LeafPredicate partitionPredicate;
+        @Nullable private LeafPredicate bucketPredicate;
+
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            Map<String, LeafPredicate> leafPredicates =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE);
+            this.partitionPredicate = leafPredicates.get("partition");
+            this.bucketPredicate = leafPredicates.get("bucket");
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new BucketsSplit());
+            return () ->
+                    Collections.singletonList(
+                            new BucketsSplit(partitionPredicate, bucketPredicate));
         }
     }
 
@@ -136,17 +156,32 @@ public class BucketsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
+        @Nullable private final LeafPredicate partitionPredicate;
+        @Nullable private final LeafPredicate bucketPredicate;
+
+        private BucketsSplit(
+                @Nullable LeafPredicate partitionPredicate,
+                @Nullable LeafPredicate bucketPredicate) {
+            this.partitionPredicate = partitionPredicate;
+            this.bucketPredicate = bucketPredicate;
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
             }
-            return o != null && getClass() == o.getClass();
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            BucketsSplit that = (BucketsSplit) o;
+            return Objects.equals(partitionPredicate, that.partitionPredicate)
+                    && Objects.equals(bucketPredicate, that.bucketPredicate);
         }
 
         @Override
         public int hashCode() {
-            return 1;
+            return Objects.hash(partitionPredicate, bucketPredicate);
         }
 
         @Override
@@ -167,7 +202,7 @@ public class BucketsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            // filter pushdown is handled at the Scan layer through BucketsSplit
             return this;
         }
 
@@ -188,7 +223,29 @@ public class BucketsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<BucketEntry> buckets = fileStoreTable.newSnapshotReader().bucketEntries();
+            BucketsSplit bucketsSplit = (BucketsSplit) split;
+            SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
+
+            // Apply partition filter to SnapshotReader
+            List<String> partitionKeys = fileStoreTable.partitionKeys();
+            RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+            boolean hasResults =
+                    applyPartitionFilter(
+                            snapshotReader,
+                            bucketsSplit.partitionPredicate,
+                            partitionKeys,
+                            partitionType);
+            if (!hasResults) {
+                return new IteratorRecordReader<>(Collections.emptyIterator());
+            }
+
+            // Apply bucket filter to SnapshotReader
+            if (bucketsSplit.bucketPredicate != null) {
+                LeafPredicate bp = bucketsSplit.bucketPredicate;
+                snapshotReader.withBucketFilter(bucket -> bp.test(GenericRow.of(null, bucket)));
+            }
+
+            List<BucketEntry> buckets = snapshotReader.bucketEntries();
 
             @SuppressWarnings("unchecked")
             CastExecutor<InternalRow, BinaryString> partitionCastExecutor =

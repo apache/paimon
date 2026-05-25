@@ -348,6 +348,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Override
+    protected void revokeViewPermission(Identifier identifier) {
+        restCatalogServer.addNoPermissionView(identifier);
+    }
+
+    @Override
     protected void authTableColumns(Identifier identifier, List<String> columns) {
         restCatalogServer.addTableColumnAuth(identifier, columns);
     }

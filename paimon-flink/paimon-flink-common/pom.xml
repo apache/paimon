@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-flink</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.4-SNAPSHOT</version>
+        <version>1.5-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -229,6 +229,13 @@ under the License.
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm</artifactId>
             <version>9.4</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-lumina</artifactId>
+            <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

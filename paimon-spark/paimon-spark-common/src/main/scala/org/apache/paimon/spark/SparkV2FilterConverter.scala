@@ -165,10 +165,10 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
         }
 
       case ALWAYS_TRUE =>
-        builder.alwaysTrue()
+        PredicateBuilder.alwaysTrue()
 
       case ALWAYS_FALSE =>
-        builder.alwaysFalse()
+        PredicateBuilder.alwaysFalse()
 
       case _ => throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
     }

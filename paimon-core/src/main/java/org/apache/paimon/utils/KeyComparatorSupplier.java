@@ -45,6 +45,6 @@ public class KeyComparatorSupplier implements SerializableSupplier<Comparator<In
 
     @Override
     public RecordComparator get() {
-        return newRecordComparator(inputTypes, sortFields, true);
+        return newRecordComparator(inputTypes, sortFields);
     }
 }

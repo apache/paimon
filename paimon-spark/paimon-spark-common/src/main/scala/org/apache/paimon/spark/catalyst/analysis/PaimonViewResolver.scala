@@ -30,7 +30,9 @@ import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.parser.extensions.{CurrentOrigin, Origin}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan, Project, SubqueryAlias}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class PaimonViewResolver(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -62,14 +64,24 @@ case class PaimonViewResolver(spark: SparkSession)
     val parsedPlan =
       parseViewText(nameParts.toArray.mkString("."), view.query(SupportView.DIALECT))
 
-    val aliases = SparkTypeUtils.fromPaimonRowType(view.rowType()).fields.zipWithIndex.map {
+    // Apply early analysis rules that won't re-run for plans injected during Resolution batch.
+    val earlyRules = SparkShimLoader.shim.earlyBatchRules()
+    val rewritten = earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan))
+
+    // Spark internally replaces CharType/VarcharType with StringType during V2 table resolution,
+    // so the view's schema must also use StringType to avoid UpCast failures
+    // (e.g., "Cannot up cast from STRING to VARCHAR(50)").
+    val viewSchema = CharVarcharUtils.replaceCharVarcharWithStringInSchema(
+      SparkTypeUtils.fromPaimonRowType(view.rowType()))
+
+    val aliases = viewSchema.fields.zipWithIndex.map {
       case (expected, pos) =>
         val attr = GetColumnByOrdinal(pos, expected.dataType)
         Alias(UpCast(attr, expected.dataType), expected.name)(explicitMetadata =
           Some(expected.metadata))
     }
 
-    SubqueryAlias(nameParts, Project(aliases, parsedPlan))
+    SubqueryAlias(nameParts, Project(aliases, rewritten))
   }
 
   private def parseViewText(name: String, viewText: String): LogicalPlan = {

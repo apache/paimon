@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 import random
@@ -22,6 +21,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -34,12 +34,12 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import ConflictDetection
+from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
@@ -78,14 +78,16 @@ class FileStoreCommit:
     org.apache.paimon.operation.FileStoreCommitImpl in Java.
     """
 
-    def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str):
+    def __init__(self, snapshot_commit: SnapshotCommit, table, commit_user: str,
+                 commit_callbacks: Optional[List[CommitCallback]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.snapshot_commit = snapshot_commit
         self.table: FileStoreTable = table
         self.commit_user = commit_user
+        self.commit_callbacks: List[CommitCallback] = commit_callbacks if commit_callbacks is not None else []
 
-        self.snapshot_manager = SnapshotManager(table)
+        self.snapshot_manager = table.snapshot_manager()
         self.manifest_file_manager = ManifestFileManager(table)
         self.manifest_list_manager = ManifestListManager(table)
 
@@ -147,6 +149,9 @@ class FileStoreCommit:
             commit_kind = "OVERWRITE"
             detect_conflicts = True
             allow_rollback = True
+        if self.conflict_detection.has_row_id_check_from_snapshot():
+            detect_conflicts = True
+            allow_rollback = True
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
@@ -156,37 +161,33 @@ class FileStoreCommit:
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
-        if not commit_messages:
-            return
-
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
             self.table.identifier,
             len(commit_messages),
         )
+        skip_overwrite = False
         partition_filter = None
-        # sanity check, all changes must be done within the given partition, meanwhile build a partition filter
-        if len(overwrite_partition) > 0:
-            predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
-            sub_predicates = []
-            for key, value in overwrite_partition.items():
-                sub_predicates.append(predicate_builder.equal(key, value))
-            partition_filter = predicate_builder.and_predicates(sub_predicates)
 
-            for msg in commit_messages:
-                row = OffsetRow(msg.partition, 0, len(msg.partition))
-                if not partition_filter.test(row):
-                    raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
-                                       f"in {msg.partition} does not belong to this partition")
+        # Partition filter is built from dynamic or static partition according to options.
+        if len(self.table.partition_keys) > 0 and self.table.options.dynamic_partition_overwrite():
+            if not commit_messages:
+                # In dynamic mode, if there are no changes to commit, no data will be deleted
+                skip_overwrite = True
+            else:
+                partition_filter = self._create_dynamic_partition_filter(commit_messages)
+        else:
+            partition_filter = self._create_static_partition_filter(overwrite_partition, commit_messages)
 
-        self._try_commit(
-            commit_kind="OVERWRITE",
-            commit_identifier=commit_identifier,
-            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                snapshot, partition_filter, commit_messages),
-            detect_conflicts=True,
-            allow_rollback=False,
-        )
+        if not skip_overwrite:
+            self._try_commit(
+                commit_kind="OVERWRITE",
+                commit_identifier=commit_identifier,
+                commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                    snapshot, partition_filter, commit_messages),
+                detect_conflicts=True,
+                allow_rollback=False,
+            )
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
         if not partitions:
@@ -201,15 +202,17 @@ class FileStoreCommit:
                         f"Partition keys are: {list(self.table.partition_keys)}."
                     )
 
-        # Use full table fields so FullStartingScanner's trim_and_transform_predicate
-        # maps indices correctly (full schema index -> partition index).
-        predicate_builder = PredicateBuilder(self.table.fields)
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        default_part_value = self.table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
         partition_predicates = []
         for part in partitions:
-            sub_predicates = [
-                predicate_builder.equal(key, value)
-                for key, value in part.items()
-            ]
+            sub_predicates = []
+            for key, value in part.items():
+                if value is None or (isinstance(value, str) and value == default_part_value):
+                    sub_predicates.append(predicate_builder.is_null(key))
+                else:
+                    sub_predicates.append(predicate_builder.equal(key, value))
             if sub_predicates:
                 pred = predicate_builder.and_predicates(sub_predicates)
                 if pred is not None:
@@ -224,6 +227,17 @@ class FileStoreCommit:
             commit_identifier=commit_identifier,
             commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
                 snapshot, partition_filter, []),
+            detect_conflicts=True,
+            allow_rollback=False,
+        )
+
+    def truncate_table(self, commit_identifier: int) -> None:
+        """Truncate the entire table, deleting all data."""
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                snapshot, None, []),
             detect_conflicts=True,
             allow_rollback=False,
         )
@@ -367,6 +381,10 @@ class FileStoreCommit:
                     delta_record_count -= entry.file.row_count
 
             total_record_count += delta_record_count
+            index_manifest = None
+            if latest_snapshot and commit_kind == "APPEND":
+                index_manifest = latest_snapshot.index_manifest
+
             snapshot_data = Snapshot(
                 version=3,
                 id=new_snapshot_id,
@@ -380,6 +398,7 @@ class FileStoreCommit:
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),
                 next_row_id=next_row_id,
+                index_manifest=index_manifest,
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
@@ -391,7 +410,7 @@ class FileStoreCommit:
         # Use SnapshotCommit for atomic commit
         try:
             with self.snapshot_commit:
-                success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
+                success = self.snapshot_commit.commit(snapshot_data, statistics)
                 if not success:
                     commit_time_s = (int(time.time() * 1000) - start_millis) / 1000
                     logger.warning(
@@ -420,6 +439,16 @@ class FileStoreCommit:
             commit_identifier,
             commit_kind,
         )
+
+        if self.commit_callbacks:
+            context = CommitCallbackContext(
+                snapshot=snapshot_data,
+                commit_entries=commit_entries,
+                identifier=commit_identifier,
+            )
+            for callback in self.commit_callbacks:
+                callback.call(context)
+
         return SuccessResult()
 
     def _write_manifest_file(self, commit_entries, new_manifest_file):
@@ -437,11 +466,13 @@ class FileStoreCommit:
 
         # Calculate partition statistics
         partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
-        partition_min_stats = [min(col) for col in partition_columns]
-        partition_max_stats = [max(col) for col in partition_columns]
-        partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
-        if not all(count == 0 for count in partition_null_counts):
-            raise RuntimeError("Partition value should not be null")
+        partition_null_counts = [sum(1 for value in col if value is None) for col in partition_columns]
+        partition_min_stats = [
+            min((v for v in col if v is not None), default=None) for col in partition_columns
+        ]
+        partition_max_stats = [
+            max((v for v in col if v is not None), default=None) for col in partition_columns
+        ]
 
         # Calculate min_row_id and max_row_id from commit_entries
         min_row_id = None
@@ -499,11 +530,50 @@ class FileStoreCommit:
                     return True
         return False
 
+    def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
+        """Build a partition filter from the unique partitions present in commit_messages."""
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        predicates = []
+        seen_partitions = set()
+        for msg in commit_messages:
+            partition_values = tuple(msg.partition)
+            if partition_values not in seen_partitions:
+                seen_partitions.add(partition_values)
+                equalities = []
+                for name, value in zip(self.table.partition_keys, msg.partition):
+                    if value is None:
+                        equalities.append(predicate_builder.is_null(name))
+                    else:
+                        equalities.append(predicate_builder.equal(name, value))
+                predicates.append(predicate_builder.and_predicates(equalities))
+        return predicate_builder.or_predicates(predicates)
+
+    def _create_static_partition_filter(self, overwrite_partition, commit_messages: List[CommitMessage]):
+        """Build a partition filter from the explicit overwrite_partition spec."""
+        if not overwrite_partition:
+            return None
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
+        default_part_value = self.table.options.options.get(
+            CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__")
+        equalities = []
+        for key, value in overwrite_partition.items():
+            if value is None or (isinstance(value, str) and value == default_part_value):
+                equalities.append(predicate_builder.is_null(key))
+            else:
+                equalities.append(predicate_builder.equal(key, value))
+        partition_filter = predicate_builder.and_predicates(equalities)
+        for msg in commit_messages:
+            row = OffsetRow(msg.partition, 0, len(msg.partition))
+            if not partition_filter.test(row):
+                raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
+                                   f"in {msg.partition} does not belong to this partition")
+        return partition_filter
+
     def _generate_overwrite_entries(self, latest_snapshot, partition_filter, commit_messages):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latest_snapshot is None \
-            else (FileScanner(self.table, lambda: [], partition_filter).
+            else (FileScanner(self.table, lambda: ([], None), partition_predicate=partition_filter).
                   read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
@@ -569,6 +639,11 @@ class FileStoreCommit:
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
+        for callback in self.commit_callbacks:
+            try:
+                callback.close()
+            except Exception:
+                pass
         if hasattr(self.snapshot_commit, 'close'):
             self.snapshot_commit.close()
 
@@ -684,6 +759,9 @@ class FileStoreCommit:
         blob_start_by_field = {}
 
         for entry in commit_entries:
+            assert entry.file.file_source is not None, \
+                f"file_source must be present for row-tracking table, file={entry.file.file_name}"
+
             # Check if this is an append file that needs row ID assignment
             if (entry.kind == 0 and  # ADD kind
                     entry.file.file_source == 0 and  # APPEND file source

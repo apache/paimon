@@ -114,6 +114,24 @@ public class BlobDescriptorTest {
         assertThat(blobDescriptor.length()).isEqualTo(200L);
     }
 
+    @Test
+    public void testSerializeUsesCurrentVersion() throws Exception {
+        byte[] serializedV1 =
+                IOUtils.readFully(
+                        BlobDescriptorTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatible/blob_descriptor_v1"),
+                        true);
+
+        BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(serializedV1);
+        byte[] serialized = blobDescriptor.serialize();
+
+        assertThat(serialized[0]).isEqualTo((byte) 2);
+        assertThat(BlobDescriptor.isBlobDescriptor(serialized)).isTrue();
+        assertThat(BlobDescriptor.deserialize(serialized))
+                .isEqualTo(new BlobDescriptor("/test/path", 100L, 200L));
+    }
+
     private BlobDescriptor createDescriptorWithVersion(
             byte version, String uri, long offset, long length) throws Exception {
         Constructor<BlobDescriptor> constructor =

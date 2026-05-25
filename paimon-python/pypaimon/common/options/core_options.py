@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import sys
 from enum import Enum
 from typing import Dict, Optional
@@ -64,6 +64,7 @@ class CoreOptions:
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_LANCE: str = "lance"
+    FILE_FORMAT_VORTEX: str = "vortex"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -260,6 +261,46 @@ class CoreOptions:
         .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
     )
 
+    SCAN_SNAPSHOT_ID: ConfigOption[int] = (
+        ConfigOptions.key("scan.snapshot-id")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional snapshot id used in case of 'from-snapshot' or "
+            "'from-snapshot-full' scan mode."
+        )
+    )
+
+    SCAN_TIMESTAMP_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.timestamp-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp in milliseconds used for time travel to the "
+            "latest snapshot equal to or earlier than the given timestamp."
+        )
+    )
+
+    SCAN_TIMESTAMP: ConfigOption[str] = (
+        ConfigOptions.key("scan.timestamp")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp string (e.g. '2023-12-01 12:00:00') used for "
+            "time travel. Will be converted to milliseconds internally."
+        )
+    )
+
+    SCAN_WATERMARK: ConfigOption[int] = (
+        ConfigOptions.key("scan.watermark")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional watermark used for time travel to the first snapshot "
+            "with watermark greater than or equal to the given value."
+        )
+    )
+
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("source.split.target-size")
         .memory_type()
@@ -387,11 +428,67 @@ class CoreOptions:
         )
     )
 
+    LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("local-cache.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable local block cache for file reads. "
+            "If local-cache.dir is configured, disk cache is used; otherwise memory cache is used."
+        )
+    )
+
+    LOCAL_CACHE_DIR: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory for local block cache on disk. "
+            "If not configured, memory cache is used instead."
+        )
+    )
+
+    LOCAL_CACHE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("local-cache.max-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Maximum total size of the local block cache. Unlimited by default.")
+    )
+
+    LOCAL_CACHE_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("local-cache.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description("Block size for local cache.")
+    )
+
+    LOCAL_CACHE_WHITELIST: ConfigOption[str] = (
+        ConfigOptions.key("local-cache.whitelist")
+        .string_type()
+        .default_value("meta,global-index")
+        .with_description(
+            "Comma-separated list of file types to cache. "
+            "Supported values: meta, global-index, bucket-index, data, file-index."
+        )
+    )
+
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
         .default_value(1024)
         .with_description("Read batch size for any file format if it supports.")
+    )
+
+    READ_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("read.parallelism")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Parallelism for reading splits within a single TableRead call. "
+            "The value 1 (default) keeps reads serial. Values >= 2 enable a "
+            "thread pool that reads splits concurrently and assembles the "
+            "result in input order. Has no effect when fewer than 2 splits "
+            "are passed.")
     )
 
     ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
@@ -401,6 +498,53 @@ class CoreOptions:
         .with_description(
             "When adding a new column, if the table has partition keys, "
             "insert the new column before the first partition column by default."
+        )
+    )
+
+    VARIANT_SHREDDING_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("variant.shredding.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to enable VARIANT shredding. When True (default), writes apply the "
+            "shredding schema configured via 'variant.shreddingSchema', and reads "
+            "automatically reassemble shredded columns back to the standard "
+            "struct<value, metadata> form. Set to False to bypass both behaviours."
+        )
+    )
+
+    VARIANT_SHREDDING_SCHEMA: ConfigOption[str] = (
+        ConfigOptions.key("variant.shreddingSchema")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "JSON-encoded ROW type specifying which VARIANT sub-fields to shred when "
+            "writing Parquet (static shredding mode). The top-level fields map VARIANT "
+            "column names to their sub-field schemas. "
+            "Alias: 'parquet.variant.shreddingSchema'. "
+            "Example: '{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"payload\","
+            "\"type\":{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"age\","
+            "\"type\":\"BIGINT\"}]}}]}'"
+        )
+    )
+
+    PARTITION_DEFAULT_NAME: ConfigOption[str] = (
+        ConfigOptions.key("partition.default-name")
+        .string_type()
+        .default_value("__DEFAULT_PARTITION__")
+        .with_description(
+            "The default partition name in case the dynamic partition"
+            " column value is null/empty string."
+        )
+    )
+
+    DYNAMIC_PARTITION_OVERWRITE: ConfigOption[bool] = (
+        ConfigOptions.key("dynamic-partition-overwrite")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether only overwrite dynamic partition when overwriting a partitioned table "
+            "with dynamic partition columns. Works only when the table has partition keys."
         )
     )
 
@@ -469,6 +613,16 @@ class CoreOptions:
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
+    def variant_shredding_enabled(self) -> bool:
+        return self.options.get(CoreOptions.VARIANT_SHREDDING_ENABLED, True)
+
+    def variant_shredding_schema(self) -> Optional[str]:
+        val = self.options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA)
+        if val is None:
+            # Support alias used by Java: parquet.variant.shreddingSchema
+            val = self.options.data.get("parquet.variant.shreddingSchema")
+        return val
+
     def blob_descriptor_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
         if value is None:
@@ -509,6 +663,18 @@ class CoreOptions:
 
     def scan_tag_name(self, default=None):
         return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
+
+    def scan_snapshot_id(self, default=None):
+        return self.options.get(CoreOptions.SCAN_SNAPSHOT_ID, default)
+
+    def scan_timestamp_millis(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TIMESTAMP_MILLIS, default)
+
+    def scan_timestamp(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TIMESTAMP, default)
+
+    def scan_watermark(self, default=None):
+        return self.options.get(CoreOptions.SCAN_WATERMARK, default)
 
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()
@@ -569,8 +735,29 @@ class CoreOptions:
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
 
+    def local_cache_enabled(self) -> bool:
+        return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)
+
+    def local_cache_dir(self) -> Optional[str]:
+        return self.options.get(CoreOptions.LOCAL_CACHE_DIR)
+
+    def local_cache_max_size(self) -> Optional[MemorySize]:
+        return self.options.get(CoreOptions.LOCAL_CACHE_MAX_SIZE)
+
+    def local_cache_block_size(self) -> MemorySize:
+        return self.options.get(CoreOptions.LOCAL_CACHE_BLOCK_SIZE)
+
+    def local_cache_whitelist(self) -> str:
+        return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
+
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
 
+    def read_parallelism(self, default=None) -> int:
+        return self.options.get(CoreOptions.READ_PARALLELISM, default)
+
     def add_column_before_partition(self) -> bool:
         return self.options.get(CoreOptions.ADD_COLUMN_BEFORE_PARTITION, False)
+
+    def dynamic_partition_overwrite(self) -> bool:
+        return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)

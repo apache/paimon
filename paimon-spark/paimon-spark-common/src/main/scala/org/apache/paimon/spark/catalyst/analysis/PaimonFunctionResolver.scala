@@ -18,13 +18,19 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME
 import org.apache.paimon.spark.catalog.SupportV1Function
+import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.analysis.UnresolvedFunction
+import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.UNRESOLVED_FUNCTION
+import org.apache.spark.sql.types.{LongType, StringType}
+import org.apache.spark.unsafe.types.UTF8String
 
 case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan] {
 
@@ -34,6 +40,9 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
     plan.resolveOperatorsUpWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
       case l: LogicalPlan =>
         l.transformExpressionsWithPruning(_.containsAnyPattern(UNRESOLVED_FUNCTION)) {
+          case u: UnresolvedFunction
+              if isBlobViewFunction(u.nameParts) && u.arguments.forall(_.resolved) =>
+            resolveBlobView(u)
           case u: UnResolvedPaimonV1Function if u.arguments.forall(_.resolved) =>
             u.funcIdent.catalog match {
               case Some(catalog) =>
@@ -48,4 +57,41 @@ case class PaimonFunctionResolver(spark: SparkSession) extends Rule[LogicalPlan]
             }
         }
     }
+
+  private def resolveBlobView(u: UnresolvedFunction): Expression = {
+    if (u.arguments.length != 3) {
+      throw new UnsupportedOperationException(
+        s"Function 'blob_view' requires 3 arguments " +
+          s"(tableName STRING, fieldName STRING, rowId BIGINT), but found ${u.arguments.length}")
+    }
+    val tableName = literalString(u.arguments(0), "tableName")
+    val fieldName = literalString(u.arguments(1), "fieldName")
+    if (u.arguments(2).dataType != LongType) {
+      throw new UnsupportedOperationException(
+        "The third argument of 'blob_view' must be BIGINT type.")
+    }
+    ReplacePaimonFunctions.resolveBlobView(spark, tableName, fieldName, u.arguments(2))
+  }
+
+  private def literalString(expr: Expression, argumentName: String): String = {
+    if (!expr.isInstanceOf[Literal]) {
+      throw new UnsupportedOperationException(s"$argumentName must be a literal")
+    }
+    if (expr.dataType != StringType) {
+      throw new UnsupportedOperationException(s"$argumentName must be STRING type")
+    }
+
+    val value = expr.eval()
+    if (value == null) {
+      null
+    } else {
+      value.asInstanceOf[UTF8String].toString
+    }
+  }
+
+  private def isBlobViewFunction(nameParts: Seq[String]): Boolean = {
+    nameParts.length >= 2 &&
+    nameParts.last.equalsIgnoreCase(PaimonFunctions.BLOB_VIEW) &&
+    nameParts(nameParts.length - 2).equalsIgnoreCase(SYSTEM_DATABASE_NAME)
+  }
 }

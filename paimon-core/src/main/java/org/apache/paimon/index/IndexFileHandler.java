@@ -33,6 +33,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -41,7 +42,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
 /** Handle index files. */
@@ -205,24 +205,16 @@ public class IndexFileHandler {
         return indexManifestFile.readWithIOException(indexManifest);
     }
 
-    private IndexFile indexFile(IndexManifestEntry entry) {
-        IndexFileMeta file = entry.indexFile();
-        switch (file.indexType()) {
-            case HASH_INDEX:
-                return hashIndex(entry.partition(), entry.bucket());
-            case DELETION_VECTORS_INDEX:
-                return dvIndex(entry.partition(), entry.bucket());
-            default:
-                throw new IllegalArgumentException("Unknown index type: " + file.indexType());
+    public boolean existsIndexFile(IndexManifestEntry entry) {
+        try {
+            return fileIO.exists(filePath(entry));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
-    public boolean existsIndexFile(IndexManifestEntry file) {
-        return indexFile(file).exists(file.indexFile());
-    }
-
     public void deleteIndexFile(IndexManifestEntry entry) {
-        indexFile(entry).delete(entry.indexFile());
+        fileIO.deleteQuietly(filePath(entry));
     }
 
     public void deleteManifest(String indexManifest) {

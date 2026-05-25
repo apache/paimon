@@ -196,7 +196,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         Iterator<WrapperWithFieldIndex<FieldAggregator>> aggIter = fieldAggregators.iterator();
         WrapperWithFieldIndex<FieldAggregator> curAgg = aggIter.hasNext() ? aggIter.next() : null;
 
-        boolean[] isEmptySequenceGroup = new boolean[getters.length];
+        boolean[] isProcessedSequenceField = new boolean[getters.length];
         for (int i = 0; i < getters.length; i++) {
             FieldsComparator seqComparator = null;
             if (curComparator != null && curComparator.fieldIndex == i) {
@@ -211,15 +211,13 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
 
             Object accumulator = row.getField(i);
-            if (seqComparator == null) {
-                Object field = getters[i].getFieldOrNull(kv.value());
-                if (aggregator != null) {
-                    row.setField(i, aggregator.agg(accumulator, field));
-                } else if (field != null) {
-                    row.setField(i, field);
+            if (seqComparator != null) {
+                // Skip if this field has already been processed as part of a sequence group
+                if (isProcessedSequenceField[i]) {
+                    continue;
                 }
-            } else {
-                if (isEmptySequenceGroup(kv, seqComparator, isEmptySequenceGroup)) {
+
+                if (isEmptySequenceGroup(kv, seqComparator, isProcessedSequenceField)) {
                     // skip null sequence group
                     continue;
                 }
@@ -234,6 +232,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         for (int fieldIndex : seqComparator.compareFields()) {
                             row.setField(
                                     fieldIndex, getters[fieldIndex].getFieldOrNull(kv.value()));
+                            // Mark these sequence fields as processed
+                            isProcessedSequenceField[fieldIndex] = true;
                         }
                         continue;
                     }
@@ -242,27 +242,28 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 } else if (aggregator != null) {
                     row.setField(i, aggregator.aggReversed(accumulator, field));
                 }
+            } else {
+                Object field = getters[i].getFieldOrNull(kv.value());
+                if (aggregator != null) {
+                    row.setField(i, aggregator.agg(accumulator, field));
+                } else if (field != null) {
+                    row.setField(i, field);
+                }
             }
         }
     }
 
     private boolean isEmptySequenceGroup(
-            KeyValue kv, FieldsComparator comparator, boolean[] isEmptySequenceGroup) {
-
-        // If any flag of the sequence fields is set, it means the sequence group is empty.
-        if (isEmptySequenceGroup[comparator.compareFields()[0]]) {
-            return true;
-        }
-
+            KeyValue kv, FieldsComparator comparator, boolean[] isProcessedSequenceField) {
         for (int fieldIndex : comparator.compareFields()) {
             if (getters[fieldIndex].getFieldOrNull(kv.value()) != null) {
                 return false;
             }
         }
 
-        // Set the flag of all the sequence fields of the sequence group.
+        // Mark these sequence fields as processed
         for (int fieldIndex : comparator.compareFields()) {
-            isEmptySequenceGroup[fieldIndex] = true;
+            isProcessedSequenceField[fieldIndex] = true;
         }
 
         return true;
@@ -277,7 +278,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         Iterator<WrapperWithFieldIndex<FieldAggregator>> aggIter = fieldAggregators.iterator();
         WrapperWithFieldIndex<FieldAggregator> curAgg = aggIter.hasNext() ? aggIter.next() : null;
 
-        boolean[] isEmptySequenceGroup = new boolean[getters.length];
+        boolean[] isProcessedSequenceField = new boolean[getters.length];
         for (int i = 0; i < getters.length; i++) {
             FieldsComparator seqComparator = null;
             if (curComparator != null && curComparator.fieldIndex == i) {
@@ -292,7 +293,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
 
             if (seqComparator != null) {
-                if (isEmptySequenceGroup(kv, seqComparator, isEmptySequenceGroup)) {
+                // Skip if this field has already been processed as part of a sequence group
+                if (isProcessedSequenceField[i]) {
+                    continue;
+                }
+
+                if (isEmptySequenceGroup(kv, seqComparator, isProcessedSequenceField)) {
                     // skip null sequence group
                     continue;
                 }
@@ -316,6 +322,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                     updatedSequenceFields.add(field);
                                 }
                             }
+                            // Mark these sequence fields as processed
+                            isProcessedSequenceField[field] = true;
                         }
                     } else {
                         // retract normal field
@@ -344,13 +352,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private void initRow(GenericRow row, InternalRow value) {
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(value);
-            if (!nullables[i]) {
-                if (field != null) {
-                    row.setField(i, field);
-                } else {
-                    throw new IllegalArgumentException("Field " + i + " can not be null");
-                }
+            if (!nullables[i] && field == null) {
+                throw new IllegalArgumentException("Field " + i + " can not be null");
             }
+            row.setField(i, field);
         }
     }
 
@@ -496,6 +501,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             RowType targetType = readType != null ? readType : rowType;
             Map<Integer, FieldsComparator> projectedSeqComparators = new HashMap<>();
             Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
+            Set<Integer> projectedSequenceGroupPartialDelete = sequenceGroupPartialDelete;
 
             if (readType != null) {
                 // Build index mapping from table schema to read schema
@@ -547,6 +553,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         projectedAggregators.put(newIndex, fieldAggregators.get(oldIndex).get());
                     }
                 }
+
+                projectedSequenceGroupPartialDelete =
+                        sequenceGroupPartialDelete.stream()
+                                .filter(indexMap::containsKey)
+                                .map(indexMap::get)
+                                .collect(Collectors.toSet());
             } else {
                 // Use original mappings
                 this.fieldSeqComparators.forEach(
@@ -563,7 +575,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     projectedAggregators,
                     !fieldSeqComparators.isEmpty(),
                     removeRecordOnDelete,
-                    sequenceGroupPartialDelete,
+                    projectedSequenceGroupPartialDelete,
                     ArrayUtils.toPrimitiveBoolean(
                             fieldTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new)));
         }

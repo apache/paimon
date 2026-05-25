@@ -218,6 +218,14 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void rollbackSchema(long schemaId) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support rollbackSchema.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void createBranch(String branchName) {
         throw new UnsupportedOperationException(
                 String.format(
@@ -258,10 +266,26 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void renameBranch(String fromBranch, String toBranch) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support renameBranch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void fastForward(String branchName) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support fastForward.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default void mergeBranch(String sourceBranch, String targetBranch) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support mergeBranch.",
                         this.getClass().getSimpleName()));
     }
 

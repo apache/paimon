@@ -23,6 +23,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.table.functions.ScalarFunction;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -472,6 +473,67 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 expected);
     }
 
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testSelfMerge(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 2, "name2_test_udf"),
+                        changelogRow("+I", 3, "name3_test_udf"),
+                        changelogRow("+I", 4, "name4_test_udf"),
+                        changelogRow("+I", 8, "name8_test_udf"),
+                        changelogRow("+I", 9, "name9_test_udf"),
+                        changelogRow("+I", 12, "name12_test_udf"),
+                        changelogRow("+I", 16, "name16_test_udf"),
+                        changelogRow("+I", 19, "name19_test_udf"));
+
+        String udfName =
+                "org.apache.paimon.flink.action.DataEvolutionMergeIntoActionITCase$StringConcatUdf";
+        String createFuncSql = "CREATE TEMPORARY FUNCTION concat_string AS";
+        String createViewSql =
+                String.format(
+                        "CREATE TEMPORARY VIEW SS AS SELECT _ROW_ID, concat_string(name) AS name FROM `%s`.`T$row_tracking`",
+                        targetDb);
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("TempT._ROW_ID=SS._ROW_ID")
+                            .withMatchedUpdateSet("TempT.name=SS.name")
+                            .withSourceTable("SS")
+                            .withTargetAlias("TempT")
+                            .withSourceSqls(
+                                    String.format("%s '%s'", createFuncSql, udfName), createViewSql)
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', 'TempT', '%s',"
+                                    + " 'SS', 'TempT._ROW_ID=SS._ROW_ID', 'name=SS.name', 2)",
+                            targetDb,
+                            String.format("%s ''%s''", createFuncSql, udfName)
+                                    + ";"
+                                    + createViewSql);
+
+            executeSQL(procedureStatement, false, true);
+        }
+
+        testBatchRead(
+                "SELECT id, name FROM T$row_tracking where _ROW_ID in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
+    }
+
     @Test
     public void testUpdateAction() throws Exception {
 
@@ -657,6 +719,58 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         Assertions.assertTrue(
                 t.getMessage().contains("raw-data BLOB column"),
                 "Expected error about raw-data BLOB column but got: " + t.getMessage());
+    }
+
+    @Test
+    public void testUpdateNonBlobColumnOnRawBlobTableWithSplitFiles() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_SPLIT_T",
+                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+                                put("sink.parallelism", "1");
+                            }
+                        }));
+        insertInto(
+                "RAW_BLOB_SPLIT_T",
+                "(1, 'name1', X'48656C6C6F')",
+                "(2, 'name2', X'5945')",
+                "(3, 'name3', X'414243')");
+        testBatchRead(
+                "SELECT COUNT(*) > 1 FROM `RAW_BLOB_SPLIT_T$files` "
+                        + "WHERE file_path LIKE '%.blob'",
+                Collections.singletonList(changelogRow("+I", true)));
+
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_SPLIT_S",
+                        Arrays.asList("id INT", "name STRING"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("RAW_BLOB_SPLIT_S", "(1, 'updated_name1')");
+
+        builder(warehouse, database, "RAW_BLOB_SPLIT_T")
+                .withMergeCondition("RAW_BLOB_SPLIT_T.id=RAW_BLOB_SPLIT_S.id")
+                .withMatchedUpdateSet("RAW_BLOB_SPLIT_T.name=RAW_BLOB_SPLIT_S.name")
+                .withSourceTable("RAW_BLOB_SPLIT_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "updated_name1"),
+                        changelogRow("+I", 2, "name2"),
+                        changelogRow("+I", 3, "name3"));
+        testBatchRead("SELECT id, name FROM RAW_BLOB_SPLIT_T ORDER BY id", expected);
     }
 
     @Test
@@ -919,5 +1033,13 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
             hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
         }
         return new String(hexChars);
+    }
+
+    /** The test udf to test udf in merge into situation. */
+    public static class StringConcatUdf extends ScalarFunction {
+
+        public String eval(String input) {
+            return input + "_test_udf";
+        }
     }
 }

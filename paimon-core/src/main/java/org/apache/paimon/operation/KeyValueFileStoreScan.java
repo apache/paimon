@@ -116,6 +116,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withCompleteFilter(Predicate predicate) {
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
@@ -220,7 +225,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             return false;
         }
 
-        return mergeEngine != PARTIAL_UPDATE && mergeEngine != AGGREGATE && !deletionVectorsEnabled;
+        return mergeEngine != PARTIAL_UPDATE
+                && mergeEngine != AGGREGATE
+                && !deletionVectorsEnabled
+                && valueFilter == null
+                && keyFilter == null;
     }
 
     @Override

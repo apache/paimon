@@ -121,6 +121,9 @@ public interface SnapshotReader {
 
     SnapshotReader withLimit(int limit);
 
+    /** Whether the pushed filter still contains non-partition predicates. */
+    boolean hasNonPartitionFilter();
+
     /** Get splits plan from snapshot. */
     Plan read();
 

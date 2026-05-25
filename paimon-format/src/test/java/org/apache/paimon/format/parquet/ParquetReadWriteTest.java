@@ -670,6 +670,77 @@ public class ParquetReadWriteTest {
                 });
     }
 
+    @Test
+    public void testReadTimestampNanosWrittenByParquet() throws Exception {
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        Type timestampNanosType =
+                Types.primitive(INT64, Type.Repetition.REQUIRED)
+                        .as(
+                                LogicalTypeAnnotation.timestampType(
+                                        false, LogicalTypeAnnotation.TimeUnit.NANOS))
+                        .named("f0")
+                        .withId(0);
+        Type arrayTimestampNanosType =
+                ConversionPatterns.listOfElements(
+                                Type.Repetition.OPTIONAL,
+                                "f1",
+                                Types.primitive(INT64, Type.Repetition.OPTIONAL)
+                                        .as(
+                                                LogicalTypeAnnotation.timestampType(
+                                                        false,
+                                                        LogicalTypeAnnotation.TimeUnit.NANOS))
+                                        .named("element")
+                                        .withId(2))
+                        .withId(1);
+        MessageType schema =
+                new MessageType("origin-parquet", timestampNanosType, arrayTimestampNanosType);
+        long[] nanosValues = new long[] {1704067200123456789L, -123456789L};
+
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(path.toString()), conf))
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .build()) {
+            SimpleGroupFactory simpleGroupFactory = new SimpleGroupFactory(schema);
+            for (long nanos : nanosValues) {
+                Group row = simpleGroupFactory.newGroup();
+                row.append("f0", nanos);
+                Group array = row.addGroup("f1");
+                array.addGroup(0).add(0, nanos);
+                array.addGroup(0).add(0, nanos + 1);
+                writer.write(row);
+            }
+        }
+
+        RowType paimonRowType =
+                RowType.builder()
+                        .fields(new TimestampType(9), new ArrayType(new TimestampType(9)))
+                        .build();
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), paimonRowType, 500, FilterCompat.NOOP);
+        AtomicInteger count = new AtomicInteger(0);
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)))) {
+            reader.forEachRemaining(
+                    row -> {
+                        long nanos = nanosValues[count.get()];
+                        assertThat(row.getTimestamp(0, 9)).isEqualTo(timestampFromNanos(nanos));
+                        assertThat(row.getArray(1).getTimestamp(0, 9))
+                                .isEqualTo(timestampFromNanos(nanos));
+                        assertThat(row.getArray(1).getTimestamp(1, 9))
+                                .isEqualTo(timestampFromNanos(nanos + 1));
+                        count.incrementAndGet();
+                    });
+        }
+        assertThat(count.get()).isEqualTo(nanosValues.length);
+    }
+
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
             throws IOException {
         List<InternalRow> rows = records.stream().map(this::newRow).collect(Collectors.toList());
@@ -863,6 +934,11 @@ public class ParquetReadWriteTest {
                 new GenericMap(f32),
                 GenericRow.of(str, v),
                 new GenericMap(f34));
+    }
+
+    private Timestamp timestampFromNanos(long nanos) {
+        return Timestamp.fromEpochMillis(
+                Math.floorDiv(nanos, 1_000_000L), (int) Math.floorMod(nanos, 1_000_000L));
     }
 
     private Timestamp toMills(Integer v) {

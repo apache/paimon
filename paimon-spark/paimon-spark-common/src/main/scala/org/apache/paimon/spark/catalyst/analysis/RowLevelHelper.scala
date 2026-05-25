@@ -76,16 +76,15 @@ trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
       }
   }
 
-  /** Determines if DataSourceV2 is not supported for the given table. */
+  /**
+   * Determines if DataSourceV2 is not supported for the given table. This is the logical complement
+   * of [[SparkTable.supportsV2RowLevelOps]]; the two predicates must stay in sync so that Spark
+   * 4.1's row-level rewrite rules (which key on `SupportsRowLevelOperations`) and Paimon's V1
+   * postHoc fallback rules (which gate on this predicate) agree about which tables go down which
+   * path.
+   */
   protected def shouldFallbackToV1(table: SparkTable): Boolean = {
-    val baseTable = table.getTable
-    org.apache.spark.SPARK_VERSION < "3.5" ||
-    !baseTable.isInstanceOf[FileStoreTable] ||
-    !baseTable.primaryKeys().isEmpty ||
-    !table.useV2Write ||
-    table.coreOptions.deletionVectorsEnabled() ||
-    table.coreOptions.rowTrackingEnabled() ||
-    table.coreOptions.dataEvolutionEnabled()
+    !SparkTable.supportsV2RowLevelOps(table)
   }
 
   /** Determines if DataSourceV2 delete is not supported for the given table. */
@@ -107,6 +106,13 @@ trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
   protected def shouldFallbackToV1MergeInto(m: MergeIntoTable): Boolean = {
     val relation = PaimonRelation.getPaimonRelation(m.targetTable)
     val table = relation.table.asInstanceOf[SparkTable]
+    // Note for Spark 4.1+: `shouldFallbackToV1(table)` returns `false` for pure append-only
+    // tables (no PK / RT / DE / DV), so this predicate lets the aligned `MergeIntoTable` node
+    // return untouched. Spark's own `RewriteMergeIntoTable` in the Resolution batch can't fire
+    // (`resolveOperators` short-circuits on `analyzed=true`), so the rewrite is performed by
+    // `Spark41MergeIntoRewrite` (paimon-spark4-common) which aligns + transcribes Spark's
+    // `ReplaceData` / `AppendData` branches for non-`SupportsDelta` sources. Non-append-only
+    // tables still fall back to V1 (`MergeIntoPaimonTable` / `MergeIntoPaimonDataEvolutionTable`).
     shouldFallbackToV1(table) ||
     !m.rewritable ||
     !m.aligned

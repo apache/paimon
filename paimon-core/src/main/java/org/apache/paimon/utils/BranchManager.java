@@ -59,6 +59,10 @@ public interface BranchManager {
 
     void fastForward(String branchName);
 
+    void mergeBranch(String sourceBranch, String targetBranch);
+
+    void renameBranch(String fromBranch, String toBranch);
+
     List<String> branches();
 
     default boolean branchExists(String branchName) {
@@ -94,6 +98,21 @@ public interface BranchManager {
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
+    }
+
+    static void mergeValidate(String sourceBranch, String targetBranch) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(sourceBranch),
+                "Source branch name '%s' is blank.",
+                sourceBranch);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(targetBranch),
+                "Target branch name '%s' is blank.",
+                targetBranch);
+        checkArgument(
+                !sourceBranch.equals(targetBranch),
+                "Cannot merge branch '%s' into itself.",
+                sourceBranch);
     }
 
     static void fastForwardValidate(String branchName, String currentBranch) {

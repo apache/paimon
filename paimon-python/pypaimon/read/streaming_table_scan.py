@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 """
 AsyncStreamingTableScan for continuous streaming reads from Paimon tables.
 
@@ -31,6 +31,8 @@ from typing import AsyncGenerator, Callable, Iterator, List, Optional
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.common.predicate import Predicate
+from pypaimon.consumer.consumer import Consumer
+from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
@@ -46,7 +48,6 @@ from pypaimon.read.scanner.incremental_diff_scanner import \
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class AsyncStreamingTableScan:
@@ -78,6 +79,7 @@ class AsyncStreamingTableScan:
         bucket_filter: Optional[Callable[[int], bool]] = None,
         prefetch_enabled: bool = True,
         diff_threshold: int = 10,
+        consumer_id: Optional[str] = None
     ):
         """Initialize the streaming table scan."""
         self.table = table
@@ -100,9 +102,16 @@ class AsyncStreamingTableScan:
         self._lookahead_size = 10  # How many snapshots to look ahead
 
         # Initialize managers
-        self._snapshot_manager = SnapshotManager(table)
+        self._snapshot_manager = table.snapshot_manager()
         self._manifest_list_manager = ManifestListManager(table)
         self._manifest_file_manager = ManifestFileManager(table)
+
+        # Consumer management for persisting streaming progress
+        self._consumer_id = consumer_id
+        self._consumer_manager = (
+            ConsumerManager(table.file_io, table.table_path)
+            if consumer_id else None
+        )
 
         # Scanner for determining which snapshots to read
         # Auto-select based on changelog-producer if not explicitly provided
@@ -110,6 +119,7 @@ class AsyncStreamingTableScan:
 
         # State tracking
         self.next_snapshot_id: Optional[int] = None
+        self._pending_consumer_snapshot: Optional[int] = None
 
     async def stream(self) -> AsyncGenerator[Plan, None]:
         """Yield Plans as new snapshots appear.
@@ -120,12 +130,21 @@ class AsyncStreamingTableScan:
         Yields:
             Plan objects containing splits for reading
         """
+        # Restore from consumer if available
+        if self.next_snapshot_id is None and self._consumer_manager:
+            consumer = self._consumer_manager.consumer(self._consumer_id)
+            if consumer:
+                self.next_snapshot_id = consumer.next_snapshot
+
         # Initial scan
         if self.next_snapshot_id is None:
             latest_snapshot = self._snapshot_manager.get_latest_snapshot()
             if latest_snapshot:
                 self.next_snapshot_id = latest_snapshot.id + 1
+                self._stage_consumer()
                 yield self._create_initial_plan(latest_snapshot)
+                # Resumes here when caller calls __anext__() — after caller processed the plan.
+                self._flush_pending_consumer()
 
         # Check for catch-up scenario: starting from earlier snapshot with large gap.
         # This block only executes once per stream() call (before the while True loop).
@@ -140,12 +159,17 @@ class AsyncStreamingTableScan:
                         latest_snapshot
                     )
                     self.next_snapshot_id = latest_snapshot.id + 1
+                    self._stage_consumer()
                     yield catch_up_plan
+                    # Resumes here when caller calls __anext__().
+                    self._flush_pending_consumer()
             finally:
                 self._catch_up_in_progress = False
 
         # Follow-up polling loop with lookahead and optional prefetching
         while True:
+            # Flush any consumer position staged by the previous yield before doing more work.
+            self._flush_pending_consumer()
             plan = None
             snapshot_processed = False  # Track if we processed (or skipped) a snapshot
 
@@ -194,7 +218,9 @@ class AsyncStreamingTableScan:
                 # Start prefetching next scannable snapshot before yielding
                 if self._prefetch_enabled:
                     self._start_prefetch(self.next_snapshot_id)
+                self._stage_consumer()
                 yield plan
+                # _flush_pending_consumer() is called at the top of the next iteration.
             elif not snapshot_processed:
                 # No snapshot available yet, wait and poll again
                 await asyncio.sleep(self.poll_interval)
@@ -220,6 +246,26 @@ class AsyncStreamingTableScan:
                     break
         finally:
             loop.close()
+
+    def _stage_consumer(self) -> None:
+        """Stage next_snapshot_id to be written to disk on the next generator resume."""
+        if self._consumer_manager and self._consumer_id and self.next_snapshot_id is not None:
+            self._pending_consumer_snapshot = self.next_snapshot_id
+
+    def _flush_pending_consumer(self) -> None:
+        """Flush the staged consumer position to disk.
+
+        Called at the resume point after each yield — i.e. when the caller calls
+        __anext__() to request the next plan, which happens after the caller's loop
+        body (to_arrow + sink write) has completed. This gives at-least-once semantics:
+        the consumer file is only advanced after the caller has processed the prior plan.
+        """
+        if self._consumer_manager and self._consumer_id and self._pending_consumer_snapshot is not None:
+            self._consumer_manager.reset_consumer(
+                self._consumer_id,
+                Consumer(next_snapshot=self._pending_consumer_snapshot)
+            )
+            self._pending_consumer_snapshot = None
 
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""
@@ -276,7 +322,7 @@ class AsyncStreamingTableScan:
     def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
         """Create a Plan for the initial full scan of the latest snapshot."""
         def all_manifests():
-            return self._manifest_list_manager.read_all(snapshot)
+            return self._manifest_list_manager.read_all(snapshot), snapshot
 
         starting_scanner = FileScanner(
             self.table,

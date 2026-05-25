@@ -372,7 +372,7 @@ public class ParquetReaderUtil {
     }
 
     /**
-     * Parquet's column names are case in sensitive. So when we look up columns we first check for
+     * Parquet's column names are case insensitive. So when we look up columns we first check for
      * exact match, and if that can not find we look for a case-insensitive match.
      */
     public static ColumnIO lookupColumnByName(GroupColumnIO groupColumnIO, String columnName) {
@@ -388,7 +388,10 @@ public class ParquetReaderUtil {
             }
         }
 
-        throw new RuntimeException("Can not find column io for parquet reader.");
+        throw new RuntimeException(
+                String.format(
+                        "ColumnIO for '%s' not found in Parquet schema under '%s'.",
+                        columnName, String.join(".", groupColumnIO.getFieldPath())));
     }
 
     public static GroupColumnIO getMapKeyValueColumn(GroupColumnIO groupColumnIO) {

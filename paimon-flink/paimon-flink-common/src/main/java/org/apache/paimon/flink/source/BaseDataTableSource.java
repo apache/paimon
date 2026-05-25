@@ -27,6 +27,9 @@ import org.apache.paimon.flink.lookup.partitioner.BucketIdExtractor;
 import org.apache.paimon.flink.lookup.partitioner.BucketShufflePartitioner;
 import org.apache.paimon.flink.lookup.partitioner.BucketShuffleStrategy;
 import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
+import org.apache.paimon.flink.sink.AdaptiveParallelism;
+import org.apache.paimon.flink.source.aggregate.AggregatePushDownUtils;
+import org.apache.paimon.flink.source.aggregate.PushedAggregateResult;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -34,12 +37,11 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.BucketSpec;
-import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -65,10 +67,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.configuration.ExecutionOptions.RUNTIME_MODE;
+import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
@@ -107,7 +110,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
     protected final DynamicTableFactory.Context context;
     @Nullable private BucketShufflePartitioner bucketShufflePartitioner;
     @Nullable protected WatermarkStrategy<RowData> watermarkStrategy;
-    @Nullable protected Long countPushed;
+    @Nullable protected PushedAggregateResult pushedAggregateResult;
 
     public BaseDataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -118,7 +121,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
-            @Nullable Long countPushed) {
+            @Nullable PushedAggregateResult pushedAggregateResult) {
         super(table, predicate, projectFields, limit);
 
         this.tableIdentifier = tableIdentifier;
@@ -126,7 +129,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         this.context = context;
 
         this.watermarkStrategy = watermarkStrategy;
-        this.countPushed = countPushed;
+        this.pushedAggregateResult = pushedAggregateResult;
     }
 
     @Override
@@ -159,8 +162,8 @@ public abstract class BaseDataTableSource extends FlinkTableSource
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
-        if (countPushed != null) {
-            return createCountStarScan();
+        if (pushedAggregateResult != null) {
+            return createPushedAggregateScan();
         }
 
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
@@ -206,9 +209,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                 table);
     }
 
-    private ScanRuntimeProvider createCountStarScan() {
-        checkNotNull(countPushed);
-        NumberSequenceRowSource source = new NumberSequenceRowSource(countPushed, countPushed);
+    private ScanRuntimeProvider createPushedAggregateScan() {
+        checkNotNull(pushedAggregateResult);
+        StaticRowDataSource source =
+                new StaticRowDataSource(
+                        pushedAggregateResult.rows(), pushedAggregateResult.paimonRowType());
         return new SourceProvider() {
             @Override
             public Source<RowData, ?, ?> createSource() {
@@ -279,6 +284,18 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         int numBuckets;
         ShuffleStrategy strategy = null;
         if (useCustomShuffle) {
+            try {
+                checkArgument(
+                        this.context
+                                        .getConfiguration()
+                                        .get(RUNTIME_MODE)
+                                        .equals(RuntimeExecutionMode.STREAMING)
+                                || !AdaptiveParallelism.isEnabled(this.context.getConfiguration()),
+                        "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
+            } catch (NoClassDefFoundError ignored) {
+                // before 1.17, there is no adaptive parallelism
+            }
+
             numBuckets = table.store().options().bucket();
             BucketIdExtractor extractor =
                     new BucketIdExtractor(
@@ -317,52 +334,21 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             return false;
         }
 
-        if (!(table instanceof DataTable)) {
+        if (!(table instanceof FileStoreTable)) {
             return false;
         }
 
-        if (groupingSets.size() != 1) {
-            return false;
-        }
-
-        if (groupingSets.get(0).length != 0) {
-            return false;
-        }
-
-        if (aggregateExpressions.size() != 1) {
-            return false;
-        }
-
-        if (!aggregateExpressions
-                .get(0)
-                .getFunctionDefinition()
-                .getClass()
-                .getName()
-                .equals(
-                        "org.apache.flink.table.planner.functions.aggfunctions.Count1AggFunction")) {
-            return false;
-        }
-
-        List<Split> splits =
-                table.newReadBuilder()
-                        .dropStats()
-                        .withProjection(new int[0])
-                        .withFilter(predicate)
-                        .withPartitionFilter(partitionPredicate)
-                        .newScan()
-                        .plan()
-                        .splits();
-        long countPushed = 0;
-        for (Split s : splits) {
-            OptionalLong mergedRowCount = s.mergedRowCount();
-            if (!mergedRowCount.isPresent()) {
-                return false;
-            }
-            countPushed += mergedRowCount.getAsLong();
-        }
-
-        this.countPushed = countPushed;
-        return true;
+        Optional<PushedAggregateResult> result =
+                AggregatePushDownUtils.tryPushdownAggregation(
+                        (FileStoreTable) table,
+                        predicate,
+                        partitionPredicate,
+                        projectFields,
+                        groupingSets,
+                        aggregateExpressions,
+                        producedDataType);
+        result.ifPresent(r -> this.pushedAggregateResult = r);
+        return result.isPresent();
     }
 
     @Override

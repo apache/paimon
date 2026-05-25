@@ -22,12 +22,32 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Pair;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** Extracts statistics directly from file. */
 public interface SimpleStatsExtractor {
 
     SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
+
+    /**
+     * Extract statistics using optional in-memory writer metadata to avoid re-reading the file.
+     * When writerMetadata is non-null and the extractor supports it, the stats will be extracted
+     * from memory instead of from the file. This avoids issues with object stores where the file
+     * may not be immediately visible after close.
+     *
+     * @param fileIO the file IO
+     * @param path the file path
+     * @param length the file length
+     * @param writerMetadata optional format-specific metadata from the writer, or null
+     * @return column statistics
+     */
+    default SimpleColStats[] extract(
+            FileIO fileIO, Path path, long length, @Nullable Object writerMetadata)
+            throws IOException {
+        return extract(fileIO, path, length);
+    }
 
     Pair<SimpleColStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path, long length)
             throws IOException;

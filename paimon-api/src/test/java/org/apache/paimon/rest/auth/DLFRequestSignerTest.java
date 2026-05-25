@@ -26,6 +26,7 @@ import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -272,6 +273,46 @@ public class DLFRequestSignerTest {
 
         assertEquals("1.0", headers.get("x-acs-signature-version"));
         assertEquals("2026-01-18", headers.get("x-acs-version"));
+    }
+
+    @Test
+    public void testOpenApiDateFormatWithNonEnglishLocale() {
+        Locale originalLocale = Locale.getDefault();
+        try {
+            // Simulate Chinese locale environment (e.g., zh_CN, zh_US_#Hans)
+            Locale.setDefault(Locale.CHINA);
+
+            DLFOpenApiSigner signer = new DLFOpenApiSigner();
+            Instant now = ZonedDateTime.of(2025, 4, 16, 3, 44, 46, 0, ZoneOffset.UTC).toInstant();
+            String host = "dlfnext.cn-hangzhou.aliyuncs.com";
+
+            Map<String, String> headers = signer.signHeaders(null, now, null, host);
+            String dateValue = headers.get("Date");
+
+            // Date must always be in English RFC 1123 format regardless of JVM locale
+            assertEquals("Wed, 16 Apr 2025 03:44:46 GMT", dateValue);
+        } finally {
+            Locale.setDefault(originalLocale);
+        }
+    }
+
+    @Test
+    public void testOpenApiDateFormatWithJapaneseLocale() {
+        Locale originalLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.JAPAN);
+
+            DLFOpenApiSigner signer = new DLFOpenApiSigner();
+            Instant now = ZonedDateTime.of(2025, 4, 16, 3, 44, 46, 0, ZoneOffset.UTC).toInstant();
+            String host = "dlfnext.cn-hangzhou.aliyuncs.com";
+
+            Map<String, String> headers = signer.signHeaders(null, now, null, host);
+            String dateValue = headers.get("Date");
+
+            assertEquals("Wed, 16 Apr 2025 03:44:46 GMT", dateValue);
+        } finally {
+            Locale.setDefault(originalLocale);
+        }
     }
 
     @Test

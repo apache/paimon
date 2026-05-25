@@ -50,7 +50,6 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
                         null,
                         null,
                         null,
-                        null,
                         null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(9L);
         // TODO validate column statistics

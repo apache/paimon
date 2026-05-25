@@ -68,6 +68,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1082,6 +1083,38 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testDropTableWithExternalPaths() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "table_with_external_paths");
+        java.nio.file.Path dataExternalPath = tempFile.resolve("data-external-path");
+        java.nio.file.Path globalIndexExternalPath = tempFile.resolve("global-index-external-path");
+        Files.createDirectories(dataExternalPath.resolve("data"));
+        Files.createDirectories(globalIndexExternalPath.resolve("index"));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), dataExternalPath.toUri().toString());
+        options.put(
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                globalIndexExternalPath.toUri().toString());
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        catalog.createTable(identifier, schema, false);
+        catalog.dropTable(identifier, false);
+
+        assertThat(Files.exists(dataExternalPath)).isFalse();
+        assertThat(Files.exists(globalIndexExternalPath)).isFalse();
+    }
+
+    @Test
     public void testRenameTable() throws Exception {
         catalog.createDatabase("test_db", false);
 
@@ -1136,6 +1169,96 @@ public abstract class CatalogTestBase {
         Map<String, String> initOptions = Maps.newHashMap();
         initOptions.put(CoreOptions.TYPE.key(), TableType.MATERIALIZED_TABLE.toString());
         baseAlterTable(initOptions);
+    }
+
+    @Test
+    public void testReplaceTable() throws Exception {
+        if (!supportsReplaceTable()) {
+            return;
+        }
+        catalog.createDatabase("replace_db", true);
+        Identifier identifier = Identifier.create("replace_db", "t");
+
+        Schema initialSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("data", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("id", "pt")
+                        .option("bucket", "2")
+                        .build();
+        catalog.createTable(identifier, initialSchema, false);
+
+        Table created = catalog.getTable(identifier);
+        String oldLocation = ((FileStoreTable) created).location().toString();
+        BatchWriteBuilder writeBuilder = created.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("old"), BinaryString.fromString("a")));
+            commit.commit(write.prepareCommit());
+        }
+
+        long oldSnapshotId =
+                ((FileStoreTable) catalog.getTable(identifier))
+                        .snapshotManager()
+                        .latestSnapshotId();
+
+        // Replace with new PK + bucket (partition keys unchanged)
+        Schema newSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("id", "pt")
+                        .option("bucket", "4")
+                        .build();
+        catalog.replaceTable(identifier, newSchema, false);
+
+        FileStoreTable replaced = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(replaced.partitionKeys()).containsExactly("pt");
+        assertThat(replaced.primaryKeys()).containsExactly("id", "pt");
+        assertThat(replaced.options().get("bucket")).isEqualTo("4");
+        assertThat(replaced.location().toString()).isEqualTo(oldLocation);
+        assertThat(read(replaced, null, null, null, null)).isEmpty();
+
+        // Time-travel to old snapshot still returns old data with old schema
+        FileStoreTable oldView =
+                replaced.copy(Collections.singletonMap("scan.snapshot-id", "" + oldSnapshotId));
+        assertThat(oldView.schema().fieldNames()).containsExactly("id", "data", "pt");
+        assertThat(read(oldView, null, null, null, null)).hasSize(1);
+
+        // Changing partition keys is rejected
+        Schema changePartitionKeys =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .primaryKey("id")
+                        .option("bucket", "4")
+                        .build();
+        assertThatExceptionOfType(UnsupportedOperationException.class)
+                .isThrownBy(() -> catalog.replaceTable(identifier, changePartitionKeys, false))
+                .withMessageContaining("partition keys");
+
+        // ignoreIfNotExists = true: missing table is silently skipped
+        Identifier missing = Identifier.create("replace_db", "missing");
+        catalog.replaceTable(missing, newSchema, true);
+
+        // ignoreIfNotExists = false: missing table throws
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(() -> catalog.replaceTable(missing, newSchema, false));
+
+        // System table is rejected
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.replaceTable(
+                                        Identifier.create("replace_db", "$system_table"),
+                                        newSchema,
+                                        false));
     }
 
     @Test
@@ -1622,6 +1745,10 @@ public abstract class CatalogTestBase {
     }
 
     protected boolean supportsViewDialects() {
+        return true;
+    }
+
+    protected boolean supportsReplaceTable() {
         return true;
     }
 
@@ -2158,5 +2285,48 @@ public abstract class CatalogTestBase {
                                         false))
                 .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
         catalog.dropTable(identifier, false);
+    }
+
+    @Test
+    void testTableDefaultPartitionOptionsOnNonPartitionedTable() throws Exception {
+        Catalog root =
+                catalog instanceof DelegateCatalog ? DelegateCatalog.rootCatalog(catalog) : catalog;
+        if (!(root instanceof AbstractCatalog)) {
+            return;
+        }
+        ((AbstractCatalog) root).tableDefaultOptions.put("partition.expiration-time", "7d");
+
+        catalog.createDatabase("test_db_default", false);
+        Identifier identifier = Identifier.create("test_db_default", "non_partitioned");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .build();
+        assertThatCode(() -> catalog.createTable(identifier, schema, false))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void testTableDefaultPartitionOptionsOnPartitionedTable() throws Exception {
+        Catalog root =
+                catalog instanceof DelegateCatalog ? DelegateCatalog.rootCatalog(catalog) : catalog;
+        if (!(root instanceof AbstractCatalog)) {
+            return;
+        }
+        ((AbstractCatalog) root).tableDefaultOptions.put("partition.expiration-time", "7d");
+
+        catalog.createDatabase("test_db_default_partitioned", false);
+        Identifier identifier = Identifier.create("test_db_default_partitioned", "partitioned");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        assertThat(catalog.getTable(identifier).options())
+                .containsEntry("partition.expiration-time", "7d");
     }
 }

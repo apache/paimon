@@ -34,6 +34,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
@@ -58,6 +59,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -204,10 +206,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas) {
-        // exclude blob files, useless for predicate eval
+        // exclude blob and vector-store files, useless for predicate eval
         metas =
                 metas.stream()
                         .filter(entry -> !isBlobFile(entry.file().fileName()))
+                        .filter(entry -> !isVectorStoreFile(entry.file().fileName()))
                         .collect(Collectors.toList());
 
         ToLongFunction<ManifestEntry> maxSeqFunc = e -> e.file().maxSequenceNumber();
@@ -255,14 +258,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                     continue;
                 }
                 int targetFieldId = allFields[j];
+                DataType targetType = schema.fields().get(j).type();
                 for (int fieldId : fieldIds) {
                     if (targetFieldId == fieldId) {
                         for (int k = 0; k < fieldIdsWithStats.length; k++) {
                             if (fieldId == fieldIdsWithStats[k]) {
-                                // TODO: If type not match (e.g. int -> string), we need to skip
-                                // this, set rowOffsets[j] = -1 always. (may -2, after all, set it
-                                // back to -1) Because schema evolution may happen to change int to
-                                // string or something like that.
+                                DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
+                                if (!fileType.equalsIgnoreFieldId(targetType)) {
+                                    continue loop1;
+                                }
                                 rowOffsets[j] = i;
                                 fieldOffsets[j] = k;
                                 continue loop1;

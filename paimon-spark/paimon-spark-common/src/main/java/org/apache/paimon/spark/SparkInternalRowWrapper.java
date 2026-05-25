@@ -21,8 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -32,7 +30,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils$;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -63,6 +60,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     private final int length;
     @Nullable private final UriReaderFactory uriReaderFactory;
     @Nullable private final int[] fieldIndexMap;
+    @Nullable private final StructType dataSchema;
 
     private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
 
@@ -77,6 +75,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             CatalogContext catalogContext) {
         this.tableSchema = tableSchema;
         this.length = length;
+        this.dataSchema = dataSchema;
         this.fieldIndexMap =
                 dataSchema != null ? buildFieldIndexMap(tableSchema, dataSchema) : null;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
@@ -240,15 +239,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public Blob getBlob(int pos) {
-        byte[] bytes = internalRow.getBinary(pos);
-        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
-        if (blobDes) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
-        } else {
-            return new BlobData(bytes);
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
         }
+        return Blob.fromBytes(internalRow.getBinary(actualPos), uriReaderFactory, null);
     }
 
     @Override
@@ -284,8 +279,14 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
             return null;
         }
-        return new SparkInternalRowWrapper(
-                        (StructType) tableSchema.fields()[actualPos].dataType(), numFields)
+        StructType nestedTableSchema = (StructType) tableSchema.fields()[pos].dataType();
+        if (dataSchema != null) {
+            StructType nestedDataSchema = (StructType) dataSchema.fields()[actualPos].dataType();
+            int dataNumFields = nestedDataSchema.size();
+            return new SparkInternalRowWrapper(nestedTableSchema, numFields, nestedDataSchema, null)
+                    .replace(internalRow.getStruct(actualPos, dataNumFields));
+        }
+        return new SparkInternalRowWrapper(nestedTableSchema, numFields)
                 .replace(internalRow.getStruct(actualPos, numFields));
     }
 
@@ -423,7 +424,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int pos) {
-            return new BlobData(arrayData.getBinary(pos));
+            return Blob.fromBytes(arrayData.getBinary(pos), null, null);
         }
 
         @Override

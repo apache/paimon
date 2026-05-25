@@ -40,6 +40,17 @@ public interface SimpleStatsProducer {
 
     SimpleColStats[] extract(FileIO fileIO, Path path, long length) throws IOException;
 
+    /**
+     * Extract statistics using optional in-memory writer metadata.
+     *
+     * @param writerMetadata optional format-specific metadata from the writer, or null
+     */
+    default SimpleColStats[] extract(
+            FileIO fileIO, Path path, long length, @Nullable Object writerMetadata)
+            throws IOException {
+        return extract(fileIO, path, length);
+    }
+
     static SimpleStatsProducer disabledProducer() {
         return new SimpleStatsProducer() {
 
@@ -91,6 +102,13 @@ public interface SimpleStatsProducer {
             public SimpleColStats[] extract(FileIO fileIO, Path path, long length)
                     throws IOException {
                 return extractor.extract(fileIO, path, length);
+            }
+
+            @Override
+            public SimpleColStats[] extract(
+                    FileIO fileIO, Path path, long length, @Nullable Object writerMetadata)
+                    throws IOException {
+                return extractor.extract(fileIO, path, length, writerMetadata);
             }
         };
     }

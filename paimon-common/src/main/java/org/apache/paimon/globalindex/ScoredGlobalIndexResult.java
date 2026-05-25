@@ -21,6 +21,8 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import java.util.Comparator;
+import java.util.PriorityQueue;
 import java.util.function.Supplier;
 
 /** Vector search global index result for scored index. */
@@ -49,9 +51,10 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
     }
 
     @Override
-    default GlobalIndexResult or(GlobalIndexResult other) {
+    default ScoredGlobalIndexResult or(GlobalIndexResult other) {
         if (!(other instanceof ScoredGlobalIndexResult)) {
-            return GlobalIndexResult.super.or(other);
+            throw new UnsupportedOperationException(
+                    "Only work for scored global index result, but is: " + other.getClass());
         }
         RoaringNavigableMap64 thisRowIds = results();
         ScoreGetter thisScoreGetter = scoreGetter();
@@ -76,6 +79,42 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
                 return resultOr;
             }
         };
+    }
+
+    default ScoredGlobalIndexResult topK(int k) {
+        RoaringNavigableMap64 rowIds = results();
+        if (rowIds.getIntCardinality() <= k) {
+            return this;
+        }
+
+        ScoreGetter scoreGetter = scoreGetter();
+        // Min-heap by score: the head is the smallest score so we can evict it when a
+        // higher-scored row arrives. This gives O(n log k) instead of O(n log n).
+        PriorityQueue<long[]> minHeap =
+                new PriorityQueue<>(
+                        k + 1, Comparator.comparingDouble(a -> Float.intBitsToFloat((int) a[1])));
+        for (long rowId : rowIds) {
+            float score = scoreGetter.score(rowId);
+            long[] entry = new long[] {rowId, Float.floatToRawIntBits(score)};
+            if (minHeap.size() < k) {
+                minHeap.offer(entry);
+            } else if (score > Float.intBitsToFloat((int) minHeap.peek()[1])) {
+                minHeap.poll();
+                minHeap.offer(entry);
+            }
+        }
+
+        RoaringNavigableMap64 topKRowIds = new RoaringNavigableMap64();
+        for (long[] entry : minHeap) {
+            topKRowIds.add(entry[0]);
+        }
+
+        return ScoredGlobalIndexResult.create(() -> topKRowIds, scoreGetter);
+    }
+
+    /** Returns an empty {@link ScoredGlobalIndexResult}. */
+    static ScoredGlobalIndexResult createEmpty() {
+        return create(RoaringNavigableMap64::new, rowId -> 0);
     }
 
     /** Returns a new {@link ScoredGlobalIndexResult} from supplier. */

@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """
 An SST File Reader which serves point queries and range queries.
@@ -30,7 +29,7 @@ import zlib
 from typing import Optional, Callable
 from typing import BinaryIO
 
-from pypaimon.globalindex.btree.btree_file_footer import BlockHandle
+from pypaimon.globalindex.btree.block_handle import BlockHandle
 from pypaimon.globalindex.btree.block_entry import BlockEntry
 from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
 from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
@@ -48,27 +47,28 @@ class SstFileIterator:
         self.index_iterator = index_block_iterator
         self.sought_data_block: Optional[BlockIterator] = None
     
+    @staticmethod
+    def _parse_block_handle(block_handle_bytes: bytes) -> BlockHandle:
+        handle_input = MemorySliceInput(block_handle_bytes)
+        return BlockHandle(
+            handle_input.read_var_len_long(),
+            handle_input.read_var_len_int()
+        )
+
     def seek_to(self, key: bytes) -> None:
         """
         Seek to the position of the record whose key is exactly equal to or
         greater than the specified key.
-        
+
         Args:
             key: The key to seek to
         """
         self.index_iterator.seek_to(key)
-        
+
         if self.index_iterator.has_next():
             index_entry: BlockEntry = self.index_iterator.__next__()
-            block_handle_bytes = index_entry.__getattribute__("value")
-            handle_input = MemorySliceInput(block_handle_bytes)
+            block_handle = self._parse_block_handle(index_entry.value)
 
-            # Parse block handle
-            block_handle = BlockHandle(
-                handle_input.read_var_len_long(),
-                handle_input.read_var_len_int()
-            )
-            
             # Create data block reader and seek
             data_block_reader = self.read_block(block_handle)
             self.sought_data_block = data_block_reader.iterator()
@@ -93,13 +93,7 @@ class SstFileIterator:
             return None
         
         index_entry = self.index_iterator.__next__()
-        block_handle_bytes = index_entry.value
-        
-        # Parse block handle
-        block_handle = BlockHandle(
-            struct.unpack('<Q', block_handle_bytes[0:8])[0],
-            struct.unpack('<I', block_handle_bytes[8:12])[0]
-        )
+        block_handle = self._parse_block_handle(index_entry.value)
         
         # Create data block reader
         data_block_reader = self.read_block(block_handle)

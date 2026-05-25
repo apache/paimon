@@ -38,9 +38,11 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 /**
  * A simple LSM-Tree based KV database built on top of {@link SortLookupStoreFactory}.
@@ -91,9 +93,11 @@ public class SimpleLsmKvDb implements Closeable {
     static final long PER_ENTRY_OVERHEAD = 160;
 
     private final File dataDirectory;
+    private final String uuid;
     private final SortLookupStoreFactory storeFactory;
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
+    private final long maxSstFileSize;
     private final LsmCompactor compactor;
 
     /** Active MemTable: key -> value bytes (empty byte[] = tombstone). */
@@ -124,9 +128,11 @@ public class SimpleLsmKvDb implements Closeable {
             int level0FileNumCompactTrigger,
             int sizeRatio) {
         this.dataDirectory = dataDirectory;
+        this.uuid = UUID.randomUUID().toString();
         this.storeFactory = storeFactory;
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
+        this.maxSstFileSize = maxSstFileSize;
         this.memTable = new TreeMap<>(keyComparator);
         this.memTableSize = 0;
         this.levels = new ArrayList<>();
@@ -223,6 +229,118 @@ public class SimpleLsmKvDb implements Closeable {
         }
         memTableSize += delta;
         maybeFlushMemTable();
+    }
+
+    /**
+     * Bulk-load globally sorted entries directly into SST files at the deepest level, bypassing
+     * MemTable, flush, and compaction entirely. The database must be empty when this is called.
+     *
+     * @param sortedEntries an iterator of key-value pairs in sorted order (by the DB's key
+     *     comparator)
+     */
+    public void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> sortedEntries) throws IOException {
+        ensureOpen();
+        if (!memTable.isEmpty() || getSstFileCount() > 0) {
+            throw new IllegalStateException(
+                    "bulkLoad requires an empty database (no memTable entries and no SST files)");
+        }
+
+        int targetLevel = MAX_LEVELS - 1;
+        List<SstFileMetadata> targetLevelFiles = levels.get(targetLevel);
+        List<SstFileMetadata> bulkLoadFiles = new ArrayList<>();
+
+        SortLookupStoreWriter currentWriter = null;
+        File currentSstFile = null;
+        MemorySlice currentFileMinKey = null;
+        MemorySlice currentFileMaxKey = null;
+        MemorySlice previousFileMaxKey = null;
+        long currentBatchSize = 0;
+
+        try {
+            while (sortedEntries.hasNext()) {
+                Map.Entry<byte[], byte[]> entry = sortedEntries.next();
+                byte[] key = entry.getKey();
+                byte[] value = entry.getValue();
+                MemorySlice currentKey = MemorySlice.wrap(key);
+
+                if (currentWriter == null) {
+                    currentSstFile = newSstFile();
+                    currentWriter = storeFactory.createWriter(currentSstFile, null);
+                    currentFileMinKey = currentKey;
+                    currentBatchSize = 0;
+                }
+
+                currentWriter.put(key, value);
+                currentFileMaxKey = currentKey;
+                currentBatchSize += key.length + value.length;
+
+                if (currentBatchSize >= maxSstFileSize) {
+                    currentWriter.close();
+                    currentWriter = null;
+                    previousFileMaxKey =
+                            addBulkLoadSstFile(
+                                    bulkLoadFiles,
+                                    currentSstFile,
+                                    currentFileMinKey,
+                                    currentFileMaxKey,
+                                    previousFileMaxKey,
+                                    targetLevel);
+                    currentSstFile = null;
+                    currentFileMinKey = null;
+                    currentFileMaxKey = null;
+                }
+            }
+
+            if (currentWriter != null) {
+                currentWriter.close();
+                currentWriter = null;
+                addBulkLoadSstFile(
+                        bulkLoadFiles,
+                        currentSstFile,
+                        currentFileMinKey,
+                        currentFileMaxKey,
+                        previousFileMaxKey,
+                        targetLevel);
+            }
+        } catch (IOException | RuntimeException e) {
+            if (currentWriter != null) {
+                try {
+                    currentWriter.close();
+                } catch (IOException suppressed) {
+                    e.addSuppressed(suppressed);
+                }
+            }
+            throw e;
+        }
+
+        targetLevelFiles.addAll(bulkLoadFiles);
+
+        LOG.info(
+                "Bulk-loaded {} SST files directly to level {}", bulkLoadFiles.size(), targetLevel);
+    }
+
+    private MemorySlice addBulkLoadSstFile(
+            List<SstFileMetadata> targetLevelFiles,
+            File currentSstFile,
+            MemorySlice currentFileMinKey,
+            MemorySlice currentFileMaxKey,
+            @Nullable MemorySlice previousFileMaxKey,
+            int targetLevel) {
+        if (keyComparator.compare(currentFileMinKey, currentFileMaxKey) > 0) {
+            throw new IllegalArgumentException(
+                    "bulkLoad requires entries sorted by the configured key comparator; "
+                            + "generated SST min key is greater than max key.");
+        }
+        if (previousFileMaxKey != null
+                && keyComparator.compare(previousFileMaxKey, currentFileMinKey) > 0) {
+            throw new IllegalArgumentException(
+                    "bulkLoad requires entries sorted by the configured key comparator; "
+                            + "generated SST key ranges are not ordered.");
+        }
+        targetLevelFiles.add(
+                new SstFileMetadata(
+                        currentSstFile, currentFileMinKey, currentFileMaxKey, 0, targetLevel));
+        return currentFileMaxKey;
     }
 
     // -------------------------------------------------------------------------
@@ -454,7 +572,7 @@ public class SimpleLsmKvDb implements Closeable {
 
     private File newSstFile() {
         long sequence = fileSequence++;
-        return new File(dataDirectory, String.format("sst-%06d.db", sequence));
+        return new File(dataDirectory, String.format("sst-%s-%06d.db", uuid, sequence));
     }
 
     private void ensureOpen() {
@@ -474,9 +592,9 @@ public class SimpleLsmKvDb implements Closeable {
         private long memTableFlushThreshold = 64 * 1024 * 1024; // 64 MB
         private long maxSstFileSize = 8 * 1024 * 1024; // 8 MB
         private int blockSize = 32 * 1024; // 32 KB
-        private long cacheSize = 128 * 1024 * 1024; // 128 MB
         private int level0FileNumCompactTrigger = 4;
         private int sizeRatio = 10;
+        private CacheManager cacheManager;
         private CompressOptions compressOptions = CompressOptions.defaultOptions();
         private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
 
@@ -502,9 +620,9 @@ public class SimpleLsmKvDb implements Closeable {
             return this;
         }
 
-        /** Set the block cache size in bytes. Default is 128 MB. */
-        public Builder cacheSize(long cacheSize) {
-            this.cacheSize = cacheSize;
+        /** Set the cache manager. */
+        public Builder cacheManager(CacheManager cacheManager) {
+            this.cacheManager = cacheManager;
             return this;
         }
 
@@ -551,7 +669,9 @@ public class SimpleLsmKvDb implements Closeable {
                 }
             }
 
-            CacheManager cacheManager = new CacheManager(MemorySize.ofBytes(cacheSize));
+            if (cacheManager == null) {
+                cacheManager = new CacheManager(MemorySize.ofMebiBytes(8));
+            }
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
                             keyComparator, cacheManager, blockSize, compressOptions);

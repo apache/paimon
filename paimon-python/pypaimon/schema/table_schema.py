@@ -1,20 +1,19 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import json
 import time
@@ -63,6 +62,43 @@ class TableSchema:
         # Check if primary keys contain all partition keys
         # Return True if they don't contain all (cross-partition update)
         return not all(pk in self.primary_keys for pk in self.partition_keys)
+
+    @property
+    def bucket_keys(self) -> List[str]:
+        """Resolve the effective bucket-key column names.
+
+        Resolution rule matches Java ``TableSchema.bucketKeys()``: prefer
+        the explicit ``bucket-key`` option; otherwise fall back to primary
+        keys with partition keys stripped (the same convention writers
+        use).
+
+        Validation is intentionally narrower than Java's
+        ``originalBucketKeys()``: only ``unknown column name`` is checked
+        here. Java additionally enforces ``bucket-key`` ⊄ partition keys,
+        and (when primary keys are non-empty) ``bucket-key`` ⊆ primary
+        keys, but it does so once at schema construction. Doing the same
+        in a property would add per-read overhead and could surface
+        errors on tables already in the catalog. The narrow check here
+        is just enough to fail fast on the typo case.
+        """
+        configured = self.options.get(CoreOptions.BUCKET_KEY.key())
+        if configured and configured.strip():
+            keys = [k.strip() for k in configured.split(',') if k.strip()]
+            field_names = {f.name for f in self.fields}
+            missing = [k for k in keys if k not in field_names]
+            if missing:
+                raise ValueError(
+                    "bucket-key references unknown columns: {}".format(missing))
+            return keys
+        return [pk for pk in self.primary_keys if pk not in self.partition_keys]
+
+    @property
+    def logical_bucket_key_fields(self) -> List[DataField]:
+        """The ``DataField``s for ``bucket_keys``, in the order they were
+        declared. Mirrors Java ``TableSchema.logicalBucketKeyType()``.
+        """
+        field_map = {f.name: f for f in self.fields}
+        return [field_map[name] for name in self.bucket_keys]
 
     def to_schema(self) -> Schema:
         return Schema(

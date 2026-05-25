@@ -146,10 +146,90 @@ public class TableScanTest extends ScannerTestBase {
                 table.newScan().withFilter(filter).withLimit(10).plan();
         int splitsWithFilterAndLimit = planWithFilterAndLimit.splits().size();
 
-        // Should read exactly 10 files (from index 25 to 34) to get 10 rows
-        assertThat(splitsWithFilterAndLimit).isLessThanOrEqualTo(10);
-        assertThat(splitsWithFilterAndLimit).isGreaterThan(0);
-        assertThat(splitsWithFilterAndLimit).isLessThan(totalSplits);
+        // With non-partition filter, limit pushdown should be disabled to avoid
+        // returning insufficient rows. All 25 matching files should be returned.
+        assertThat(splitsWithFilterAndLimit).isEqualTo(25);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    void testLimitPushdownWithNonPartitionFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int filesCount = 10;
+        int rowsPerFile = 100;
+        int filterValue = 50;
+
+        for (int fileIdx = 0; fileIdx < filesCount; fileIdx++) {
+            for (int i = 0; i < rowsPerFile; i++) {
+                write.write(rowData(fileIdx, i, (long) (fileIdx * rowsPerFile + i)));
+            }
+            commit.commit(fileIdx, write.prepareCommit(true, fileIdx));
+        }
+
+        TableScan.Plan planAll = table.newScan().plan();
+        assertThat(planAll.splits().size()).isEqualTo(filesCount);
+
+        Predicate filter =
+                new PredicateBuilder(table.schema().logicalRowType()).equal(1, filterValue);
+        TableScan.Plan planFilterOnly = table.newScan().withFilter(filter).plan();
+        assertThat(planFilterOnly.splits().size()).isEqualTo(filesCount);
+
+        List<String> allRows = getResult(table.newRead(), planFilterOnly.splits());
+        long totalMatchingRows =
+                allRows.stream().filter(r -> r.contains("|" + filterValue + "|")).count();
+        assertThat(totalMatchingRows).isEqualTo(filesCount);
+
+        int limit = 5;
+        TableScan.Plan planWithFilterAndLimit =
+                table.newScan().withFilter(filter).withLimit(limit).plan();
+
+        List<String> limitedAllRows = getResult(table.newRead(), planWithFilterAndLimit.splits());
+        long limitedMatchingRows =
+                limitedAllRows.stream().filter(r -> r.contains("|" + filterValue + "|")).count();
+
+        assertThat(limitedMatchingRows)
+                .as(
+                        "Filter+limit bug: scan returned %d splits, but only %d rows match "
+                                + "filter (expected >= %d). Total matching = %d",
+                        planWithFilterAndLimit.splits().size(),
+                        limitedMatchingRows,
+                        limit,
+                        totalMatchingRows)
+                .isGreaterThanOrEqualTo(limit);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    void testLimitPushdownWithPartitionFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < 10; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        Predicate partitionFilter =
+                new PredicateBuilder(table.schema().logicalRowType()).lessOrEqual(0, 4);
+
+        TableScan.Plan planNoLimit = table.newScan().withFilter(partitionFilter).plan();
+        assertThat(planNoLimit.splits().size()).isEqualTo(5);
+
+        TableScan.Plan plan = table.newScan().withFilter(partitionFilter).withLimit(2).plan();
+
+        assertThat(plan.splits().size())
+                .as("Partition filter + limit: limit pushdown should not be disabled")
+                .isEqualTo(2);
 
         write.close();
         commit.close();

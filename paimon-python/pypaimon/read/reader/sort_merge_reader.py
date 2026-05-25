@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import heapq
 from typing import Any, Callable, List, Optional
@@ -30,9 +29,15 @@ from pypaimon.table.row.key_value import KeyValue
 class SortMergeReaderWithMinHeap(RecordReader):
     """SortMergeReader implemented with min-heap."""
 
-    def __init__(self, readers: List[RecordReader[KeyValue]], schema: TableSchema):
+    def __init__(self, readers: List[RecordReader[KeyValue]], schema: TableSchema,
+                 merge_function: Optional[Any] = None):
         self.next_batch_readers = list(readers)
-        self.merge_function = DeduplicateMergeFunction()
+        # Default to dedupe so callers that don't pass a merge_function
+        # keep their old behaviour. The merge engine dispatch lives in
+        # ``MergeFileSplitRead.section_reader_supplier`` for the read
+        # path; tests or other ad-hoc callers can pass a different
+        # implementation here.
+        self.merge_function = merge_function if merge_function is not None else DeduplicateMergeFunction()
 
         if schema.partition_keys:
             trimmed_primary_keys = [pk for pk in schema.primary_keys if pk not in schema.partition_keys]

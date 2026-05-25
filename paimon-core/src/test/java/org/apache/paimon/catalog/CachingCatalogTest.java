@@ -56,8 +56,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -173,6 +175,45 @@ class CachingCatalogTest extends CatalogTestBase {
                 .hasMessage("Table db.tbl$branch_b1 does not exist.");
         assertThatThrownBy(() -> catalog.getTable(branchSysIdent))
                 .hasMessage("Table db.tbl$branch_b1 does not exist.");
+    }
+
+    @Test
+    public void testConcurrentGetTableLoadsTableOnce() throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        CachingCatalog catalog = new CachingCatalog(wrapped, new Options());
+        Identifier tableIdent = new Identifier("db", "tbl");
+        Table table = Mockito.mock(Table.class);
+        AtomicInteger loadCount = new AtomicInteger();
+        CountDownLatch loadStarted = new CountDownLatch(1);
+        CountDownLatch releaseLoad = new CountDownLatch(1);
+        when(wrapped.getTable(tableIdent))
+                .thenAnswer(
+                        invocation -> {
+                            loadCount.incrementAndGet();
+                            loadStarted.countDown();
+                            assertThat(releaseLoad.await(10, TimeUnit.SECONDS)).isTrue();
+                            return table;
+                        });
+
+        int numThreads = 8;
+        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        try {
+            List<Future<Table>> futures = new ArrayList<>();
+            for (int i = 0; i < numThreads; i++) {
+                futures.add(executor.submit(() -> catalog.getTable(tableIdent)));
+            }
+
+            assertThat(loadStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            releaseLoad.countDown();
+
+            for (Future<Table> future : futures) {
+                assertThat(future.get(10, TimeUnit.SECONDS)).isSameAs(table);
+            }
+            assertThat(loadCount).hasValue(1);
+        } finally {
+            releaseLoad.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test

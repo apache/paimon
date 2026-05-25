@@ -63,10 +63,10 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
     public void cleanUnusedDataFiles(Changelog changelog, Predicate<ExpireFileEntry> skipper) {
         if (changelog.changelogManifestList() != null) {
             deleteAddedDataFiles(changelog.changelogManifestList());
-        }
-
-        if (manifestList.exists(changelog.deltaManifestList())) {
-            cleanUnusedDataFiles(changelog.deltaManifestList(), skipper);
+        } else {
+            if (manifestList.exists(changelog.deltaManifestList())) {
+                cleanUnusedDataFiles(changelog.deltaManifestList(), skipper);
+            }
         }
     }
 
@@ -74,14 +74,15 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
     public void cleanUnusedManifests(Changelog changelog, Set<String> skippingSet) {
         if (changelog.changelogManifestList() != null) {
             cleanUnusedManifestList(changelog.changelogManifestList(), skippingSet);
-        }
-
-        if (manifestList.exists(changelog.deltaManifestList())) {
-            cleanUnusedManifestList(changelog.deltaManifestList(), skippingSet);
-        }
-
-        if (manifestList.exists(changelog.baseManifestList())) {
-            cleanUnusedManifestList(changelog.baseManifestList(), skippingSet);
+        } else {
+            if (manifestList.exists(changelog.deltaManifestList())) {
+                cleanUnusedManifestList(changelog.deltaManifestList(), skippingSet);
+            }
+            // See FileDeletionBase#cleanUnusedManifests
+            // about why we need to clean base manifest
+            if (manifestList.exists(changelog.baseManifestList())) {
+                cleanUnusedManifestList(changelog.baseManifestList(), skippingSet);
+            }
         }
 
         // the index and statics manifest list should handle by snapshot deletion.

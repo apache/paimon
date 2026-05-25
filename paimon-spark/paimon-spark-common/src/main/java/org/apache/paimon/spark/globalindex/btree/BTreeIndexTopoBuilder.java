@@ -32,10 +32,13 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.FlatMapFunction;
@@ -53,6 +56,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
@@ -83,12 +87,19 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
         }
 
-        List<DataSplit> splits = splitByContiguousRowRange(indexBuilder.scan());
+        Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits = indexBuilder.scan();
+        if (!indexRangeAndSplits.isPresent()) {
+            return Collections.emptyList();
+        }
+
+        Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
+        List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
         if (splits.isEmpty()) {
             return Collections.emptyList();
         }
-        Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
-                groupSplitsByRange(splits);
+
+        Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
+                groupSplitsByRange(scanResult.getKey(), splits);
         if (partitionRangeSplits.isEmpty()) {
             return Collections.emptyList();
         }
@@ -104,11 +115,11 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         sortColumns.add(indexField.name());
         final int partitionKeyNum = table.partitionKeys().size();
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
-        for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partitionEntry :
+        for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                 partitionRangeSplits.entrySet()) {
-            for (Map.Entry<Range, List<DataSplit>> entry : partitionEntry.getValue().entrySet()) {
+            for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
                 Range range = entry.getKey();
-                List<DataSplit> rangeSplits = entry.getValue();
+                List<Split> rangeSplits = entry.getValue();
                 if (rangeSplits.isEmpty()) {
                     continue;
                 }
@@ -119,7 +130,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         PaimonUtils.createDataset(
                                 spark,
                                 ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                        rangeSplits.toArray(new DataSplit[0]), relation));
+                                        rangeSplits.toArray(new Split[0]), relation));
 
                 Dataset<Row> selected =
                         source.select(

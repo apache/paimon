@@ -112,13 +112,99 @@ public class PredicateBuilderTest {
         Predicate child3 = builder.isNull(6);
 
         assertThat(PredicateBuilder.splitAnd(PredicateBuilder.and(child1, child2, child3)))
-                .isEqualTo(
-                        Arrays.asList(
-                                child1,
-                                child3,
-                                builder.isNull(5),
-                                builder.isNull(4),
-                                builder.isNull(3)));
+                .containsExactlyInAnyOrder(
+                        child1, child3, builder.isNull(5), builder.isNull(4), builder.isNull(3));
+    }
+
+    // ---- and() tests ----
+
+    @Test
+    public void testAndFiltersTruePredicates() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate a = builder.equal(0, 1);
+
+        // and(a, alwaysTrue()) should simplify to a
+        assertThat(PredicateBuilder.and(a, PredicateBuilder.alwaysTrue())).isEqualTo(a);
+        // and(alwaysTrue(), a) should simplify to a
+        assertThat(PredicateBuilder.and(PredicateBuilder.alwaysTrue(), a)).isEqualTo(a);
+    }
+
+    @Test
+    public void testAndShortCircuitsFalse() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate a = builder.equal(0, 1);
+
+        // Any always-false child makes the whole AND always-false
+        Predicate result = PredicateBuilder.and(a, PredicateBuilder.alwaysFalse());
+        assertThat(result).isEqualTo(PredicateBuilder.alwaysFalse());
+
+        result = PredicateBuilder.and(PredicateBuilder.alwaysFalse(), a);
+        assertThat(result).isEqualTo(PredicateBuilder.alwaysFalse());
+    }
+
+    @Test
+    public void testAndAllTrue() {
+        // and(alwaysTrue(), alwaysTrue()) → alwaysTrue()
+        Predicate result =
+                PredicateBuilder.and(PredicateBuilder.alwaysTrue(), PredicateBuilder.alwaysTrue());
+        assertThat(result).isEqualTo(PredicateBuilder.alwaysTrue());
+    }
+
+    // ---- or() tests ----
+
+    @Test
+    public void testOrFiltersFalsePredicates() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate a = builder.equal(0, 1);
+
+        // or(a, alwaysFalse()) should simplify to a
+        assertThat(PredicateBuilder.or(a, PredicateBuilder.alwaysFalse())).isEqualTo(a);
+        // or(alwaysFalse(), a) should simplify to a
+        assertThat(PredicateBuilder.or(PredicateBuilder.alwaysFalse(), a)).isEqualTo(a);
+    }
+
+    @Test
+    public void testOrShortCircuitsTrue() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate a = builder.equal(0, 1);
+
+        // Any always-true child makes the whole OR always-true
+        Predicate result = PredicateBuilder.or(a, PredicateBuilder.alwaysTrue());
+        assertThat(result).isEqualTo(PredicateBuilder.alwaysTrue());
+
+        result = PredicateBuilder.or(PredicateBuilder.alwaysTrue(), a);
+        assertThat(result).isEqualTo(PredicateBuilder.alwaysTrue());
+    }
+
+    @Test
+    public void testOrAllFalse() {
+        // or(alwaysFalse(), alwaysFalse()) → alwaysFalse()
+        Predicate result =
+                PredicateBuilder.or(PredicateBuilder.alwaysFalse(), PredicateBuilder.alwaysFalse());
+        assertThat(result).isEqualTo(PredicateBuilder.alwaysFalse());
+    }
+
+    // ---- and/or evaluation tests ----
+
+    @Test
+    public void testAndEvaluation() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        // a >= 1 AND a <= 3  (optimised to BETWEEN(1, 3))
+        Predicate result =
+                PredicateBuilder.and(builder.greaterOrEqual(0, 1), builder.lessOrEqual(0, 3));
+        assertThat(result.test(GenericRow.of(2))).isTrue();
+        assertThat(result.test(GenericRow.of(0))).isFalse();
+        assertThat(result.test(GenericRow.of(4))).isFalse();
+    }
+
+    @Test
+    public void testOrEvaluation() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        // a = 1 OR a = 2
+        Predicate result = PredicateBuilder.or(builder.equal(0, 1), builder.equal(0, 2));
+        assertThat(result.test(GenericRow.of(1))).isTrue();
+        assertThat(result.test(GenericRow.of(2))).isTrue();
+        assertThat(result.test(GenericRow.of(3))).isFalse();
     }
 
     @Test

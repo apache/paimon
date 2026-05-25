@@ -93,8 +93,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
-                            PrimaryKeyTableUtils.addKeyNamePrefix(
-                                    tableSchema.logicalBucketKeyType()),
                             keyType,
                             rowType,
                             extractor,

@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 import glob
 import datetime
 import os
@@ -28,6 +28,8 @@ import pyarrow as pa
 from parameterized import parameterized
 
 from pypaimon.common.json_util import JSON
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableWriteTest(unittest.TestCase):
@@ -92,8 +94,8 @@ class TableWriteTest(unittest.TestCase):
 
         # snapshot
         snapshot_json: str = JSON.to_json(table.snapshot_manager().get_latest_snapshot())
-        self.assertEquals(True, snapshot_json.__contains__("baseManifestList"))
-        self.assertEquals(False, snapshot_json.__contains__("nextRowId"))
+        self.assertEqual(True, snapshot_json.__contains__("baseManifestList"))
+        self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
 
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -436,3 +438,36 @@ class TableWriteTest(unittest.TestCase):
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits)
         self.assertEqual(expected, actual)
+
+    def test_rolling(self):
+        pa_schema = pa.schema([('name', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=[])
+        self.catalog.create_table('default.test_rolling_recursion', schema, True)
+        table = self.catalog.get_table('default.test_rolling_recursion')
+
+        row_value = 'x' * 100
+        sample = pa.Table.from_batches([
+            pa.RecordBatch.from_pydict({'name': pa.array([row_value], type=pa.string())})
+        ])
+        # Set target just above single chunk nbytes so best_split=1 every time
+        target = sample.nbytes + 1
+
+        options = CoreOptions.copy(table.options)
+        options.set(CoreOptions.TARGET_FILE_SIZE, str(target))
+        writer = AppendOnlyDataWriter(
+            table=table, partition=(), bucket=0,
+            max_seq_number=0, options=options,
+        )
+
+        num_rows = 1500
+        big_batch = pa.RecordBatch.from_pydict(
+            {'name': pa.array([row_value] * num_rows, type=pa.string())}
+        )
+        writer.write(big_batch)
+
+        pending_rows = writer.pending_data.num_rows if writer.pending_data is not None else 0
+        committed_rows = sum(f.row_count for f in writer.committed_files)
+        self.assertEqual(committed_rows + pending_rows, num_rows)
+        self.assertGreater(len(writer.committed_files), 0)
+        if writer.pending_data is not None:
+            self.assertLessEqual(writer.pending_data.nbytes, target)

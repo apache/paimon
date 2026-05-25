@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -67,6 +68,10 @@ public class GlobalIndexMeta {
 
     public long rowRangeEnd() {
         return rowRangeEnd;
+    }
+
+    public Range rowRange() {
+        return new Range(rowRangeStart, rowRangeEnd);
     }
 
     public int indexFieldId() {

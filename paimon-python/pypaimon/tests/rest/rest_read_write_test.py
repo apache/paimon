@@ -1,20 +1,19 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 
@@ -115,6 +114,71 @@ class RESTTableReadWriteTest(RESTBaseTest):
         df2['f0'] = df2['f0'].astype('int32')
         pd.testing.assert_frame_equal(
             actual_df2.reset_index(drop=True), df2.reset_index(drop=True))
+
+    def test_dynamic_partition_overwrite(self):
+        pa_schema = pa.schema([
+            ('f0', pa.string()),
+            ('f1', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['f0'])
+        self.rest_catalog.create_table('default.test_dynamic_overwrite', schema, False)
+        table = self.rest_catalog.get_table('default.test_dynamic_overwrite')
+        read_builder = table.new_read_builder()
+
+        # Write initial non-null and null partitions
+        self._batch_write(table, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['apple', 'banana', 'cherry'],
+        }))
+
+        # Dynamic overwrite partition f0='a' only; 'b' and null untouched
+        self._batch_overwrite(table, pd.DataFrame({
+            'f0': ['a'],
+            'f1': ['watermelon'],
+        }))
+
+        self._assert_table_equals(read_builder, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['watermelon', 'banana', 'cherry'],
+        }), sort_by='f0')
+
+        # Dynamic overwrite partitions f0='a' and f0=None; 'b' untouched
+        self._batch_overwrite(table, pd.DataFrame({
+            'f0': ['a', None],
+            'f1': ['mango', 'grape'],
+        }))
+
+        self._assert_table_equals(read_builder, pd.DataFrame({
+            'f0': ['a', 'b', None],
+            'f1': ['mango', 'banana', 'grape'],
+        }), sort_by='f0')
+
+    def _batch_write(self, table, df):
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _batch_overwrite(self, table, df, partition=None):
+        write_builder = table.new_batch_write_builder().overwrite(partition)
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _assert_table_equals(self, read_builder, expected_df, sort_by=None):
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_df = table_read.to_pandas(table_scan.plan().splits())
+        if sort_by:
+            actual_df = actual_df.sort_values(by=sort_by)
+        pd.testing.assert_frame_equal(
+            actual_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
     def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -238,11 +302,12 @@ class RESTTableReadWriteTest(RESTBaseTest):
         table = self.rest_catalog.get_table('default.test_append_only_limit')
         self._write_test_table(table)
 
+        # Row-level limit: the reader stops at exactly N rows (not "first
+        # split's full row count"). Scan still keeps the first split that
+        # covers the limit; the reader short-circuits inside it.
         read_builder = table.new_read_builder().with_limit(1)
         actual = self._read_test_table(read_builder)
-        # only records from 1st commit (1st split) will be read
-        # might be split of "dt=1" or split of "dt=2"
-        self.assertEqual(actual.num_rows, 4)
+        self.assertEqual(actual.num_rows, 1)
 
     def test_pk_parquet_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,

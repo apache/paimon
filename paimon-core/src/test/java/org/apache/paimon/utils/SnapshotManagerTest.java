@@ -334,7 +334,7 @@ public class SnapshotManagerTest {
         SnapshotManager snapshotManager =
                 newSnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 100 snapshots using user "lastCommitUser"
-        for (long i = 0; i < 100; i++) {
+        for (long i = 1; i <= 100; i++) {
             Snapshot snapshot =
                     new Snapshot(
                             i,
@@ -375,7 +375,7 @@ public class SnapshotManagerTest {
         Thread.sleep(100);
 
         // expire snapshot
-        localFileIO.deleteQuietly(snapshotManager.snapshotPath(0));
+        localFileIO.deleteQuietly(snapshotManager.snapshotPath(1));
         thread.join();
 
         assertThat(exception.get()).isNull();

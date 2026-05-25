@@ -103,6 +103,28 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testInsertIntoCheckSameBucketAndInsertOverwriteRescale() {
+        batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')");
+        batchSql(
+                "ALTER TABLE append_table SET ("
+                        + "'bucket' = '2', "
+                        + "'bucket-append-ordered' = 'false', "
+                        + "'write-only' = 'true')");
+
+        assertThatThrownBy(() -> batchSql("INSERT INTO append_table VALUES (3, 'CCC')"))
+                .rootCause()
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "Try to write table with a new bucket num 2, but the previous bucket num is 1. "
+                                + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.");
+
+        batchSql("INSERT OVERWRITE append_table VALUES (3, 'CCC'), (4, 'DDD')");
+
+        assertThat(batchSql("SELECT * FROM append_table"))
+                .containsExactlyInAnyOrder(Row.of(3, "CCC"), Row.of(4, "DDD"));
+    }
+
+    @Test
     public void testReadWriteWithExternalPathRoundRobinStrategy1() {
         String externalPaths =
                 TraceableFileIO.SCHEME

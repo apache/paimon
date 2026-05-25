@@ -28,7 +28,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -48,7 +52,6 @@ public class SimpleLsmKvDbTest {
         return SimpleLsmKvDb.builder(dataDirectory)
                 .memTableFlushThreshold(1024)
                 .blockSize(256)
-                .cacheSize(4 * 1024 * 1024)
                 .level0FileNumCompactTrigger(4)
                 .compressOptions(new CompressOptions("none", 1))
                 .build();
@@ -197,7 +200,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(dataDirectory)
                         .memTableFlushThreshold(256)
                         .blockSize(128)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -320,7 +322,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(dbDir)
                         .memTableFlushThreshold(1024 * 1024) // large threshold, won't auto-flush
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(10)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -349,7 +350,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "compressed-db"))
                         .memTableFlushThreshold(512)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(CompressOptions.defaultOptions())
                         .build();
@@ -397,7 +397,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-trigger-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -434,7 +433,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-overlap-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -470,7 +468,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-reduce-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -513,7 +510,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-multi-db"))
                         .memTableFlushThreshold(512)
                         .blockSize(128)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(50)
                         .compressOptions(new CompressOptions("none", 1))
@@ -545,7 +541,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-tombstone-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -593,7 +588,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-update-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -638,7 +632,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "large-scale-db"))
                         .memTableFlushThreshold(256)
                         .blockSize(64)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(20)
                         .compressOptions(new CompressOptions("none", 1))
@@ -792,7 +785,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "stats-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(10)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -827,7 +819,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "reverse-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .keyComparator(reverseComparator)
@@ -869,7 +860,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "reverse-compact-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .keyComparator(reverseComparator)
@@ -915,7 +905,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "reverse-delete-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(new CompressOptions("none", 1))
                         .keyComparator(reverseComparator)
@@ -955,7 +944,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "non-overlap-skip-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -985,7 +973,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "overlap-group-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1019,7 +1006,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "mixed-group-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1068,7 +1054,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "tombstone-no-skip-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1099,7 +1084,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "multi-round-group-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1143,7 +1127,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "l0-clear-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(1)
                         .compressOptions(new CompressOptions("none", 1))
@@ -1197,7 +1180,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "many-l0-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(1)
                         .compressOptions(new CompressOptions("none", 1))
@@ -1249,7 +1231,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "overlap-l0-l1-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(1)
                         .compressOptions(new CompressOptions("none", 1))
@@ -1308,7 +1289,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "group-delete-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1345,8 +1325,254 @@ public class SimpleLsmKvDbTest {
         }
     }
 
+    @Test
+    public void testBulkLoad() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            // Prepare sorted entries
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            for (int i = 0; i < 100; i++) {
+                String key = String.format("key-%05d", i);
+                String value = String.format("value-%05d", i);
+                entries.add(
+                        new AbstractMap.SimpleImmutableEntry<>(
+                                key.getBytes(UTF_8), value.getBytes(UTF_8)));
+            }
+
+            db.bulkLoad(entries.iterator());
+
+            // All data at deepest level, no L0 files
+            Assertions.assertEquals(0, db.getLevelFileCount(0));
+            Assertions.assertTrue(db.getLevelFileCount(SimpleLsmKvDb.MAX_LEVELS - 1) > 0);
+
+            // All keys should be readable
+            for (int i = 0; i < 100; i++) {
+                String expected = String.format("value-%05d", i);
+                String actual = getString(db, String.format("key-%05d", i));
+                Assertions.assertEquals(expected, actual, "Mismatch at index " + i);
+            }
+        }
+    }
+
+    @Test
+    public void testBulkLoadMultipleSstFiles() throws IOException {
+        // Use a small maxSstFileSize to force multiple SST files
+        SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bulk-multi-db"))
+                        .memTableFlushThreshold(1024)
+                        .maxSstFileSize(512)
+                        .blockSize(128)
+                        .level0FileNumCompactTrigger(4)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build();
+
+        try {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                String key = String.format("key-%05d", i);
+                String value = String.format("value-%05d", i);
+                entries.add(
+                        new AbstractMap.SimpleImmutableEntry<>(
+                                key.getBytes(UTF_8), value.getBytes(UTF_8)));
+            }
+
+            db.bulkLoad(entries.iterator());
+
+            // Multiple SST files should be created at the deepest level
+            int deepestLevelFiles = db.getLevelFileCount(SimpleLsmKvDb.MAX_LEVELS - 1);
+            Assertions.assertTrue(
+                    deepestLevelFiles > 1,
+                    "Expected multiple SST files at deepest level, got " + deepestLevelFiles);
+            Assertions.assertEquals(0, db.getLevelFileCount(0));
+
+            // All keys should be readable
+            for (int i = 0; i < 200; i++) {
+                String expected = String.format("value-%05d", i);
+                String actual = getString(db, String.format("key-%05d", i));
+                Assertions.assertEquals(expected, actual, "Mismatch at index " + i);
+            }
+        } finally {
+            db.close();
+        }
+    }
+
+    @Test
+    public void testBulkLoadEmptyIterator() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            List<Map.Entry<byte[], byte[]>> empty = new ArrayList<>();
+            db.bulkLoad(empty.iterator());
+
+            Assertions.assertEquals(0, db.getSstFileCount());
+            Assertions.assertNull(getString(db, "any-key"));
+        }
+    }
+
+    @Test
+    public void testBulkLoadFailsOnUnsortedEntries() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(entry("key-00002", "value-2"));
+            entries.add(entry("key-00001", "value-1"));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+            Assertions.assertTrue(exception.getMessage().contains("sorted"));
+            Assertions.assertEquals(0, db.getSstFileCount());
+        }
+    }
+
+    @Test
+    public void testBulkLoadFailsOnUnorderedSstRanges() throws IOException {
+        SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bulk-unordered-ranges-db"))
+                        .memTableFlushThreshold(1024)
+                        .maxSstFileSize(1)
+                        .blockSize(256)
+                        .level0FileNumCompactTrigger(4)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build();
+
+        try {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(entry("key-00001", "value-1"));
+            entries.add(entry("key-00003", "value-3"));
+            entries.add(entry("key-00002", "value-2"));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+            Assertions.assertTrue(exception.getMessage().contains("ranges"));
+            Assertions.assertEquals(0, db.getSstFileCount());
+        } finally {
+            db.close();
+        }
+    }
+
+    @Test
+    public void testBulkLoadOrderCheckUsesConfiguredComparator() throws IOException {
+        Comparator<MemorySlice> reverseComparator =
+                new Comparator<MemorySlice>() {
+                    @Override
+                    public int compare(MemorySlice a, MemorySlice b) {
+                        return b.compareTo(a);
+                    }
+                };
+
+        try (SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bulk-reverse-db"))
+                        .memTableFlushThreshold(1024)
+                        .blockSize(256)
+                        .level0FileNumCompactTrigger(4)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .keyComparator(reverseComparator)
+                        .build()) {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(entry("key-a", "value-a"));
+            entries.add(entry("key-b", "value-b"));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+            Assertions.assertTrue(exception.getMessage().contains("comparator"));
+        }
+    }
+
+    @Test
+    public void testBulkLoadThenPutAndGet() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            // Bulk load initial data
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            for (int i = 0; i < 50; i++) {
+                String key = String.format("key-%05d", i);
+                String value = String.format("value-%05d", i);
+                entries.add(
+                        new AbstractMap.SimpleImmutableEntry<>(
+                                key.getBytes(UTF_8), value.getBytes(UTF_8)));
+            }
+            db.bulkLoad(entries.iterator());
+
+            // Now use normal put to add/overwrite data
+            putString(db, "key-00000", "overwritten");
+            putString(db, "key-99999", "new-key");
+
+            Assertions.assertEquals("overwritten", getString(db, "key-00000"));
+            Assertions.assertEquals("new-key", getString(db, "key-99999"));
+            Assertions.assertEquals("value-00025", getString(db, String.format("key-%05d", 25)));
+        }
+    }
+
+    @Test
+    public void testTwoInstancesSameDirectoryNoFileCollision() throws IOException {
+        // Two SimpleLsmKvDb instances sharing the same dataDirectory should not interfere
+        // with each other because SST file names contain a unique UUID.
+        File sharedDir = new File(tempDir.toFile(), "shared-dir-db");
+
+        try (SimpleLsmKvDb db1 =
+                        SimpleLsmKvDb.builder(sharedDir)
+                                .memTableFlushThreshold(1024)
+                                .blockSize(256)
+                                .level0FileNumCompactTrigger(4)
+                                .compressOptions(new CompressOptions("none", 1))
+                                .build();
+                SimpleLsmKvDb db2 =
+                        SimpleLsmKvDb.builder(sharedDir)
+                                .memTableFlushThreshold(1024)
+                                .blockSize(256)
+                                .level0FileNumCompactTrigger(4)
+                                .compressOptions(new CompressOptions("none", 1))
+                                .build()) {
+
+            // Write different data to each instance
+            putString(db1, "key-a", "from-db1");
+            putString(db1, "key-b", "from-db1");
+            db1.flush();
+
+            putString(db2, "key-a", "from-db2");
+            putString(db2, "key-c", "from-db2");
+            db2.flush();
+
+            // Each instance should see only its own data
+            Assertions.assertEquals("from-db1", getString(db1, "key-a"));
+            Assertions.assertEquals("from-db1", getString(db1, "key-b"));
+            Assertions.assertNull(getString(db1, "key-c"));
+
+            Assertions.assertEquals("from-db2", getString(db2, "key-a"));
+            Assertions.assertNull(getString(db2, "key-b"));
+            Assertions.assertEquals("from-db2", getString(db2, "key-c"));
+
+            // Write more data and flush again to ensure no cross-contamination
+            putString(db1, "key-a", "updated-db1");
+            db1.flush();
+
+            putString(db2, "key-a", "updated-db2");
+            db2.flush();
+
+            Assertions.assertEquals("updated-db1", getString(db1, "key-a"));
+            Assertions.assertEquals("updated-db2", getString(db2, "key-a"));
+        }
+    }
+
+    @Test
+    public void testBulkLoadFailsOnNonEmptyDb() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            putString(db, "existing", "data");
+
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(
+                    new AbstractMap.SimpleImmutableEntry<>(
+                            "key".getBytes(UTF_8), "value".getBytes(UTF_8)));
+
+            Assertions.assertThrows(
+                    IllegalStateException.class, () -> db.bulkLoad(entries.iterator()));
+        }
+    }
+
     private static void putString(SimpleLsmKvDb db, String key, String value) throws IOException {
         db.put(key.getBytes(UTF_8), value.getBytes(UTF_8));
+    }
+
+    private static Map.Entry<byte[], byte[]> entry(String key, String value) {
+        return new AbstractMap.SimpleImmutableEntry<>(key.getBytes(UTF_8), value.getBytes(UTF_8));
     }
 
     private static String getString(SimpleLsmKvDb db, String key) throws IOException {

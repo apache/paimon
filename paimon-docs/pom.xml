@@ -25,14 +25,14 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>1.4-SNAPSHOT</version>
+        <version>1.5-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-docs</artifactId>
     <name>Paimon : Docs</name>
 
     <properties>
-        <generated.docs.dir>./docs/layouts/shortcodes/generated</generated.docs.dir>
+        <generated.docs.dir>./docs/generated</generated.docs.dir>
         <static.docs.dir>./docs/static</static.docs.dir>
     </properties>
 

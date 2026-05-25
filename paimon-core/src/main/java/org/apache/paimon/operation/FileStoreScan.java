@@ -35,6 +35,7 @@ import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
+import org.apache.paimon.utils.TriFilter;
 
 import javax.annotation.Nullable;
 
@@ -56,13 +57,15 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(PartitionPredicate predicate);
 
+    FileStoreScan withCompleteFilter(Predicate predicate);
+
     FileStoreScan withBucket(int bucket);
 
     FileStoreScan onlyReadRealBuckets();
 
     FileStoreScan withBucketFilter(Filter<Integer> bucketFilter);
 
-    FileStoreScan withTotalAwareBucketFilter(BiFilter<Integer, Integer> bucketFilter);
+    FileStoreScan withTotalAwareBucketFilter(TriFilter<BinaryRow, Integer, Integer> bucketFilter);
 
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
 

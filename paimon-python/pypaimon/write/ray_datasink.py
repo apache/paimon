@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 """
 Module to write a Paimon table from a Ray Dataset, by using the Ray Datasink API.
 """
@@ -35,6 +35,29 @@ if TYPE_CHECKING:
     from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _cast_binary_to_table_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
+    """Cast binary to large_binary for BLOB fields.
+
+    When map_batches returns Python dicts, PyArrow infers bytes as binary,
+    losing the original large_binary (BLOB) type. Cast back before writing.
+    """
+    cast_indices = []
+    for i, field in enumerate(table.schema):
+        target_field = target_schema.field(field.name) if field.name in target_schema.names else None
+        if target_field and pa.types.is_binary(field.type) and pa.types.is_large_binary(target_field.type):
+            cast_indices.append(i)
+
+    if not cast_indices:
+        return table
+
+    columns = table.columns
+    for i in cast_indices:
+        columns[i] = columns[i].cast(pa.large_binary())
+    fields = [target_schema.field(f.name) if i in cast_indices else f
+              for i, f in enumerate(table.schema)]
+    return pa.table(columns, schema=pa.schema(fields))
 
 # Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
 try:
@@ -90,11 +113,17 @@ class PaimonDatasink(_DatasinkBase):
             
             table_write = writer_builder.new_write()
 
+            table_schema = self.table.table_schema
+            from pypaimon.schema.data_types import PyarrowFieldParser
+            target_pa_schema = PyarrowFieldParser.from_paimon_schema(table_schema.fields)
+
             for block in blocks:
                 block_arrow: pa.Table = BlockAccessor.for_block(block).to_arrow()
 
                 if block_arrow.num_rows == 0:
                     continue
+
+                block_arrow = _cast_binary_to_table_schema(block_arrow, target_pa_schema)
 
                 table_write.write_arrow(block_arrow)
 

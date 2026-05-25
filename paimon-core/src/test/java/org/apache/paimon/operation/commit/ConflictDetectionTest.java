@@ -25,6 +25,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -339,5 +341,52 @@ class ConflictDetectionTest {
             }
         }
         assert (deleteCount > 0);
+    }
+
+    @Test
+    void testShouldBeOverwriteCommit() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> addOnlyEntries = new ArrayList<>();
+        addOnlyEntries.add(createFileEntry("f1", ADD));
+        addOnlyEntries.add(createFileEntry("f2", ADD));
+        assertThat(detection.shouldBeOverwriteCommit(addOnlyEntries, Collections.emptyList()))
+                .isFalse();
+
+        assertThat(
+                        detection.shouldBeOverwriteCommit(
+                                Collections.emptyList(), Collections.emptyList()))
+                .isFalse();
+
+        List<SimpleFileEntry> deleteEntries = new ArrayList<>();
+        deleteEntries.add(createFileEntry("f1", DELETE));
+        deleteEntries.add(createFileEntry("f2", ADD));
+        assertThat(detection.shouldBeOverwriteCommit(deleteEntries, Collections.emptyList()))
+                .isTrue();
+
+        List<IndexManifestEntry> dvIndexFiles = new ArrayList<>();
+        dvIndexFiles.add(createDvIndexEntry("dv1", ADD, Arrays.asList("f1")));
+        assertThat(detection.shouldBeOverwriteCommit(Collections.emptyList(), dvIndexFiles))
+                .isTrue();
+
+        detection.setRowIdCheckFromSnapshot(1L);
+        assertThat(detection.shouldBeOverwriteCommit(addOnlyEntries, Collections.emptyList()))
+                .isFalse();
+    }
+
+    private ConflictDetection createConflictDetection() {
+        return new ConflictDetection(
+                "test-table",
+                "test-user",
+                RowType.of(),
+                null,
+                null,
+                BucketMode.HASH_FIXED,
+                false,
+                true,
+                false,
+                null,
+                null,
+                null);
     }
 }

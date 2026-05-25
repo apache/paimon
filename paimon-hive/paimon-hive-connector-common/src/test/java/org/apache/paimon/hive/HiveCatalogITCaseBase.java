@@ -1470,6 +1470,31 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testDonePartitionExpire() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE done_expire_t (a INT, dt STRING) PARTITIONED BY (dt) WITH ("
+                                + "'partition.timestamp-formatter'='yyyyMMdd',"
+                                + "'partition.timestamp-pattern'='$dt',"
+                                + "'metastore.partitioned-table'='true',"
+                                + "'partition.mark-done-action'='done-partition'"
+                                + ")")
+                .await();
+        tEnv.executeSql("INSERT INTO done_expire_t VALUES (1, '20240101')").await();
+        tEnv.executeSql("CALL sys.mark_partition_done('test_db.done_expire_t', 'dt=20240101')")
+                .await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS done_expire_t"))
+                .containsExactlyInAnyOrder("dt=20240101", "dt=20240101.done");
+
+        tEnv.executeSql(
+                        "CALL sys.expire_partitions("
+                                + "`table` => 'test_db.done_expire_t', "
+                                + "expiration_time => '1 d', "
+                                + "timestamp_formatter => 'yyyyMMdd')")
+                .await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS done_expire_t")).isEmpty();
+    }
+
+    @Test
     public void testRepairDatabasesOrTables() throws Exception {
         TableEnvironment fileCatalog = useFileCatalog("test_db");
         TableEnvironment fileCatalog01 = useFileCatalog("test_db_01");
