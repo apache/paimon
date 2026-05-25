@@ -74,11 +74,8 @@ def _read_table(
     multithreaded_io = runners.get_or_create_runner().name != "ray"
     storage_config = StorageConfig(multithreaded_io, io_config)
 
-    warehouse = catalog_options.get("warehouse", "")
-    scan_catalog_options = {"warehouse": warehouse} if warehouse else {}
-
     source = PaimonDataSource(
-        table, storage_config=storage_config, catalog_options=scan_catalog_options
+        table, storage_config=storage_config, catalog_options=catalog_options
     )
     return source.read()
 
