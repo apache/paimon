@@ -20,6 +20,7 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.ListUtils;
@@ -40,12 +41,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntPredicate;
 import java.util.stream.Collectors;
 
@@ -55,45 +50,6 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 public class PartitionIndex {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionIndex.class);
-
-    // Configuration for bucket refresh executor
-    // Higher thread count because refresh operations are I/O bound (waiting on disk/network)
-    private static final int REFRESH_CORE_THREADS = 4;
-    private static final int REFRESH_MAX_THREADS = 12;
-
-    // Shared executor for all PartitionIndex instances to control global concurrency
-    // Uses unbounded queue because:
-    // 1. Refresh tasks are infrequent (hours/days between refreshes)
-    // 2. Low memory footprint (~400 bytes per task, max ~200KB for 500 partitions)
-    // 3. Tasks process quickly (30-60s each) so queue drains fast
-    // 4. Ensures all partitions eventually refresh (no task rejection)
-    private static final ExecutorService REFRESH_EXECUTOR;
-
-    static {
-        ThreadFactory threadFactory =
-                new ThreadFactory() {
-                    private final AtomicInteger counter = new AtomicInteger(0);
-
-                    @Override
-                    public Thread newThread(Runnable r) {
-                        Thread thread =
-                                new Thread(r, "paimon-bucket-refresh-" + counter.getAndIncrement());
-                        thread.setDaemon(true);
-                        return thread;
-                    }
-                };
-
-        // Unbounded queue - never rejects tasks
-        // With 24h refresh interval, queue size is manageable even with many partitions
-        REFRESH_EXECUTOR =
-                new ThreadPoolExecutor(
-                        REFRESH_CORE_THREADS,
-                        REFRESH_MAX_THREADS,
-                        60L,
-                        TimeUnit.SECONDS,
-                        new LinkedBlockingQueue<>(),
-                        threadFactory);
-    }
 
     public final Int2ShortHashMap hash2Bucket;
 
@@ -291,9 +247,11 @@ public class PartitionIndex {
                         nonFullBucketInformation.size());
             }
 
-            // With unbounded queue, tasks are never rejected
-            // Note: Using exceptionally for error handling (Java 8 compatible)
-            // Timeout is handled by the ThreadPoolExecutor's keep-alive time
+            // Reuse the shared FileOperationThreadPool instead of creating a dedicated
+            // executor: refresh is an I/O-bound file operation (scanning index manifest
+            // entries) and the shared pool already exists for this purpose. This avoids
+            // duplicating thread-pool resources and aligns with how other file-scan paths
+            // in Paimon (FileDeletionBase, TableCommitImpl, ListUnexistingFiles) work.
             refreshFuture =
                     CompletableFuture.runAsync(
                                     () -> {
@@ -356,7 +314,8 @@ public class PartitionIndex {
                                                     e);
                                         }
                                     },
-                                    REFRESH_EXECUTOR)
+                                    FileOperationThreadPool.getExecutorService(
+                                            Runtime.getRuntime().availableProcessors()))
                             .exceptionally(
                                     throwable -> {
                                         LOG.warn(
