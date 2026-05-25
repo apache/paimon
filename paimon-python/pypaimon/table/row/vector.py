@@ -15,21 +15,25 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Union
+import array
+from typing import List, Union
 
 
 class Vector:
-    """A fixed-length dense vector of numeric values."""
+    """A fixed-length dense vector of numeric values backed by array.array."""
 
-    def __init__(self, values: List[Union[int, float, bool]]):
-        self._values = list(values)
+    def __init__(self, values, typecode: str = 'f'):
+        if isinstance(values, array.array):
+            self._values = values
+        else:
+            self._values = array.array(typecode, values)
 
-    def to_list(self) -> List[Union[int, float, bool]]:
-        return list(self._values)
+    def to_list(self) -> List[Union[int, float]]:
+        return self._values.tolist()
 
     @staticmethod
-    def from_list(values: List[Union[int, float, bool]]) -> 'Vector':
-        return Vector(values)
+    def from_list(values: List[Union[int, float]], typecode: str = 'f') -> 'Vector':
+        return Vector(values, typecode)
 
     def __len__(self) -> int:
         return len(self._values)
@@ -43,10 +47,10 @@ class Vector:
         return self._values == other._values
 
     def __hash__(self) -> int:
-        return hash(tuple(self._values))
+        return hash(self._values.tobytes())
 
     def __str__(self) -> str:
-        return f"Vector({self._values})"
+        return f"Vector({self._values.tolist()})"
 
     def __repr__(self) -> str:
         return self.__str__()

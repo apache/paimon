@@ -70,7 +70,7 @@ class OffsetRow(InternalRow):
         value = self.get_field(pos)
         if value is None:
             return None
-        return Vector(list(value))
+        return Vector(value.as_py() if hasattr(value, 'as_py') else value)
 
     def get_row_kind(self) -> RowKind:
         return RowKind(self.row_kind_byte)

@@ -63,7 +63,7 @@ class VectorClassTest(unittest.TestCase):
 
     def test_integer_vector(self):
         v = Vector([1, 2, 3])
-        self.assertEqual(v.to_list(), [1, 2, 3])
+        self.assertEqual(v.to_list(), [1.0, 2.0, 3.0])
 
     def test_empty_vector(self):
         v = Vector([])
