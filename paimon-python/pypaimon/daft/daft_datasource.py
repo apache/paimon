@@ -49,11 +49,6 @@ PAIMON_FILE_FORMAT_PARQUET = "parquet"
 PAIMON_FILE_FORMAT_ORC = "orc"
 PAIMON_FILE_FORMAT_AVRO = "avro"
 
-_ABSOLUTE_URI_SCHEMES = (
-    "oss://", "s3://", "s3a://", "s3n://",
-    "hdfs://", "file://", "http://", "https://",
-)
-
 
 class _PaimonPKSplitTask(DataSourceTask):
     """DataSourceTask for PK-table splits that require LSM-tree merge.
@@ -300,7 +295,7 @@ class PaimonDataSource(DataSource):
 
     def _build_file_uri(self, file_path: str) -> str:
         """Reconstruct a full URI from a (potentially scheme-stripped) file_path."""
-        if file_path.startswith(_ABSOLUTE_URI_SCHEMES):
+        if urlparse(file_path).scheme:
             return file_path
         if self._warehouse_scheme:
             return f"{self._warehouse_scheme}://{file_path}"
