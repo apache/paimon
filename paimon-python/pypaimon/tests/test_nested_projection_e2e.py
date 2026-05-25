@@ -95,6 +95,28 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
              {'mv_latest_version': 200, 'val': 'y', 'mv_latest_value': 'b'},
              {'mv_latest_version': 300, 'val': 'z', 'mv_latest_value': 'c'}])
 
+    def test_dotted_top_level_field_kept(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('media.left', pa.string()),
+        ])
+        identifier = 'default.ao_dotted_top_level'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pylist(
+            [{'id': 1, 'media.left': 'hello'}], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'media.left'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
+
     def test_top_level_only_projection_unchanged(self):
         """A projection without dots must keep the existing top-level
         path — file-level pushdown still asks for plain column names,

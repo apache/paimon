@@ -164,12 +164,11 @@ class ReadBuilder:
 
         paths: List[List[int]] = []
         for name in names:
-            if '.' not in name:
-                if name not in top_index:
-                    # Silently skip unknown names — preserves the
-                    # pre-existing contract from the plain top-level path.
-                    continue
+            # Dot can be part of a top-level field name, not only a struct path separator.
+            if name in top_index:
                 paths.append([top_index[name]])
+                continue
+            if '.' not in name:
                 continue
             parts = name.split('.')
             top = parts[0]
