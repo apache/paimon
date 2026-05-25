@@ -15,14 +15,12 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""Unit tests for PaimonDataSource helper methods."""
 import unittest
 
 from pypaimon.daft.daft_datasource import PaimonDataSource
 
 
 def _build_uri(warehouse_scheme: str, file_path: str) -> str:
-    """Invoke ``_build_file_uri`` on a stub with the given ``_warehouse_scheme``."""
     class _Stub:
         pass
     stub = _Stub()
@@ -31,15 +29,8 @@ def _build_uri(warehouse_scheme: str, file_path: str) -> str:
 
 
 class BuildFileUriTest(unittest.TestCase):
-    """Verify _build_file_uri does not double-prefix absolute paths.
-
-    REST catalogs (e.g. DLF) return absolute ``oss://`` / ``s3://`` paths in
-    DataFileMeta.file_path. The previous unconditional prefix produced
-    invalid URIs like ``file://oss://bucket/...``.
-    """
 
     def test_passes_through_when_path_already_has_scheme(self):
-        # (warehouse_scheme, file_path) -> expected (== file_path)
         cases = [
             ("",     "oss://bucket/db.db/tbl/data.parquet"),
             ("",     "s3://bucket/key.parquet"),
@@ -47,9 +38,7 @@ class BuildFileUriTest(unittest.TestCase):
             ("",     "s3n://bucket/key.parquet"),
             ("",     "hdfs://nameservice/path/data.parquet"),
             ("file", "file:///abs/path/data.parquet"),
-            # warehouse_scheme also set → file_path still wins (no double prefix)
             ("oss",  "oss://bucket/db.db/tbl/data.parquet"),
-            # Regression: real DLF + OSS shape, warehouse is a catalog name (no scheme)
             ("",     "oss://clg-paimon-fe4767/db.db/tbl/bucket-0/data-0.parquet"),
         ]
         for warehouse_scheme, file_path in cases:
@@ -63,7 +52,6 @@ class BuildFileUriTest(unittest.TestCase):
         )
 
     def test_defaults_to_file_scheme_when_both_unschemed(self):
-        # Local filesystem warehouse case (only scenario current tests cover).
         self.assertEqual(
             _build_uri("", "/tmp/pytest-xxx/db.db/tbl/data.parquet"),
             "file:///tmp/pytest-xxx/db.db/tbl/data.parquet",
