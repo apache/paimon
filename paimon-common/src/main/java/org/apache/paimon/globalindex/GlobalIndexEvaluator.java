@@ -29,13 +29,16 @@ import org.apache.paimon.utils.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -44,6 +47,8 @@ import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.
 
 /** Predicate for filtering data using global indexes. */
 public class GlobalIndexEvaluator implements Closeable {
+
+    private static final int MAX_PREDICATE_DEPTH = 1000;
 
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
@@ -66,23 +71,31 @@ public class GlobalIndexEvaluator implements Closeable {
             return Optional.empty();
         }
         try {
-            return visitAsync(predicate).get();
-        } catch (Exception e) {
+            return visitAsync(predicate, 0).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during index evaluation", e);
+        } catch (ExecutionException e) {
             if (e.getCause() instanceof RuntimeException) {
                 throw (RuntimeException) e.getCause();
             }
             if (e.getCause() instanceof Error) {
                 throw (Error) e.getCause();
             }
-            throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
+            throw new RuntimeException(e.getCause());
         }
     }
 
-    private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(Predicate predicate) {
+    private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(
+            Predicate predicate, int depth) {
+        if (depth > MAX_PREDICATE_DEPTH) {
+            throw new IllegalArgumentException(
+                    "Predicate tree exceeds maximum depth of " + MAX_PREDICATE_DEPTH);
+        }
         if (predicate instanceof LeafPredicate) {
             return visitLeafAsync((LeafPredicate) predicate);
         }
-        return visitCompoundAsync((CompoundPredicate) predicate);
+        return visitCompoundAsync((CompoundPredicate) predicate, depth);
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitLeafAsync(LeafPredicate predicate) {
@@ -105,10 +118,7 @@ public class GlobalIndexEvaluator implements Closeable {
                                     Optional<GlobalIndexResult> result =
                                             predicate
                                                     .function()
-                                                    .visit(
-                                                            reader,
-                                                            fieldRef,
-                                                            predicate.literals());
+                                                    .visit(reader, fieldRef, predicate.literals());
                                     result.ifPresent(GlobalIndexResult::results);
                                     return result;
                                 }
@@ -141,10 +151,12 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
-            CompoundPredicate predicate) {
+            CompoundPredicate predicate, int depth) {
         List<Predicate> children = flattenChildren(predicate);
         List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
-                children.stream().map(this::visitAsync).collect(Collectors.toList());
+                children.stream()
+                        .map(child -> visitAsync(child, depth + 1))
+                        .collect(Collectors.toList());
 
         return CompletableFuture.allOf(childFutures.toArray(new CompletableFuture[0]))
                 .thenApply(
@@ -188,11 +200,16 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private List<Predicate> flattenChildren(CompoundPredicate predicate) {
         List<Predicate> result = new ArrayList<>();
-        for (Predicate child : predicate.children()) {
+        Deque<Predicate> stack = new ArrayDeque<>(predicate.children());
+        while (!stack.isEmpty()) {
+            Predicate child = stack.pollFirst();
             if (child instanceof CompoundPredicate) {
                 CompoundPredicate compound = (CompoundPredicate) child;
                 if (compound.function().equals(predicate.function())) {
-                    result.addAll(flattenChildren(compound));
+                    List<Predicate> grandChildren = compound.children();
+                    for (int i = grandChildren.size() - 1; i >= 0; i--) {
+                        stack.addFirst(grandChildren.get(i));
+                    }
                     continue;
                 }
             }

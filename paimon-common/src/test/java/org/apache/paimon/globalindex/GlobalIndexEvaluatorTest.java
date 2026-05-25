@@ -578,6 +578,34 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testMultipleReadersPerFieldCombinedWithAnd() {
+        executor = Executors.newFixedThreadPool(2);
+        RowType rowType = rowType();
+
+        GlobalIndexResult readerResult1 = resultOf(1, 2, 3, 4, 5);
+        GlobalIndexResult readerResult2 = resultOf(3, 4, 5, 6, 7);
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Arrays.asList(
+                                        readerReturning(readerResult1),
+                                        readerReturning(readerResult2)),
+                        executor);
+
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = builder.equal(0, 42);
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        // Multiple readers for same field are combined with AND (intersection)
+        assertBitmapContainsExactly(result.get().results(), 3L, 4L, 5L);
+        evaluator.close();
+    }
+
+    @Test
     void testNonFieldLeafPredicateDoesNotThrow() {
         executor = Executors.newFixedThreadPool(2);
         RowType rowType = rowType();

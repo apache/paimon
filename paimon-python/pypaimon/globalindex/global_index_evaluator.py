@@ -18,8 +18,11 @@
 """Global index evaluator for filtering data using global indexes."""
 
 import threading
+from collections import deque
 from concurrent.futures import Executor, Future
 from typing import Callable, Collection, Dict, List, Optional
+
+_MAX_PREDICATE_DEPTH = 1000
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -69,9 +72,13 @@ class GlobalIndexEvaluator:
         future = self._visit_async(predicate)
         return future.result()
 
-    def _visit_async(self, predicate) -> Future:
+    def _visit_async(self, predicate, depth=0) -> Future:
+        if depth > _MAX_PREDICATE_DEPTH:
+            raise ValueError(
+                f"Predicate tree exceeds maximum depth of {_MAX_PREDICATE_DEPTH}"
+            )
         if isinstance(predicate, Predicate) and predicate.method in ('and', 'or'):
-            return self._visit_compound_async(predicate)
+            return self._visit_compound_async(predicate, depth)
         return self._visit_leaf_async(predicate)
 
     def _visit_leaf_async(self, predicate: Predicate) -> Future:
@@ -145,9 +152,9 @@ class GlobalIndexEvaluator:
                 return compound_result
         return compound_result
 
-    def _visit_compound_async(self, predicate: Predicate) -> Future:
+    def _visit_compound_async(self, predicate: Predicate, depth: int = 0) -> Future:
         children = self._flatten_children(predicate.method, predicate.literals)
-        child_futures = [self._visit_async(child) for child in children]
+        child_futures = [self._visit_async(child, depth + 1) for child in children]
 
         all_done = Future()
         if not child_futures:
@@ -198,9 +205,12 @@ class GlobalIndexEvaluator:
 
     def _flatten_children(self, method: str, children) -> list:
         result = []
-        for child in children:
+        stack = deque(children)
+        while stack:
+            child = stack.popleft()
             if isinstance(child, Predicate) and child.method == method:
-                result.extend(self._flatten_children(method, child.literals))
+                for grandchild in reversed(child.literals):
+                    stack.appendleft(grandchild)
             else:
                 result.append(child)
         return result

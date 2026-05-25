@@ -591,6 +591,33 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator.close()
         executor.shutdown(wait=False)
 
+    def test_multiple_readers_per_field_combined_with_and(self):
+        fields = _make_fields()
+        reader_result1 = GlobalIndexResult.from_range(Range(1, 5))
+        reader_result2 = GlobalIndexResult.from_range(Range(3, 7))
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [
+                StubGlobalIndexReader(reader_result1),
+                StubGlobalIndexReader(reader_result2),
+            ],
+            executor,
+        )
+
+        predicate = Predicate(method='equal', index=0, field='a', literals=[42])
+        result = evaluator.evaluate(predicate)
+
+        self.assertIsNotNone(result)
+        bm = result.results()
+        # Multiple readers for same field are combined with AND (intersection)
+        self.assertEqual(bm.cardinality(), 3)
+        for v in [3, 4, 5]:
+            self.assertTrue(bm.contains(v))
+        evaluator.close()
+        executor.shutdown(wait=False)
+
     def test_non_field_leaf_predicate_does_not_throw(self):
         fields = _make_fields()
         result_a = GlobalIndexResult.from_range(Range(1, 3))
