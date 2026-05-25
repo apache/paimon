@@ -56,8 +56,7 @@ class GlobalIndexEvaluator:
         self._field_by_name = {f.name: f for f in fields}
         self._readers_function = readers_function
         self._index_readers_cache: Dict[int, Collection[GlobalIndexReader]] = {}
-        self._field_locks: Dict[int, threading.Lock] = {}
-        self._meta_lock = threading.Lock()
+        self._reader_locks: Dict[int, threading.Lock] = {}
         self._executor = executor if executor is not None else _DirectExecutor()
 
     def evaluate(
@@ -82,21 +81,69 @@ class GlobalIndexEvaluator:
             return f
 
         field_id = field.id
-        lock = self._get_field_lock(field_id)
+        readers = self._index_readers_cache.get(field_id)
+        if readers is None:
+            readers = self._readers_function(field)
+            self._index_readers_cache[field_id] = readers
 
-        def task():
-            with lock:
-                return self._visit_leaf_predicate(predicate)
+        field_ref = FieldRef(predicate.index, predicate.field, str(field.type))
 
-        return self._executor.submit(task)
+        reader_futures = []
+        for reader in readers:
+            lock = self._get_reader_lock(id(reader))
+            reader_futures.append(
+                self._executor.submit(
+                    self._visit_reader, reader, predicate, field_ref, lock
+                )
+            )
+
+        all_done = Future()
+        if not reader_futures:
+            all_done.set_result(None)
+            return all_done
+
+        remaining = [len(reader_futures)]
+        count_lock = threading.Lock()
+
+        def on_done(_):
+            with count_lock:
+                remaining[0] -= 1
+                if remaining[0] == 0:
+                    try:
+                        all_done.set_result(
+                            self._combine_reader_results(reader_futures)
+                        )
+                    except Exception as e:
+                        all_done.set_exception(e)
+
+        for rf in reader_futures:
+            rf.add_done_callback(on_done)
+
+        return all_done
+
+    def _visit_reader(self, reader, predicate, field_ref, lock):
+        with lock:
+            return self._visit_function(reader, predicate, field_ref)
+
+    def _combine_reader_results(
+        self, reader_futures: List[Future]
+    ) -> Optional[GlobalIndexResult]:
+        compound_result: Optional[GlobalIndexResult] = None
+        for f in reader_futures:
+            child_result = f.result()
+            if child_result is None:
+                continue
+            if compound_result is not None:
+                compound_result = compound_result.and_(child_result)
+            else:
+                compound_result = child_result
+            if compound_result.is_empty():
+                return compound_result
+        return compound_result
 
     def _visit_compound_async(self, predicate: Predicate) -> Future:
         children = self._flatten_children(predicate.method, predicate.literals)
         child_futures = [self._visit_async(child) for child in children]
-
-        def combine():
-            results = [f.result() for f in child_futures]
-            return self._combine_results(results, predicate.method)
 
         all_done = Future()
         if not child_futures:
@@ -111,7 +158,10 @@ class GlobalIndexEvaluator:
                 remaining[0] -= 1
                 if remaining[0] == 0:
                     try:
-                        all_done.set_result(combine())
+                        results = [f.result() for f in child_futures]
+                        all_done.set_result(
+                            self._combine_results(results, predicate.method)
+                        )
                     except Exception as e:
                         all_done.set_exception(e)
 
@@ -151,46 +201,12 @@ class GlobalIndexEvaluator:
                 result.append(child)
         return result
 
-    def _get_field_lock(self, field_id: int) -> threading.Lock:
-        lock = self._field_locks.get(field_id)
-        if lock is not None:
-            return lock
-        with self._meta_lock:
-            lock = self._field_locks.get(field_id)
-            if lock is None:
-                lock = threading.Lock()
-                self._field_locks[field_id] = lock
-            return lock
-
-    def _visit_leaf_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
-        field = self._field_by_name.get(predicate.field)
-        if field is None:
-            return None
-
-        field_id = field.id
-        readers = self._index_readers_cache.get(field_id)
-        if readers is None:
-            readers = self._readers_function(field)
-            self._index_readers_cache[field_id] = readers
-
-        field_ref = FieldRef(predicate.index, predicate.field, str(field.type))
-
-        compound_result: Optional[GlobalIndexResult] = None
-
-        for reader in readers:
-            child_result = self._visit_function(reader, predicate, field_ref)
-            if child_result is None:
-                continue
-
-            if compound_result is not None:
-                compound_result = compound_result.and_(child_result)
-            else:
-                compound_result = child_result
-
-            if compound_result.is_empty():
-                return compound_result
-
-        return compound_result
+    def _get_reader_lock(self, reader_id: int) -> threading.Lock:
+        lock = self._reader_locks.get(reader_id)
+        if lock is None:
+            lock = threading.Lock()
+            self._reader_locks[reader_id] = lock
+        return lock
 
     def _visit_function(
         self,
