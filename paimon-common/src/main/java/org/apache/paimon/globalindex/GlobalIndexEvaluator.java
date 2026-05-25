@@ -48,7 +48,6 @@ public class GlobalIndexEvaluator implements Closeable {
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
-    private final Map<GlobalIndexReader, Object> readerLocks;
     private final ExecutorService executorService;
 
     public GlobalIndexEvaluator(
@@ -60,7 +59,6 @@ public class GlobalIndexEvaluator implements Closeable {
         this.executorService =
                 executorService == null ? newDirectExecutorService() : executorService;
         this.indexReadersCache = new ConcurrentHashMap<>();
-        this.readerLocks = new ConcurrentHashMap<>();
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
@@ -100,11 +98,10 @@ public class GlobalIndexEvaluator implements Closeable {
         List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            Object lock = readerLocks.computeIfAbsent(reader, k -> new Object());
             readerFutures.add(
                     CompletableFuture.supplyAsync(
                             () -> {
-                                synchronized (lock) {
+                                synchronized (reader) {
                                     return predicate
                                             .function()
                                             .visit(reader, fieldRef, predicate.literals());
@@ -169,14 +166,11 @@ public class GlobalIndexEvaluator implements Closeable {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<GlobalIndexResult> childResult : results) {
                 if (childResult.isPresent()) {
-                    compoundResult =
-                            compoundResult
-                                    .map(
-                                            globalIndexResult ->
-                                                    Optional.of(
-                                                            globalIndexResult.and(
-                                                                    childResult.get())))
-                                    .orElse(childResult);
+                    if (compoundResult.isPresent()) {
+                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
+                    } else {
+                        compoundResult = childResult;
+                    }
                 }
                 if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
                     return compoundResult;

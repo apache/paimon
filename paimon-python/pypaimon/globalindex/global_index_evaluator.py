@@ -57,6 +57,7 @@ class GlobalIndexEvaluator:
         self._readers_function = readers_function
         self._index_readers_cache: Dict[int, Collection[GlobalIndexReader]] = {}
         self._reader_locks: Dict[int, threading.Lock] = {}
+        self._locks_lock = threading.Lock()
         self._executor = executor if executor is not None else _DirectExecutor()
 
     def evaluate(
@@ -202,11 +203,12 @@ class GlobalIndexEvaluator:
         return result
 
     def _get_reader_lock(self, reader_id: int) -> threading.Lock:
-        lock = self._reader_locks.get(reader_id)
-        if lock is None:
-            lock = threading.Lock()
-            self._reader_locks[reader_id] = lock
-        return lock
+        with self._locks_lock:
+            lock = self._reader_locks.get(reader_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._reader_locks[reader_id] = lock
+            return lock
 
     def _visit_function(
         self,
