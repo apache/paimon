@@ -29,6 +29,7 @@ Usage::
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Optional
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     import daft
@@ -39,7 +40,8 @@ if TYPE_CHECKING:
 def _enrich_options_with_rest_token(
     catalog_options: Dict[str, str], table: "FileStoreTable"
 ) -> Dict[str, str]:
-    # REST catalogs (DLF) deliver OSS STS tokens via table.file_io; fold them in so Daft's IOConfig matches pypaimon's.
+    # REST catalogs (DLF) keep OSS STS tokens on table.file_io and the bucket on table.table_path,
+    # not in catalog_options; fold both in so Daft's IOConfig routes to OSS with valid credentials.
     if catalog_options.get("metastore") != "rest":
         return catalog_options
     file_io = getattr(table, "file_io", None)
@@ -48,7 +50,11 @@ def _enrich_options_with_rest_token(
     file_io.try_to_refresh_token()
     if file_io.token is None:
         return catalog_options
-    return {**catalog_options, **file_io.token.token}
+    enriched = {**catalog_options, **file_io.token.token}
+    parsed = urlparse(getattr(table, "table_path", "") or "")
+    if parsed.scheme and parsed.netloc:
+        enriched["warehouse"] = f"{parsed.scheme}://{parsed.netloc}"
+    return enriched
 
 
 def _read_table(

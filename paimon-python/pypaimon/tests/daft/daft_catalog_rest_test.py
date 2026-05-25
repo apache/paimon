@@ -280,14 +280,17 @@ class DaftRestReadTest(RESTBaseTest):
             captured["opts"] = dict(opts)
             return original_builder(opts)
 
-        oss_options = {**self.options, "warehouse": "oss://bucket/wh"}
+        oss_options = {**self.options, "warehouse": "morax_test"}
+        oss_table_path = "oss://my-bucket/db.db/tbl-abc"
 
         with patch.object(self.table, "file_io", fake_file_io), \
+             patch.object(self.table, "table_path", oss_table_path), \
              patch.object(daft_io_config, "_convert_paimon_catalog_options_to_io_config", spy_builder):
             _read_table(self.table, catalog_options=oss_options)
 
         for k, v in token_payload.items():
             self.assertEqual(captured["opts"].get(k), v, captured["opts"])
+        self.assertEqual(captured["opts"].get("warehouse"), "oss://my-bucket", captured["opts"])
         fake_file_io.try_to_refresh_token.assert_called()
 
     def test_enrich_is_noop_when_not_rest_metastore(self):
