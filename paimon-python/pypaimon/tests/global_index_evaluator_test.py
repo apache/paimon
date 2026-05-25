@@ -410,6 +410,58 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator.close()
         executor.shutdown(wait=False)
 
+    def test_same_field_predicates_not_accessed_concurrently(self):
+        import threading
+        import time
+
+        fields = _make_fields()
+
+        concurrency = [0]
+        max_concurrency = [0]
+        lock = threading.Lock()
+
+        class ConcurrencyDetectingReader(GlobalIndexReader):
+            def __init__(self, result):
+                self._result = result
+
+            def visit_equal(self, field_ref, literal):
+                with lock:
+                    concurrency[0] += 1
+                    max_concurrency[0] = max(max_concurrency[0], concurrency[0])
+                time.sleep(0.05)
+                with lock:
+                    concurrency[0] -= 1
+                return self._result
+
+            def close(self):
+                pass
+
+        result_a = GlobalIndexResult.from_range(Range(1, 5))
+        reader = ConcurrencyDetectingReader(result_a)
+
+        executor = ThreadPoolExecutor(max_workers=4)
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [reader],
+            executor,
+        )
+
+        # AND(a=1, a=2, a=3) — all same field, must not run concurrently
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(method='equal', index=0, field='a', literals=[1]),
+                Predicate(method='equal', index=0, field='a', literals=[2]),
+                Predicate(method='equal', index=0, field='a', literals=[3]),
+            ],
+        )
+
+        evaluator.evaluate(predicate)
+
+        self.assertEqual(max_concurrency[0], 1)
+        evaluator.close()
+        executor.shutdown(wait=False)
+
     def test_null_predicate(self):
         fields = _make_fields()
         evaluator = GlobalIndexEvaluator(fields, lambda field: [])

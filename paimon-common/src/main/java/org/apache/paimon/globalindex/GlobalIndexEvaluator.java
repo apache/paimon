@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -154,9 +155,11 @@ public class GlobalIndexEvaluator
 
     private Optional<GlobalIndexResult> visitParallel(CompoundPredicate predicate) {
         List<Predicate> children = flattenChildren(predicate);
-        List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(children.size());
-        for (Predicate child : children) {
-            futures.add(executorService.submit(() -> evaluateWithoutParallel(child)));
+        List<List<Predicate>> groups = groupByField(children);
+        List<Future<Optional<GlobalIndexResult>>> futures = new ArrayList<>(groups.size());
+        for (List<Predicate> group : groups) {
+            futures.add(
+                    executorService.submit(() -> evaluateGroupWithoutParallel(group, predicate)));
         }
 
         List<Optional<GlobalIndexResult>> results = new ArrayList<>(children.size());
@@ -190,6 +193,55 @@ public class GlobalIndexEvaluator
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
             for (Optional<GlobalIndexResult> childResult : results) {
+                if (childResult.isPresent()) {
+                    if (compoundResult.isPresent()) {
+                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
+                    } else {
+                        compoundResult = childResult;
+                    }
+                }
+                if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
+                    return compoundResult;
+                }
+            }
+            return compoundResult;
+        }
+    }
+
+    private List<List<Predicate>> groupByField(List<Predicate> children) {
+        Map<String, List<Predicate>> fieldGroups = new HashMap<>();
+        List<List<Predicate>> result = new ArrayList<>();
+        for (Predicate child : children) {
+            if (child instanceof LeafPredicate) {
+                String fieldName = ((LeafPredicate) child).fieldName();
+                fieldGroups.computeIfAbsent(fieldName, k -> new ArrayList<>()).add(child);
+            } else {
+                result.add(Collections.singletonList(child));
+            }
+        }
+        result.addAll(fieldGroups.values());
+        return result;
+    }
+
+    private Optional<GlobalIndexResult> evaluateGroupWithoutParallel(
+            List<Predicate> group, CompoundPredicate parent) {
+        if (group.size() == 1) {
+            return evaluateWithoutParallel(group.get(0));
+        }
+        if (parent.function() instanceof Or) {
+            GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
+            for (Predicate child : group) {
+                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
+                if (!childResult.isPresent()) {
+                    return Optional.empty();
+                }
+                compoundResult = compoundResult.or(childResult.get());
+            }
+            return Optional.of(compoundResult);
+        } else {
+            Optional<GlobalIndexResult> compoundResult = Optional.empty();
+            for (Predicate child : group) {
+                Optional<GlobalIndexResult> childResult = evaluateWithoutParallel(child);
                 if (childResult.isPresent()) {
                     if (compoundResult.isPresent()) {
                         compoundResult = Optional.of(compoundResult.get().and(childResult.get()));

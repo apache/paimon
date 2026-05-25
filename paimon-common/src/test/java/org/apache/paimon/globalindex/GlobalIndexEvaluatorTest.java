@@ -416,6 +416,48 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
+    void testSameFieldPredicatesNotAccessedConcurrently() {
+        executor = Executors.newFixedThreadPool(4);
+        RowType rowType = rowType();
+
+        AtomicInteger concurrency = new AtomicInteger(0);
+        AtomicInteger maxConcurrency = new AtomicInteger(0);
+
+        GlobalIndexReader concurrencyDetectingReader =
+                new StubGlobalIndexReader(resultOf(1, 2, 3, 4, 5)) {
+                    @Override
+                    public Optional<GlobalIndexResult> visitEqual(
+                            FieldRef fieldRef, Object literal) {
+                        int c = concurrency.incrementAndGet();
+                        maxConcurrency.updateAndGet(cur -> Math.max(cur, c));
+                        try {
+                            Thread.sleep(50);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        concurrency.decrementAndGet();
+                        return super.visitEqual(fieldRef, literal);
+                    }
+                };
+
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> Collections.singletonList(concurrencyDetectingReader),
+                        executor);
+
+        // AND(a=1, a=2, a=3) — all same field, must not run concurrently
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(builder.equal(0, 1), builder.equal(0, 2), builder.equal(0, 3));
+
+        evaluator.evaluate(predicate);
+
+        assertThat(maxConcurrency.get()).isEqualTo(1);
+        evaluator.close();
+    }
+
+    @Test
     void testNullPredicate() {
         RowType rowType = rowType();
         GlobalIndexEvaluator evaluator =

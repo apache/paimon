@@ -135,15 +135,54 @@ class GlobalIndexEvaluator:
                 compound_result = compound_result.or_(child_result)
             return compound_result
 
-    def _submit_children(self, children) -> List[Future]:
-        return [self._executor.submit(self._evaluate_without_parallel, child) for child in children]
+    def _group_by_field(self, children) -> list:
+        field_groups = {}
+        result = []
+        for child in children:
+            if isinstance(child, Predicate) and child.method not in ('and', 'or'):
+                field_name = child.field
+                if field_name not in field_groups:
+                    field_groups[field_name] = []
+                field_groups[field_name].append(child)
+            else:
+                result.append([child])
+        result.extend(field_groups.values())
+        return result
+
+    def _evaluate_group_without_parallel(self, group, method) -> Optional[GlobalIndexResult]:
+        if len(group) == 1:
+            return self._evaluate_without_parallel(group[0])
+        if method == 'or':
+            compound_result = GlobalIndexResult.create_empty()
+            for child in group:
+                child_result = self._evaluate_without_parallel(child)
+                if child_result is None:
+                    return None
+                compound_result = compound_result.or_(child_result)
+            return compound_result
+        else:
+            compound_result = None
+            for child in group:
+                child_result = self._evaluate_without_parallel(child)
+                if child_result is not None:
+                    if compound_result is not None:
+                        compound_result = compound_result.and_(child_result)
+                    else:
+                        compound_result = child_result
+                if compound_result is not None and compound_result.is_empty():
+                    return compound_result
+            return compound_result
+
+    def _submit_groups(self, groups, method) -> List[Future]:
+        return [self._executor.submit(self._evaluate_group_without_parallel, group, method) for group in groups]
 
     def _collect_results(self, futures: List[Future]) -> List[Optional[GlobalIndexResult]]:
         return [f.result() for f in futures]
 
     def _visit_and_parallel(self, children) -> Optional[GlobalIndexResult]:
         children = self._flatten_children('and', children)
-        results = self._collect_results(self._submit_children(children))
+        groups = self._group_by_field(children)
+        results = self._collect_results(self._submit_groups(groups, 'and'))
 
         compound_result: Optional[GlobalIndexResult] = None
         for child_result in results:
@@ -160,7 +199,8 @@ class GlobalIndexEvaluator:
 
     def _visit_or_parallel(self, children) -> Optional[GlobalIndexResult]:
         children = self._flatten_children('or', children)
-        results = self._collect_results(self._submit_children(children))
+        groups = self._group_by_field(children)
+        results = self._collect_results(self._submit_groups(groups, 'or'))
 
         compound_result = GlobalIndexResult.create_empty()
         for child_result in results:
