@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.flink.sink.coordinator.CoordinatedFileInfoSender;
 import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
 import org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
@@ -49,6 +50,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     private static final long serialVersionUID = 1L;
 
     protected FileStoreTable table;
+    protected @Nullable CoordinatedFileInfoSender sender;
 
     protected final StoreSinkWrite.Provider storeSinkWriteProvider;
     protected final String initialCommitUser;
@@ -104,6 +106,10 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
     public void setWriteRestore(@Nullable WriteRestore writeRestore) {
         this.writeRestore = writeRestore;
+    }
+
+    public void setFileInfoSender(@Nullable CoordinatedFileInfoSender sender) {
+        this.sender = sender;
     }
 
     protected StoreSinkWriteState createState(

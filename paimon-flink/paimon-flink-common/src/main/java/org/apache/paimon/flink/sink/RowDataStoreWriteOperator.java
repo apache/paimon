@@ -127,6 +127,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
         super.processWatermark(mark);
 
         this.currentWatermark = mark.getTimestamp();
+        if (sender != null) {
+            sender.sendWatermark(mark.getTimestamp());
+        }
         if (logSinkFunction != null) {
             logSinkFunction.writeWatermark(
                     new org.apache.flink.api.common.eventtime.Watermark(mark.getTimestamp()));
@@ -161,6 +164,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
 
+        if (sender != null) {
+            sender.snapshot(context.getCheckpointId());
+        }
         if (logSinkFunction != null) {
             StreamingFunctionUtils.snapshotFunctionState(
                     context, getOperatorStateBackend(), logSinkFunction);
@@ -200,6 +206,22 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<InternalRow> {
 
         if (logSinkFunction instanceof CheckpointListener) {
             ((CheckpointListener) logSinkFunction).notifyCheckpointAborted(checkpointId);
+        }
+    }
+
+    @Override
+    protected void handleCommittables(long chechpointId) {
+        if (sender != null) {
+            sender.sendToCoordinator(chechpointId);
+        }
+    }
+
+    @Override
+    protected void collect(Committable committable) {
+        if (sender != null) {
+            sender.collect(committable);
+        } else {
+            super.collect(committable);
         }
     }
 

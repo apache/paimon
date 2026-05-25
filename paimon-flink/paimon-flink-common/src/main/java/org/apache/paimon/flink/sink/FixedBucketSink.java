@@ -28,6 +28,9 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_COORDINATOR_STATE_DIR;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 
 /** {@link FlinkSink} for writing records into fixed bucket Paimon table. */
@@ -55,5 +58,34 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
                         table, logSinkFunction, writeProvider, commitUser)
                 : new RowDataStoreWriteOperator.Factory(
                         table, logSinkFunction, writeProvider, commitUser);
+    }
+
+    @Override
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteCoordinatorFactory(
+            StoreSinkWrite.Provider writeProvider,
+            String commitUser,
+            boolean isStreaming,
+            String checkpointDir) {
+        Options options = table.coreOptions().toConfiguration();
+        boolean commitCoordinatorEnable = options.get(SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED);
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        String configuredStateDir =
+                options.getString(
+                        SINK_COMMITTER_COORDINATOR_STATE_DIR.key(), checkpointDir + "/pwc");
+        if (commitCoordinatorEnable) {
+            if (coordinatorEnabled) {
+                throw new UnsupportedOperationException(
+                        "Unsupported for both writer coordinator and commit coordinator");
+            }
+            return new CommitterCoordinatedFactory(
+                    isStreaming,
+                    configuredStateDir,
+                    new RowDataStoreWriteOperator.Factory(
+                            table, logSinkFunction, writeProvider, commitUser),
+                    createCommitterFactory(),
+                    commitUser,
+                    options.get(END_INPUT_WATERMARK));
+        }
+        return createWriteOperatorFactory(writeProvider, commitUser);
     }
 }
