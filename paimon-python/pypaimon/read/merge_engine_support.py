@@ -77,10 +77,21 @@ def check_supported(table) -> None:
                 )
             )
         return
+    if engine == MergeEngine.AGGREGATE:
+        # AggregateMergeFunction is wired up; the unsupported-option
+        # guard for aggregation (rejecting tables that configure
+        # retract opt-ins or out-of-scope aggregators) lands in a
+        # follow-up commit. For now non-supported configurations will
+        # surface as a ValueError at merge-function construction time
+        # (e.g. unknown aggregator identifier) or a NotImplementedError
+        # at first DELETE / UPDATE_BEFORE row.
+        return
     raise NotImplementedError(
         "merge-engine '{}' is not implemented in pypaimon yet "
-        "(supported: deduplicate, partial-update). Use the Java "
-        "client or open an issue to track support.".format(engine.value)
+        "(supported: deduplicate, partial-update, aggregation). "
+        "Use the Java client or open an issue to track support.".format(
+            engine.value
+        )
     )
 
 

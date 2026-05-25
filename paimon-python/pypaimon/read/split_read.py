@@ -53,6 +53,8 @@ from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
+from pypaimon.read.reader.aggregation_merge_function import (
+    AggregateMergeFunction, build_field_aggregators)
 from pypaimon.read.reader.partial_update_merge_function import \
     PartialUpdateMergeFunction
 from pypaimon.read.reader.sort_merge_reader import (DeduplicateMergeFunction,
@@ -649,6 +651,17 @@ class MergeFileSplitRead(SplitRead):
                 key_arity=len(self.trimmed_primary_key),
                 value_arity=self.value_arity,
                 nullables=[f.type.nullable for f in self.value_fields],
+            )
+        if engine == MergeEngine.AGGREGATE:
+            field_aggregators = build_field_aggregators(
+                self.value_fields,
+                self.trimmed_primary_key,
+                self.table.options,
+            )
+            return AggregateMergeFunction(
+                key_arity=len(self.trimmed_primary_key),
+                value_arity=self.value_arity,
+                field_aggregators=field_aggregators,
             )
         # check_supported() rejects everything else at TableRead.__init__.
         raise AssertionError(
