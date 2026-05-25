@@ -36,6 +36,23 @@ if TYPE_CHECKING:
     from pypaimon.table.file_store_table import FileStoreTable
 
 
+def _enrich_options_with_rest_token(
+    catalog_options: Dict[str, str], table: "FileStoreTable"
+) -> Dict[str, str]:
+    # REST catalogs (DLF) issue dynamic OSS STS tokens through table.file_io rather
+    # than catalog_options; fold them into the options dict so Daft's IOConfig gets
+    # the same credentials pypaimon would use for its own reads.
+    if catalog_options.get("metastore") != "rest":
+        return catalog_options
+    file_io = getattr(table, "file_io", None)
+    if file_io is None or not hasattr(file_io, "try_to_refresh_token"):
+        return catalog_options
+    file_io.try_to_refresh_token()
+    if file_io.token is None:
+        return catalog_options
+    return {**catalog_options, **file_io.token.token}
+
+
 def _read_table(
     table: FileStoreTable,
     catalog_options: Dict[str, str] | None = None,
@@ -68,7 +85,9 @@ def _read_table(
     if catalog_options is None:
         catalog_options = {}
 
-    io_config = io_config or _convert_paimon_catalog_options_to_io_config(catalog_options)
+    io_config = io_config or _convert_paimon_catalog_options_to_io_config(
+        _enrich_options_with_rest_token(catalog_options, table)
+    )
     io_config = io_config or context.get_context().daft_planning_config.default_io_config
 
     multithreaded_io = runners.get_or_create_runner().name != "ray"

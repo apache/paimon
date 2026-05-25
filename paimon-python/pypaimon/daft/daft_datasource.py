@@ -166,9 +166,6 @@ class PaimonDataSource(DataSource):
 
         self._file_format = table.options.file_format().lower()
         self._is_parquet = self._file_format == PAIMON_FILE_FORMAT_PARQUET
-        # REST catalogs (DLF) issue dynamic OSS tokens that Daft's static IOConfig can't refresh; fall back to pypaimon's reader which shares the catalog's token-aware file_io.
-        if self._is_parquet and catalog_options.get("metastore") == "rest":
-            self._is_parquet = False
 
         self._partition_field_arrow_types: dict[str, pa.DataType] = (
             {f.name: PyarrowFieldParser.from_paimon_type(f.type) for f in table.partition_keys_fields}

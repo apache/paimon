@@ -259,35 +259,33 @@ class DaftRestReadTest(RESTBaseTest):
         self.assertIn("uri", received, received)
         self.assertIn("token", received, received)
 
-    def test_rest_catalog_disables_native_parquet_reader(self):
-        from daft import context
-        from daft.daft import StorageConfig
+    def test_read_table_enriches_io_config_with_rest_token(self):
+        from pypaimon.daft import daft_io_config
+        from pypaimon.daft.daft_paimon import _read_table
 
-        from pypaimon.daft.daft_datasource import PaimonDataSource
-        from pypaimon.daft.daft_io_config import (
-            _convert_paimon_catalog_options_to_io_config,
-        )
+        token_payload = {
+            "fs.oss.accessKeyId": "ak-from-dlf",
+            "fs.oss.accessKeySecret": "sk-from-dlf",
+            "fs.oss.securityToken": "sts-from-dlf",
+        }
+        fake_token = MagicMock()
+        fake_token.token = token_payload
+        fake_file_io = MagicMock()
+        fake_file_io.token = fake_token
 
-        self.rest_catalog.create_table(
-            "default.daft_rest_parquet",
-            pypaimon.Schema.from_pyarrow_schema(
-                self.pa_schema, options={"file.format": "parquet"}
-            ),
-            False,
-        )
-        parquet_table = self.rest_catalog.get_table("default.daft_rest_parquet")
-        self.assertEqual(parquet_table.options.file_format(), "parquet")
+        captured = {}
+        original_builder = daft_io_config._convert_paimon_catalog_options_to_io_config
 
-        io_config = (
-            _convert_paimon_catalog_options_to_io_config(self.options)
-            or context.get_context().daft_planning_config.default_io_config
-        )
-        storage_config = StorageConfig(True, io_config)
+        def spy_builder(opts):
+            captured["opts"] = dict(opts)
+            return original_builder(opts)
 
-        source = PaimonDataSource(
-            parquet_table,
-            storage_config=storage_config,
-            catalog_options=self.options,
-        )
+        oss_options = {**self.options, "warehouse": "oss://bucket/wh"}
 
-        self.assertFalse(source._is_parquet)
+        with patch.object(self.table, "file_io", fake_file_io), \
+             patch.object(daft_io_config, "_convert_paimon_catalog_options_to_io_config", spy_builder):
+            _read_table(self.table, catalog_options=oss_options)
+
+        for k, v in token_payload.items():
+            self.assertEqual(captured["opts"].get(k), v, captured["opts"])
+        fake_file_io.try_to_refresh_token.assert_called()
