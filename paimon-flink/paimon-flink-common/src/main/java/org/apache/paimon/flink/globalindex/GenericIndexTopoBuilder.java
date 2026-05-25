@@ -137,6 +137,24 @@ public class GenericIndexTopoBuilder {
             List<String> indexColumns,
             String indexType,
             PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        buildIndexAndExecute(
+                env,
+                table,
+                indexColumns,
+                indexType,
+                partitionPredicate,
+                userOptions,
+                NO_MAX_INDEXED_ROW_ID);
+    }
+
+    public static void buildIndexAndExecute(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            List<String> indexColumns,
+            String indexType,
+            PartitionPredicate partitionPredicate,
             Options userOptions,
             long maxIndexedRowId)
             throws Exception {
