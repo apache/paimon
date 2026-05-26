@@ -705,30 +705,39 @@ main() {
 
     echo ""
 
-    # Run Vector dedicated file test (Java write, Python read)
-    if ! run_vector_dedicated_file_java_write_test; then
-        vector_dedicated_java_write_result=1
-    fi
+    # Run Vector dedicated file tests (requires Python >= 3.11 for vortex-data)
+    if [[ "$PYTHON_MINOR" -ge 11 ]]; then
+        # Run Vector dedicated file test (Java write, Python read)
+        if ! run_vector_dedicated_file_java_write_test; then
+            vector_dedicated_java_write_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Vector dedicated file test (Python write, Java read)
-    if ! run_vector_dedicated_file_py_write_test; then
-        vector_dedicated_py_write_result=1
-    fi
+        # Run Vector dedicated file test (Python write, Java read)
+        if ! run_vector_dedicated_file_py_write_test; then
+            vector_dedicated_py_write_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Multi-Vector dedicated file test (Java write, Python read)
-    if ! run_multi_vector_dedicated_file_java_write_test; then
-        multi_vector_dedicated_java_write_result=1
-    fi
+        # Run Multi-Vector dedicated file test (Java write, Python read)
+        if ! run_multi_vector_dedicated_file_java_write_test; then
+            multi_vector_dedicated_java_write_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Multi-Vector dedicated file test (Python write, Java read)
-    if ! run_multi_vector_dedicated_file_py_write_test; then
-        multi_vector_dedicated_py_write_result=1
+        # Run Multi-Vector dedicated file test (Python write, Java read)
+        if ! run_multi_vector_dedicated_file_py_write_test; then
+            multi_vector_dedicated_py_write_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Vector Dedicated File Tests (requires Python >= 3.11 for vortex, current: $PYTHON_VERSION)${NC}"
+        vector_dedicated_java_write_result=0
+        vector_dedicated_py_write_result=0
+        multi_vector_dedicated_java_write_result=0
+        multi_vector_dedicated_py_write_result=0
     fi
 
     echo ""
