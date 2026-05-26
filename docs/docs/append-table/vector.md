@@ -53,8 +53,7 @@ public class CreateTableWithVector {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("id", DataTypes.BIGINT());
         schemaBuilder.column("embed", DataTypes.VECTOR(3, DataTypes.FLOAT()));
-        schemaBuilder.option(CoreOptions.FILE_FORMAT.key(), "lance");
-        schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
+        schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "vortex");
         Schema schema = schemaBuilder.build();
 
         // Create catalog
@@ -111,10 +110,12 @@ CREATE TABLE IF NOT EXISTS ts_table (
     embed1 ARRAY<FLOAT>,
     embed2 ARRAY<FLOAT>
 ) WITH (
-    'file.format' = 'lance',
+    'vector.file.format' = 'vortex',
     'vector-field' = 'embed1,embed2',
     'field.embed1.vector-dim' = '128',
-    'field.embed2.vector-dim' = '768'
+    'field.embed2.vector-dim' = '768',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
 );
 ```
 
@@ -124,7 +125,7 @@ CREATE TABLE IF NOT EXISTS ts_table (
 
 ## Dedicated File Format for Vector
 
-When mapping `VECTOR` type to the file format layer, the ideal storage format is `FixedSizeList`. Currently, this is only supported for certain file formats (such as `lance`) through the `paimon-arrow` integration. This means that to use `VECTOR` type, you must specify a particular format via `file.format`, which has a global impact. In particular, this may be unfavorable for scalars and multimodal (Blob) data.
+When mapping `VECTOR` type to the file format layer, the ideal storage format is `FixedSizeList`. Storing vectors in the main data file (e.g., Parquet) via `file.format` has a global impact, which may be unfavorable for scalars and multimodal (Blob) data.
 
 Therefore, Paimon provides a solution to store vector columns separately within Data Evolution tables.
 
@@ -132,9 +133,9 @@ Layout:
 ```
 table/
 ├── bucket-0/
-│   ├── data-uuid-0.parquet      # Contains id, name columns
-│   ├── data-uuid-1.blob         # Contains blob data
-│   ├── data-uuid-2.vector.lance # Contains vector data using lance format
+│   ├── data-uuid-0.parquet       # Contains id, name columns
+│   ├── data-uuid-1.blob          # Contains blob data
+│   ├── data-uuid-2.vector.vortex # Contains vector data using vortex format
 │   └── ...
 ├── manifest/
 ├── schema/
@@ -152,7 +153,7 @@ CREATE TABLE IF NOT EXISTS ts_table (
     embed ARRAY<FLOAT>
 ) WITH (
     'file.format' = 'parquet',
-    'vector.file.format' = 'lance',
+    'vector.file.format' = 'vortex',
     'vector-field' = 'embed',
     'field.embed.vector-dim' = '128',
     'row-tracking.enabled' = 'true',
