@@ -852,8 +852,8 @@ public class JavaPyE2ETest {
     }
 
     /**
-     * Java writes a vector table with dedicated vector files (vector.file.format=parquet) for
-     * Python to read.
+     * Java writes a vector table with dedicated vector files (vector.file.format=vortex) for Python
+     * to read.
      */
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
@@ -865,7 +865,7 @@ public class JavaPyE2ETest {
                         .column("id", DataTypes.INT())
                         .column("embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()))
                         .column("label", DataTypes.STRING())
-                        .option("vector.file.format", "parquet")
+                        .option("vector.file.format", "vortex")
                         .option("row-tracking.enabled", "true")
                         .option("data-evolution.enabled", "true")
                         .option("bucket", "-1")
@@ -942,7 +942,7 @@ public class JavaPyE2ETest {
     }
 
     /**
-     * Java writes a vector table with multiple vector columns in a single .vector.parquet file for
+     * Java writes a vector table with multiple vector columns in a single .vector.vortex file for
      * Python to read.
      */
     @Test
@@ -956,7 +956,7 @@ public class JavaPyE2ETest {
                         .column("embed1", DataTypes.VECTOR(3, DataTypes.FLOAT()))
                         .column("embed2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
                         .column("label", DataTypes.STRING())
-                        .option("vector.file.format", "parquet")
+                        .option("vector.file.format", "vortex")
                         .option("row-tracking.enabled", "true")
                         .option("data-evolution.enabled", "true")
                         .option("bucket", "-1")

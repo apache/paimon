@@ -555,7 +555,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(pa_table.column('label').to_pylist(), ['first', 'second', 'third'])
 
     def test_read_vector_dedicated_file(self):
-        """Read a vector table with dedicated .vector.parquet files written by Java."""
+        """Read a vector table with dedicated .vector.vortex files written by Java."""
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 
         table = self.catalog.get_table('default.vector_dedicated_test')
@@ -568,14 +568,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
 
-        # Verify that splits contain .vector.parquet files
+        # Verify that splits contain .vector.vortex files
         has_vector_file = False
         for split in splits:
             for f in split.files:
                 if DataFileMeta.is_vector_file(f.file_name):
                     has_vector_file = True
-                    self.assertIn('.vector.parquet', f.file_name)
-        self.assertTrue(has_vector_file, "Should have .vector.parquet files from Java write")
+                    self.assertIn('.vector.vortex', f.file_name)
+        self.assertTrue(has_vector_file, "Should have .vector.vortex files from Java write")
 
         pa_table = table_read.to_arrow(splits)
         pa_table = table_sort_by(pa_table, 'id')
@@ -594,7 +594,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(pa_table.column('label').to_pylist(), ['first', 'second', 'third'])
 
     def test_py_write_vector_dedicated_file(self):
-        """Python writes a vector table with dedicated .vector.parquet files for Java to read."""
+        """Python writes a vector table with dedicated .vector.vortex files for Java to read."""
         from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 
         pa_schema = pa.schema([
@@ -606,7 +606,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                'vector.file.format': 'parquet',
+                'vector.file.format': 'vortex',
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
                 'bucket': '-1',
@@ -633,14 +633,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_write.write_arrow(test_data)
         commit_messages = table_write.prepare_commit()
 
-        # Verify that commit messages contain .vector.parquet files
+        # Verify that commit messages contain .vector.vortex files
         all_files = []
         for msg in commit_messages:
             all_files.extend(msg.new_files)
         vector_files = [f for f in all_files if DataFileMeta.is_vector_file(f.file_name)]
-        self.assertGreater(len(vector_files), 0, "Should have .vector.parquet files")
+        self.assertGreater(len(vector_files), 0, "Should have .vector.vortex files")
         for vf in vector_files:
-            self.assertIn('.vector.parquet', vf.file_name)
+            self.assertIn('.vector.vortex', vf.file_name)
 
         table_commit.commit(commit_messages)
         table_write.close()
@@ -661,7 +661,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print("test_py_write_vector_dedicated_file: wrote 3 rows with dedicated vector files")
 
     def test_read_multi_vector_dedicated_file(self):
-        """Read a table with multiple vector columns in a single .vector.parquet file written by Java."""
+        """Read a table with multiple vector columns in a single .vector.vortex file written by Java."""
         table = self.catalog.get_table('default.multi_vector_dedicated_test')
         embed1_field = next(f for f in table.fields if f.name == 'embed1')
         embed2_field = next(f for f in table.fields if f.name == 'embed2')
@@ -701,7 +701,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             options={
-                'vector.file.format': 'parquet',
+                'vector.file.format': 'vortex',
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
                 'bucket': '-1',
@@ -732,7 +732,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_write.write_arrow(test_data)
         commit_messages = table_write.prepare_commit()
 
-        # All vector columns should be in the same .vector.parquet file
+        # All vector columns should be in the same .vector.vortex file
         all_files = []
         for msg in commit_messages:
             all_files.extend(msg.new_files)

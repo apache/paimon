@@ -93,7 +93,7 @@ class VectorOnlyTableTest(unittest.TestCase):
             Schema.from_pyarrow_schema(
                 pa_schema,
                 options={
-                    'vector.file.format': 'parquet',
+                    'vector.file.format': 'vortex',
                     'row-tracking.enabled': 'true',
                     'data-evolution.enabled': 'true',
                     'bucket': '-1',
@@ -110,7 +110,7 @@ class VectorOnlyTableTest(unittest.TestCase):
             Schema.from_pyarrow_schema(
                 pa_schema,
                 options={
-                    'vector.file.format': 'parquet',
+                    'vector.file.format': 'vortex',
                     'data-evolution.enabled': 'true',
                     'bucket': '-1',
                 }
@@ -216,8 +216,8 @@ class VectorTableWriteReadTest(unittest.TestCase):
         self.assertIn((1.0, 2.0, 3.0), vectors)
         self.assertIn((4.0, 5.0, 6.0), vectors)
 
-    def test_vector_dedicated_format_write_read_parquet(self):
-        """Write vector data to separate .vector.parquet files."""
+    def test_vector_dedicated_format_write_read_vortex(self):
+        """Write vector data to separate .vector.vortex files."""
         pa_schema = pa.schema([
             ('id', pa.int64()),
             ('embed', pa.list_(pa.float32(), 3)),
@@ -228,12 +228,12 @@ class VectorTableWriteReadTest(unittest.TestCase):
             options={
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
-                'vector.file.format': 'parquet',
+                'vector.file.format': 'vortex',
             }
         )
 
-        self.catalog.create_table('test_db.dedicated_vector_pq', schema, False)
-        table = self.catalog.get_table('test_db.dedicated_vector_pq')
+        self.catalog.create_table('test_db.dedicated_vector_vortex', schema, False)
+        table = self.catalog.get_table('test_db.dedicated_vector_vortex')
 
         test_data = pa.table({
             'id': pa.array([1, 2, 3], type=pa.int64()),
@@ -248,7 +248,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
         writer.write_arrow(test_data)
         commit_messages = writer.prepare_commit()
 
-        # Verify file names: should have both .parquet and .vector.parquet
+        # Verify file names: should have both normal files and .vector.vortex
         all_files = []
         for msg in commit_messages:
             all_files.extend(msg.new_files)
@@ -259,7 +259,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
         self.assertGreater(len(normal_files), 0, "Should have normal data files")
         self.assertGreater(len(vector_files), 0, "Should have vector files")
         for vf in vector_files:
-            self.assertIn('.vector.parquet', vf.file_name)
+            self.assertIn('.vector.vortex', vf.file_name)
 
         write_builder.new_commit().commit(commit_messages)
         writer.close()
