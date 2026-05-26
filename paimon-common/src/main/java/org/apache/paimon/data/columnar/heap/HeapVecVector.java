@@ -18,13 +18,17 @@
 
 package org.apache.paimon.data.columnar.heap;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.ColumnarVec;
 import org.apache.paimon.data.columnar.VecColumnVector;
 
 /** This class represents a nullable heap vector column vector. */
-public class HeapVecVector extends AbstractArrayBasedVector implements VecColumnVector {
+public class HeapVecVector extends AbstractArrayBasedVector
+        implements VecColumnVector, ArrayColumnVector {
 
     private final int vectorSize;
 
@@ -37,7 +41,17 @@ public class HeapVecVector extends AbstractArrayBasedVector implements VecColumn
     public InternalVector getVector(int i) {
         long offset = offsets[i];
         long length = lengths[i];
+        if (length <= 0) {
+            return null;
+        }
         return ColumnarVec.DEFAULT_FACTORY.create(children[0], (int) offset, (int) length);
+    }
+
+    @Override
+    public InternalArray getArray(int i) {
+        long offset = offsets[i];
+        long length = lengths[i];
+        return new ColumnarArray(children[0], (int) offset, (int) length);
     }
 
     @Override

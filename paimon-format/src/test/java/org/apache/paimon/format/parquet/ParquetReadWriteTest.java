@@ -19,12 +19,14 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FormatReaderContext;
@@ -54,6 +56,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.example.data.Group;
@@ -739,6 +742,142 @@ public class ParquetReadWriteTest {
                     });
         }
         assertThat(count.get()).isEqualTo(nanosValues.length);
+    }
+
+    @Test
+    public void testVectorTypeReadWrite() throws IOException {
+        RowType vectorRowType =
+                RowType.builder()
+                        .field("id", new IntType())
+                        .field("float_vec", new VectorType(3, new FloatType()))
+                        .field("double_vec", new VectorType(2, new DoubleType()))
+                        .field("int_vec", new VectorType(4, new IntType()))
+                        .build();
+
+        int number = 100;
+        List<InternalRow> rows = new ArrayList<>(number);
+        for (int i = 0; i < number; i++) {
+            if (i % 10 == 0) {
+                rows.add(GenericRow.of(i, null, null, null));
+            } else {
+                rows.add(
+                        GenericRow.of(
+                                i,
+                                BinaryVector.fromPrimitiveArray(
+                                        new float[] {i * 0.1f, i * 0.2f, i * 0.3f}),
+                                BinaryVector.fromPrimitiveArray(new double[] {i * 1.1, i * 2.2}),
+                                BinaryVector.fromPrimitiveArray(
+                                        new int[] {i, i + 1, i + 2, i + 3})));
+            }
+        }
+
+        Path testPath = createTempParquetFileByPaimon(folder, rows, 10, vectorRowType);
+
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), vectorRowType, 500, FilterCompat.NOOP);
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                testPath,
+                                new LocalFileIO().getFileSize(testPath)));
+        reader.forEachRemaining(
+                row -> {
+                    int i = cnt.get();
+                    assertThat(row.getInt(0)).isEqualTo(i);
+                    if (i % 10 == 0) {
+                        InternalVector nullVec = row.getVector(1);
+                        assertThat(nullVec).isNull();
+                    } else {
+                        InternalVector floatVec = row.getVector(1);
+                        assertThat(floatVec).isNotNull();
+                        assertThat(floatVec.size()).isEqualTo(3);
+                        assertThat(floatVec.getFloat(0)).isEqualTo(i * 0.1f);
+                        assertThat(floatVec.getFloat(1)).isEqualTo(i * 0.2f);
+                        assertThat(floatVec.getFloat(2)).isEqualTo(i * 0.3f);
+
+                        InternalVector doubleVec = row.getVector(2);
+                        assertThat(doubleVec).isNotNull();
+                        assertThat(doubleVec.size()).isEqualTo(2);
+                        assertThat(doubleVec.getDouble(0)).isEqualTo(i * 1.1);
+                        assertThat(doubleVec.getDouble(1)).isEqualTo(i * 2.2);
+
+                        InternalVector intVec = row.getVector(3);
+                        assertThat(intVec).isNotNull();
+                        assertThat(intVec.size()).isEqualTo(4);
+                        assertThat(intVec.getInt(0)).isEqualTo(i);
+                        assertThat(intVec.getInt(1)).isEqualTo(i + 1);
+                        assertThat(intVec.getInt(2)).isEqualTo(i + 2);
+                        assertThat(intVec.getInt(3)).isEqualTo(i + 3);
+                    }
+                    cnt.incrementAndGet();
+                });
+        assertThat(cnt.get()).isEqualTo(number);
+    }
+
+    @Test
+    public void testVectorTypeProjection() throws IOException {
+        RowType vectorRowType =
+                RowType.builder()
+                        .field("id", new IntType())
+                        .field("float_vec", new VectorType(3, new FloatType()))
+                        .field("name", DataTypes.STRING())
+                        .build();
+
+        int number = 50;
+        List<InternalRow> rows = new ArrayList<>(number);
+        for (int i = 0; i < number; i++) {
+            rows.add(
+                    GenericRow.of(
+                            i,
+                            BinaryVector.fromPrimitiveArray(
+                                    new float[] {i * 1.0f, i * 2.0f, i * 3.0f}),
+                            BinaryString.fromString("name_" + i)));
+        }
+
+        Path testPath = createTempParquetFileByPaimon(folder, rows, 10, vectorRowType);
+
+        RowType projectedType =
+                RowType.builder()
+                        .field("float_vec", new VectorType(3, new FloatType()))
+                        .field("id", new IntType())
+                        .build();
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), projectedType, 500, FilterCompat.NOOP);
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                testPath,
+                                new LocalFileIO().getFileSize(testPath)));
+        reader.forEachRemaining(
+                row -> {
+                    int i = cnt.get();
+                    InternalVector vec = row.getVector(0);
+                    assertThat(vec).isNotNull();
+                    assertThat(vec.size()).isEqualTo(3);
+                    assertThat(vec.getFloat(0)).isEqualTo(i * 1.0f);
+                    assertThat(vec.getFloat(1)).isEqualTo(i * 2.0f);
+                    assertThat(vec.getFloat(2)).isEqualTo(i * 3.0f);
+                    assertThat(row.getInt(1)).isEqualTo(i);
+                    cnt.incrementAndGet();
+                });
+        assertThat(cnt.get()).isEqualTo(number);
+    }
+
+    @Test
+    public void testVectorTypeSchemaConversion() {
+        RowType vectorRowType =
+                RowType.builder().field("float_vec", new VectorType(3, new FloatType())).build();
+
+        org.apache.parquet.schema.Type parquetType =
+                ParquetSchemaConverter.convertToParquetMessageType(vectorRowType);
+        assertThat(parquetType.asGroupType().getType(0).getLogicalTypeAnnotation())
+                .isInstanceOf(LogicalTypeAnnotation.ListLogicalTypeAnnotation.class);
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
