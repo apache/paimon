@@ -24,7 +24,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
@@ -33,7 +35,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Utils for global index build. */
 public class GlobalIndexBuilderUtils {
@@ -131,6 +135,46 @@ public class GlobalIndexBuilderUtils {
             throws IOException {
         GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, fields, options);
         return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
+    }
+
+    /**
+     * Find the minimum firstRowId among files whose schema does not contain all index columns.
+     * Files at or beyond this rowId cannot be indexed because the column was added later via ALTER
+     * TABLE.
+     *
+     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the columns
+     */
+    public static long findMinNonIndexableRowId(
+            SchemaManager schemaManager, List<ManifestEntry> entries, List<String> indexColumns) {
+        Map<Long, Boolean> schemaContainsColumns = new HashMap<>();
+        long minRowId = Long.MAX_VALUE;
+        for (ManifestEntry entry : entries) {
+            long sid = entry.file().schemaId();
+            boolean contains =
+                    schemaContainsColumns.computeIfAbsent(
+                            sid,
+                            id -> schemaManager.schema(id).fieldNames().containsAll(indexColumns));
+            if (!contains && entry.file().firstRowId() != null) {
+                minRowId = Math.min(minRowId, entry.file().nonNullFirstRowId());
+            }
+        }
+        return minRowId;
+    }
+
+    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
+    public static List<ManifestEntry> filterEntriesBefore(
+            List<ManifestEntry> entries, long boundaryRowId) {
+        if (boundaryRowId == Long.MAX_VALUE) {
+            return entries;
+        }
+        List<ManifestEntry> result = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            if (entry.file().firstRowId() != null
+                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
+                result.add(entry);
+            }
+        }
+        return result;
     }
 
     private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
