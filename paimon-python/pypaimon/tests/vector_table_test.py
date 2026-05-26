@@ -230,6 +230,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             options={
+                'file.format': 'vortex',
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
                 'vector.file.format': 'vortex',

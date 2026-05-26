@@ -606,6 +606,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             options={
+                'file.format': 'vortex',
                 'vector.file.format': 'vortex',
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
@@ -701,6 +702,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             options={
+                'file.format': 'vortex',
                 'vector.file.format': 'vortex',
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
