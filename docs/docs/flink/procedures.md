@@ -754,7 +754,28 @@ All available procedures are listed below.
          CALL sys.rewrite_file_index(`table` => 'test_db.T')<br/><br/>
          -- rewrite the file index for the specified partition in the table<br/>
          CALL sys.rewrite_file_index(`table` => 'test_db.T', partitions => 'pt=a')<br/><br/>
-     </td>
+      </td>
+   </tr>
+   <tr>
+      <td>reassign_row_id</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.reassign_row_id(&lt`table` => identifier&gt [, &ltpartitions => partitions&gt])<br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.reassign_row_id(&ltidentifier&gt [, &ltpartitions&gt])<br/><br/>
+      </td>
+      <td>
+         Reassign row IDs for a data evolution table by rewriting metadata. Argument:
+            <li>table: &ltdatabaseName&gt.&lttableName&gt.</li>
+            <li>partitions : specific partitions.</li>
+      </td>
+      <td>
+         -- reassign row IDs for the whole table<br/>
+         CALL sys.reassign_row_id(`table` => 'test_db.T')<br/><br/>
+         -- reassign row IDs for the specified partition in the table<br/>
+         CALL sys.reassign_row_id(`table` => 'test_db.T', partitions => 'pt=a')<br/><br/>
+      </td>
+   </tr>
    <tr>
       <td>create_branch</td>
       <td>

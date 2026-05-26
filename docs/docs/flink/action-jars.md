@@ -307,6 +307,34 @@ For more information of 'rewrite_file_index', see
     rewrite_file_index --help
 ```
 
+## Reassign Row ID
+
+Run the following command to submit a 'reassign_row_id' job for a data evolution table.
+This action rewrites metadata to make partition row-id ranges non-overlapping.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    reassign_row_id \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--table_conf <paimon-table-conf> [--table_conf <paimon-table-conf> ...]] \
+    [--partition <partition_spec> [--partition <partition_spec> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+
+partition_spec:
+key1=value1,key2=value2...
+```
+
+For more information of 'reassign_row_id', see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    reassign_row_id --help
+```
+
 ## Force Start Flink Job
 
 Some actions, like `create_tag`, are lightweight and by default will not be submitted as a job to Flink cluster. If you
