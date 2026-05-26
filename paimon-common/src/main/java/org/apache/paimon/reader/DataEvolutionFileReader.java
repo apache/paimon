@@ -66,7 +66,7 @@ public class DataEvolutionFileReader implements RecordReader<InternalRow> {
                 rowOffsets.length == fieldOffsets.length,
                 "Row offsets and field offsets must have the same length");
         checkArgument(rowOffsets.length > 0, "Row offsets must not be empty");
-        checkArgument(readers != null && readers.length > 1, "Readers should be more than 1");
+        checkArgument(readers != null && readers.length >= 1, "should not pass empty readers.");
         this.rowOffsets = rowOffsets;
         this.fieldOffsets = fieldOffsets;
         this.readers = readers;
