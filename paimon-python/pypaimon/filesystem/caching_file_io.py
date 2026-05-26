@@ -382,6 +382,31 @@ class CachingFileIO(FileIO):
     def is_dir(self, path: str) -> bool:
         return self._delegate.is_dir(path)
 
+    # FileIO base has raising / no-op defaults that block __getattr__ — forward explicitly.
+    def to_filesystem_path(self, path: str) -> str:
+        return self._delegate.to_filesystem_path(path)
+
+    def try_to_write_atomic(self, *args, **kwargs):
+        return self._delegate.try_to_write_atomic(*args, **kwargs)
+
+    def write_parquet(self, *args, **kwargs):
+        return self._delegate.write_parquet(*args, **kwargs)
+
+    def write_orc(self, *args, **kwargs):
+        return self._delegate.write_orc(*args, **kwargs)
+
+    def write_avro(self, *args, **kwargs):
+        return self._delegate.write_avro(*args, **kwargs)
+
+    def write_lance(self, *args, **kwargs):
+        return self._delegate.write_lance(*args, **kwargs)
+
+    def write_blob(self, *args, **kwargs):
+        return self._delegate.write_blob(*args, **kwargs)
+
+    def write_vortex(self, *args, **kwargs):
+        return self._delegate.write_vortex(*args, **kwargs)
+
     def __getattr__(self, name):
         return getattr(self._delegate, name)
 
