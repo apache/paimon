@@ -16,15 +16,14 @@
 # under the License.
 
 import sys
+from datetime import timedelta
 from enum import Enum
 from typing import Dict, Optional
 
-from datetime import timedelta
-
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
-from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.config_option import ConfigOption
+from pypaimon.common.options.config_options import ConfigOptions
 
 
 class ExternalPathStrategy(str, Enum):
@@ -217,6 +216,28 @@ class CoreOptions:
         .with_description(
             "Comma-separated BLOB field names that should be stored as serialized BlobDescriptor bytes "
             "inline in normal data files."
+        )
+    )
+
+    BLOB_EXTERNAL_STORAGE_PATH: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "The external storage path where raw BLOB data from fields configured "
+            "by 'blob-external-storage-field' is written at write time. "
+            "Orphan file cleanup is not applied to this path."
+        )
+    )
+
+    BLOB_EXTERNAL_STORAGE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') "
+            "whose raw data will be written to external storage at write time. "
+            "The external storage path is configured via 'blob-external-storage-path'."
         )
     )
 
@@ -632,6 +653,19 @@ class CoreOptions:
         if isinstance(value, (list, set, tuple)):
             return {str(field).strip() for field in value if str(field).strip()}
         return set()
+
+    def blob_external_storage_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
+
+    def blob_external_storage_path(self, default=None):
+        return self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, default)
 
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
