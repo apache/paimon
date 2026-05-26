@@ -75,6 +75,12 @@
             <td>Comma-separated field names to treat as BLOB fields and store as serialized BlobViewStruct bytes inline in data files and resolve from upstream tables at read time.</td>
         </tr>
         <tr>
+            <td><h5>blob-view.resolve.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to resolve blob-view-field values from upstream tables at read time. Set to false to preserve BlobViewStruct references when forwarding blob view values to another blob-view table.</td>
+        </tr>
+        <tr>
             <td><h5>blob-write-null-on-missing-file</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
