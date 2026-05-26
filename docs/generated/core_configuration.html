@@ -1,3 +1,21 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
 <table class="configuration table table-bordered">
     <thead>
         <tr>
@@ -43,6 +61,12 @@
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Write blob field using blob descriptor rather than blob bytes.</td>
+        </tr>
+        <tr>
+            <td><h5>blob-compaction.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to compact blob files when compacting a data evolution table.</td>
         </tr>
         <tr>
             <td><h5>blob-descriptor-field</h5></td>
@@ -433,12 +457,6 @@
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
-        </tr>
-        <tr>
-            <td><h5>blob-compaction.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to compact blob files when compacting a data evolution table.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>
@@ -1600,7 +1618,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>vector.target-file-size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
-            <td>Target size of a vector-store file. Default is 10 * TARGET_FILE_SIZE.</td>
+            <td>Target size of a vector-store file. Default is the same as TARGET_FILE_SIZE.</td>
         </tr>
         <tr>
             <td><h5>visibility-callback.check-interval</h5></td>

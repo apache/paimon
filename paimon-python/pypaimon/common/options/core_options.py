@@ -245,7 +245,7 @@ class CoreOptions:
         ConfigOptions.key("vector.target-file-size")
         .memory_type()
         .no_default_value()
-        .with_description("Target file size for vector data. Default is 10 * target-file-size.")
+        .with_description("Target file size for vector data. Default is the same as target-file-size.")
     )
 
     DATA_FILE_PREFIX: ConfigOption[str] = (
@@ -679,7 +679,7 @@ class CoreOptions:
         elif default is not None:
             return MemorySize.parse(default).get_bytes()
         else:
-            return 10 * self.target_file_size(has_primary_key=False)
+            return self.target_file_size(has_primary_key=False)
 
     def data_file_prefix(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_PREFIX, default)
