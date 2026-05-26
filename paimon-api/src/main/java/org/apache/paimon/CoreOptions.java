@@ -2207,8 +2207,8 @@ public class CoreOptions implements Serializable {
                                     + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
                                     + "If the value of this option is -1, committer will not check for its first commit.");
 
-    public static final ConfigOption<Long> COMMIT_ROW_ID_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT =
-            ConfigOptions.key("commit.row-id-overwrite-conflict.last-safe-snapshot")
+    public static final ConfigOption<Long> COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT =
+            ConfigOptions.key("commit.overwrite-conflict.last-safe-snapshot")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
@@ -3883,8 +3883,8 @@ public class CoreOptions implements Serializable {
         return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
     }
 
-    public Optional<Long> commitRowIdOverwriteConflictLastSafeSnapshot() {
-        return options.getOptional(COMMIT_ROW_ID_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT);
+    public Optional<Long> commitOverwriteConflictLastSafeSnapshot() {
+        return options.getOptional(COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT);
     }
 
     public List<String> clusteringColumns() {

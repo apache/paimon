@@ -30,14 +30,14 @@ public final class GlobalIndexCommitUtils {
 
     private GlobalIndexCommitUtils() {}
 
-    public static FileStoreTable withRowIdOverwriteConflictCheck(
-            FileStoreTable table, @Nullable Long rowIdOverwriteConflictCheckFromSnapshot) {
-        if (rowIdOverwriteConflictCheckFromSnapshot == null) {
+    public static FileStoreTable withOverwriteConflictCheck(
+            FileStoreTable table, @Nullable Long overwriteConflictCheckFromSnapshot) {
+        if (overwriteConflictCheckFromSnapshot == null) {
             return table;
         }
         return table.copy(
                 Collections.singletonMap(
-                        CoreOptions.COMMIT_ROW_ID_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT.key(),
-                        String.valueOf(rowIdOverwriteConflictCheckFromSnapshot)));
+                        CoreOptions.COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT.key(),
+                        String.valueOf(overwriteConflictCheckFromSnapshot)));
     }
 }

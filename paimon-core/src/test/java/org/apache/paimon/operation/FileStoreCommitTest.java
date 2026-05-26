@@ -1104,7 +1104,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testRowIdOverwriteConflictFromOptions() throws Exception {
+    public void testOverwriteConflictFromOptions() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
@@ -1138,8 +1138,7 @@ public class FileStoreCommitTest {
                 (commit, committable) -> committableRef.set(committable));
 
         Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
-        dynamicOptions.put(
-                CoreOptions.COMMIT_ROW_ID_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT.key(), "1");
+        dynamicOptions.put(CoreOptions.COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT.key(), "1");
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
                         store,

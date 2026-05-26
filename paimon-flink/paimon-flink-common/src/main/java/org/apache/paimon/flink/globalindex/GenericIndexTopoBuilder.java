@@ -179,7 +179,7 @@ public class GenericIndexTopoBuilder {
 
         List<ManifestEntry> entries = indexBuilder.scan();
         List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
-        Long rowIdOverwriteConflictCheckFromSnapshot = indexBuilder.scanSnapshotId().orElse(null);
+        Long overwriteConflictCheckFromSnapshot = indexBuilder.scanSnapshotId().orElse(null);
 
         return buildTopology(
                 env,
@@ -190,7 +190,7 @@ public class GenericIndexTopoBuilder {
                 entries,
                 deletedIndexEntries,
                 maxIndexedRowId,
-                rowIdOverwriteConflictCheckFromSnapshot);
+                overwriteConflictCheckFromSnapshot);
     }
 
     /**
@@ -211,7 +211,7 @@ public class GenericIndexTopoBuilder {
             List<ManifestEntry> entries,
             List<IndexManifestEntry> deletedIndexEntries,
             long maxIndexedRowId,
-            Long rowIdOverwriteConflictCheckFromSnapshot)
+            Long overwriteConflictCheckFromSnapshot)
             throws Exception {
         long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
         LOG.info(
@@ -297,7 +297,7 @@ public class GenericIndexTopoBuilder {
             built = built.union(deletes);
         }
 
-        commit(table, indexType, built, rowIdOverwriteConflictCheckFromSnapshot);
+        commit(table, indexType, built, overwriteConflictCheckFromSnapshot);
         return true;
     }
 
@@ -512,10 +512,10 @@ public class GenericIndexTopoBuilder {
             FileStoreTable table,
             String indexType,
             DataStream<Committable> written,
-            Long rowIdOverwriteConflictCheckFromSnapshot) {
+            Long overwriteConflictCheckFromSnapshot) {
         FileStoreTable commitTable =
-                GlobalIndexCommitUtils.withRowIdOverwriteConflictCheck(
-                        table, rowIdOverwriteConflictCheckFromSnapshot);
+                GlobalIndexCommitUtils.withOverwriteConflictCheck(
+                        table, overwriteConflictCheckFromSnapshot);
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,

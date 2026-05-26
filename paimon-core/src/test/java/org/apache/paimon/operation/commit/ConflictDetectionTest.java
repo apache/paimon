@@ -516,7 +516,7 @@ class ConflictDetectionTest {
                 .thenReturn(snapshot(2, Snapshot.CommitKind.OVERWRITE, barrierProperties));
 
         ConflictDetection detection = createConflictDetection(snapshotManager);
-        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
+        detection.setOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -542,7 +542,7 @@ class ConflictDetectionTest {
                 .thenReturn(snapshot(2, Snapshot.CommitKind.APPEND, barrierProperties));
 
         ConflictDetection detection = createConflictDetection(snapshotManager);
-        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
+        detection.setOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -569,7 +569,7 @@ class ConflictDetectionTest {
                 .thenReturn(Collections.singletonList(mock(ManifestEntry.class)));
 
         ConflictDetection detection = createConflictDetection(snapshotManager, commitScanner);
-        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
+        detection.setOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -599,7 +599,7 @@ class ConflictDetectionTest {
                 .thenReturn(Collections.emptyList());
 
         ConflictDetection detection = createConflictDetection(snapshotManager, commitScanner);
-        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
+        detection.setOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(

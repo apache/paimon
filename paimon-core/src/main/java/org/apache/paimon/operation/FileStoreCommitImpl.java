@@ -220,8 +220,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
-        options.commitRowIdOverwriteConflictLastSafeSnapshot()
-                .ifPresent(this.conflictDetection::setRowIdOverwriteConflictCheckFromSnapshot);
+        options.commitOverwriteConflictLastSafeSnapshot()
+                .ifPresent(this.conflictDetection::setOverwriteConflictCheckFromSnapshot);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -329,7 +329,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
-                if (conflictDetection.hasRowIdOverwriteConflictCheckFromSnapshot()) {
+                if (conflictDetection.hasOverwriteConflictCheckFromSnapshot()) {
                     checkAppendFiles = true;
                 }
 

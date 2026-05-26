@@ -95,7 +95,7 @@ public class ConflictDetection {
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
-    private @Nullable Long rowIdOverwriteConflictCheckFromSnapshot = null;
+    private @Nullable Long overwriteConflictCheckFromSnapshot = null;
 
     public ConflictDetection(
             String tableName,
@@ -132,13 +132,13 @@ public class ConflictDetection {
         return rowIdCheckFromSnapshot != null;
     }
 
-    public void setRowIdOverwriteConflictCheckFromSnapshot(
-            @Nullable Long rowIdOverwriteConflictCheckFromSnapshot) {
-        this.rowIdOverwriteConflictCheckFromSnapshot = rowIdOverwriteConflictCheckFromSnapshot;
+    public void setOverwriteConflictCheckFromSnapshot(
+            @Nullable Long overwriteConflictCheckFromSnapshot) {
+        this.overwriteConflictCheckFromSnapshot = overwriteConflictCheckFromSnapshot;
     }
 
-    public boolean hasRowIdOverwriteConflictCheckFromSnapshot() {
-        return rowIdOverwriteConflictCheckFromSnapshot != null;
+    public boolean hasOverwriteConflictCheckFromSnapshot() {
+        return overwriteConflictCheckFromSnapshot != null;
     }
 
     @Nullable
@@ -247,7 +247,7 @@ public class ConflictDetection {
             return exception;
         }
 
-        exception = checkRowIdOverwriteConflicts(latestSnapshot, deltaEntries, deltaIndexEntries);
+        exception = checkOverwriteConflicts(latestSnapshot, deltaEntries, deltaIndexEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -559,25 +559,23 @@ public class ConflictDetection {
         return Optional.empty();
     }
 
-    private Optional<RuntimeException> checkRowIdOverwriteConflicts(
+    private Optional<RuntimeException> checkOverwriteConflicts(
             Snapshot latestSnapshot,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
-        if (rowIdOverwriteConflictCheckFromSnapshot == null) {
+        if (overwriteConflictCheckFromSnapshot == null) {
             return Optional.empty();
         }
-        if (latestSnapshot.id() <= rowIdOverwriteConflictCheckFromSnapshot) {
+        if (latestSnapshot.id() <= overwriteConflictCheckFromSnapshot) {
             return Optional.empty();
         }
 
         List<BinaryRow> changedPartitions =
                 changedPartitionsIncludingAllIndexFiles(deltaEntries, deltaIndexEntries);
-        for (long id = rowIdOverwriteConflictCheckFromSnapshot + 1;
-                id <= latestSnapshot.id();
-                id++) {
+        for (long id = overwriteConflictCheckFromSnapshot + 1; id <= latestSnapshot.id(); id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitKind() != CommitKind.OVERWRITE) {
                 continue;
@@ -589,7 +587,7 @@ public class ConflictDetection {
                                         "Row-id overwrite barrier snapshot %s was committed after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
-                                        id, rowIdOverwriteConflictCheckFromSnapshot)));
+                                        id, overwriteConflictCheckFromSnapshot)));
             }
             if (overwriteChangedTargetPartitions(snapshot, changedPartitions)) {
                 return Optional.of(
@@ -598,7 +596,7 @@ public class ConflictDetection {
                                         "Overwrite snapshot %s changed partitions after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
-                                        id, rowIdOverwriteConflictCheckFromSnapshot)));
+                                        id, overwriteConflictCheckFromSnapshot)));
             }
         }
         return Optional.empty();
