@@ -87,9 +87,7 @@ public class HashBucketAssigner implements BucketAssigner {
                             + "not complete before existing buckets saturate, which can "
                             + "cause unnecessary bucket creation. Recommended: 10-20% of "
                             + "target-row-num (higher for high-throughput partitions).",
-                    minEmptyBucketsBeforeAsyncCheck,
-                    MIN_THRESHOLD_PERCENT,
-                    targetBucketRowNumber);
+                    minEmptyBucketsBeforeAsyncCheck, MIN_THRESHOLD_PERCENT, targetBucketRowNumber);
         }
     }
 
