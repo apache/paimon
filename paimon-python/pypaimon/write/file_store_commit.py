@@ -330,21 +330,6 @@ class FileStoreCommit:
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
-        # Check if row tracking is enabled
-        row_tracking_enabled = self.table.options.row_tracking_enabled()
-
-        # Apply row tracking logic if enabled
-        next_row_id = None
-        if row_tracking_enabled:
-            # Assign snapshot ID to delta files
-            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
-
-            # Get the next row ID start from the latest snapshot
-            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
-
-            # Assign row IDs to new files and get the next row ID for the snapshot
-            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
-
         # Conflict detection: read base entries from latest snapshot, then check conflicts
         if detect_conflicts and latest_snapshot is not None:
             base_entries = self.commit_scanner.read_all_entries_from_changed_partitions(
@@ -357,6 +342,14 @@ class FileStoreCommit:
                     if self.rollback.try_to_rollback(latest_snapshot):
                         return RetryResult(latest_snapshot, conflict_exception)
                 raise conflict_exception
+
+        # Apply row tracking logic after conflict detection (matches Java ordering)
+        row_tracking_enabled = self.table.options.row_tracking_enabled()
+        next_row_id = None
+        if row_tracking_enabled:
+            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
+            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
 
         try:
             new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
