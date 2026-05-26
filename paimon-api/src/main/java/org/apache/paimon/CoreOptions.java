@@ -1462,7 +1462,10 @@ public class CoreOptions implements Serializable {
                                     + "the assigner will asynchronously scan disk to find buckets freed by compaction. "
                                     + "For example, with target-row-num=1000000 and threshold=100000, "
                                     + "refresh triggers at 900000 rows. "
-                                    + "Set to -1 to disable. Recommended value: 10-20% of target-row-num.");
+                                    + "Set to -1 to disable. Recommended value: 10-20% of target-row-num "
+                                    + "(use the upper end for high-throughput partitions, so that the async "
+                                    + "refresh has time to complete before existing buckets saturate; values "
+                                    + "below 5% of target-row-num will log a warning at startup).");
 
     public static final ConfigOption<Duration> DYNAMIC_BUCKET_MIN_REFRESH_INTERVAL =
             key("dynamic-bucket.min-refresh-interval")

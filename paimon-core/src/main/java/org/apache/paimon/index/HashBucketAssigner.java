@@ -39,6 +39,8 @@ public class HashBucketAssigner implements BucketAssigner {
 
     private static final Logger LOG = LoggerFactory.getLogger(HashBucketAssigner.class);
 
+    private static final int MIN_THRESHOLD_PERCENT = 5;
+
     private final SnapshotManager snapshotManager;
     private final String commitUser;
     private final IndexFileHandler indexFileHandler;
@@ -75,6 +77,20 @@ public class HashBucketAssigner implements BucketAssigner {
         this.maxBucketsNum = maxBucketsNum;
         this.minEmptyBucketsBeforeAsyncCheck = minEmptyBucketsBeforeAsyncCheck;
         this.minRefreshInterval = minRefreshInterval;
+
+        if (minEmptyBucketsBeforeAsyncCheck != -1
+                && minEmptyBucketsBeforeAsyncCheck
+                        < targetBucketRowNumber * MIN_THRESHOLD_PERCENT / 100) {
+            LOG.warn(
+                    "dynamic-bucket.empty-bucket-threshold ({}) is below {}% of "
+                            + "dynamic-bucket.target-row-num ({}). The async refresh may "
+                            + "not complete before existing buckets saturate, which can "
+                            + "cause unnecessary bucket creation. Recommended: 10-20% of "
+                            + "target-row-num (higher for high-throughput partitions).",
+                    minEmptyBucketsBeforeAsyncCheck,
+                    MIN_THRESHOLD_PERCENT,
+                    targetBucketRowNumber);
+        }
     }
 
     /** Assign a bucket for key hash of a record. */
