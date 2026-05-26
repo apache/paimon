@@ -221,6 +221,20 @@ WHEN NOT MATCHED THEN
 INSERT *      -- when not matched, insert this row without any transformation;
 ```
 
+### Column Alignment
+
+Assignments are aligned to the target by column name, and unmentioned target columns are filled with NULL.
+
+`INSERT *` / `UPDATE SET *` expand against the target columns:
+
+- Source columns missing from the target are rejected by default. Enable `spark.paimon.write.merge-schema` to keep them and evolve the table schema at write time (see [Write Merge Schema](#write-merge-schema)).
+- Target columns missing from the source are filled with NULL (or the column's `CURRENT_DEFAULT`, if any).
+
+For nested struct columns with `merge-schema` enabled:
+
+- `UPDATE SET *` on a struct preserves the current target value for any subfield not present in the source.
+- Explicit `UPDATE SET col.subfield = ...` or `INSERT` fills unmentioned subfields with NULL.
+
 ## Write Merge Schema
 
 :::info
