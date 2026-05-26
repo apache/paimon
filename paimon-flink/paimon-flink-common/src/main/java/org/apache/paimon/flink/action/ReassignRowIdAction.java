@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;

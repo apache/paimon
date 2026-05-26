@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.ReassignRowIdAction;
-import org.apache.paimon.flink.dataevolution.DataEvolutionRowIdReassigner;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.ParameterUtils;
