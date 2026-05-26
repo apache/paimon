@@ -654,6 +654,23 @@ public class CoreOptions implements Serializable {
                             "Open file cost of a source file. It is used to avoid reading"
                                     + " too many files with a source split, which can be very slow.");
 
+    public static final ConfigOption<Boolean> SOURCE_SPLIT_FILE_ENABLED =
+            key("source.split.file-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, large data files are sub-divided at format-native boundaries "
+                                    + "(Parquet row groups, ORC stripes) during batch scans of "
+                                    + "append-only tables, improving read parallelism. Off by default.");
+
+    public static final ConfigOption<Integer> SOURCE_SPLIT_FILE_MAX_SPLITS =
+            key("source.split.file-max-splits")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "Upper bound on the number of fine-grained splits produced per data file. "
+                                    + "Any remaining boundaries are absorbed by the last split.");
+
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
             key("write-buffer-size")
                     .memoryType()
@@ -2898,6 +2915,14 @@ public class CoreOptions implements Serializable {
 
     public long splitOpenFileCost() {
         return options.get(SOURCE_SPLIT_OPEN_FILE_COST).getBytes();
+    }
+
+    public boolean sourceSplitFileEnabled() {
+        return options.get(SOURCE_SPLIT_FILE_ENABLED);
+    }
+
+    public int sourceSplitFileMaxSplits() {
+        return options.get(SOURCE_SPLIT_FILE_MAX_SPLITS);
     }
 
     public long writeBufferSize() {
