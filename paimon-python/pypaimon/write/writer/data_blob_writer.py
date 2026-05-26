@@ -19,11 +19,10 @@ import logging
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-
 import pyarrow as pa
 
-from pypaimon.data.timestamp import Timestamp
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import GenericRow
@@ -144,12 +143,28 @@ class DataBlobWriter(DataWriter):
                 options=options
             )
 
+        # Initialize ExternalStorageBlobWriter if configured
+        self._external_storage_writer = None
+        external_storage_fields = self.options.blob_external_storage_fields()
+        external_storage_path = self.options.blob_external_storage_path()
+        if external_storage_fields and external_storage_path:
+            from pypaimon.write.writer.external_storage_blob_writer import \
+                ExternalStorageBlobWriter
+            self._external_storage_writer = ExternalStorageBlobWriter(
+                file_io=self.file_io,
+                external_storage_path=external_storage_path,
+                external_storage_fields=external_storage_fields,
+                blob_target_file_size=self.options.blob_target_file_size(),
+                data_file_prefix=CoreOptions.data_file_prefix(self.options),
+            )
+
         logger.info(
             "Initialized DataBlobWriter with blob columns: %s, blob file columns: %s, descriptor "
-            "stored columns: %s",
+            "stored columns: %s, external storage fields: %s",
             self.blob_column_names,
             self.blob_file_column_names,
             sorted(self.blob_descriptor_fields),
+            sorted(external_storage_fields) if external_storage_fields else [],
         )
 
     def _get_blob_columns_from_schema(self) -> List[str]:
@@ -172,6 +187,11 @@ class DataBlobWriter(DataWriter):
 
     def write(self, data: pa.RecordBatch):
         try:
+            # Transform external-storage fields: write raw blob to external storage,
+            # replace with serialized BlobDescriptor
+            if self._external_storage_writer:
+                data = self._external_storage_writer.transform_batch(data)
+
             # Split data into normal and blob parts
             normal_data, blob_data_map = self._split_data(data)
             self._validate_descriptor_stored_fields_input(data)
@@ -213,6 +233,8 @@ class DataBlobWriter(DataWriter):
         try:
             if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
                 self._close_current_writers()
+            if self._external_storage_writer:
+                self._external_storage_writer.close()
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
@@ -224,6 +246,8 @@ class DataBlobWriter(DataWriter):
         """Abort all writers and clean up resources."""
         for blob_writer in self.blob_writers.values():
             blob_writer.abort()
+        if self._external_storage_writer:
+            self._external_storage_writer.abort()
         self.pending_normal_data = None
         self.committed_files.clear()
 
