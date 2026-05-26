@@ -382,6 +382,10 @@ class CachingFileIO(FileIO):
     def is_dir(self, path: str) -> bool:
         return self._delegate.is_dir(path)
 
+    # FileIO base defines a no-op default, so __getattr__ never forwards this.
+    def to_filesystem_path(self, path: str) -> str:
+        return self._delegate.to_filesystem_path(path)
+
     def __getattr__(self, name):
         return getattr(self._delegate, name)
 
