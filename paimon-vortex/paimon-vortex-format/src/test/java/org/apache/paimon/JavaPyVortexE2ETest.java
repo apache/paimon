@@ -35,7 +35,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,7 +72,7 @@ public class JavaPyVortexE2ETest {
             Files.createDirectories(tempDir.resolve("warehouse"));
         }
 
-        warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.resolve("warehouse"));
+        warehouse = new Path(tempDir.resolve("warehouse").toUri());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
 
         try {

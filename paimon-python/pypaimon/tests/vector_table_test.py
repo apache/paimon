@@ -216,6 +216,10 @@ class VectorTableWriteReadTest(unittest.TestCase):
         self.assertIn((1.0, 2.0, 3.0), vectors)
         self.assertIn((4.0, 5.0, 6.0), vectors)
 
+    @unittest.skipUnless(
+        __import__('importlib').util.find_spec('vortex') is not None,
+        "vortex not installed"
+    )
     def test_vector_dedicated_format_write_read_vortex(self):
         """Write vector data to separate .vector.vortex files."""
         pa_schema = pa.schema([
