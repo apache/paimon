@@ -1010,7 +1010,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testReplaceManifestListWithRowIdOverwriteBarrierProperty() throws Exception {
+    public void testReplaceManifestListWithOverwriteBarrierProperty() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
@@ -1019,7 +1019,7 @@ public class FileStoreCommitTest {
 
         Map<String, String> barrierProperties = new HashMap<>();
         barrierProperties.put("keep", "v1");
-        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
+        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
@@ -1051,11 +1051,11 @@ public class FileStoreCommitTest {
         Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
         assertThat(normalSnapshot.properties())
                 .containsEntry("keep", "v1")
-                .doesNotContainKey(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY);
+                .doesNotContainKey(Snapshot.OVERWRITE_BARRIER_PROPERTY);
     }
 
     @Test
-    public void testCompactManifestWithRowIdOverwriteBarrierProperty() throws Exception {
+    public void testCompactManifestWithOverwriteBarrierProperty() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
@@ -1074,7 +1074,7 @@ public class FileStoreCommitTest {
 
         Map<String, String> barrierProperties = new HashMap<>();
         barrierProperties.put("keep", "v1");
-        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
+        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
@@ -1100,7 +1100,7 @@ public class FileStoreCommitTest {
         assertThat(normalSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(normalSnapshot.properties())
                 .containsEntry("keep", "v1")
-                .doesNotContainKey(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY);
+                .doesNotContainKey(Snapshot.OVERWRITE_BARRIER_PROPERTY);
     }
 
     @Test
@@ -1112,7 +1112,7 @@ public class FileStoreCommitTest {
         Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
 
         Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
+        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
@@ -1142,12 +1142,12 @@ public class FileStoreCommitTest {
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
                         store,
-                        "row-id-overwrite-barrier-check",
+                        "overwrite-barrier-check",
                         new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
                         new CoreOptions(dynamicOptions),
                         true)) {
             assertThatThrownBy(() -> commit.commit(checkNotNull(committableRef.get()), false))
-                    .hasMessageContaining("Row-id overwrite barrier snapshot 2")
+                    .hasMessageContaining("Overwrite barrier snapshot 2")
                     .hasMessageContaining("task planned from snapshot 1");
         }
     }

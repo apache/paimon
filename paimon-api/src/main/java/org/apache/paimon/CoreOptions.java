@@ -2213,7 +2213,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "If set, committer will check OVERWRITE snapshots starting from the "
-                                    + "snapshot after this one. If a row-id overwrite barrier snapshot "
+                                    + "snapshot after this one. If an overwrite barrier snapshot "
                                     + "or an ordinary overwrite snapshot which changed target partitions "
                                     + "is found, commit will be aborted.");
 

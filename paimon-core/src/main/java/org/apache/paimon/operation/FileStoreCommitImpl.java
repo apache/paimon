@@ -1122,7 +1122,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 latest.indexManifest(),
                 latest.nextRowId(),
-                withoutRowIdOverwriteBarrierProperties(latest.properties()));
+                withoutOverwriteBarrierProperties(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1139,7 +1139,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                withoutRowIdOverwriteBarrierProperties(latest.properties()));
+                withoutOverwriteBarrierProperties(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1250,21 +1250,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        withoutRowIdOverwriteBarrierProperties(latestSnapshot.properties()),
+                        withoutOverwriteBarrierProperties(latestSnapshot.properties()),
                         latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
 
-    private static @Nullable Map<String, String> withoutRowIdOverwriteBarrierProperties(
+    private static @Nullable Map<String, String> withoutOverwriteBarrierProperties(
             @Nullable Map<String, String> properties) {
-        if (properties == null
-                || !properties.containsKey(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY)) {
+        if (properties == null || !properties.containsKey(Snapshot.OVERWRITE_BARRIER_PROPERTY)) {
             return properties;
         }
 
         Map<String, String> copied = new HashMap<>(properties);
-        copied.remove(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY);
+        copied.remove(Snapshot.OVERWRITE_BARRIER_PROPERTY);
         return copied.isEmpty() ? null : copied;
     }
 

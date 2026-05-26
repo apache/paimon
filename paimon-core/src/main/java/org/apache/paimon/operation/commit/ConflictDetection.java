@@ -580,11 +580,11 @@ public class ConflictDetection {
             if (snapshot.commitKind() != CommitKind.OVERWRITE) {
                 continue;
             }
-            if (hasRowIdOverwriteBarrierProperty(snapshot.properties())) {
+            if (hasOverwriteBarrierProperty(snapshot.properties())) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
-                                        "Row-id overwrite barrier snapshot %s was committed after the "
+                                        "Overwrite barrier snapshot %s was committed after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
                                         id, overwriteConflictCheckFromSnapshot)));
@@ -602,9 +602,9 @@ public class ConflictDetection {
         return Optional.empty();
     }
 
-    private boolean hasRowIdOverwriteBarrierProperty(@Nullable Map<String, String> properties) {
+    private boolean hasOverwriteBarrierProperty(@Nullable Map<String, String> properties) {
         return properties != null
-                && Boolean.parseBoolean(properties.get(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY));
+                && Boolean.parseBoolean(properties.get(Snapshot.OVERWRITE_BARRIER_PROPERTY));
     }
 
     private boolean overwriteChangedTargetPartitions(

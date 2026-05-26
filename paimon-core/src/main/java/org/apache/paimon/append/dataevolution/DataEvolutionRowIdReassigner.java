@@ -150,8 +150,7 @@ public class DataEvolutionRowIdReassigner {
                             deltaManifestList,
                             rewrittenIndexManifest.indexManifest,
                             assignment.nextRowId,
-                            Collections.singletonMap(
-                                    Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true"));
+                            Collections.singletonMap(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true"));
             if (!success) {
                 throw new RuntimeException(
                         "Failed to reassign row IDs because a newer snapshot has been committed.");

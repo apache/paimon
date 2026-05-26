@@ -508,10 +508,10 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDetectsRowIdOverwriteBarrierSnapshotConflict() {
+    void testDetectsOverwriteBarrierSnapshotConflict() {
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
         Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
+        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
         when(snapshotManager.snapshot(2L))
                 .thenReturn(snapshot(2, Snapshot.CommitKind.OVERWRITE, barrierProperties));
 
@@ -529,15 +529,15 @@ class ConflictDetectionTest {
 
         assertThat(exception).isPresent();
         assertThat(exception.get())
-                .hasMessageContaining("Row-id overwrite barrier snapshot 2")
+                .hasMessageContaining("Overwrite barrier snapshot 2")
                 .hasMessageContaining("task planned from snapshot 1");
     }
 
     @Test
-    void testIgnoresRowIdOverwriteBarrierPropertyOnNonOverwriteSnapshot() {
+    void testIgnoresOverwriteBarrierPropertyOnNonOverwriteSnapshot() {
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
         Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
+        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
         when(snapshotManager.snapshot(2L))
                 .thenReturn(snapshot(2, Snapshot.CommitKind.APPEND, barrierProperties));
 
