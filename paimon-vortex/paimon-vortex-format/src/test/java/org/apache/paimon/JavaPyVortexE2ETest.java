@@ -26,7 +26,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
