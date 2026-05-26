@@ -2338,6 +2338,15 @@ public class CoreOptions implements Serializable {
                                     + "as serialized BlobViewStruct bytes inline in data files and "
                                     + "resolve from upstream tables at read time.");
 
+    public static final ConfigOption<Boolean> BLOB_VIEW_RESOLVE_ENABLED =
+            key("blob-view.resolve.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to resolve blob-view-field values from upstream tables at "
+                                    + "read time. Set to false to preserve BlobViewStruct references "
+                                    + "when forwarding blob view values to another blob-view table.");
+
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
                     .booleanType()
@@ -3009,6 +3018,11 @@ public class CoreOptions implements Serializable {
      */
     public Set<String> blobViewField() {
         return parseCommaSeparatedSet(BLOB_VIEW_FIELD);
+    }
+
+    /** Whether to resolve blob view references at read time. */
+    public boolean blobViewResolveEnabled() {
+        return options.get(BLOB_VIEW_RESOLVE_ENABLED);
     }
 
     /** Resolve blob fields that are stored inline in normal data files. */

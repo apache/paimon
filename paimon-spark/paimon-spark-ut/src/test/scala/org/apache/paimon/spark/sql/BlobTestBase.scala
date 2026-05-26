@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.{Blob, BlobDescriptor}
+import org.apache.paimon.data.{Blob, BlobDescriptor, BlobViewStruct}
 import org.apache.paimon.fs.{IsolatedDirectoryFileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
@@ -234,6 +234,81 @@ class BlobTestBase extends PaimonSparkTestBase {
           Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
           Row(2, "row2", Array[Byte](89, 69)))
       )
+    }
+  }
+
+  test("Blob: forward blob view reference with dynamic option") {
+    withTable(
+      "upstream_blob_view_forward",
+      "first_downstream_blob_view",
+      "second_downstream_blob_view") {
+      sql(
+        "CREATE TABLE upstream_blob_view_forward (id INT, name STRING, picture BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql(
+        "INSERT INTO upstream_blob_view_forward VALUES " +
+          "(1, 'row1', X'48656C6C6F'), " +
+          "(2, 'row2', X'5945')")
+
+      val upstreamFullName = s"$dbName0.upstream_blob_view_forward"
+      sql(
+        "CREATE TABLE first_downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+      sql(
+        s"INSERT INTO first_downstream_blob_view " +
+          s"SELECT id, name, sys.blob_view('$upstreamFullName', 'picture', _ROW_ID) " +
+          s"FROM `upstream_blob_view_forward$$row_tracking`")
+
+      sql(
+        "CREATE TABLE second_downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+
+      val preserveFirstReferenceOption =
+        s"spark.paimon.paimon.$dbName0.first_downstream_blob_view." +
+          CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()
+      val preserveSecondReferenceOption =
+        s"spark.paimon.paimon.$dbName0.second_downstream_blob_view." +
+          CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()
+      withSparkSQLConf(preserveFirstReferenceOption -> "false") {
+        sql(
+          "INSERT INTO second_downstream_blob_view " +
+            "SELECT id, label, image_ref FROM first_downstream_blob_view")
+
+        checkAnswer(
+          sql("SELECT * FROM second_downstream_blob_view ORDER BY id"),
+          Seq(
+            Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
+            Row(2, "row2", Array[Byte](89, 69)))
+        )
+
+        withSparkSQLConf(preserveSecondReferenceOption -> "false") {
+          val originalReferences =
+            sql("SELECT image_ref FROM first_downstream_blob_view ORDER BY id").collect()
+          val forwardedReferences =
+            sql("SELECT image_ref FROM second_downstream_blob_view ORDER BY id").collect()
+
+          assert(forwardedReferences.length == originalReferences.length)
+          forwardedReferences.zip(originalReferences).foreach {
+            case (forwarded, original) =>
+              val originalReference = original.getAs[Array[Byte]](0)
+              val forwardedReference = forwarded.getAs[Array[Byte]](0)
+              assert(util.Arrays.equals(originalReference, forwardedReference))
+              assert(BlobViewStruct.deserialize(forwardedReference).identifier().getFullName ==
+                upstreamFullName)
+          }
+        }
+      }
     }
   }
 
