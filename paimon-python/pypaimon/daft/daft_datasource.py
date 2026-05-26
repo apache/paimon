@@ -295,6 +295,8 @@ class PaimonDataSource(DataSource):
 
     def _build_file_uri(self, file_path: str) -> str:
         """Reconstruct a full URI from a (potentially scheme-stripped) file_path."""
+        if urlparse(file_path).scheme:
+            return file_path
         if self._warehouse_scheme:
             return f"{self._warehouse_scheme}://{file_path}"
         return f"file://{file_path}"
