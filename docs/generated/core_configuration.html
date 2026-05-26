@@ -534,7 +534,7 @@
             <td><h5>dynamic-bucket.empty-bucket-threshold</h5></td>
             <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
-            <td>Threshold for triggering asynchronous refresh of bucket information. When a bucket's row count reaches (target-row-num - threshold), the assigner will asynchronously scan disk to find buckets freed by compaction. For example, with target-row-num=1000000 and threshold=100000, refresh triggers at 900000 rows. Set to -1 to disable. Recommended value: 10-20% of target-row-num.</td>
+            <td>Threshold for triggering asynchronous refresh of bucket information. When a bucket's row count reaches (target-row-num - threshold), the assigner will asynchronously scan disk to find buckets freed by compaction. For example, with target-row-num=1000000 and threshold=100000, refresh triggers at 900000 rows. Set to -1 to disable. Recommended value: 10-20% of target-row-num (use the upper end for high-throughput partitions, so that the async refresh has time to complete before existing buckets saturate; values below 5% of target-row-num will log a warning at startup).</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.initial-buckets</h5></td>
