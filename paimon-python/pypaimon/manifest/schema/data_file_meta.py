@@ -171,6 +171,10 @@ class DataFileMeta:
     def is_blob_file(file_name: str) -> bool:
         return file_name.endswith(".blob")
 
+    @staticmethod
+    def is_vector_file(file_name: str) -> bool:
+        return ".vector." in file_name
+
     def assign_first_row_id(self, first_row_id: int) -> 'DataFileMeta':
         """Create a new DataFileMeta with the assigned first_row_id."""
         return DataFileMeta(

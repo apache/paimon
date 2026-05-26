@@ -55,6 +55,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -474,6 +475,45 @@ public class VortexReaderWriterTest {
                 batch.releaseBatch();
             }
             assertEquals(3, idx, "Should have read exactly 3 rows");
+        }
+    }
+
+    @Test
+    public void testReachTargetSize(@TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        Options options = new Options();
+        // Use small batch size to trigger flush frequently
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 2, 1));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile =
+                new Path(new Path(tempDir.toUri()), "test_target_size_" + UUID.randomUUID());
+
+        FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, testFile, "");
+        try {
+            // Before any write, should not reach target size
+            assertFalse(writer.reachTargetSize(true, 1));
+
+            // Write rows to fill the batch (batchSize=2), triggering a flush
+            writer.addElement(GenericRow.of(1, BinaryString.fromString("hello")));
+            writer.addElement(GenericRow.of(2, BinaryString.fromString("world")));
+            // batch is full, next addElement triggers flush
+            writer.addElement(GenericRow.of(3, BinaryString.fromString("vortex")));
+
+            // After flush, ipcBytes > 0. With a very small target, should reach target size
+            assertTrue(writer.reachTargetSize(true, 1));
+
+            // suggestedCheck=false should always return false
+            assertFalse(writer.reachTargetSize(false, 1));
+
+            // With a very large target, should not reach target size
+            assertFalse(writer.reachTargetSize(true, Long.MAX_VALUE));
+        } finally {
+            writer.close();
         }
     }
 
