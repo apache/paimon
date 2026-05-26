@@ -40,7 +40,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -67,7 +66,6 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +74,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.filterEntriesBefore;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.findMinNonIndexableRowId;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
 import static org.apache.paimon.io.DataIncrement.deleteIndexIncrement;
@@ -356,51 +356,6 @@ public class GenericIndexTopoBuilder {
 
         commit(table, indexType, built);
         return true;
-    }
-
-    /**
-     * Find the minimum firstRowId among files whose schema does not contain all index columns.
-     * Files at or beyond this rowId cannot be indexed because the column was added later via ALTER
-     * TABLE.
-     *
-     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the columns
-     */
-    static long findMinNonIndexableRowId(
-            SchemaManager schemaManager, List<ManifestEntry> entries, List<String> indexColumns) {
-        Map<Long, Boolean> schemaContainsColumns = new HashMap<>();
-        long minRowId = Long.MAX_VALUE;
-        for (ManifestEntry entry : entries) {
-            long sid = entry.file().schemaId();
-            boolean contains =
-                    schemaContainsColumns.computeIfAbsent(
-                            sid,
-                            id -> schemaManager.schema(id).fieldNames().containsAll(indexColumns));
-            if (!contains && entry.file().firstRowId() != null) {
-                minRowId = Math.min(minRowId, entry.file().nonNullFirstRowId());
-            }
-        }
-        return minRowId;
-    }
-
-    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
-    static List<ManifestEntry> filterEntriesBefore(
-            List<ManifestEntry> entries, long boundaryRowId) {
-        if (boundaryRowId == Long.MAX_VALUE) {
-            return entries;
-        }
-        List<ManifestEntry> result = new ArrayList<>();
-        for (ManifestEntry entry : entries) {
-            if (entry.file().firstRowId() != null
-                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
-                result.add(entry);
-            }
-        }
-        LOG.info(
-                "Filtered {} files at or beyond rowId {}, {} files remain.",
-                entries.size() - result.size(),
-                boundaryRowId,
-                result.size());
-        return result;
     }
 
     /**
