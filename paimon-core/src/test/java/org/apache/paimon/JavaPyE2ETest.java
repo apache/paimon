@@ -851,7 +851,6 @@ public class JavaPyE2ETest {
                         "3, [-1.0, 0.5, 2.5], third");
     }
 
-
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testBlobWriteAlterCompact() throws Exception {
