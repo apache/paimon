@@ -34,6 +34,7 @@ import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
+import org.apache.paimon.data.columnar.heap.HeapVecVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
@@ -129,8 +130,9 @@ public class ParquetReaderUtil {
                         createWritableColumnVector(batchSize, arrayType.getElementType()));
             case VECTOR:
                 VectorType vectorType = (VectorType) fieldType;
-                return new HeapArrayVector(
+                return new HeapVecVector(
                         batchSize,
+                        vectorType.getLength(),
                         createWritableColumnVector(batchSize, vectorType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) fieldType;
