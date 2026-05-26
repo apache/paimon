@@ -762,7 +762,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         tc = wb.new_commit()
         with self.assertRaises(RuntimeError) as ctx:
             tc.commit(stale_commit_msgs)
-        self.assertIn("conflicts", str(ctx.exception))
+        self.assertIn("conflict", str(ctx.exception))
         tc.close()
         print(f"Conflict detected as expected: {ctx.exception}")
 
