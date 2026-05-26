@@ -64,6 +64,8 @@ class VectorWriter(AppendOnlyDataWriter):
             self.file_io.write_parquet(file_path, data,
                                        compression=self.compression,
                                        zstd_level=self.zstd_level)
+        elif self.vector_file_format == CoreOptions.FILE_FORMAT_VORTEX:
+            self.file_io.write_vortex(file_path, data)
         else:
             raise ValueError(f"Unsupported vector file format: {self.vector_file_format}")
 
