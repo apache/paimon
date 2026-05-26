@@ -321,7 +321,7 @@ public class BlobUpdateTest extends TableTestBase {
                                 table.schema().id(),
                                 Collections.singletonList("f2")));
 
-        commitDataFiles(compactedLayout, oldBlobFiles);
+        commitCompactFiles(oldBlobFiles, compactedLayout);
 
         FileStoreTable readTable = getTableDefault();
         assertBlobFileLayout(
@@ -381,6 +381,19 @@ public class BlobUpdateTest extends TableTestBase {
                                 null,
                                 new DataIncrement(newFiles, deletedFiles, Collections.emptyList()),
                                 CompactIncrement.emptyIncrement())));
+    }
+
+    private void commitCompactFiles(List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter)
+            throws Exception {
+        commitDefault(
+                Collections.singletonList(
+                        new CommitMessageImpl(
+                                BinaryRow.EMPTY_ROW,
+                                0,
+                                null,
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        compactBefore, compactAfter, Collections.emptyList()))));
     }
 
     private static List<DataFileMeta> blobFiles(FileStoreTable table) {
