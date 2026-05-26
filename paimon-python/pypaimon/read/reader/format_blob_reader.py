@@ -154,7 +154,7 @@ class FormatBlobReader(RecordBatchReader):
             index_length = struct.unpack('<I', header[:4])[0]  # Little endian
             version = header[4]
 
-            if version not in (1, 2):
+            if version != 1:
                 raise IOError(f"Unsupported blob file version: {version}")
 
             # Read index data

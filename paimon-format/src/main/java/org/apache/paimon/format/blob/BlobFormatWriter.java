@@ -44,7 +44,7 @@ import static org.apache.paimon.utils.StreamUtils.longToLittleEndian;
 /** {@link FormatWriter} for blob file. */
 public class BlobFormatWriter implements FileAwareFormatWriter {
 
-    public static final byte VERSION = 2;
+    public static final byte VERSION = 1;
     public static final int MAGIC_NUMBER = 1481511375;
     public static final byte[] MAGIC_NUMBER_BYTES = intToLittleEndian(MAGIC_NUMBER);
     public static final long NULL_LENGTH = -1L;

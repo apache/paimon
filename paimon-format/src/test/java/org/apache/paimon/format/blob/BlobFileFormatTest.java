@@ -34,7 +34,6 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -46,10 +45,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.zip.CRC32;
 
-import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
-import static org.apache.paimon.utils.StreamUtils.longToLittleEndian;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link BlobFileFormat}. */
@@ -76,31 +72,6 @@ public class BlobFileFormatTest {
     @Test
     public void testReadBlobInlineBytes() throws IOException {
         innerTest(false);
-    }
-
-    @Test
-    public void testReadLegacyVersionOneBlobFile() throws IOException {
-        BlobFileFormat format = new BlobFileFormat(false);
-        RowType rowType = RowType.of(DataTypes.BLOB());
-        List<byte[]> blobs = Arrays.asList("hello".getBytes(), null, "world".getBytes());
-
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
-            writeLegacyVersionOneBlobFile(out, blobs);
-        }
-
-        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
-        FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        List<Object> result = new ArrayList<>();
-        readerFactory
-                .createReader(context)
-                .forEachRemaining(
-                        row -> result.add(row.isNullAt(0) ? null : row.getBlob(0).toData()));
-
-        assertThat(result).hasSize(blobs.size());
-        assertThat((byte[]) result.get(0)).isEqualTo(blobs.get(0));
-        assertThat(result.get(1)).isNull();
-        assertThat((byte[]) result.get(2)).isEqualTo(blobs.get(2));
     }
 
     private void innerTest(boolean blobAsDescriptor) throws IOException {
@@ -173,42 +144,6 @@ public class BlobFileFormatTest {
         // assert
         assertThat(result).hasSize(1);
         assertThat(result.get(0)).isSameAs(BlobPlaceholder.INSTANCE);
-    }
-
-    private void writeLegacyVersionOneBlobFile(PositionOutputStream out, List<byte[]> blobs)
-            throws IOException {
-        CRC32 crc32 = new CRC32();
-        long[] lengths = new long[blobs.size()];
-        for (int i = 0; i < blobs.size(); i++) {
-            byte[] blob = blobs.get(i);
-            if (blob == null) {
-                lengths[i] = BlobFormatWriter.NULL_LENGTH;
-                continue;
-            }
-
-            long previousPos = out.getPos();
-            crc32.reset();
-
-            crc32.update(
-                    BlobFormatWriter.MAGIC_NUMBER_BYTES,
-                    0,
-                    BlobFormatWriter.MAGIC_NUMBER_BYTES.length);
-            out.write(BlobFormatWriter.MAGIC_NUMBER_BYTES);
-            crc32.update(blob, 0, blob.length);
-            out.write(blob);
-
-            long binLength = out.getPos() - previousPos + 12;
-            lengths[i] = binLength;
-            byte[] lengthBytes = longToLittleEndian(binLength);
-            crc32.update(lengthBytes, 0, lengthBytes.length);
-            out.write(lengthBytes);
-            out.write(intToLittleEndian((int) crc32.getValue()));
-        }
-
-        byte[] indexBytes = DeltaVarintCompressor.compress(lengths);
-        out.write(indexBytes);
-        out.write(intToLittleEndian(indexBytes.length));
-        out.write(1);
     }
 
     @Test

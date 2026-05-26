@@ -24,7 +24,7 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
 class BlobFormatWriter:
-    VERSION = 2
+    VERSION = 1
     MAGIC_NUMBER = 1481511375
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2

@@ -42,7 +42,7 @@ public class BlobFileMeta {
         byte[] header = new byte[5];
         IOUtils.readFully(in, header);
         byte version = header[4];
-        if (version != 1 && version != 2) {
+        if (version != 1) {
             throw new IOException("Unsupported version: " + version);
         }
         int indexLength = BytesUtils.getInt(header, 0);

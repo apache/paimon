@@ -383,8 +383,8 @@ public class BlobUpdateTest extends TableTestBase {
                                 CompactIncrement.emptyIncrement())));
     }
 
-    private void commitCompactFiles(List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter)
-            throws Exception {
+    private void commitCompactFiles(
+            List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter) throws Exception {
         commitDefault(
                 Collections.singletonList(
                         new CommitMessageImpl(
