@@ -218,6 +218,67 @@ public class VectorStoreTableTest extends TableTestBase {
         assertThat(counter.get()).isEqualTo(rowNum);
     }
 
+    @Test
+    public void testParquetVectorFormat() throws Exception {
+        int rowNum = RANDOM.nextInt(64) + 1;
+
+        catalog.createTable(identifier(), schemaParquetVector(), true);
+
+        commitDefault(writeDataWithoutBlob(rowNum, 1));
+
+        AtomicInteger counter = new AtomicInteger(0);
+
+        readDefault(
+                row -> {
+                    counter.getAndIncrement();
+                    InternalRow expected = rowsWritten.get(row.getInt(0));
+                    assertThat(row.getString(1)).isEqualTo(expected.getString(1));
+                    assertThat(row.getVector(2).toFloatArray())
+                            .isEqualTo(expected.getVector(3).toFloatArray());
+                    assertThat(row.getInt(3)).isEqualTo(expected.getInt(4));
+                });
+
+        assertThat(counter.get()).isEqualTo(rowNum);
+    }
+
+    @Test
+    public void testParquetVectorFormatMultiBatch() throws Exception {
+        int rowNum = (RANDOM.nextInt(64) + 1) * 2;
+
+        catalog.createTable(identifier(), schemaParquetVector(), true);
+
+        commitDefault(writeDataWithoutBlob(rowNum / 2, 2));
+
+        AtomicInteger counter = new AtomicInteger(0);
+
+        readDefault(
+                row -> {
+                    counter.getAndIncrement();
+                    InternalRow expected = rowsWritten.get(row.getInt(0));
+                    assertThat(row.getString(1)).isEqualTo(expected.getString(1));
+                    assertThat(row.getVector(2).toFloatArray())
+                            .isEqualTo(expected.getVector(3).toFloatArray());
+                    assertThat(row.getInt(3)).isEqualTo(expected.getInt(4));
+                });
+        assertThat(counter.get()).isEqualTo(rowNum);
+    }
+
+    private Schema schemaParquetVector() {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()));
+        schemaBuilder.column("f3", DataTypes.INT());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "2 MB");
+        schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "4 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VECTOR_FIELD.key(), "f2");
+        schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "parquet");
+        schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
+        return schemaBuilder.build();
+    }
+
     @Override
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
