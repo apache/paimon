@@ -24,6 +24,7 @@ to create and populate test tables, then _read_table() is validated.
 
 from __future__ import annotations
 
+import asyncio
 import decimal
 
 import pyarrow as pa
@@ -55,6 +56,40 @@ def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None
     finally:
         table_write.close()
         table_commit.close()
+
+
+async def _read_paimon_source_batches(
+    table,
+    filter_expr=None,
+    columns=None,
+    limit=None,
+    call_push_filters=True,
+):
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    if filter_expr is not None and call_push_filters:
+        pushed_filters, remaining_filters = source.push_filters([filter_expr._expr])
+        assert pushed_filters
+        assert not remaining_filters
+
+    batches = []
+    fallback_task_count = 0
+    pushdowns = Pushdowns(filters=filter_expr, columns=columns, limit=limit)
+    async for task in source.get_tasks(pushdowns):
+        if type(task).__name__ == "_PaimonPKSplitTask":
+            fallback_task_count += 1
+        async for batch in task.read():
+            batches.append(batch.to_pydict())
+    assert fallback_task_count > 0
+    return batches
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +345,193 @@ def test_read_paimon_pk_table_deduplication(pk_table):
     id1_row = [row for row in zip(result.column("id").to_pylist(), result.column("name").to_pylist()) if row[0] == 1]
     assert len(id1_row) == 1
     assert id1_row[0][1] == "new_a"
+
+
+def test_read_paimon_pk_fallback_applies_pushed_filter(pk_table):
+    """Fallback PK reads must apply filters pushed into the Paimon source."""
+    table, _ = pk_table
+    batch1 = pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "name": pa.array(["old_a", "old_b"], pa.string()),
+            "dt": pa.array(["2024-01-01", "2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, batch1)
+
+    batch2 = pa.table(
+        {
+            "id": pa.array([1], pa.int64()),
+            "name": pa.array(["new_a"], pa.string()),
+            "dt": pa.array(["2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, batch2)
+
+    batches = asyncio.run(_read_paimon_source_batches(table, filter_expr=col("id") == 1))
+    ids = [value for batch in batches for value in batch["id"]]
+    names = [value for batch in batches for value in batch["name"]]
+
+    assert ids == [1]
+    assert names == ["new_a"]
+
+
+def test_read_paimon_pk_fallback_filters_before_projection(pk_table):
+    """Fallback reads keep filter columns available for Daft's upper filter."""
+    table, _ = pk_table
+    batch1 = pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "name": pa.array(["old_a", "old_b"], pa.string()),
+            "dt": pa.array(["2024-01-01", "2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, batch1)
+
+    batch2 = pa.table(
+        {
+            "id": pa.array([1], pa.int64()),
+            "name": pa.array(["new_a"], pa.string()),
+            "dt": pa.array(["2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, batch2)
+
+    batches = asyncio.run(
+        _read_paimon_source_batches(
+            table,
+            filter_expr=col("id") == 1,
+            columns=["name"],
+        )
+    )
+
+    assert batches == [{"name": ["new_a"], "id": [1]}]
+
+
+def test_read_paimon_fallback_plans_pushdown_filter_without_push_filters(local_paimon_catalog):
+    """Fallback planning must use Pushdowns.filters even if push_filters was not called."""
+    catalog, _ = local_paimon_catalog
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.string()),
+        ]),
+        options={
+            "file.format": "avro",
+            "source.split.target-size": "800b",
+            "source.split.open-file-cost": "600b",
+        },
+    )
+    catalog.create_table("test_db.avro_pushdown_filter", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.avro_pushdown_filter")
+    _write_to_paimon(table, pa.table({"id": [1], "name": ["first"]}))
+    _write_to_paimon(table, pa.table({"id": [999], "name": ["match"]}))
+
+    batches = asyncio.run(
+        _read_paimon_source_batches(
+            table,
+            filter_expr=col("id") == 999,
+            limit=1,
+            call_push_filters=False,
+        )
+    )
+
+    assert batches == [{"id": [999], "name": ["match"]}]
+
+
+def test_read_paimon_fallback_keeps_limit_above_remaining_filter(local_paimon_catalog):
+    """Fallback reads must not apply limit before Daft evaluates remaining filters."""
+    catalog, _ = local_paimon_catalog
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.string()),
+        ]),
+        options={"file.format": "avro"},
+    )
+    catalog.create_table("test_db.avro_remaining_filter_limit", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.avro_remaining_filter_limit")
+    _write_to_paimon(table, pa.table({"id": [1, 999], "name": ["first", "match"]}))
+
+    result = _read_table(table).where(~(col("id") == 1)).limit(1).to_pydict()
+
+    assert result == {"id": [999], "name": ["match"]}
+
+
+def test_read_paimon_keeps_limit_above_partition_filter(append_only_table):
+    """Scan planning must not apply limit before datasource partition pruning."""
+    table, _ = append_only_table
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": pa.array([1], pa.int64()),
+                "name": pa.array(["first"], pa.string()),
+                "value": pa.array([1.0], pa.float64()),
+                "dt": pa.array(["2024-01-01"], pa.string()),
+            }
+        ),
+    )
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": pa.array([2], pa.int64()),
+                "name": pa.array(["match"], pa.string()),
+                "value": pa.array([2.0], pa.float64()),
+                "dt": pa.array(["2024-01-02"], pa.string()),
+            }
+        ),
+    )
+
+    result = _read_table(table).where(col("dt") == "2024-01-02").limit(1).to_pydict()
+
+    assert result["id"] == [2]
+
+
+def test_read_paimon_pk_fallback_filter_then_project_dataframe(pk_table):
+    """Daft may keep the filter above the source while pushing projection."""
+    table, _ = pk_table
+    batch1 = pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "name": pa.array(["old_a", "old_b"], pa.string()),
+            "dt": pa.array(["2024-01-01", "2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, batch1)
+
+    batch2 = pa.table(
+        {
+            "id": pa.array([1], pa.int64()),
+            "name": pa.array(["new_a"], pa.string()),
+            "dt": pa.array(["2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, batch2)
+
+    result = _read_table(table).where(col("id") == 1).select("name").to_pydict()
+
+    assert result == {"name": ["new_a"]}
+
+
+def test_read_paimon_pk_fallback_applies_limit(pk_table):
+    """Fallback PK reads must use the same limit as the planning read builder."""
+    table, _ = pk_table
+    data = pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "dt": pa.array(["2024-01-01", "2024-01-01", "2024-01-01"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, data)
+    _write_to_paimon(table, data)
+
+    batches = asyncio.run(_read_paimon_source_batches(table, limit=1))
+    ids = [value for batch in batches for value in batch["id"]]
+
+    assert len(ids) == 1
 
 
 # ---------------------------------------------------------------------------
