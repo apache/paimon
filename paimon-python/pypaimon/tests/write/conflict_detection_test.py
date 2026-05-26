@@ -108,13 +108,14 @@ class TestCheckRowIdExistence(unittest.TestCase):
         detection = self._make_detection()
         base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
-        self.assertIsNone(detection.check_row_id_existence(base, delta))
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
 
     def test_conflict_when_base_file_removed(self):
         detection = self._make_detection()
         base = []
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
-        result = detection.check_row_id_existence(base, delta)
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
 
@@ -122,21 +123,30 @@ class TestCheckRowIdExistence(unittest.TestCase):
         detection = self._make_detection()
         base = [_make_entry("f2", kind=0, first_row_id=0, row_count=200)]
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
-        result = detection.check_row_id_existence(base, delta)
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
+
+    def test_skip_newly_appended_files(self):
+        detection = self._make_detection()
+        base = []
+        delta = [_make_entry("p1", kind=0, first_row_id=200, row_count=100)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
 
     def test_skip_when_no_pre_assigned_row_id(self):
         detection = self._make_detection()
         base = []
         delta = [_make_entry("f1", kind=0)]
-        self.assertIsNone(detection.check_row_id_existence(base, delta))
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
 
     def test_skip_delete_entries(self):
         detection = self._make_detection()
         base = []
         delta = [_make_entry("f1", kind=1, first_row_id=0, row_count=100)]
-        self.assertIsNone(detection.check_row_id_existence(base, delta))
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
 
     def test_skip_when_data_evolution_disabled(self):
         detection = ConflictDetection(
@@ -148,7 +158,15 @@ class TestCheckRowIdExistence(unittest.TestCase):
         )
         base = []
         delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
-        self.assertIsNone(detection.check_row_id_existence(base, delta))
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
+    def test_skip_when_next_row_id_is_none(self):
+        detection = self._make_detection()
+        base = []
+        delta = [_make_entry("p1", kind=0, first_row_id=0, row_count=100)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=None))
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):

@@ -176,7 +176,9 @@ class ConflictDetection:
                 "File deletion conflicts detected! Give up committing. " + str(e))
 
         if commit_kind != "COMPACT":
-            conflict = self.check_row_id_existence(base_entries, delta_entries)
+            next_row_id = latest_snapshot.next_row_id if latest_snapshot else None
+            conflict = self.check_row_id_existence(
+                base_entries, delta_entries, next_row_id)
             if conflict is not None:
                 return conflict
 
@@ -186,13 +188,18 @@ class ConflictDetection:
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
 
-    def check_row_id_existence(self, base_entries, delta_entries):
+    def check_row_id_existence(self, base_entries, delta_entries, next_row_id=None):
         if not self.data_evolution_enabled:
+            return None
+
+        if next_row_id is None:
             return None
 
         files_to_check = [
             entry for entry in delta_entries
-            if entry.kind == 0 and entry.file.first_row_id is not None
+            if entry.kind == 0
+            and entry.file.first_row_id is not None
+            and entry.file.first_row_id < next_row_id
         ]
 
         if not files_to_check:

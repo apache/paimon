@@ -225,7 +225,8 @@ public class ConflictDetection {
         }
 
         if (commitKind != CommitKind.COMPACT) {
-            exception = checkRowIdExistence(baseEntries, deltaEntries);
+            Long nextRowId = latestSnapshot.nextRowId();
+            exception = checkRowIdExistence(baseEntries, deltaEntries, nextRowId);
             if (exception.isPresent()) {
                 return exception;
             }
@@ -544,14 +545,21 @@ public class ConflictDetection {
     }
 
     Optional<RuntimeException> checkRowIdExistence(
-            List<SimpleFileEntry> baseEntries, List<SimpleFileEntry> deltaEntries) {
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            @Nullable Long nextRowId) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
 
         List<SimpleFileEntry> filesToCheck =
                 deltaEntries.stream()
-                        .filter(e -> e.kind() == FileKind.ADD && e.firstRowId() != null)
+                        .filter(
+                                e ->
+                                        e.kind() == FileKind.ADD
+                                                && e.firstRowId() != null
+                                                && nextRowId != null
+                                                && e.firstRowId() < nextRowId)
                         .collect(Collectors.toList());
 
         if (filesToCheck.isEmpty()) {

@@ -385,7 +385,7 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries)).isEmpty();
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
     }
 
     @Test
@@ -398,7 +398,7 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries);
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 100L);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
     }
@@ -414,9 +414,26 @@ class ConflictDetectionTest {
         deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
 
         Optional<RuntimeException> result =
-                detection.checkRowIdExistence(baseEntries, deltaEntries);
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 200L);
         assertThat(result).isPresent();
         assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsNewlyAppendedFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        // nextRowId=100: files with firstRowId >= 100 are newly appended, not references
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        // partial-column update referencing existing rows (firstRowId=0 < nextRowId=100)
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+        // newly appended file (firstRowId=100 >= nextRowId=100), should be skipped
+        deltaEntries.add(createFileEntryWithRowId("new1", ADD, 100L, 50L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
     }
 
     @Test
@@ -428,7 +445,7 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntry("f1", ADD));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries)).isEmpty();
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
     }
 
     @Test
@@ -440,7 +457,18 @@ class ConflictDetectionTest {
         List<SimpleFileEntry> deltaEntries = new ArrayList<>();
         deltaEntries.add(createFileEntryWithRowId("f1", DELETE, 0L, 100L));
 
-        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries)).isEmpty();
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsWhenNextRowIdNull() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, null)).isEmpty();
     }
 
     private SimpleFileEntry createFileEntryWithRowId(
