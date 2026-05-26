@@ -201,7 +201,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             success = true
           } catch {
             case e: Exception =>
-              if (!e.getMessage.contains("multiple 'MERGE INTO' and 'COMPACT' operations")) {
+              if (!e.getMessage.contains("multiple 'MERGE INTO' and 'COMPACT' operations")
+                && !e.getMessage.contains("Row ID existence conflict")) {
                 throw e
               }
           }
