@@ -694,6 +694,21 @@ public class GenericIndexTopoBuilder {
                         // Only write rows within this shard's range
                         if (currentRowId >= task.shardRange.from) {
                             if (multiColumn) {
+                                boolean hasNull = false;
+                                for (InternalRow.FieldGetter getter : indexFieldGetters) {
+                                    if (getter.getFieldOrNull(row) == null) {
+                                        hasNull = true;
+                                        break;
+                                    }
+                                }
+                                if (hasNull) {
+                                    LOG.info(
+                                            "Null value in indexed columns at rowId={}, stopping shard [{}, {}].",
+                                            currentRowId,
+                                            task.shardRange.from,
+                                            task.shardRange.to);
+                                    break;
+                                }
                                 ((GlobalIndexMultiColumnWriter) indexWriter).write(row);
                             } else {
                                 Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
