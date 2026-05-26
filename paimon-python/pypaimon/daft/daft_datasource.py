@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from pypaimon.common.predicate import Predicate
+    from pypaimon.manifest.schema.data_file_meta import DataFileMeta
     from pypaimon.read.table_read import TableRead
     from pypaimon.read.split import Split
     from pypaimon.table.file_store_table import FileStoreTable
@@ -285,7 +286,7 @@ class PaimonDataSource(DataSource):
                     pv = pv_cache[pv_key]
 
                 for data_file in split.files:
-                    file_uri = self._build_file_uri(data_file.file_path)
+                    file_uri = self._build_file_uri(self._data_file_path(data_file))
                     yield DataSourceTask.parquet(
                         path=file_uri,
                         schema=self._schema,
@@ -329,6 +330,10 @@ class PaimonDataSource(DataSource):
         if self._warehouse_scheme:
             return f"{self._warehouse_scheme}://{file_path}"
         return f"file://{file_path}"
+
+    @staticmethod
+    def _data_file_path(data_file: DataFileMeta) -> str:
+        return data_file.external_path if data_file.external_path else data_file.file_path
 
     def _build_partition_values(self, split: Split) -> daft.recordbatch.RecordBatch | None:
         """Build a single-row RecordBatch encoding the partition values for a split."""
