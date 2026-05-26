@@ -51,6 +51,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
@@ -126,6 +127,11 @@ public class ParquetReaderUtil {
                 return new HeapArrayVector(
                         batchSize,
                         createWritableColumnVector(batchSize, arrayType.getElementType()));
+            case VECTOR:
+                VectorType vectorType = (VectorType) fieldType;
+                return new HeapArrayVector(
+                        batchSize,
+                        createWritableColumnVector(batchSize, vectorType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) fieldType;
                 return new HeapMapVector(
@@ -322,8 +328,11 @@ public class ParquetReaderUtil {
                     groupColumnIO.getFieldPath());
         }
 
-        if (type instanceof ArrayType) {
-            ArrayType arrayType = (ArrayType) type;
+        if (type instanceof ArrayType || type instanceof VectorType) {
+            DataType elementType =
+                    type instanceof ArrayType
+                            ? ((ArrayType) type).getElementType()
+                            : ((VectorType) type).getElementType();
             ColumnIO elementTypeColumnIO;
             if (columnIO instanceof GroupColumnIO) {
                 GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
@@ -333,7 +342,7 @@ public class ParquetReaderUtil {
                     }
                     elementTypeColumnIO = groupColumnIO;
                 } else {
-                    if (arrayType.getElementType() instanceof RowType) {
+                    if (elementType instanceof RowType) {
                         elementTypeColumnIO = groupColumnIO;
                     } else {
                         elementTypeColumnIO = groupColumnIO.getChild(0);
@@ -347,7 +356,7 @@ public class ParquetReaderUtil {
 
             ParquetField field =
                     constructField(
-                            new DataField(0, "", arrayType.getElementType()),
+                            new DataField(0, "", elementType),
                             getArrayElementColumn(elementTypeColumnIO),
                             parquetListElementType(parquetType.asGroupType()));
             if (repetitionLevel == field.getRepetitionLevel()) {
