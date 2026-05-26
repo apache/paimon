@@ -1055,6 +1055,55 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testCompactManifestWithRowIdReassignProperty() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        store.commitData(keyValues, s -> partition, kv -> 0);
+        store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap());
+        Snapshot latest =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+
+        long deleteNum =
+                store.manifestListFactory().create().readDataManifests(latest).stream()
+                        .mapToLong(ManifestFileMeta::numDeletedFiles)
+                        .sum();
+        assertThat(deleteNum).isGreaterThan(0);
+
+        Map<String, String> reassignProperties = new HashMap<>();
+        reassignProperties.put("keep", "v1");
+        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    latest,
+                                    latest.totalRecordCount(),
+                                    baseManifestList(latest),
+                                    deltaManifestList(latest),
+                                    latest.indexManifest(),
+                                    latest.nextRowId(),
+                                    reassignProperties))
+                    .isTrue();
+        }
+
+        Snapshot reassignSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(reassignSnapshot.properties()).isEqualTo(reassignProperties);
+
+        try (FileStoreCommit commit = store.newCommit()) {
+            commit.compactManifest();
+        }
+
+        Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(normalSnapshot.id()).isGreaterThan(reassignSnapshot.id());
+        assertThat(normalSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(normalSnapshot.properties())
+                .containsEntry("keep", "v1")
+                .doesNotContainKey(Snapshot.ROW_ID_REASSIGN_PROPERTY);
+    }
+
+    @Test
     public void testRowIdReassignConflictFromOptions() throws Exception {
         TestFileStore store = createStore(false);
 

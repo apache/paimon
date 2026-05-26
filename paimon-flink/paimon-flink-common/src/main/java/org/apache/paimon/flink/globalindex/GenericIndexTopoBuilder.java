@@ -179,10 +179,7 @@ public class GenericIndexTopoBuilder {
 
         List<ManifestEntry> entries = indexBuilder.scan();
         List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
-        Long rowIdReassignCheckFromSnapshot =
-                indexBuilder.scanSnapshotId().isPresent()
-                        ? indexBuilder.scanSnapshotId().get()
-                        : null;
+        Long rowIdReassignCheckFromSnapshot = indexBuilder.scanSnapshotId().orElse(null);
 
         return buildTopology(
                 env,
@@ -516,7 +513,9 @@ public class GenericIndexTopoBuilder {
             String indexType,
             DataStream<Committable> written,
             Long rowIdReassignCheckFromSnapshot) {
-        FileStoreTable commitTable = withRowIdReassignCheck(table, rowIdReassignCheckFromSnapshot);
+        FileStoreTable commitTable =
+                GlobalIndexCommitUtils.withRowIdReassignCheck(
+                        table, rowIdReassignCheckFromSnapshot);
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
@@ -532,17 +531,6 @@ public class GenericIndexTopoBuilder {
         written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
                 .setParallelism(1)
                 .setMaxParallelism(1);
-    }
-
-    private static FileStoreTable withRowIdReassignCheck(
-            FileStoreTable table, Long rowIdReassignCheckFromSnapshot) {
-        if (rowIdReassignCheckFromSnapshot == null) {
-            return table;
-        }
-        return table.copy(
-                Collections.singletonMap(
-                        CoreOptions.COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT.key(),
-                        String.valueOf(rowIdReassignCheckFromSnapshot)));
     }
 
     /** Serializable descriptor for one shard's work. Each shard has its own DataSplit and Range. */

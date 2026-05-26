@@ -27,6 +27,7 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.globalindex.GlobalIndexCommitUtils;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CommitterOperatorFactory;
@@ -327,7 +328,9 @@ public class BTreeIndexTopoBuilder {
             FileStoreTable table,
             DataStream<Committable> written,
             Long rowIdReassignCheckFromSnapshot) {
-        FileStoreTable commitTable = withRowIdReassignCheck(table, rowIdReassignCheckFromSnapshot);
+        FileStoreTable commitTable =
+                GlobalIndexCommitUtils.withRowIdReassignCheck(
+                        table, rowIdReassignCheckFromSnapshot);
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
@@ -343,17 +346,6 @@ public class BTreeIndexTopoBuilder {
         written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
                 .setParallelism(1)
                 .setMaxParallelism(1);
-    }
-
-    private static FileStoreTable withRowIdReassignCheck(
-            FileStoreTable table, Long rowIdReassignCheckFromSnapshot) {
-        if (rowIdReassignCheckFromSnapshot == null) {
-            return table;
-        }
-        return table.copy(
-                Collections.singletonMap(
-                        CoreOptions.COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT.key(),
-                        String.valueOf(rowIdReassignCheckFromSnapshot)));
     }
 
     /** Operator to read data from splits. */
