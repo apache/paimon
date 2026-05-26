@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -472,9 +473,9 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntryWithSchemaId(BinaryRow.EMPTY_ROW, 200L, 100, 0L));
 
         List<ManifestEntry> result =
-                GenericIndexTopoBuilder.filterEntriesBefore(
+                GlobalIndexBuilderUtils.filterEntriesBefore(
                         entries,
-                        GenericIndexTopoBuilder.findMinNonIndexableRowId(
+                        GlobalIndexBuilderUtils.findMinNonIndexableRowId(
                                 schemaManager, entries, Collections.singletonList("vec")));
 
         assertThat(result).hasSize(2);
