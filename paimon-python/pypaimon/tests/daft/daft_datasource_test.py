@@ -16,6 +16,8 @@
 # limitations under the License.
 ################################################################################
 import unittest
+from dataclasses import dataclass
+from typing import Optional
 
 import pytest
 
@@ -23,6 +25,12 @@ pypaimon = pytest.importorskip("pypaimon")
 daft = pytest.importorskip("daft")
 
 from pypaimon.daft.daft_datasource import PaimonDataSource
+
+
+@dataclass
+class _DataFile:
+    file_path: str
+    external_path: Optional[str] = None
 
 
 def _build_uri(warehouse_scheme: str, file_path: str) -> str:
@@ -60,6 +68,31 @@ class BuildFileUriTest(unittest.TestCase):
         self.assertEqual(
             _build_uri("", "/tmp/pytest-xxx/db.db/tbl/data.parquet"),
             "file:///tmp/pytest-xxx/db.db/tbl/data.parquet",
+        )
+
+
+class DataFilePathTest(unittest.TestCase):
+
+    def test_prefers_external_path(self):
+        data_file = _DataFile(
+            file_path="file:///warehouse/db.db/tbl/bucket-0/data.parquet",
+            external_path="s3://external-bucket/data/db.db/tbl/bucket-0/data.parquet",
+        )
+
+        self.assertEqual(
+            PaimonDataSource._data_file_path(data_file),
+            "s3://external-bucket/data/db.db/tbl/bucket-0/data.parquet",
+        )
+
+    def test_falls_back_to_file_path(self):
+        data_file = _DataFile(
+            file_path="file:///warehouse/db.db/tbl/bucket-0/data.parquet",
+            external_path=None,
+        )
+
+        self.assertEqual(
+            PaimonDataSource._data_file_path(data_file),
+            "file:///warehouse/db.db/tbl/bucket-0/data.parquet",
         )
 
 
