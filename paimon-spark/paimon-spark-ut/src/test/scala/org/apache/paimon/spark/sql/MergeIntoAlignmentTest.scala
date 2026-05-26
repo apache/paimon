@@ -597,4 +597,73 @@ class MergeIntoAlignmentTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT id, info.a, info.b FROM t"), Seq(Row(1, "newA", "oldB")))
     }
   }
+
+  // Top-level column matching is case-insensitive under Spark's default
+  // `spark.sql.caseSensitive=false`. Exercises `PaimonMergeIntoResolver.expandStarAssignments`
+  // and `PaimonOutputResolver.reorderColumnsByName` — both use `conf.resolver`.
+  test("merge into: top-level column names match case-insensitively (UPDATE * / INSERT *)") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      // Source uses uppercase, target uses lowercase.
+      spark
+        .sql("SELECT 1 AS ID, 'A' AS NAME UNION ALL SELECT 3 AS ID, 'c' AS NAME")
+        .createOrReplaceTempView("s")
+
+      sql("""MERGE INTO t USING s ON t.id = s.ID
+            | WHEN MATCHED THEN UPDATE SET *
+            | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "A"), Row(2, "b"), Row(3, "c"))
+      )
+    }
+  }
+
+  // Explicit `SET t.<COL> = s.<COL>` LHS resolves case-insensitively against target output.
+  // Exercises `PaimonAssignmentUtils.applyAssignments`'s `key.semanticEquals` + name fallback.
+  test("merge into: explicit SET target column LHS matches case-insensitively") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+
+      spark.sql("SELECT 1 AS id, 'NEW' AS new_name").createOrReplaceTempView("s")
+
+      // LHS `NAME` (uppercase) matches target `name`.
+      sql("""MERGE INTO t USING s ON t.id = s.id
+            | WHEN MATCHED THEN UPDATE SET NAME = s.new_name""".stripMargin)
+
+      checkAnswer(sql("SELECT id, name FROM t"), Seq(Row(1, "NEW")))
+    }
+  }
+
+  // Nested struct field names match case-insensitively. Exercises `resolveStructType` →
+  // `reorderColumnsByName` recursion with `conf.resolver`, including the
+  // `hasExtraStructFieldsToPreserveValue` field-name comparison.
+  test("merge into: nested struct field names match case-insensitively (UPDATE *)") {
+    withTable("t") {
+      sql("""CREATE TABLE t (
+            |  id INT,
+            |  info STRUCT<a: STRING, b: STRING>
+            |) USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, named_struct('a', 'oldA', 'b', 'oldB'))")
+
+      // Source struct fields use uppercase.
+      spark
+        .sql("SELECT 1 AS id, named_struct('A', 'newA', 'B', 'newB') AS info")
+        .createOrReplaceTempView("s")
+
+      sql("""MERGE INTO t USING s ON t.id = s.id
+            | WHEN MATCHED THEN UPDATE SET *""".stripMargin)
+
+      checkAnswer(sql("SELECT id, info.a, info.b FROM t"), Seq(Row(1, "newA", "newB")))
+    }
+  }
 }
