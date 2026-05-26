@@ -31,6 +31,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.schema.ConversionPatterns;
@@ -168,6 +169,17 @@ public class ParquetSchemaConverter {
                                         depth + 1)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
+                        .withId(fieldId);
+            case VECTOR:
+                VectorType vectorType = (VectorType) type;
+                Type vecElementParquetType =
+                        convertToParquetType(
+                                        LIST_ELEMENT_NAME,
+                                        vectorType.getElementType(),
+                                        fieldId,
+                                        depth + 1)
+                                .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
+                return ConversionPatterns.listOfElements(repetition, name, vecElementParquetType)
                         .withId(fieldId);
             case MAP:
                 MapType mapType = (MapType) type;

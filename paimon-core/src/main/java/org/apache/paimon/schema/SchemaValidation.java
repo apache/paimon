@@ -41,7 +41,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -798,21 +797,7 @@ public class SchemaValidation {
                     "Data evolution config must enabled for table with vector-store file format.");
 
             List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
-            List<DataField> fieldsForValidation = new ArrayList<>();
-            for (DataField field : fieldsInVectorFile) {
-                if (field.type() instanceof VectorType) {
-                    VectorType vectorType = (VectorType) field.type();
-                    fieldsForValidation.add(
-                            new DataField(
-                                    field.id(),
-                                    field.name(),
-                                    new ArrayType(
-                                            vectorType.isNullable(), vectorType.getElementType())));
-                } else {
-                    fieldsForValidation.add(field);
-                }
-            }
-            vectorFileFormat.validateDataFields(new RowType(fieldsForValidation));
+            vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
         }
     }
 

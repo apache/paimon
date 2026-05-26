@@ -40,6 +40,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.io.api.Binary;
@@ -138,7 +139,10 @@ public class ParquetRowDataWriter {
             GroupType groupType = type.asGroupType();
             LogicalTypeAnnotation annotation = type.getLogicalTypeAnnotation();
 
-            if (t instanceof ArrayType
+            if (t instanceof VectorType
+                    && annotation instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
+                return new VectorWriter(((VectorType) t).getElementType(), groupType);
+            } else if (t instanceof ArrayType
                     && annotation instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
                 return new ArrayWriter(((ArrayType) t).getElementType(), groupType);
             } else if (t instanceof MapType
@@ -552,6 +556,26 @@ public class ParquetRowDataWriter {
                 recordConsumer.endField(repeatedGroupName, 0);
             }
             recordConsumer.endGroup();
+        }
+    }
+
+    /** It writes a vector type field to parquet, stored as array. */
+    private class VectorWriter implements FieldWriter {
+
+        private final ArrayWriter delegate;
+
+        private VectorWriter(DataType t, GroupType groupType) {
+            this.delegate = new ArrayWriter(t, groupType);
+        }
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            delegate.writeArrayData(row.getVector(ordinal));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            delegate.write(arrayData, ordinal);
         }
     }
 
