@@ -147,6 +147,44 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 context.fileIO());
     }
 
+    @Override
+    public FileRecordReader<InternalRow> createReader(
+            FormatReaderFactory.Context context, long offset, long length) throws IOException {
+        ParquetReadOptions.Builder builder =
+                ParquetUtil.getParquetReadOptionsBuilder(conf)
+                        .withRecordFilter(filter)
+                        .withRange(offset, offset + length);
+
+        ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
+                        builder.build(),
+                        context.selection());
+        MessageType fileSchema = reader.getFileMetaData().getSchema();
+        RequestedSchema requestedSchema = getOrCreateRequestedSchema(fileSchema);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Create ranged reader for parquet file {} [offset={}, length={}].",
+                    context.filePath(),
+                    offset,
+                    length);
+        }
+
+        reader.setRequestedSchema(requestedSchema.messageType);
+        WritableColumnVector[] writableVectors = createWritableVectors();
+
+        return new VectorizedParquetRecordReader(
+                context.filePath(),
+                reader,
+                fileSchema,
+                requestedSchema.fields,
+                writableVectors,
+                batchSize,
+                context.fileIO());
+    }
+
     private RequestedSchema getOrCreateRequestedSchema(MessageType fileSchema) {
         // clipParquetSchema and buildFieldsList are pure functions of (readFields, fileSchema).
         // Cache the result keyed by fileSchema so that files sharing the same on-disk schema
