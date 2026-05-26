@@ -376,6 +376,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Table getTable(Identifier identifier, TableAccessContext accessContext)
+            throws TableNotExistException {
+        return wrapped.getTable(identifier, accessContext);
+    }
+
+    @Override
     public View getView(Identifier identifier) throws ViewNotExistException {
         return wrapped.getView(identifier);
     }
@@ -459,6 +465,13 @@ public abstract class DelegateCatalog implements Catalog {
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         return wrapped.authTableQuery(identifier, select);
+    }
+
+    @Override
+    public TableQueryAuthResult authTableQuery(
+            Identifier identifier, @Nullable List<String> select, TableAccessContext accessContext)
+            throws TableNotExistException {
+        return wrapped.authTableQuery(identifier, select, accessContext);
     }
 
     @Override

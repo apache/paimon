@@ -592,6 +592,12 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
+        return getTable(identifier, TableAccessContext.direct());
+    }
+
+    @Override
+    public Table getTable(Identifier identifier, TableAccessContext accessContext)
+            throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
                 identifier,
@@ -601,7 +607,8 @@ public abstract class AbstractCatalog implements Catalog {
                 lockFactory().orElse(null),
                 lockContext().orElse(null),
                 context,
-                false);
+                false,
+                accessContext);
     }
 
     @Override

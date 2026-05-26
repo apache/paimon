@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableAccessContext;
 import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.source.TableQueryAuth;
@@ -54,6 +55,7 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogContext catalogContext;
     private final boolean supportsVersionManagement;
     private final boolean supportsPartitionModification;
+    @Nullable private final TableAccessContext tableAccessContext;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
@@ -64,6 +66,28 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement,
             boolean supportsPartitionModification) {
+        this(
+                identifier,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                supportsVersionManagement,
+                supportsPartitionModification,
+                TableAccessContext.direct());
+    }
+
+    public CatalogEnvironment(
+            @Nullable Identifier identifier,
+            @Nullable String uuid,
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean supportsVersionManagement,
+            boolean supportsPartitionModification,
+            TableAccessContext tableAccessContext) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
@@ -72,6 +96,7 @@ public class CatalogEnvironment implements Serializable {
         this.catalogContext = catalogContext;
         this.supportsVersionManagement = supportsVersionManagement;
         this.supportsPartitionModification = supportsPartitionModification;
+        this.tableAccessContext = tableAccessContext;
     }
 
     public static CatalogEnvironment empty() {
@@ -196,6 +221,10 @@ public class CatalogEnvironment implements Serializable {
         return catalogContext;
     }
 
+    public TableAccessContext tableAccessContext() {
+        return tableAccessContext == null ? TableAccessContext.direct() : tableAccessContext;
+    }
+
     public CatalogEnvironment copy(Identifier identifier) {
         return new CatalogEnvironment(
                 identifier,
@@ -205,7 +234,21 @@ public class CatalogEnvironment implements Serializable {
                 lockContext,
                 catalogContext,
                 supportsVersionManagement,
-                supportsPartitionModification);
+                supportsPartitionModification,
+                tableAccessContext());
+    }
+
+    public CatalogEnvironment copy(TableAccessContext tableAccessContext) {
+        return new CatalogEnvironment(
+                identifier,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                supportsVersionManagement,
+                supportsPartitionModification,
+                tableAccessContext);
     }
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
@@ -214,7 +257,7 @@ public class CatalogEnvironment implements Serializable {
         }
         return select -> {
             try (Catalog catalog = catalogLoader.load()) {
-                return catalog.authTableQuery(identifier, select);
+                return catalog.authTableQuery(identifier, select, tableAccessContext());
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

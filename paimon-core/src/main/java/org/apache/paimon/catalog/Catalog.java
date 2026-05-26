@@ -158,6 +158,19 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Return a {@link Table} identified by the given {@link Identifier} with access context.
+     *
+     * @param identifier Path of the table
+     * @param accessContext context describing why the table is accessed
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    default Table getTable(Identifier identifier, TableAccessContext accessContext)
+            throws TableNotExistException {
+        return getTable(identifier);
+    }
+
+    /**
      * Return a {@link Table} identified by the given tableId.
      *
      * @param tableId Id of the table
@@ -1213,6 +1226,22 @@ public interface Catalog extends AutoCloseable {
      */
     TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException;
+
+    /**
+     * Auth table query select with access context and get the filter for row level access control
+     * and column masking rules.
+     *
+     * @param identifier path of the table to query
+     * @param select selected fields, null if select all
+     * @param accessContext context describing why the table is accessed
+     * @return additional filter for row level access control and column masking rules
+     * @throws TableNotExistException if the table does not exist
+     */
+    default TableQueryAuthResult authTableQuery(
+            Identifier identifier, @Nullable List<String> select, TableAccessContext accessContext)
+            throws TableNotExistException {
+        return authTableQuery(identifier, select);
+    }
 
     // ==================== Catalog Information ==========================
 

@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.TableAccessContext;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -149,7 +150,13 @@ public class PrivilegedCatalog extends DelegateCatalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        Table table = wrapped.getTable(identifier);
+        return getTable(identifier, TableAccessContext.direct());
+    }
+
+    @Override
+    public Table getTable(Identifier identifier, TableAccessContext accessContext)
+            throws TableNotExistException {
+        Table table = wrapped.getTable(identifier, accessContext);
         if (table instanceof FileStoreTable) {
             return PrivilegedFileStoreTable.wrap(
                     (FileStoreTable) table, privilegeManager.getPrivilegeChecker(), identifier);

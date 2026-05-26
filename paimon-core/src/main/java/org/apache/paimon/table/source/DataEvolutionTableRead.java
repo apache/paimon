@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobView;
@@ -49,15 +50,18 @@ import java.util.function.Supplier;
 /** A {@link TableRead} for data-evolution enabled append-only tables. */
 public class DataEvolutionTableRead extends AppendTableRead {
 
+    @Nullable private final Identifier identifier;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema,
+            @Nullable Identifier identifier,
             @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory) {
         super(providerFactories, schema);
+        this.identifier = identifier;
         this.catalogContext = catalogContext;
         this.readFactory = readFactory;
     }
@@ -129,7 +133,8 @@ public class DataEvolutionTableRead extends AppendTableRead {
         }
 
         BlobViewResolver resolver =
-                BlobViewLookup.createResolver(catalogContext, new ArrayList<>(viewStructs));
+                BlobViewLookup.createResolver(
+                        catalogContext, identifier, new ArrayList<>(viewStructs));
 
         RecordReader<InternalRow> reader = createDataReader(split, authResult);
         Set<Integer> blobViewFieldSet = new HashSet<>();

@@ -255,6 +255,31 @@ public class CatalogUtils {
             @Nullable CatalogContext catalogContext,
             boolean isRestCatalog)
             throws Catalog.TableNotExistException {
+        return loadTable(
+                catalog,
+                identifier,
+                internalFileIO,
+                externalFileIO,
+                metadataLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                isRestCatalog,
+                TableAccessContext.direct());
+    }
+
+    public static Table loadTable(
+            Catalog catalog,
+            Identifier identifier,
+            Function<Path, FileIO> internalFileIO,
+            Function<Path, FileIO> externalFileIO,
+            TableMetadata.Loader metadataLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean isRestCatalog,
+            TableAccessContext tableAccessContext)
+            throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
         }
@@ -299,7 +324,8 @@ public class CatalogUtils {
                         isRestCatalog ? null : lockContext,
                         catalogContext,
                         catalog.supportsVersionManagement(),
-                        catalog.supportsPartitionModification());
+                        catalog.supportsPartitionModification(),
+                        tableAccessContext);
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);

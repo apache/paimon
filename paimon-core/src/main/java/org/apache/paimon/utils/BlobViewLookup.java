@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableAccessContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobViewResolver;
@@ -35,6 +36,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -63,16 +66,26 @@ public class BlobViewLookup {
 
     public static BlobViewResolver createResolver(
             CatalogContext catalogContext, List<BlobViewStruct> viewStructs) {
-        return createResolver(catalogContext, viewStructs, CatalogFactory::createCatalog);
+        return createResolver(catalogContext, null, viewStructs);
+    }
+
+    public static BlobViewResolver createResolver(
+            CatalogContext catalogContext,
+            @Nullable Identifier fallbackFrom,
+            List<BlobViewStruct> viewStructs) {
+        return createResolver(
+                catalogContext, fallbackFrom, viewStructs, CatalogFactory::createCatalog);
     }
 
     @VisibleForTesting
     static BlobViewResolver createResolver(
             CatalogContext catalogContext,
+            @Nullable Identifier fallbackFrom,
             List<BlobViewStruct> viewStructs,
             CatalogLoader catalogLoader) {
+        TableAccessContext accessContext = accessContext(fallbackFrom);
         Map<BlobViewStruct, BlobDescriptor> cached =
-                preloadDescriptors(catalogContext, viewStructs, catalogLoader);
+                preloadDescriptors(catalogContext, viewStructs, accessContext, catalogLoader);
         Map<Identifier, UriReader> cache = new HashMap<>();
         return blobView -> {
             BlobViewStruct viewStruct = blobView.viewStruct();
@@ -90,7 +103,7 @@ public class BlobViewLookup {
                             identifier -> {
                                 try (Catalog catalog = catalogLoader.create(catalogContext)) {
                                     return UriReader.fromFile(
-                                            catalog.getTable(identifier).fileIO());
+                                            catalog.getTable(identifier, accessContext).fileIO());
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
@@ -99,9 +112,16 @@ public class BlobViewLookup {
         };
     }
 
+    private static TableAccessContext accessContext(@Nullable Identifier fallbackFrom) {
+        return fallbackFrom == null
+                ? TableAccessContext.direct()
+                : TableAccessContext.blobViewFallback(fallbackFrom);
+    }
+
     private static Map<BlobViewStruct, BlobDescriptor> preloadDescriptors(
             CatalogContext catalogContext,
             List<BlobViewStruct> viewStructs,
+            TableAccessContext accessContext,
             CatalogLoader catalogLoader) {
         if (viewStructs.isEmpty()) {
             return Collections.emptyMap();
@@ -110,7 +130,11 @@ public class BlobViewLookup {
         Map<Identifier, TableReferences> grouped = groupReferencesByTable(viewStructs);
         try {
             return loadReferencedDescriptors(
-                    catalogContext, grouped.values(), PRELOAD_DESCRIPTOR_EXECUTOR, catalogLoader);
+                    catalogContext,
+                    grouped.values(),
+                    accessContext,
+                    PRELOAD_DESCRIPTOR_EXECUTOR,
+                    catalogLoader);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to preload blob descriptors.", e);
@@ -151,12 +175,15 @@ public class BlobViewLookup {
     private static Map<BlobViewStruct, BlobDescriptor> loadReferencedDescriptors(
             CatalogContext catalogContext,
             Collection<TableReferences> grouped,
+            TableAccessContext accessContext,
             ExecutorService executor,
             CatalogLoader catalogLoader)
             throws Exception {
         List<TableReadPlan> plans = new ArrayList<>(grouped.size());
         for (TableReferences tableReferences : grouped) {
-            plans.add(createTableReadPlan(catalogContext, tableReferences, catalogLoader));
+            plans.add(
+                    createTableReadPlan(
+                            catalogContext, tableReferences, accessContext, catalogLoader));
         }
         long targetRowsPerTask = targetRowsPerTask(plans);
 
@@ -180,6 +207,7 @@ public class BlobViewLookup {
                                                 plan.fields,
                                                 plan.readType,
                                                 rangeChunk,
+                                                accessContext,
                                                 catalogLoader);
                                     } finally {
                                         Thread.currentThread()
@@ -206,11 +234,12 @@ public class BlobViewLookup {
     private static TableReadPlan createTableReadPlan(
             CatalogContext catalogContext,
             TableReferences tableReferences,
+            TableAccessContext accessContext,
             CatalogLoader catalogLoader)
             throws Exception {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
             List<FieldRead> fields = new ArrayList<>(tableReferences.referencesByField.size());
-            Table table = catalog.getTable(tableReferences.identifier);
+            Table table = catalog.getTable(tableReferences.identifier, accessContext);
             for (Map.Entry<Integer, List<BlobViewStruct>> entry :
                     tableReferences.referencesByField.entrySet()) {
                 int fieldId = entry.getKey();
@@ -249,12 +278,13 @@ public class BlobViewLookup {
             List<FieldRead> fields,
             RowType readType,
             List<Range> rowRanges,
+            TableAccessContext accessContext,
             CatalogLoader catalogLoader)
             throws Exception {
         try (Catalog catalog = catalogLoader.create(catalogContext)) {
             Map<BlobViewStruct, BlobDescriptor> resolved = new HashMap<>();
             Table table =
-                    catalog.getTable(identifier)
+                    catalog.getTable(identifier, accessContext)
                             .copy(
                                     Collections.singletonMap(
                                             CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true"));

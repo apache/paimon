@@ -128,6 +128,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 ? new DataEvolutionTableRead(
                         providerFactories,
                         schema(),
+                        catalogEnvironment.identifier(),
                         catalogEnvironment.catalogContext(),
                         () -> new AppendTableRead(providerFactories, schema()))
                 : new AppendTableRead(providerFactories, schema());
