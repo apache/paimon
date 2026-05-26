@@ -72,8 +72,7 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
             return new CommitterCoordinatedFactory(
                     isStreaming,
                     configuredStateDir,
-                    new RowDataStoreWriteOperator.Factory(
-                            table, logSinkFunction, writeProvider, commitUser),
+                    new RowDataStoreWriteOperator.Factory(table, writeProvider, commitUser),
                     createCommitterFactory(),
                     commitUser,
                     options.get(END_INPUT_WATERMARK));
