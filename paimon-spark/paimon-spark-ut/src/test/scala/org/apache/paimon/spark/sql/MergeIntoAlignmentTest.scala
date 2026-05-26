@@ -598,9 +598,6 @@ class MergeIntoAlignmentTest extends PaimonSparkTestBase {
     }
   }
 
-  // Top-level column matching is case-insensitive under Spark's default
-  // `spark.sql.caseSensitive=false`. Exercises `PaimonMergeIntoResolver.expandStarAssignments`
-  // and `PaimonOutputResolver.reorderColumnsByName` — both use `conf.resolver`.
   test("merge into: top-level column names match case-insensitively (UPDATE * / INSERT *)") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT, name STRING)
@@ -624,8 +621,6 @@ class MergeIntoAlignmentTest extends PaimonSparkTestBase {
     }
   }
 
-  // Explicit `SET t.<COL> = s.<COL>` LHS resolves case-insensitively against target output.
-  // Exercises `PaimonAssignmentUtils.applyAssignments`'s `key.semanticEquals` + name fallback.
   test("merge into: explicit SET target column LHS matches case-insensitively") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT, name STRING)
@@ -643,9 +638,6 @@ class MergeIntoAlignmentTest extends PaimonSparkTestBase {
     }
   }
 
-  // Nested struct field names match case-insensitively. Exercises `resolveStructType` →
-  // `reorderColumnsByName` recursion with `conf.resolver`, including the
-  // `hasExtraStructFieldsToPreserveValue` field-name comparison.
   test("merge into: nested struct field names match case-insensitively (UPDATE *)") {
     withTable("t") {
       sql("""CREATE TABLE t (

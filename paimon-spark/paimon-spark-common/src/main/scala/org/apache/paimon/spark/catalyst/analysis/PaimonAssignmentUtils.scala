@@ -151,7 +151,8 @@ object PaimonAssignmentUtils extends SQLConfHelper {
       assignments.partition(assignment => assignment.key.semanticEquals(colExpr))
 
     val fieldAssignments =
-      otherAssignments.filter(assignment => assignment.key.exists(_.semanticEquals(colExpr)))
+      otherAssignments.filter(
+        assignment => assignment.key.find(_.semanticEquals(colExpr)).isDefined)
 
     if (exactAssignments.size > 1) {
       val conflict = exactAssignments.map(_.value.sql).mkString(", ")
