@@ -17,7 +17,7 @@
 
 import unittest
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
