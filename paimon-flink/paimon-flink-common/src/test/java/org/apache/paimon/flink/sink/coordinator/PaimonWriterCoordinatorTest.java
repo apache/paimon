@@ -241,7 +241,7 @@ public class PaimonWriterCoordinatorTest {
             write.write(row);
         }
         for (CommitMessage committable : write.prepareCommit(false, ck)) {
-            sender.collect(new Committable(ck, Committable.Kind.FILE, committable));
+            sender.collect(new Committable(ck, committable));
         }
 
         sender.sendToCoordinator(ck);
