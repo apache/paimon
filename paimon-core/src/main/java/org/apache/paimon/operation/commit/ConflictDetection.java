@@ -224,6 +224,13 @@ public class ConflictDetection {
             return exception;
         }
 
+        if (commitKind != CommitKind.COMPACT) {
+            exception = checkRowIdExistence(baseEntries, deltaEntries);
+            if (exception.isPresent()) {
+                return exception;
+            }
+        }
+
         exception = checkRowIdRangeConflicts(commitKind, mergedEntries);
         if (exception.isPresent()) {
             return exception;
@@ -534,6 +541,92 @@ public class ConflictDetection {
         }
 
         return Optional.empty();
+    }
+
+    Optional<RuntimeException> checkRowIdExistence(
+            List<SimpleFileEntry> baseEntries, List<SimpleFileEntry> deltaEntries) {
+        if (!dataEvolutionEnabled) {
+            return Optional.empty();
+        }
+
+        List<SimpleFileEntry> filesToCheck =
+                deltaEntries.stream()
+                        .filter(e -> e.kind() == FileKind.ADD && e.firstRowId() != null)
+                        .collect(Collectors.toList());
+
+        if (filesToCheck.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Set<FileRowIdKey> existingIndex = new HashSet<>();
+        for (SimpleFileEntry base : baseEntries) {
+            if (base.firstRowId() != null) {
+                existingIndex.add(
+                        new FileRowIdKey(
+                                base.partition(),
+                                base.bucket(),
+                                base.firstRowId(),
+                                base.rowCount()));
+            }
+        }
+
+        for (SimpleFileEntry entry : filesToCheck) {
+            FileRowIdKey key =
+                    new FileRowIdKey(
+                            entry.partition(),
+                            entry.bucket(),
+                            entry.firstRowId(),
+                            entry.rowCount());
+            if (!existingIndex.contains(key)) {
+                return Optional.of(
+                        new RuntimeException(
+                                String.format(
+                                        "Row ID existence conflict: file '%s' references "
+                                                + "firstRowId=%d, rowCount=%d in bucket %d, "
+                                                + "but no matching file exists in the current snapshot. "
+                                                + "The referenced file may have been rewritten by a "
+                                                + "concurrent compaction or removed by an overwrite.",
+                                        entry.fileName(),
+                                        entry.firstRowId(),
+                                        entry.rowCount(),
+                                        entry.bucket())));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static class FileRowIdKey {
+        private final BinaryRow partition;
+        private final int bucket;
+        private final long firstRowId;
+        private final long rowCount;
+
+        FileRowIdKey(BinaryRow partition, int bucket, long firstRowId, long rowCount) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.firstRowId = firstRowId;
+            this.rowCount = rowCount;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FileRowIdKey that = (FileRowIdKey) o;
+            return bucket == that.bucket
+                    && firstRowId == that.firstRowId
+                    && rowCount == that.rowCount
+                    && Objects.equals(partition, that.partition);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, firstRowId, rowCount);
+        }
     }
 
     private static boolean dedicatedStorageFile(String fileName) {
