@@ -149,7 +149,7 @@ class KeyValueDataWriter(DataWriter):
         before this method, so the precondition holds.
 
         NOTE(follow-up): the merge runs row-by-row over
-        ``data.to_pylist()`` / ``pa.Table.from_pylist``. Arrow types
+        ``data.to_pydict()`` / ``pa.Table.from_pydict``. Arrow types
         with non-trivial Python representations (Decimal128 with
         specific precision/scale, timestamps with timezone or
         sub-millisecond units, durations, deeply nested structs) can
@@ -164,8 +164,12 @@ class KeyValueDataWriter(DataWriter):
             # row-by-row pyarrow round-trip in the common streaming case.
             return data
 
-        rows = data.to_pylist()
         col_names = data.schema.names
+        # ``to_pydict`` works on pyarrow >= 6 (Python 3.6 CI ships 6.0.1),
+        # unlike ``to_pylist`` which only landed in pyarrow 7.
+        col_dict = data.to_pydict()
+        rows = [{name: col_dict[name][i] for name in col_names}
+                for i in range(n)]
         key_arity = len(self.trimmed_primary_keys)
         # System fields sit at indices [key_arity, key_arity + 1] (the
         # _SEQUENCE_NUMBER and _VALUE_KIND columns added by
@@ -206,7 +210,9 @@ class KeyValueDataWriter(DataWriter):
 
         if not merged_rows:
             return data.slice(0, 0)
-        return pa.Table.from_pylist(merged_rows, schema=data.schema)
+        result_dict = {name: [r[name] for r in merged_rows]
+                       for name in data.schema.names}
+        return pa.Table.from_pydict(result_dict, schema=data.schema)
 
     @staticmethod
     def _key_tuple(row: dict, col_names: List[str], key_arity: int) -> tuple:
