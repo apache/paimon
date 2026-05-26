@@ -75,8 +75,6 @@ class DataWriter(ABC):
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
             self.partition, self.bucket
         )
-        # Store the current generated external path to preserve scheme in metadata
-        self._current_external_path: Optional[str] = None
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
@@ -186,11 +184,7 @@ class DataWriter(ABC):
         file_path = self._generate_file_path(file_name)
 
         is_external_path = self.external_path_provider is not None
-        if is_external_path:
-            # Use the stored external path from _generate_file_path to preserve scheme
-            external_path_str = self._current_external_path if self._current_external_path else None
-        else:
-            external_path_str = None
+        external_path_str = file_path if is_external_path else None
 
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
@@ -308,9 +302,7 @@ class DataWriter(ABC):
         changelog_file_name = f"changelog-{uuid.uuid4()}-0.{cl_fmt}"
         changelog_file_path = self._generate_file_path(changelog_file_name)
 
-        changelog_external_path = None
-        if is_external and self._current_external_path:
-            changelog_external_path = self._current_external_path
+        changelog_external_path = changelog_file_path if is_external else None
 
         if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
@@ -350,9 +342,7 @@ class DataWriter(ABC):
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
-            external_path = self.external_path_provider.get_next_external_data_path(file_name)
-            self._current_external_path = external_path
-            return external_path
+            return self.external_path_provider.get_next_external_data_path(file_name)
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         return f"{bucket_path.rstrip('/')}/{file_name}"

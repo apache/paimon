@@ -408,6 +408,7 @@ class FileStoreCommit:
                 manifest_path = self.manifest_list_manager.manifest_path
                 changelog_manifest_list_size = self.table.file_io.get_file_size(
                     f"{manifest_path}/{changelog_manifest_list_name}")
+                # kind==0 means ADD; pypaimon producers only support additions currently
                 changelog_record_count = sum(
                     entry.file.row_count for entry in changelog_entries if entry.kind == 0)
 

@@ -79,6 +79,7 @@ class FileStoreWrite:
                 options=options,
                 write_cols=self.write_cols,
                 blob_consumer=self.blob_consumer,
+                changelog_producer=self.changelog_producer,
             )
         elif self._has_vector_columns() and options.with_vector_format():
             return DataVectorWriter(
@@ -96,7 +97,7 @@ class FileStoreWrite:
                 bucket=bucket,
                 max_seq_number=max_seq_number(),
                 options=options,
-                merge_function=self._build_pk_merge_function()
+                merge_function=self._build_pk_merge_function(),
                 changelog_producer=self.changelog_producer)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()

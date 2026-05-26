@@ -188,7 +188,7 @@ class ChangelogProducerTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
 
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = SnapshotManager(table.file_io, table.table_path)
         snapshot = snapshot_manager.get_latest_snapshot()
 
         self.assertIsNotNone(snapshot.changelog_manifest_list)
@@ -234,7 +234,7 @@ class ChangelogProducerTest(unittest.TestCase):
         table_commit2.close()
 
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = SnapshotManager(table.file_io, table.table_path)
         snapshot = snapshot_manager.get_latest_snapshot()
         self.assertEqual(snapshot.id, 2)
         self.assertIsNotNone(snapshot.changelog_manifest_list)
