@@ -191,7 +191,6 @@ public class ParquetColumnVector {
 
         DataTypeRoot type = column.getType().getTypeRoot();
         if (type == DataTypeRoot.ARRAY
-                || type == DataTypeRoot.VECTOR
                 || type == DataTypeRoot.MAP
                 || type == DataTypeRoot.MULTISET) {
             for (ParquetColumnVector child : children) {
