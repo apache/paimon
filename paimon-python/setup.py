@@ -115,7 +115,7 @@ def _build_dev_package():
 
 atexit.register(_build_dev_package)
 
-PACKAGES = find_packages(include=["pypaimon*"])
+PACKAGES = find_packages(include=["pypaimon*"], exclude=["pypaimon.tests*"])
 
 
 def read_requirements():
