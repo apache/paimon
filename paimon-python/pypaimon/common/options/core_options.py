@@ -233,6 +233,13 @@ class CoreOptions:
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description("The target file size for blob files.")
     )
+
+    VECTOR_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("vector.target-file-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Target size of a vector-store file. Default is the same as TARGET_FILE_SIZE.")
+    )
     DATA_FILE_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("data-file.prefix")
         .string_type()
@@ -649,6 +656,12 @@ class CoreOptions:
             return self.options.get(CoreOptions.BLOB_TARGET_FILE_SIZE, None).get_bytes()
         elif default is not None:
             return MemorySize.parse(default).get_bytes()
+        else:
+            return self.target_file_size(has_primary_key=False)
+
+    def vector_target_file_size(self):
+        if self.options.contains(CoreOptions.VECTOR_TARGET_FILE_SIZE):
+            return self.options.get(CoreOptions.VECTOR_TARGET_FILE_SIZE, None).get_bytes()
         else:
             return self.target_file_size(has_primary_key=False)
 
