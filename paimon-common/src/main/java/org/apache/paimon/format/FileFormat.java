@@ -73,6 +73,12 @@ public abstract class FileFormat {
         return Optional.empty();
     }
 
+    /** Returns a {@link FormatMetadataReader} if this format supports sub-file splitting. */
+    @Nullable
+    public FormatMetadataReader createMetadataReader() {
+        return null;
+    }
+
     public static FileFormat fromIdentifier(String identifier, Options options) {
         return fromIdentifier(
                 normalizeFileFormat(identifier),

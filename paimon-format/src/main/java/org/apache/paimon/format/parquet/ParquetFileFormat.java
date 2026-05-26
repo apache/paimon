@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.format.FormatMetadataReader;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
@@ -90,6 +91,11 @@ public class ParquetFileFormat extends FileFormat {
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
         return Optional.of(new ParquetSimpleStatsExtractor(options, type, statsCollectors));
+    }
+
+    @Override
+    public FormatMetadataReader createMetadataReader() {
+        return new ParquetMetadataReader(options);
     }
 
     private Options getParquetConfiguration(FormatContext context) {
