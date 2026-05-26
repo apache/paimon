@@ -50,3 +50,5 @@ Cargo.lock
 *libvortex_jni*
 ### Tantivy lib ###
 *libtantivy_jni*
+
+.cursor-svg-check/

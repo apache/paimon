@@ -1673,6 +1673,20 @@ public class CoreOptions implements Serializable {
                                     + "you need to create this table as a partitioned table in Hive metastore.\n"
                                     + "This config option does not affect the default filesystem metastore.");
 
+    public static final ConfigOption<Boolean> METASTORE_DROP_PARTITION_IGNORE_NONEXISTENT =
+            key("metastore.drop-partition-ignore-nonexistent")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore HMS drop-partition failures when the partition "
+                                    + "is confirmed not to exist in Hive Metastore. "
+                                    + "Useful when HMS has been manually cleaned up or returns "
+                                    + "non-standard exceptions (e.g., MetaException caused by "
+                                    + "NullPointerException in some HMS versions) instead of "
+                                    + "NoSuchObjectException for missing partitions. "
+                                    + "When enabled, Paimon will verify the partition's existence "
+                                    + "before deciding to ignore the error.");
+
     public static final ConfigOption<String> METASTORE_TAG_TO_PARTITION =
             key("metastore.tag-to-partition")
                     .stringType()
@@ -3424,6 +3438,10 @@ public class CoreOptions implements Serializable {
 
     public boolean partitionedTableInMetastore() {
         return options.get(METASTORE_PARTITIONED_TABLE);
+    }
+
+    public boolean metastoreDropPartitionIgnoreNonexistent() {
+        return options.get(METASTORE_DROP_PARTITION_IGNORE_NONEXISTENT);
     }
 
     @Nullable
