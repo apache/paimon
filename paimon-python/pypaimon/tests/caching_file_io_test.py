@@ -394,6 +394,21 @@ class CachingFileIOTest(unittest.TestCase):
         self.assertEqual("bucket/key", caching_io.to_filesystem_path("oss://bucket/key"))
         delegate.to_filesystem_path.assert_called_once_with("oss://bucket/key")
 
+    def test_write_parquet_when_enable_local_cache(self):
+        import pyarrow as pa
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        delegate = LocalFileIO()
+        cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        caching_io = CachingFileIO(delegate, cache)
+
+        out_path = os.path.join(self.cache_dir, "data.parquet")
+        table = pa.table({"a": [1, 2, 3]})
+        caching_io.write_parquet(out_path, table)
+
+        self.assertTrue(os.path.exists(out_path))
+        self.assertEqual(table, pa.parquet.read_table(out_path))
+
 
 class ConfigOptionsTest(unittest.TestCase):
 
