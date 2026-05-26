@@ -29,12 +29,15 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobViewResolver;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -55,6 +58,8 @@ import java.util.concurrent.Future;
  */
 public class BlobViewLookup {
 
+    public static final String ORIGIN_VIEW_TABLE = "origin-view-table";
+
     private static final int PRELOAD_DESCRIPTOR_THREAD_NUM = 100;
     private static final long MIN_ROW_PER_TASK = 100L;
     private static final ExecutorService PRELOAD_DESCRIPTOR_EXECUTOR =
@@ -62,17 +67,22 @@ public class BlobViewLookup {
                     PRELOAD_DESCRIPTOR_THREAD_NUM, "blob-view-preload");
 
     public static BlobViewResolver createResolver(
-            CatalogContext catalogContext, List<BlobViewStruct> viewStructs) {
-        return createResolver(catalogContext, viewStructs, CatalogFactory::createCatalog);
+            CatalogContext catalogContext,
+            @Nullable Identifier originTable,
+            List<BlobViewStruct> viewStructs) {
+        return createResolver(
+                catalogContext, originTable, viewStructs, CatalogFactory::createCatalog);
     }
 
     @VisibleForTesting
     static BlobViewResolver createResolver(
             CatalogContext catalogContext,
+            @Nullable Identifier originTable,
             List<BlobViewStruct> viewStructs,
             CatalogLoader catalogLoader) {
+        CatalogContext lookupCatalogContext = withOriginViewTable(catalogContext, originTable);
         Map<BlobViewStruct, BlobDescriptor> cached =
-                preloadDescriptors(catalogContext, viewStructs, catalogLoader);
+                preloadDescriptors(lookupCatalogContext, viewStructs, catalogLoader);
         Map<Identifier, UriReader> cache = new HashMap<>();
         return blobView -> {
             BlobViewStruct viewStruct = blobView.viewStruct();
@@ -88,7 +98,7 @@ public class BlobViewLookup {
                     cache.computeIfAbsent(
                             viewStruct.identifier(),
                             identifier -> {
-                                try (Catalog catalog = catalogLoader.create(catalogContext)) {
+                                try (Catalog catalog = catalogLoader.create(lookupCatalogContext)) {
                                     return UriReader.fromFile(
                                             catalog.getTable(identifier).fileIO());
                                 } catch (Exception e) {
@@ -97,6 +107,22 @@ public class BlobViewLookup {
                             });
             blobView.resolve(uriReader, descriptor);
         };
+    }
+
+    @VisibleForTesting
+    static CatalogContext withOriginViewTable(
+            CatalogContext catalogContext, @Nullable Identifier originTable) {
+        if (originTable == null) {
+            return catalogContext;
+        }
+
+        Options options = new Options(catalogContext.options().toMap());
+        options.set(ORIGIN_VIEW_TABLE, originTable.getFullName());
+        return CatalogContext.create(
+                options,
+                catalogContext.hadoopConf(),
+                catalogContext.preferIO(),
+                catalogContext.fallbackIO());
     }
 
     private static Map<BlobViewStruct, BlobDescriptor> preloadDescriptors(
