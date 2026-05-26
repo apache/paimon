@@ -270,8 +270,8 @@ run_vector_dedicated_file_java_write_test() {
 
     cd "$PROJECT_ROOT"
 
-    echo "Running Maven test for JavaPyE2ETest.testJavaWriteVectorDedicatedFile..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteVectorDedicatedFile -pl paimon-core -q -Drun.e2e.tests=true; then
+    echo "Running Maven test for JavaPyVortexE2ETest.testJavaWriteVectorDedicatedFile..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyVortexE2ETest#testJavaWriteVectorDedicatedFile -pl paimon-vortex/paimon-vortex-format -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java vector dedicated file write completed successfully${NC}"
     else
         echo -e "${RED}✗ Java vector dedicated file write failed${NC}"
@@ -302,8 +302,8 @@ run_vector_dedicated_file_py_write_test() {
     echo ""
 
     cd "$PROJECT_ROOT"
-    echo "Running Maven test for JavaPyE2ETest.testJavaReadVectorDedicatedFile..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadVectorDedicatedFile -pl paimon-core -q -Drun.e2e.tests=true; then
+    echo "Running Maven test for JavaPyVortexE2ETest.testJavaReadVectorDedicatedFile..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyVortexE2ETest#testJavaReadVectorDedicatedFile -pl paimon-vortex/paimon-vortex-format -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java vector dedicated file read completed successfully${NC}"
         return 0
     else
@@ -317,8 +317,8 @@ run_multi_vector_dedicated_file_java_write_test() {
 
     cd "$PROJECT_ROOT"
 
-    echo "Running Maven test for JavaPyE2ETest.testJavaWriteMultiVectorDedicatedFile..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteMultiVectorDedicatedFile -pl paimon-core -q -Drun.e2e.tests=true; then
+    echo "Running Maven test for JavaPyVortexE2ETest.testJavaWriteMultiVectorDedicatedFile..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyVortexE2ETest#testJavaWriteMultiVectorDedicatedFile -pl paimon-vortex/paimon-vortex-format -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java multi-vector dedicated file write completed successfully${NC}"
     else
         echo -e "${RED}✗ Java multi-vector dedicated file write failed${NC}"
@@ -349,8 +349,8 @@ run_multi_vector_dedicated_file_py_write_test() {
     echo ""
 
     cd "$PROJECT_ROOT"
-    echo "Running Maven test for JavaPyE2ETest.testJavaReadMultiVectorDedicatedFile..."
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadMultiVectorDedicatedFile -pl paimon-core -q -Drun.e2e.tests=true; then
+    echo "Running Maven test for JavaPyVortexE2ETest.testJavaReadMultiVectorDedicatedFile..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyVortexE2ETest#testJavaReadMultiVectorDedicatedFile -pl paimon-vortex/paimon-vortex-format -q -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java multi-vector dedicated file read completed successfully${NC}"
         return 0
     else
