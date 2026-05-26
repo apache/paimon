@@ -57,6 +57,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -1009,6 +1010,100 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testReplaceManifestListWithRowIdReassignProperty() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+
+        Map<String, String> reassignProperties = new HashMap<>();
+        reassignProperties.put("keep", "v1");
+        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    latest,
+                                    latest.totalRecordCount(),
+                                    baseManifestList(latest),
+                                    deltaManifestList(latest),
+                                    latest.indexManifest(),
+                                    latest.nextRowId(),
+                                    reassignProperties))
+                    .isTrue();
+        }
+
+        Snapshot reassignSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(reassignSnapshot.properties()).isEqualTo(reassignProperties);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    reassignSnapshot,
+                                    reassignSnapshot.totalRecordCount(),
+                                    baseManifestList(reassignSnapshot),
+                                    deltaManifestList(reassignSnapshot),
+                                    reassignSnapshot.indexManifest(),
+                                    reassignSnapshot.nextRowId()))
+                    .isTrue();
+        }
+
+        Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(normalSnapshot.properties())
+                .containsEntry("keep", "v1")
+                .doesNotContainKey(Snapshot.ROW_ID_REASSIGN_PROPERTY);
+    }
+
+    @Test
+    public void testRowIdReassignConflictFromOptions() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+
+        Map<String, String> reassignProperties = new HashMap<>();
+        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    latest,
+                                    latest.totalRecordCount(),
+                                    baseManifestList(latest),
+                                    deltaManifestList(latest),
+                                    latest.indexManifest(),
+                                    latest.nextRowId(),
+                                    reassignProperties))
+                    .isTrue();
+        }
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                generateDataList(1),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                null,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
+        dynamicOptions.put(CoreOptions.COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT.key(), "1");
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "row-id-reassign-check",
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        new CoreOptions(dynamicOptions),
+                        true)) {
+            assertThatThrownBy(() -> commit.commit(checkNotNull(committableRef.get()), false))
+                    .hasMessageContaining("Row-id reassignment snapshot 2")
+                    .hasMessageContaining("task planned from snapshot 1");
+        }
+    }
+
+    @Test
     public void testCommitTwiceWithDifferentKind() throws Exception {
         TestFileStore store = createStore(false);
         try (FileStoreCommitImpl commit = store.newCommit()) {
@@ -1082,6 +1177,20 @@ public class FileStoreCommitTest {
 
     private FileStoreCommitImpl newCommitWithSnapshotCommit(
             TestFileStore store, String commitUser, SnapshotCommit snapshotCommit) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                store.options(),
+                store.options().dataEvolutionEnabled());
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -1090,7 +1199,7 @@ public class FileStoreCommitTest {
                 tableName,
                 commitUser,
                 store.partitionType(),
-                store.options(),
+                options,
                 store.pathFactory(),
                 store.snapshotManager(),
                 store.manifestFileFactory(),
@@ -1109,9 +1218,9 @@ public class FileStoreCommitTest {
                                 store.pathFactory(),
                                 store.newKeyComparator(),
                                 store.bucketMode(),
-                                store.options().deletionVectorsEnabled(),
-                                store.options().dataEvolutionEnabled(),
-                                store.options().pkClusteringOverride(),
+                                options.deletionVectorsEnabled(),
+                                dataEvolutionEnabled,
+                                options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
                                 scanner),
@@ -1151,6 +1260,14 @@ public class FileStoreCommitTest {
     private TestFileStore createStore(boolean failing, Map<String, String> options)
             throws Exception {
         return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
+    }
+
+    private Pair<String, Long> baseManifestList(Snapshot snapshot) {
+        return Pair.of(snapshot.baseManifestList(), snapshot.baseManifestListSize());
+    }
+
+    private Pair<String, Long> deltaManifestList(Snapshot snapshot) {
+        return Pair.of(snapshot.deltaManifestList(), snapshot.deltaManifestListSize());
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

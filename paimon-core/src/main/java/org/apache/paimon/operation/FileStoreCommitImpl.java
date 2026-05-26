@@ -220,6 +220,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
+        options.commitRowIdReassignLastSafeSnapshot()
+                .ifPresent(this.conflictDetection::setRowIdReassignCheckFromSnapshot);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -326,6 +328,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 if (conflictDetection.hasRowIdCheckFromSnapshot()) {
                     checkAppendFiles = true;
                     allowRollback = true;
+                }
+                if (conflictDetection.hasRowIdReassignCheckFromSnapshot()) {
+                    checkAppendFiles = true;
                 }
 
                 attempts +=
@@ -1116,7 +1121,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 baseManifestList,
                 deltaManifestList,
                 latest.indexManifest(),
-                latest.nextRowId());
+                latest.nextRowId(),
+                withoutRowIdReassignProperties(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1126,6 +1132,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId) {
+        return replaceManifestList(
+                latest,
+                totalRecordCount,
+                baseManifestList,
+                deltaManifestList,
+                indexManifest,
+                nextRowId,
+                withoutRowIdReassignProperties(latest.properties()));
+    }
+
+    public boolean replaceManifestList(
+            Snapshot latest,
+            long totalRecordCount,
+            Pair<String, Long> baseManifestList,
+            Pair<String, Long> deltaManifestList,
+            @Nullable String indexManifest,
+            @Nullable Long nextRowId,
+            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1147,7 +1171,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
-                        latest.properties(),
+                        properties,
                         nextRowId);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
@@ -1226,10 +1250,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        latestSnapshot.properties(),
+                        withoutRowIdReassignProperties(latestSnapshot.properties()),
                         latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
+    }
+
+    private static @Nullable Map<String, String> withoutRowIdReassignProperties(
+            @Nullable Map<String, String> properties) {
+        if (properties == null || !properties.containsKey(Snapshot.ROW_ID_REASSIGN_PROPERTY)) {
+            return properties;
+        }
+
+        Map<String, String> copied = new HashMap<>(properties);
+        copied.remove(Snapshot.ROW_ID_REASSIGN_PROPERTY);
+        return copied.isEmpty() ? null : copied;
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {

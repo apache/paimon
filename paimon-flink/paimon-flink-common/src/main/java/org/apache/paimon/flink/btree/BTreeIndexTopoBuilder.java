@@ -95,6 +95,7 @@ public class BTreeIndexTopoBuilder {
             Options userOptions)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
+        Long rowIdReassignCheckFromSnapshot = null;
         for (String indexColumn : indexColumns) {
             BTreeGlobalIndexBuilder indexBuilder =
                     indexBuilderSupplier.get().withIndexField(indexColumn);
@@ -106,6 +107,12 @@ public class BTreeIndexTopoBuilder {
                     indexBuilder.scan();
             if (!indexRangeAndSplits.isPresent()) {
                 continue;
+            }
+            if (indexBuilder.scanSnapshotId().isPresent()) {
+                rowIdReassignCheckFromSnapshot =
+                        minSnapshot(
+                                rowIdReassignCheckFromSnapshot,
+                                indexBuilder.scanSnapshotId().get());
             }
 
             Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
@@ -194,11 +201,15 @@ public class BTreeIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest));
+            commit(table, allStreams.get(0).union(rest), rowIdReassignCheckFromSnapshot);
             return true;
         }
 
         return false;
+    }
+
+    private static Long minSnapshot(Long left, long right) {
+        return left == null ? right : Math.min(left, right);
     }
 
     public static void buildIndexAndExecute(
@@ -312,7 +323,11 @@ public class BTreeIndexTopoBuilder {
         return new RowType(readType.isNullable(), fields);
     }
 
-    private static void commit(FileStoreTable table, DataStream<Committable> written) {
+    private static void commit(
+            FileStoreTable table,
+            DataStream<Committable> written,
+            Long rowIdReassignCheckFromSnapshot) {
+        FileStoreTable commitTable = withRowIdReassignCheck(table, rowIdReassignCheckFromSnapshot);
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
@@ -320,12 +335,25 @@ public class BTreeIndexTopoBuilder {
                         "BTreeIndexCommitter-" + UUID.randomUUID(),
                         context ->
                                 new StoreCommitter(
-                                        table, table.newCommit(context.commitUser()), context),
+                                        commitTable,
+                                        commitTable.newCommit(context.commitUser()),
+                                        context),
                         new NoopCommittableStateManager());
 
         written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
                 .setParallelism(1)
                 .setMaxParallelism(1);
+    }
+
+    private static FileStoreTable withRowIdReassignCheck(
+            FileStoreTable table, Long rowIdReassignCheckFromSnapshot) {
+        if (rowIdReassignCheckFromSnapshot == null) {
+            return table;
+        }
+        return table.copy(
+                Collections.singletonMap(
+                        CoreOptions.COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT.key(),
+                        String.valueOf(rowIdReassignCheckFromSnapshot)));
     }
 
     /** Operator to read data from splits. */

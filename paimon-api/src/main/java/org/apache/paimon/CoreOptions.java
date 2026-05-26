@@ -2207,6 +2207,14 @@ public class CoreOptions implements Serializable {
                                     + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
                                     + "If the value of this option is -1, committer will not check for its first commit.");
 
+    public static final ConfigOption<Long> COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT =
+            ConfigOptions.key("commit.row-id-reassign.last-safe-snapshot")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If set, committer will check if there are row-id reassignment snapshots starting from the "
+                                    + "snapshot after this one. If found, commit will be aborted.");
+
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("clustering.columns")
                     .stringType()
@@ -3871,6 +3879,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<Long> commitStrictModeLastSafeSnapshot() {
         return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
+    }
+
+    public Optional<Long> commitRowIdReassignLastSafeSnapshot() {
+        return options.getOptional(COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT);
     }
 
     public List<String> clusteringColumns() {

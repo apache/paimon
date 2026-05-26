@@ -95,6 +95,7 @@ public class ConflictDetection {
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
+    private @Nullable Long rowIdReassignCheckFromSnapshot = null;
 
     public ConflictDetection(
             String tableName,
@@ -129,6 +130,14 @@ public class ConflictDetection {
 
     public boolean hasRowIdCheckFromSnapshot() {
         return rowIdCheckFromSnapshot != null;
+    }
+
+    public void setRowIdReassignCheckFromSnapshot(@Nullable Long rowIdReassignCheckFromSnapshot) {
+        this.rowIdReassignCheckFromSnapshot = rowIdReassignCheckFromSnapshot;
+    }
+
+    public boolean hasRowIdReassignCheckFromSnapshot() {
+        return rowIdReassignCheckFromSnapshot != null;
     }
 
     @Nullable
@@ -233,6 +242,11 @@ public class ConflictDetection {
         }
 
         exception = checkRowIdRangeConflicts(commitKind, mergedEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        exception = checkRowIdReassignConflicts(latestSnapshot, deltaEntries, deltaIndexEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -542,6 +556,72 @@ public class ConflictDetection {
         }
 
         return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkRowIdReassignConflicts(
+            Snapshot latestSnapshot,
+            List<SimpleFileEntry> deltaEntries,
+            List<IndexManifestEntry> deltaIndexEntries) {
+        if (!dataEvolutionEnabled) {
+            return Optional.empty();
+        }
+        if (rowIdReassignCheckFromSnapshot == null) {
+            return Optional.empty();
+        }
+        if (latestSnapshot.id() <= rowIdReassignCheckFromSnapshot) {
+            return Optional.empty();
+        }
+
+        List<BinaryRow> changedPartitions =
+                changedPartitionsIncludingAllIndexFiles(deltaEntries, deltaIndexEntries);
+        for (long id = rowIdReassignCheckFromSnapshot + 1; id <= latestSnapshot.id(); id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            if (snapshot.commitKind() != CommitKind.OVERWRITE) {
+                continue;
+            }
+            if (hasRowIdReassignProperty(snapshot.properties())) {
+                return Optional.of(
+                        new RuntimeException(
+                                String.format(
+                                        "Row-id reassignment snapshot %s was committed after the "
+                                                + "task planned from snapshot %s. The task must "
+                                                + "be retried with the latest row ids.",
+                                        id, rowIdReassignCheckFromSnapshot)));
+            }
+            if (overwriteChangedTargetPartitions(snapshot, changedPartitions)) {
+                return Optional.of(
+                        new RuntimeException(
+                                String.format(
+                                        "Overwrite snapshot %s changed partitions after the "
+                                                + "task planned from snapshot %s. The task must "
+                                                + "be retried with the latest row ids.",
+                                        id, rowIdReassignCheckFromSnapshot)));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private boolean hasRowIdReassignProperty(@Nullable Map<String, String> properties) {
+        return properties != null
+                && Boolean.parseBoolean(properties.get(Snapshot.ROW_ID_REASSIGN_PROPERTY));
+    }
+
+    private boolean overwriteChangedTargetPartitions(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        return !changedPartitions.isEmpty()
+                && !commitScanner.readIncrementalEntries(snapshot, changedPartitions).isEmpty();
+    }
+
+    private List<BinaryRow> changedPartitionsIncludingAllIndexFiles(
+            List<SimpleFileEntry> dataFileChanges, List<IndexManifestEntry> indexFileChanges) {
+        Set<BinaryRow> changedPartitions = new HashSet<>();
+        for (SimpleFileEntry file : dataFileChanges) {
+            changedPartitions.add(file.partition());
+        }
+        for (IndexManifestEntry file : indexFileChanges) {
+            changedPartitions.add(file.partition());
+        }
+        return new ArrayList<>(changedPartitions);
     }
 
     Optional<RuntimeException> checkRowIdExistence(
