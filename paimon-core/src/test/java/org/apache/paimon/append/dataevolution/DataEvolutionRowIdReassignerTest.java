@@ -125,6 +125,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(result.fileCount).isEqualTo(5L);
         assertThat(result.rowCount).isEqualTo(5L);
         assertThat(result.indexFileCount).isEqualTo(0L);
+        assertThat(table.snapshotManager().latestSnapshot().properties())
+                .containsEntry(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
 
         Map<String, List<Long>> rowIdsByPartition = rowIdsByPartition(table);
         assertThat(rowIdsByPartition).hasSize(2);

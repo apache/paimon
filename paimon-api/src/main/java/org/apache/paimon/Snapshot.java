@@ -45,7 +45,7 @@ public class Snapshot implements Serializable {
     private static final long serialVersionUID = 1L;
 
     public static final long FIRST_SNAPSHOT_ID = 1;
-    public static final String ROW_ID_REASSIGN_PROPERTY = "row-id-reassign";
+    public static final String ROW_ID_OVERWRITE_BARRIER_PROPERTY = "row-id-overwrite-barrier";
 
     protected static final int CURRENT_VERSION = 3;
 

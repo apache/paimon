@@ -95,7 +95,7 @@ public class ConflictDetection {
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
-    private @Nullable Long rowIdReassignCheckFromSnapshot = null;
+    private @Nullable Long rowIdOverwriteConflictCheckFromSnapshot = null;
 
     public ConflictDetection(
             String tableName,
@@ -132,12 +132,13 @@ public class ConflictDetection {
         return rowIdCheckFromSnapshot != null;
     }
 
-    public void setRowIdReassignCheckFromSnapshot(@Nullable Long rowIdReassignCheckFromSnapshot) {
-        this.rowIdReassignCheckFromSnapshot = rowIdReassignCheckFromSnapshot;
+    public void setRowIdOverwriteConflictCheckFromSnapshot(
+            @Nullable Long rowIdOverwriteConflictCheckFromSnapshot) {
+        this.rowIdOverwriteConflictCheckFromSnapshot = rowIdOverwriteConflictCheckFromSnapshot;
     }
 
-    public boolean hasRowIdReassignCheckFromSnapshot() {
-        return rowIdReassignCheckFromSnapshot != null;
+    public boolean hasRowIdOverwriteConflictCheckFromSnapshot() {
+        return rowIdOverwriteConflictCheckFromSnapshot != null;
     }
 
     @Nullable
@@ -246,7 +247,7 @@ public class ConflictDetection {
             return exception;
         }
 
-        exception = checkRowIdReassignConflicts(latestSnapshot, deltaEntries, deltaIndexEntries);
+        exception = checkRowIdOverwriteConflicts(latestSnapshot, deltaEntries, deltaIndexEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -558,35 +559,37 @@ public class ConflictDetection {
         return Optional.empty();
     }
 
-    private Optional<RuntimeException> checkRowIdReassignConflicts(
+    private Optional<RuntimeException> checkRowIdOverwriteConflicts(
             Snapshot latestSnapshot,
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
-        if (rowIdReassignCheckFromSnapshot == null) {
+        if (rowIdOverwriteConflictCheckFromSnapshot == null) {
             return Optional.empty();
         }
-        if (latestSnapshot.id() <= rowIdReassignCheckFromSnapshot) {
+        if (latestSnapshot.id() <= rowIdOverwriteConflictCheckFromSnapshot) {
             return Optional.empty();
         }
 
         List<BinaryRow> changedPartitions =
                 changedPartitionsIncludingAllIndexFiles(deltaEntries, deltaIndexEntries);
-        for (long id = rowIdReassignCheckFromSnapshot + 1; id <= latestSnapshot.id(); id++) {
+        for (long id = rowIdOverwriteConflictCheckFromSnapshot + 1;
+                id <= latestSnapshot.id();
+                id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitKind() != CommitKind.OVERWRITE) {
                 continue;
             }
-            if (hasRowIdReassignProperty(snapshot.properties())) {
+            if (hasRowIdOverwriteBarrierProperty(snapshot.properties())) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
-                                        "Row-id reassignment snapshot %s was committed after the "
+                                        "Row-id overwrite barrier snapshot %s was committed after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
-                                        id, rowIdReassignCheckFromSnapshot)));
+                                        id, rowIdOverwriteConflictCheckFromSnapshot)));
             }
             if (overwriteChangedTargetPartitions(snapshot, changedPartitions)) {
                 return Optional.of(
@@ -595,15 +598,15 @@ public class ConflictDetection {
                                         "Overwrite snapshot %s changed partitions after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
-                                        id, rowIdReassignCheckFromSnapshot)));
+                                        id, rowIdOverwriteConflictCheckFromSnapshot)));
             }
         }
         return Optional.empty();
     }
 
-    private boolean hasRowIdReassignProperty(@Nullable Map<String, String> properties) {
+    private boolean hasRowIdOverwriteBarrierProperty(@Nullable Map<String, String> properties) {
         return properties != null
-                && Boolean.parseBoolean(properties.get(Snapshot.ROW_ID_REASSIGN_PROPERTY));
+                && Boolean.parseBoolean(properties.get(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY));
     }
 
     private boolean overwriteChangedTargetPartitions(

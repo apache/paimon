@@ -1010,16 +1010,16 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testReplaceManifestListWithRowIdReassignProperty() throws Exception {
+    public void testReplaceManifestListWithRowIdOverwriteBarrierProperty() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
 
-        Map<String, String> reassignProperties = new HashMap<>();
-        reassignProperties.put("keep", "v1");
-        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        Map<String, String> barrierProperties = new HashMap<>();
+        barrierProperties.put("keep", "v1");
+        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
@@ -1029,33 +1029,33 @@ public class FileStoreCommitTest {
                                     deltaManifestList(latest),
                                     latest.indexManifest(),
                                     latest.nextRowId(),
-                                    reassignProperties))
+                                    barrierProperties))
                     .isTrue();
         }
 
-        Snapshot reassignSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(reassignSnapshot.properties()).isEqualTo(reassignProperties);
+        Snapshot barrierSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(barrierSnapshot.properties()).isEqualTo(barrierProperties);
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
-                                    reassignSnapshot,
-                                    reassignSnapshot.totalRecordCount(),
-                                    baseManifestList(reassignSnapshot),
-                                    deltaManifestList(reassignSnapshot),
-                                    reassignSnapshot.indexManifest(),
-                                    reassignSnapshot.nextRowId()))
+                                    barrierSnapshot,
+                                    barrierSnapshot.totalRecordCount(),
+                                    baseManifestList(barrierSnapshot),
+                                    deltaManifestList(barrierSnapshot),
+                                    barrierSnapshot.indexManifest(),
+                                    barrierSnapshot.nextRowId()))
                     .isTrue();
         }
 
         Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
         assertThat(normalSnapshot.properties())
                 .containsEntry("keep", "v1")
-                .doesNotContainKey(Snapshot.ROW_ID_REASSIGN_PROPERTY);
+                .doesNotContainKey(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY);
     }
 
     @Test
-    public void testCompactManifestWithRowIdReassignProperty() throws Exception {
+    public void testCompactManifestWithRowIdOverwriteBarrierProperty() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
@@ -1072,9 +1072,9 @@ public class FileStoreCommitTest {
                         .sum();
         assertThat(deleteNum).isGreaterThan(0);
 
-        Map<String, String> reassignProperties = new HashMap<>();
-        reassignProperties.put("keep", "v1");
-        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        Map<String, String> barrierProperties = new HashMap<>();
+        barrierProperties.put("keep", "v1");
+        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
@@ -1084,35 +1084,35 @@ public class FileStoreCommitTest {
                                     deltaManifestList(latest),
                                     latest.indexManifest(),
                                     latest.nextRowId(),
-                                    reassignProperties))
+                                    barrierProperties))
                     .isTrue();
         }
 
-        Snapshot reassignSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(reassignSnapshot.properties()).isEqualTo(reassignProperties);
+        Snapshot barrierSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(barrierSnapshot.properties()).isEqualTo(barrierProperties);
 
         try (FileStoreCommit commit = store.newCommit()) {
             commit.compactManifest();
         }
 
         Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(normalSnapshot.id()).isGreaterThan(reassignSnapshot.id());
+        assertThat(normalSnapshot.id()).isGreaterThan(barrierSnapshot.id());
         assertThat(normalSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(normalSnapshot.properties())
                 .containsEntry("keep", "v1")
-                .doesNotContainKey(Snapshot.ROW_ID_REASSIGN_PROPERTY);
+                .doesNotContainKey(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY);
     }
 
     @Test
-    public void testRowIdReassignConflictFromOptions() throws Exception {
+    public void testRowIdOverwriteConflictFromOptions() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
 
-        Map<String, String> reassignProperties = new HashMap<>();
-        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        Map<String, String> barrierProperties = new HashMap<>();
+        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
             assertThat(
                             commit.replaceManifestList(
@@ -1122,7 +1122,7 @@ public class FileStoreCommitTest {
                                     deltaManifestList(latest),
                                     latest.indexManifest(),
                                     latest.nextRowId(),
-                                    reassignProperties))
+                                    barrierProperties))
                     .isTrue();
         }
 
@@ -1138,16 +1138,17 @@ public class FileStoreCommitTest {
                 (commit, committable) -> committableRef.set(committable));
 
         Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
-        dynamicOptions.put(CoreOptions.COMMIT_ROW_ID_REASSIGN_LAST_SAFE_SNAPSHOT.key(), "1");
+        dynamicOptions.put(
+                CoreOptions.COMMIT_ROW_ID_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT.key(), "1");
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
                         store,
-                        "row-id-reassign-check",
+                        "row-id-overwrite-barrier-check",
                         new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
                         new CoreOptions(dynamicOptions),
                         true)) {
             assertThatThrownBy(() -> commit.commit(checkNotNull(committableRef.get()), false))
-                    .hasMessageContaining("Row-id reassignment snapshot 2")
+                    .hasMessageContaining("Row-id overwrite barrier snapshot 2")
                     .hasMessageContaining("task planned from snapshot 1");
         }
     }

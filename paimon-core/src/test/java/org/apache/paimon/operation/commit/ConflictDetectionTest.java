@@ -508,15 +508,15 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDetectsRowIdReassignSnapshotConflict() {
+    void testDetectsRowIdOverwriteBarrierSnapshotConflict() {
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
-        Map<String, String> reassignProperties = new HashMap<>();
-        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        Map<String, String> barrierProperties = new HashMap<>();
+        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
         when(snapshotManager.snapshot(2L))
-                .thenReturn(snapshot(2, Snapshot.CommitKind.OVERWRITE, reassignProperties));
+                .thenReturn(snapshot(2, Snapshot.CommitKind.OVERWRITE, barrierProperties));
 
         ConflictDetection detection = createConflictDetection(snapshotManager);
-        detection.setRowIdReassignCheckFromSnapshot(1L);
+        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -529,20 +529,20 @@ class ConflictDetectionTest {
 
         assertThat(exception).isPresent();
         assertThat(exception.get())
-                .hasMessageContaining("Row-id reassignment snapshot 2")
+                .hasMessageContaining("Row-id overwrite barrier snapshot 2")
                 .hasMessageContaining("task planned from snapshot 1");
     }
 
     @Test
-    void testIgnoresRowIdReassignPropertyOnNonOverwriteSnapshot() {
+    void testIgnoresRowIdOverwriteBarrierPropertyOnNonOverwriteSnapshot() {
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
-        Map<String, String> reassignProperties = new HashMap<>();
-        reassignProperties.put(Snapshot.ROW_ID_REASSIGN_PROPERTY, "true");
+        Map<String, String> barrierProperties = new HashMap<>();
+        barrierProperties.put(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY, "true");
         when(snapshotManager.snapshot(2L))
-                .thenReturn(snapshot(2, Snapshot.CommitKind.APPEND, reassignProperties));
+                .thenReturn(snapshot(2, Snapshot.CommitKind.APPEND, barrierProperties));
 
         ConflictDetection detection = createConflictDetection(snapshotManager);
-        detection.setRowIdReassignCheckFromSnapshot(1L);
+        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -569,7 +569,7 @@ class ConflictDetectionTest {
                 .thenReturn(Collections.singletonList(mock(ManifestEntry.class)));
 
         ConflictDetection detection = createConflictDetection(snapshotManager, commitScanner);
-        detection.setRowIdReassignCheckFromSnapshot(1L);
+        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -599,7 +599,7 @@ class ConflictDetectionTest {
                 .thenReturn(Collections.emptyList());
 
         ConflictDetection detection = createConflictDetection(snapshotManager, commitScanner);
-        detection.setRowIdReassignCheckFromSnapshot(1L);
+        detection.setRowIdOverwriteConflictCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(

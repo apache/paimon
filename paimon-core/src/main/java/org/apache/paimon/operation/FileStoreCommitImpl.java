@@ -220,8 +220,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
-        options.commitRowIdReassignLastSafeSnapshot()
-                .ifPresent(this.conflictDetection::setRowIdReassignCheckFromSnapshot);
+        options.commitRowIdOverwriteConflictLastSafeSnapshot()
+                .ifPresent(this.conflictDetection::setRowIdOverwriteConflictCheckFromSnapshot);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -329,7 +329,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
-                if (conflictDetection.hasRowIdReassignCheckFromSnapshot()) {
+                if (conflictDetection.hasRowIdOverwriteConflictCheckFromSnapshot()) {
                     checkAppendFiles = true;
                 }
 
@@ -1122,7 +1122,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 latest.indexManifest(),
                 latest.nextRowId(),
-                withoutRowIdReassignProperties(latest.properties()));
+                withoutRowIdOverwriteBarrierProperties(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1139,7 +1139,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                withoutRowIdReassignProperties(latest.properties()));
+                withoutRowIdOverwriteBarrierProperties(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1250,20 +1250,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        withoutRowIdReassignProperties(latestSnapshot.properties()),
+                        withoutRowIdOverwriteBarrierProperties(latestSnapshot.properties()),
                         latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
 
-    private static @Nullable Map<String, String> withoutRowIdReassignProperties(
+    private static @Nullable Map<String, String> withoutRowIdOverwriteBarrierProperties(
             @Nullable Map<String, String> properties) {
-        if (properties == null || !properties.containsKey(Snapshot.ROW_ID_REASSIGN_PROPERTY)) {
+        if (properties == null
+                || !properties.containsKey(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY)) {
             return properties;
         }
 
         Map<String, String> copied = new HashMap<>(properties);
-        copied.remove(Snapshot.ROW_ID_REASSIGN_PROPERTY);
+        copied.remove(Snapshot.ROW_ID_OVERWRITE_BARRIER_PROPERTY);
         return copied.isEmpty() ? null : copied;
     }
 

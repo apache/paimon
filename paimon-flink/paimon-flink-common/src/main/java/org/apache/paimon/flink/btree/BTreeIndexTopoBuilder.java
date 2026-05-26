@@ -96,7 +96,7 @@ public class BTreeIndexTopoBuilder {
             Options userOptions)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
-        Long rowIdReassignCheckFromSnapshot = null;
+        Long rowIdOverwriteConflictCheckFromSnapshot = null;
         for (String indexColumn : indexColumns) {
             BTreeGlobalIndexBuilder indexBuilder =
                     indexBuilderSupplier.get().withIndexField(indexColumn);
@@ -110,9 +110,9 @@ public class BTreeIndexTopoBuilder {
                 continue;
             }
             if (indexBuilder.scanSnapshotId().isPresent()) {
-                rowIdReassignCheckFromSnapshot =
+                rowIdOverwriteConflictCheckFromSnapshot =
                         minSnapshot(
-                                rowIdReassignCheckFromSnapshot,
+                                rowIdOverwriteConflictCheckFromSnapshot,
                                 indexBuilder.scanSnapshotId().get());
             }
 
@@ -202,7 +202,7 @@ public class BTreeIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest), rowIdReassignCheckFromSnapshot);
+            commit(table, allStreams.get(0).union(rest), rowIdOverwriteConflictCheckFromSnapshot);
             return true;
         }
 
@@ -327,10 +327,10 @@ public class BTreeIndexTopoBuilder {
     private static void commit(
             FileStoreTable table,
             DataStream<Committable> written,
-            Long rowIdReassignCheckFromSnapshot) {
+            Long rowIdOverwriteConflictCheckFromSnapshot) {
         FileStoreTable commitTable =
-                GlobalIndexCommitUtils.withRowIdReassignCheck(
-                        table, rowIdReassignCheckFromSnapshot);
+                GlobalIndexCommitUtils.withRowIdOverwriteConflictCheck(
+                        table, rowIdOverwriteConflictCheckFromSnapshot);
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
