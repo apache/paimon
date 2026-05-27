@@ -31,6 +31,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -41,6 +44,8 @@ import java.util.Map;
 
 /** Utils for global index build. */
 public class GlobalIndexBuilderUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexBuilderUtils.class);
 
     public static final int MULTI_COLUMN_INDEX_FIELD_ID = -1;
 
@@ -148,6 +153,7 @@ public class GlobalIndexBuilderUtils {
             SchemaManager schemaManager, List<ManifestEntry> entries, List<String> indexColumns) {
         Map<Long, Boolean> schemaContainsColumns = new HashMap<>();
         long minRowId = Long.MAX_VALUE;
+        long minSchemaId = -1;
         for (ManifestEntry entry : entries) {
             long sid = entry.file().schemaId();
             boolean contains =
@@ -155,8 +161,26 @@ public class GlobalIndexBuilderUtils {
                             sid,
                             id -> schemaManager.schema(id).fieldNames().containsAll(indexColumns));
             if (!contains && entry.file().firstRowId() != null) {
-                minRowId = Math.min(minRowId, entry.file().nonNullFirstRowId());
+                long rowId = entry.file().nonNullFirstRowId();
+                if (rowId < minRowId) {
+                    minRowId = rowId;
+                    minSchemaId = sid;
+                }
             }
+        }
+        if (minRowId != Long.MAX_VALUE) {
+            List<String> schemaFields = schemaManager.schema(minSchemaId).fieldNames();
+            List<String> missingColumns = new ArrayList<>();
+            for (String col : indexColumns) {
+                if (!schemaFields.contains(col)) {
+                    missingColumns.add(col);
+                }
+            }
+            LOG.info(
+                    "Found non-indexable files: schemaId={} missing columns {}, boundaryRowId={}.",
+                    minSchemaId,
+                    missingColumns,
+                    minRowId);
         }
         return minRowId;
     }
@@ -174,6 +198,11 @@ public class GlobalIndexBuilderUtils {
                 result.add(entry);
             }
         }
+        LOG.info(
+                "Filtered {} files to {} indexable files (boundaryRowId={}).",
+                entries.size(),
+                result.size(),
+                boundaryRowId);
         return result;
     }
 

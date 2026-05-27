@@ -108,6 +108,12 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
 
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
+        if ("btree".equals(indexType)) {
+            checkArgument(
+                    indexColumns.size() == 1,
+                    "BTree index only supports single column, got: %s",
+                    indexColumns);
+        }
         try {
             if ("btree".equals(indexType)) {
                 BTreeIndexTopoBuilder.buildIndexAndExecute(
