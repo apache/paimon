@@ -718,6 +718,12 @@ public class LuminaVectorGlobalIndexTest {
                 .hasMessageContaining("rowId=1")
                 .hasMessageContaining("index=0")
                 .hasMessageContaining("Infinity");
+
+        assertThatThrownBy(() -> writer.write(new float[] {0.0f, Float.NEGATIVE_INFINITY}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rowId=1")
+                .hasMessageContaining("index=1")
+                .hasMessageContaining("-Infinity");
     }
 
     private Options createDefaultOptions(int dimension) {

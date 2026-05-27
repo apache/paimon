@@ -359,7 +359,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             throw new IllegalArgumentException(
                     String.format(
                             "Vector element at rowId=%d, index=%d is %s",
-                            logicalRowId, elementIndex, Float.isNaN(value) ? "NaN" : "Infinity"));
+                            logicalRowId, elementIndex, Float.toString(value)));
         }
     }
 
@@ -473,12 +473,17 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
 
         private void ensureAvailable(int minBytes) throws IOException {
+            int zeroReadCount = 0;
             while (readBuf.remaining() < minBytes) {
                 readBuf.compact();
                 int bytesRead = channel.read(readBuf);
                 readBuf.flip();
                 if (bytesRead == -1) {
                     throw new IOException("Unexpected end of temp file");
+                }
+                if (bytesRead == 0 && ++zeroReadCount > 100) {
+                    throw new IOException(
+                            "Unable to read from temp file: repeated zero-byte reads");
                 }
             }
         }
