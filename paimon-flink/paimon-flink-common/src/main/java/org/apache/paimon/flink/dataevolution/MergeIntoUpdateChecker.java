@@ -39,12 +39,16 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
 
 /**
  * The checker for merge into update result. It will check each committable to see if some
@@ -100,10 +104,12 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                                     GlobalIndexMeta globalIndexMeta =
                                             entry.indexFile().globalIndexMeta();
                                     if (globalIndexMeta != null) {
-                                        String fieldName =
-                                                rowType.getField(globalIndexMeta.indexFieldId())
-                                                        .name();
-                                        return updatedColumns.contains(fieldName)
+                                        Collection<String> indexedNames =
+                                                getIndexedFieldNames(globalIndexMeta, rowType);
+                                        boolean overlaps =
+                                                indexedNames.stream()
+                                                        .anyMatch(updatedColumns::contains);
+                                        return overlaps
                                                 && affectedPartitions.contains(entry.partition());
                                     }
                                     return false;
@@ -116,8 +122,8 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                 case THROW_ERROR:
                     Set<String> conflictedColumns =
                             affectedEntries.stream()
-                                    .map(file -> file.indexFile().globalIndexMeta().indexFieldId())
-                                    .map(id -> rowType.getField(id).name())
+                                    .map(file -> file.indexFile().globalIndexMeta())
+                                    .flatMap(meta -> getIndexedFieldNames(meta, rowType).stream())
                                     .collect(Collectors.toSet());
 
                     throw new RuntimeException(
@@ -158,5 +164,24 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                     throw new UnsupportedOperationException("Unsupported option: " + updateAction);
             }
         }
+    }
+
+    private static Collection<String> getIndexedFieldNames(GlobalIndexMeta meta, RowType rowType) {
+        int fieldId = meta.indexFieldId();
+        if (fieldId == MULTI_COLUMN_INDEX_FIELD_ID) {
+            List<String> names = new ArrayList<>();
+            for (int id : meta.extraFieldIds()) {
+                names.add(rowType.getField(id).name());
+            }
+            return names;
+        }
+        List<String> names = new ArrayList<>();
+        names.add(rowType.getField(fieldId).name());
+        if (meta.extraFieldIds() != null) {
+            for (int id : meta.extraFieldIds()) {
+                names.add(rowType.getField(id).name());
+            }
+        }
+        return names;
     }
 }
