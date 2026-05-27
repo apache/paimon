@@ -20,7 +20,6 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -92,15 +91,14 @@ public class GlobalIndexScanner implements Closeable {
             String indexType = indexFile.indexType();
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
 
-            if (meta.indexFieldId() == GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID
+            if (meta.indexFieldId() == MULTI_COLUMN_INDEX_FIELD_ID
                     && meta.extraFieldIds() != null) {
                 // Multi-column index: all participating fields share the same IndexFileMeta,
                 // so looking up from any fieldId returns identical index files.
                 List<Integer> fieldIds =
-                        Arrays.stream(meta.extraFieldIds())
-                                .boxed()
-                                .collect(Collectors.toList());
-                // Validate consistency: all files in the same group must have identical extraFieldIds
+                        Arrays.stream(meta.extraFieldIds()).boxed().collect(Collectors.toList());
+                // Validate consistency: all files in the same group must have identical
+                // extraFieldIds
                 if (fieldToGroup.containsKey(fieldIds.get(0))) {
                     List<Integer> existingGroup = fieldToGroup.get(fieldIds.get(0));
                     checkArgument(
@@ -132,11 +130,8 @@ public class GlobalIndexScanner implements Closeable {
                     if (group != null) {
                         // Multi-column: resolve full field list
                         List<DataField> fields =
-                                group.stream()
-                                        .map(rowType::getField)
-                                        .collect(Collectors.toList());
-                        return createReaders(
-                                indexFileReader, multiColumnMetas.get(group), fields);
+                                group.stream().map(rowType::getField).collect(Collectors.toList());
+                        return createReaders(indexFileReader, multiColumnMetas.get(group), fields);
                     } else {
                         // Single-column
                         return createReaders(
