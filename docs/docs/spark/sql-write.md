@@ -223,17 +223,20 @@ INSERT *      -- when not matched, insert this row without any transformation;
 
 ### Column Alignment
 
-Assignments are aligned to the target by column name, and unmentioned target columns are filled with NULL.
+Assignments are aligned to the target table by **column name**.
 
-`INSERT *` / `UPDATE SET *` expand against the target columns:
+For explicit clauses (`UPDATE SET col = expr` / `INSERT (col list) VALUES ...`), only the mentioned columns are written. Unmentioned target columns preserve their current value for `UPDATE`, or are filled with NULL / `CURRENT_DEFAULT` for `INSERT`.
 
-- Source columns missing from the target are rejected by default. Enable `spark.paimon.write.merge-schema` to keep them and evolve the table schema at write time (see [Write Merge Schema](#write-merge-schema)).
-- Target columns missing from the source are filled with NULL (or the column's `CURRENT_DEFAULT`, if any).
+For star clauses (`UPDATE SET *` / `INSERT *`), `*` expands against the **target** columns. The behavior when source and target columns don't match exactly depends on `spark.paimon.write.merge-schema` (see [Write Merge Schema](#write-merge-schema)):
 
-For nested struct columns with `merge-schema` enabled:
+| Scenario | `merge-schema=false` (default) | `merge-schema=true` |
+|----------|-------------------------------|---------------------|
+| Top-level source-extra columns | Silently dropped (`*` only covers target columns) | Evolved into the target schema |
+| Top-level target columns missing from source | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
+| Nested struct source-extra fields | Throws | Evolved into the target schema |
+| Nested struct target-missing fields | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
 
-- `UPDATE SET *` on a struct preserves the current target value for any subfield not present in the source.
-- Explicit `UPDATE SET col.subfield = ...` or `INSERT` fills unmentioned subfields with NULL.
+The key difference between top-level and nested: under strict mode (`merge-schema=false`), top-level source-extras are silently dropped because `*` never references them, while nested source-extras inside a struct value throw an error to avoid silent data loss.
 
 ## Write Merge Schema
 
