@@ -653,9 +653,15 @@ class MergeFileSplitRead(SplitRead):
                 nullables=[f.type.nullable for f in self.value_fields],
             )
         if engine == MergeEngine.AGGREGATE:
+            # Use the full primary-key list, not ``trimmed_primary_key``:
+            # ``value_fields`` still carries partition columns, so any PK
+            # column that is also a partition column must be recognised
+            # as PK here. Otherwise a table with
+            # ``fields.default-aggregate-function`` would apply the
+            # default aggregator to that partition-PK column.
             field_aggregators = build_field_aggregators(
                 self.value_fields,
-                self.trimmed_primary_key,
+                self.table.primary_keys,
                 self.table.options,
             )
             return AggregateMergeFunction(

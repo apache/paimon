@@ -298,6 +298,53 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         # Touch it explicitly so the test fails loudly otherwise.
         table.new_read_builder().new_read()
 
+    # -- partition column that is also part of the primary key ----------
+
+    def test_partition_pk_overlap_not_aggregated_by_default(self):
+        # When a partition column is also part of the primary key and a
+        # table-wide ``fields.default-aggregate-function`` is configured,
+        # the partition-PK column must be treated as PK (identity) and
+        # not run through the default aggregator. Regression for the
+        # split_read bug where the trimmed PK list (which drops
+        # partition columns) was passed to ``build_field_aggregators``.
+        pa_schema = pa.schema([
+            pa.field('p', pa.int64(), nullable=False),
+            pa.field('id', pa.int64(), nullable=False),
+            pa.field('v', pa.int64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['p', 'id'],
+            partition_keys=['p'],
+            options={
+                'bucket': '1',
+                'merge-engine': 'aggregation',
+                'fields.default-aggregate-function': 'sum',
+            },
+        )
+        self.catalog.create_table(
+            'default.agg_partition_pk_overlap', schema, False)
+        table = self.catalog.get_table('default.agg_partition_pk_overlap')
+
+        def write(rows):
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            c = wb.new_commit()
+            try:
+                w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+                c.commit(w.prepare_commit())
+            finally:
+                w.close()
+                c.close()
+
+        write([{'p': 1, 'id': 1, 'v': 10}])
+        write([{'p': 1, 'id': 1, 'v': 20}])
+
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        rows = rb.new_read().to_arrow(splits).to_pylist()
+        self.assertEqual(rows, [{'p': 1, 'id': 1, 'v': 30}])
+
 
 if __name__ == '__main__':
     unittest.main()
