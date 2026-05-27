@@ -32,6 +32,12 @@ public interface GlobalIndexerFactory {
     GlobalIndexer create(DataField dataField, Options options);
 
     default GlobalIndexer create(List<DataField> fields, Options options) {
+        if (fields.size() > 1) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Index type '%s' does not support multi-column index, got columns: %s",
+                            identifier(), fields));
+        }
         return create(fields.get(0), options);
     }
 }
