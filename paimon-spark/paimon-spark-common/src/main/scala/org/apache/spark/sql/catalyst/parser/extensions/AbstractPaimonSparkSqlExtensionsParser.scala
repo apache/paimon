@@ -58,6 +58,39 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
 
   private lazy val substitutor = new VariableSubstitution()
   private lazy val astBuilder = new PaimonSqlExtensionsAstBuilder(delegate)
+  private val nonReservedIdentifierTokenTypes = Set(
+    PaimonSqlExtensionsParser.ALTER,
+    PaimonSqlExtensionsParser.AS,
+    PaimonSqlExtensionsParser.CALL,
+    PaimonSqlExtensionsParser.CREATE,
+    PaimonSqlExtensionsParser.DAYS,
+    PaimonSqlExtensionsParser.DELETE,
+    PaimonSqlExtensionsParser.EXISTS,
+    PaimonSqlExtensionsParser.HOURS,
+    PaimonSqlExtensionsParser.IF,
+    PaimonSqlExtensionsParser.LIKE,
+    PaimonSqlExtensionsParser.NOT,
+    PaimonSqlExtensionsParser.OF,
+    PaimonSqlExtensionsParser.OR,
+    PaimonSqlExtensionsParser.TABLE,
+    PaimonSqlExtensionsParser.REPLACE,
+    PaimonSqlExtensionsParser.RETAIN,
+    PaimonSqlExtensionsParser.VERSION,
+    PaimonSqlExtensionsParser.TAG,
+    PaimonSqlExtensionsParser.TRUE,
+    PaimonSqlExtensionsParser.FALSE,
+    PaimonSqlExtensionsParser.MAP,
+    PaimonSqlExtensionsParser.COPY,
+    PaimonSqlExtensionsParser.INTO,
+    PaimonSqlExtensionsParser.FROM,
+    PaimonSqlExtensionsParser.FILE_FORMAT,
+    PaimonSqlExtensionsParser.PATTERN,
+    PaimonSqlExtensionsParser.FORCE,
+    PaimonSqlExtensionsParser.ON_ERROR,
+    PaimonSqlExtensionsParser.ABORT_STATEMENT,
+    PaimonSqlExtensionsParser.OVERWRITE,
+    PaimonSqlExtensionsParser.CSV
+  )
 
   /** Parses a string to a LogicalPlan. */
   override def parsePlan(sqlText: String): LogicalPlan = {
@@ -66,7 +99,14 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
       parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
         .asInstanceOf[LogicalPlan]
     } else {
-      var plan = delegate.parsePlan(sqlText)
+      var plan =
+        try {
+          delegate.parsePlan(sqlText)
+        } catch {
+          case _: ParseException if maybeCatalogCreateTableLike(sqlTextAfterSubstitution) =>
+            parse(sqlTextAfterSubstitution)(parser => astBuilder.visit(parser.singleStatement()))
+              .asInstanceOf[LogicalPlan]
+        }
       val sparkSession = PaimonSparkSession.active
       parserRules(sparkSession).foreach(
         rule => {
@@ -142,6 +182,137 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
 
   private def isCopyInto(normalized: String): Boolean = {
     normalized.startsWith("copy into")
+  }
+
+  /**
+   * Cheap token-level check for `CREATE TABLE [IF NOT EXISTS] x.y[.z] LIKE ...` shape. Used as a
+   * gate for the Paimon parser fallback when the delegate parser rejects a catalog-qualified CREATE
+   * TABLE LIKE statement.
+   */
+  private def maybeCatalogCreateTableLike(sqlText: String): Boolean = {
+    if (org.apache.spark.SPARK_VERSION < "3.4") {
+      return false
+    }
+    if (!startsWithCreateTable(sqlText)) {
+      return false
+    }
+
+    tokenStream(sqlText) match {
+      case Some(tokens) => maybeCreateTableLike(tokens)
+      case None => false
+    }
+  }
+
+  private def tokenStream(sqlText: String): Option[CommonTokenStream] = {
+    try {
+      val lexer = new PaimonSqlExtensionsLexer(
+        new UpperCaseCharStream(CharStreams.fromString(sqlText)))
+      lexer.removeErrorListeners()
+      lexer.addErrorListener(PaimonParseErrorListener)
+
+      val tokens = new CommonTokenStream(lexer)
+      tokens.fill()
+      Some(tokens)
+    } catch {
+      case _: PaimonParseException => None
+    }
+  }
+
+  private def maybeCreateTableLike(tokenStream: CommonTokenStream): Boolean = {
+    val tokens = tokenStream.getTokens.asScala
+      .filter(token => token.getChannel == Token.DEFAULT_CHANNEL)
+      .filterNot(token => token.getType == Token.EOF)
+
+    if (tokens.length < 5) return false
+    if (tokens(0).getType != PaimonSqlExtensionsParser.CREATE) return false
+    if (tokens(1).getType != PaimonSqlExtensionsParser.TABLE) return false
+
+    var idx = 2
+    if (
+      idx + 2 < tokens.length &&
+      tokens(idx).getType == PaimonSqlExtensionsParser.IF &&
+      tokens(idx + 1).getType == PaimonSqlExtensionsParser.NOT &&
+      tokens(idx + 2).getType == PaimonSqlExtensionsParser.EXISTS
+    ) {
+      idx += 3
+    }
+
+    if (idx >= tokens.length || !isIdentifierToken(tokens(idx))) return false
+    idx += 1
+
+    while (
+      idx + 1 < tokens.length &&
+      tokens(idx).getText == "." &&
+      isIdentifierToken(tokens(idx + 1))
+    ) {
+      idx += 2
+    }
+
+    idx < tokens.length && tokens(idx).getType == PaimonSqlExtensionsParser.LIKE
+  }
+
+  private def isIdentifierToken(token: Token): Boolean = {
+    token.getType == PaimonSqlExtensionsParser.IDENTIFIER ||
+    token.getType == PaimonSqlExtensionsParser.BACKQUOTED_IDENTIFIER ||
+    nonReservedIdentifierTokenTypes.contains(token.getType)
+  }
+
+  private def startsWithCreateTable(sqlText: String): Boolean = {
+    val createIndex = skipWhitespaceAndComments(sqlText, 0)
+    if (!matchesWord(sqlText, createIndex, "create")) {
+      return false
+    }
+
+    val tableIndex = skipWhitespaceAndComments(sqlText, createIndex + "create".length)
+    matchesWord(sqlText, tableIndex, "table")
+  }
+
+  private def skipWhitespaceAndComments(sqlText: String, start: Int): Int = {
+    var index = start
+    var continue = true
+
+    while (continue) {
+      while (index < sqlText.length && sqlText.charAt(index).isWhitespace) {
+        index += 1
+      }
+
+      if (
+        index + 1 < sqlText.length &&
+        sqlText.charAt(index) == '-' &&
+        sqlText.charAt(index + 1) == '-'
+      ) {
+        index += 2
+        while (
+          index < sqlText.length &&
+          sqlText.charAt(index) != '\n' &&
+          sqlText.charAt(index) != '\r'
+        ) {
+          index += 1
+        }
+      } else if (
+        index + 1 < sqlText.length &&
+        sqlText.charAt(index) == '/' &&
+        sqlText.charAt(index + 1) == '*'
+      ) {
+        val close = sqlText.indexOf("*/", index + 2)
+        index = if (close >= 0) close + 2 else sqlText.length
+      } else {
+        continue = false
+      }
+    }
+
+    index
+  }
+
+  private def matchesWord(sqlText: String, index: Int, word: String): Boolean = {
+    index + word.length <= sqlText.length &&
+    sqlText.regionMatches(true, index, word, 0, word.length) &&
+    (index + word.length == sqlText.length ||
+      !isIdentifierPart(sqlText.charAt(index + word.length)))
+  }
+
+  private def isIdentifierPart(char: Char): Boolean = {
+    char.isLetterOrDigit || char == '_'
   }
 
   protected def parse[T](command: String)(toResult: PaimonSqlExtensionsParser => T): T = {
