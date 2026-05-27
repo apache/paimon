@@ -39,6 +39,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateComment;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -342,8 +343,34 @@ public class SchemaManager implements Serializable {
                         "Column %s cannot specify NOT NULL in the %s table.",
                         String.join(".", addColumn.fieldNames()),
                         lazyIdentifier.get().getFullName());
+
+                BlobSchemaUtils.ParsedDirective blobDirective =
+                        BlobSchemaUtils.parseAddColumnComment(addColumn.description());
+                DataType requestedDataType = addColumn.dataType();
+                String effectiveComment = addColumn.description();
+                // try convert to blob type
+                if (blobDirective != null) {
+                    Preconditions.checkArgument(
+                            addColumn.fieldNames().length == 1,
+                            "BLOB directive cannot be used on a nested column %s.",
+                            String.join(".", addColumn.fieldNames()));
+                    DataTypeRoot root = requestedDataType.getTypeRoot();
+                    Preconditions.checkArgument(
+                            root == DataTypeRoot.VARBINARY || root == DataTypeRoot.BINARY,
+                            "Column %s declared with a BLOB directive must be of BYTES or "
+                                    + "BINARY type, but was %s.",
+                            addColumn.fieldNames()[0],
+                            requestedDataType);
+                    requestedDataType = new BlobType(requestedDataType.isNullable());
+                    effectiveComment = blobDirective.realComment();
+
+                    BlobSchemaUtils.modifyBlobOptions(
+                            blobDirective.optionKey(), addColumn.fieldNames()[0], newOptions);
+                }
+
                 int id = highestFieldId.incrementAndGet();
-                DataType dataType = ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
+                DataType dataType = ReassignFieldId.reassign(requestedDataType, highestFieldId);
+                String storedComment = effectiveComment;
                 new NestedColumnModifier(addColumn.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -352,8 +379,7 @@ public class SchemaManager implements Serializable {
                                     Catalog.ColumnNotExistException {
                         assertColumnNotExists(newFields, fieldName, lazyIdentifier);
 
-                        DataField dataField =
-                                new DataField(id, fieldName, dataType, addColumn.description());
+                        DataField dataField = new DataField(id, fieldName, dataType, storedComment);
 
                         // key: name ; value : index
                         Map<String, Integer> map = new HashMap<>();
