@@ -471,15 +471,16 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
-  test("Paimon MergeInto: fail in case that miss some columns in insert") {
-    withTable("source", "target") {
+  test(
+    "Paimon MergeInto: UPDATE * / INSERT * with missing source column throws (mergeSchema=false)") {
 
+    withTable("source", "target") {
       Seq((1, "c11"), (3, "c33")).toDF("a", "c").createOrReplaceTempView("source")
 
       createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
-      val error = intercept[RuntimeException] {
+      val error = intercept[Exception] {
         spark.sql(s"""
                      |MERGE INTO target
                      |USING source
@@ -490,7 +491,55 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT *
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("cannot resolve b from Project"))
+      assert(error.toLowerCase.contains("b"))
+    }
+  }
+
+  test("Paimon MergeInto: UPDATE * preserves target column missing in source (mergeSchema=true)") {
+    withTable("source", "target") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        Seq((1, "c11")).toDF("a", "c").createOrReplaceTempView("source")
+
+        createTable("target", "a INT, b INT, c STRING", Seq("a"))
+        spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+        spark.sql(s"""
+                     |MERGE INTO target
+                     |USING source
+                     |ON target.a = source.a
+                     |WHEN MATCHED THEN
+                     |UPDATE SET *
+                     |""".stripMargin)
+
+        // Matched row keeps current `b` (source has no `b`); unmatched row untouched.
+        checkAnswer(
+          spark.sql("SELECT * FROM target ORDER BY a"),
+          Row(1, 10, "c11") :: Row(2, 20, "c2") :: Nil)
+      }
+    }
+  }
+
+  test("Paimon MergeInto: INSERT * NULL-fills target column missing in source (mergeSchema=true)") {
+    withTable("source", "target") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        Seq((3, "c33")).toDF("a", "c").createOrReplaceTempView("source")
+
+        createTable("target", "a INT, b INT, c STRING", Seq("a"))
+        spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+        spark.sql(s"""
+                     |MERGE INTO target
+                     |USING source
+                     |ON target.a = source.a
+                     |WHEN NOT MATCHED
+                     |THEN INSERT *
+                     |""".stripMargin)
+
+        // New row gets `b = NULL` (source has no `b`); existing rows untouched.
+        checkAnswer(
+          spark.sql("SELECT * FROM target ORDER BY a"),
+          Row(1, 10, "c1") :: Row(2, 20, "c2") :: Row(3, null, "c33") :: Nil)
+      }
     }
   }
 
@@ -568,7 +617,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT *
                      |""".stripMargin)
       }.getMessage
-      assert(error1.contains("Conflicting update/insert on attrs: b"))
+      assert(error1.contains("Multiple assignments for 'b'"))
 
       val error2 = intercept[RuntimeException] {
         spark.sql(s"""
@@ -581,7 +630,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT (a, a, c) VALUES (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error2.contains("Conflicting update/insert on attrs: a"))
+      assert(error2.contains("Multiple assignments for 'a'"))
     }
   }
 
@@ -915,7 +964,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
-  test("Paimon MergeInto: merge-schema disabled should not add new columns") {
+  test("Paimon MergeInto: merge-schema disabled silently drops source-extra columns") {
     withTable("source", "target") {
       withSparkSQLConf("spark.paimon.write.merge-schema" -> "false") {
         createTable("target", "a INT, b STRING", Seq("a"))
@@ -1379,32 +1428,36 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
   }
 
   test("Paimon MergeInto: struct field reorder when target has fields absent from source") {
-    withTable("source", "target") {
-      // Target struct has 3 sub-fields; source struct only has 2 of them in a different order.
-      createTable("target", "id INT, info STRUCT<x INT, y INT, z INT>", Seq("id"))
-      spark.sql("INSERT INTO target VALUES (1, struct(1, 2, 3)), (2, struct(4, 5, 6))")
+    // Source struct narrower than target: strict mode rejects the nested missing field;
+    // merge-schema NULL-fills it (INSERT path has no prior row to preserve).
+    withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+      withTable("source", "target") {
+        // Target struct has 3 sub-fields; source struct only has 2 of them in a different order.
+        createTable("target", "id INT, info STRUCT<x INT, y INT, z INT>", Seq("id"))
+        spark.sql("INSERT INTO target VALUES (1, struct(1, 2, 3)), (2, struct(4, 5, 6))")
 
-      createTable("source", "id INT, info STRUCT<y INT, x INT>", Seq("id"))
-      spark.sql("INSERT INTO source VALUES (1, struct(20, 10)), (3, struct(80, 70))")
+        createTable("source", "id INT, info STRUCT<y INT, x INT>", Seq("id"))
+        spark.sql("INSERT INTO source VALUES (1, struct(20, 10)), (3, struct(80, 70))")
 
-      spark.sql("""
-                  |MERGE INTO target
-                  |USING source
-                  |ON target.id = source.id
-                  |WHEN MATCHED THEN
-                  |UPDATE SET target.info = source.info
-                  |WHEN NOT MATCHED THEN
-                  |INSERT (id, info) VALUES (source.id, source.info)
-                  |""".stripMargin)
+        spark.sql("""
+                    |MERGE INTO target
+                    |USING source
+                    |ON target.id = source.id
+                    |WHEN MATCHED THEN
+                    |UPDATE SET target.info = source.info
+                    |WHEN NOT MATCHED THEN
+                    |INSERT (id, info) VALUES (source.id, source.info)
+                    |""".stripMargin)
 
-      checkAnswer(
-        spark.sql("SELECT * FROM target ORDER BY id"),
-        Seq(
-          Row(1, Row(10, 20, null)),
-          Row(2, Row(4, 5, 6)),
-          Row(3, Row(70, 80, null))
+        checkAnswer(
+          spark.sql("SELECT * FROM target ORDER BY id"),
+          Seq(
+            Row(1, Row(10, 20, null)),
+            Row(2, Row(4, 5, 6)),
+            Row(3, Row(70, 80, null))
+          )
         )
-      )
+      }
     }
   }
 

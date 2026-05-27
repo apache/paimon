@@ -51,7 +51,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         table.output,
         a.query,
         a.isByName,
-        conf,
         mergeSchemaEnabled)
       if (newQuery ne a.query) {
         // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.
