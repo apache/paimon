@@ -33,9 +33,10 @@ import pytest
 pypaimon = pytest.importorskip("pypaimon")
 daft = pytest.importorskip("daft")
 
-from daft import col
+from daft import col, lit
 
 from pypaimon.daft.daft_paimon import _read_table
+from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
 
 
 # ---------------------------------------------------------------------------
@@ -672,6 +673,50 @@ class TestFilterPushdown:
         df = _read_table(filter_table).where((col("id") >= 2) & (col("id") <= 4))
         result = df.to_pydict()
         assert result["id"] == [2, 3, 4]
+
+    def test_unsupported_expression_remains_in_daft(self, filter_table):
+        expressions = [
+            col("id") == lit(1).cast("int64"),
+            col("id") == lit(None),
+            col("value").contains(col("id")),
+            col("value").startswith(col("id")),
+            col("value").endswith(col("id")),
+            col("value").contains(lit("a").cast("string")),
+            col("id").between(col("id"), 3),
+            col("id").is_in([1, None]),
+        ]
+
+        for expr in expressions:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert pushed_filters == []
+            assert remaining_filters == [expr._expr]
+            assert predicate is None
+
+    def test_mixed_string_expression_is_filtered_by_daft(self, local_paimon_catalog):
+        catalog, tmp_path = local_paimon_catalog
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("value", pa.string()),
+            ("pattern", pa.string()),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db.filter_mixed_string", paimon_schema, ignore_if_exists=True)
+        table = catalog.get_table("test_db.filter_mixed_string")
+
+        data = pa.table(
+            {
+                "id": [1, 2, 3],
+                "value": ["alpha", "bravo", "charlie"],
+                "pattern": ["lp", "zz", "lie"],
+            }
+        )
+        _write_to_paimon(table, data)
+
+        df = _read_table(table).where(col("value").contains(col("pattern")))
+        result = df.sort("id").to_pydict()
+
+        assert result["id"] == [1, 3]
 
 
 # ---------------------------------------------------------------------------
