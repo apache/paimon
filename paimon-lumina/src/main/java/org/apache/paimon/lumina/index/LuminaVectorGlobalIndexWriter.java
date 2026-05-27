@@ -87,6 +87,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private ByteBuffer writeBuf;
 
     private final int recordSizeInBytes;
+    private final float[] vectorBuf;
     private int count;
     private boolean closed;
 
@@ -102,6 +103,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         this.count = 0;
         this.closed = false;
         this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
+        this.vectorBuf = new float[dim];
 
         validateFieldType(fieldType);
 
@@ -147,37 +149,42 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             return;
         }
 
-        // Validate before writing anything to avoid partial records in temp file
-        float[] validated = validateVector(fieldData);
+        // Validate and materialize into vectorBuf (single pass); float[] is zero-copy
+        float[] src = materializeAndValidate(fieldData);
 
         if (writeBuf.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
         }
         writeBuf.putLong(logicalRowId);
         for (int i = 0; i < dim; i++) {
-            writeBuf.putFloat(validated[i]);
+            writeBuf.putFloat(src[i]);
         }
         logicalRowId++;
         count++;
     }
 
-    private float[] validateVector(Object fieldData) {
-        float[] result = new float[dim];
+    /**
+     * Validates the vector and returns a float[] ready to write. For float[] input, returns the
+     * input directly (zero-copy). For InternalVector/InternalArray, reads into the reusable
+     * vectorBuf field.
+     */
+    private float[] materializeAndValidate(Object fieldData) {
         if (fieldData instanceof float[]) {
             float[] vector = (float[]) fieldData;
             checkDimension(vector.length);
             for (int i = 0; i < dim; i++) {
                 checkFinite(vector[i], i);
-                result[i] = vector[i];
             }
+            return vector;
         } else if (fieldData instanceof InternalVector) {
             InternalVector vector = (InternalVector) fieldData;
             checkDimension(vector.size());
             for (int i = 0; i < dim; i++) {
                 float v = vector.getFloat(i);
                 checkFinite(v, i);
-                result[i] = v;
+                vectorBuf[i] = v;
             }
+            return vectorBuf;
         } else if (fieldData instanceof InternalArray) {
             InternalArray array = (InternalArray) fieldData;
             checkDimension(array.size());
@@ -187,13 +194,13 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                 }
                 float v = array.getFloat(i);
                 checkFinite(v, i);
-                result[i] = v;
+                vectorBuf[i] = v;
             }
+            return vectorBuf;
         } else {
             throw new RuntimeException(
                     "Unsupported vector type: " + fieldData.getClass().getName());
         }
-        return result;
     }
 
     private void flushWriteBuffer() {
@@ -402,13 +409,18 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         private int lastLoggedPercent;
 
         FileBackedDataset(File file, int dim, int totalCount, String phase) throws IOException {
+            this(file, dim, totalCount, phase, IO_BUFFER_SIZE);
+        }
+
+        FileBackedDataset(File file, int dim, int totalCount, String phase, int bufferSize)
+                throws IOException {
             this.raf = new RandomAccessFile(file, "r");
             this.channel = raf.getChannel();
             this.dim = dim;
             this.totalCount = totalCount;
-            this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
+            this.recordSizeInBytes = checkedRecordSize(dim, bufferSize);
             this.cursor = 0;
-            this.readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
+            this.readBuf = ByteBuffer.allocateDirect(bufferSize);
             this.readBuf.order(ByteOrder.nativeOrder());
             this.readBuf.limit(0); // empty initially
             this.phase = phase;
