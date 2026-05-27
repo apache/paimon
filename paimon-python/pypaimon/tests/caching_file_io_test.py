@@ -409,6 +409,61 @@ class CachingFileIOTest(unittest.TestCase):
         self.assertTrue(os.path.exists(out_path))
         self.assertEqual(table, pa.parquet.read_table(out_path))
 
+    def test_file_io_for_data_wraps_cache_when_data_token_enabled(self):
+        from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.options.options import Options
+
+        catalog = MagicMock(spec=RESTCatalog)
+        catalog.data_token_enabled = True
+        catalog.fuse_enabled = False
+        catalog._fuse_resolver = None
+        catalog.context = MagicMock()
+        catalog.context.options = Options({
+            'local-cache.enabled': 'true',
+            'local-cache.dir': self.cache_dir,
+            'local-cache.whitelist': 'meta,global-index,data',
+        })
+        catalog._cache_manager = CachingFileIO.create_cache_manager(
+            catalog.context.options)
+        catalog.file_io_for_data = RESTCatalog.file_io_for_data.__get__(
+            catalog, RESTCatalog)
+
+        file_io = catalog.file_io_for_data(
+            "oss://catalog/db1/table1", Identifier.create("db1", "table1"))
+
+        self.assertIsInstance(
+            file_io, CachingFileIO,
+            msg="Cache wrap should apply even when data-token.enabled=true; "
+                "currently bypassed in DLF mode (RESTTokenFileIO returned).")
+
+    def test_default_memory_cache_max_size_capped(self):
+        from pypaimon.common.options.options import Options
+        from pypaimon.filesystem.caching_file_io import LocalMemoryCacheManager
+
+        cache = CachingFileIO.create_cache_manager(Options({
+            'local-cache.enabled': 'true',
+        }))
+        self.assertIsInstance(cache, LocalMemoryCacheManager)
+        self.assertEqual(
+            cache._max_size_bytes, 256 * 1024 * 1024,
+            msg="Memory cache without explicit max-size should default to "
+                "256 MB, not unlimited (OOM risk).")
+
+    def test_default_disk_cache_max_size_capped(self):
+        from pypaimon.common.options.options import Options
+        from pypaimon.filesystem.caching_file_io import LocalDiskCacheManager
+
+        cache = CachingFileIO.create_cache_manager(Options({
+            'local-cache.enabled': 'true',
+            'local-cache.dir': self.cache_dir,
+        }))
+        self.assertIsInstance(cache, LocalDiskCacheManager)
+        self.assertEqual(
+            cache._max_size_bytes, 10 * 1024 * 1024 * 1024,
+            msg="Disk cache without explicit max-size should default to "
+                "10 GB, not unlimited (disk-full risk).")
+
 
 class ConfigOptionsTest(unittest.TestCase):
 
