@@ -33,6 +33,7 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -85,6 +86,15 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                         .filter(s -> !s.isEmpty())
                         .collect(Collectors.toList());
         checkArgument(!indexColumns.isEmpty(), "At least one column required.");
+        checkArgument(
+                indexColumns.size() == new HashSet<>(indexColumns).size(),
+                "Duplicate index columns are not allowed: %s",
+                indexColumns);
+        // No hard cap on the number of index columns: unlike row-store B-tree indexes
+        // (e.g. MySQL 16, PostgreSQL 32) whose limit comes from composing columns into a
+        // single key, the global index is built on per-type index frameworks. Whether
+        // multiple columns are supported, and any practical limit, is decided by each
+        // index type (single-column types reject multi-column via UnsupportedOperationException).
         for (String col : indexColumns) {
             checkArgument(
                     rowType.containsField(col),
