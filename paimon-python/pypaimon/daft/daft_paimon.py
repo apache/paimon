@@ -143,6 +143,11 @@ def read_paimon(
     Returns:
         A lazy ``daft.DataFrame`` backed by this Paimon table.
     """
+    if snapshot_id is not None and tag_name is not None:
+        raise ValueError(
+            "snapshot_id and tag_name cannot be set at the same time"
+        )
+
     from pypaimon.catalog.catalog_factory import CatalogFactory
 
     catalog = CatalogFactory.create(catalog_options)
