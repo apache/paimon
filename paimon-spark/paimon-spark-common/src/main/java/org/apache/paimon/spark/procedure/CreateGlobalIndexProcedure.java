@@ -134,6 +134,12 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                     col,
                                     tableIdent);
                         }
+                        if ("btree".equalsIgnoreCase(indexType)) {
+                            checkArgument(
+                                    indexColumns.size() == 1,
+                                    "BTree index only supports single column, got: %s",
+                                    indexColumns);
+                        }
                         DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                         PartitionPredicate partitionPredicate =
                                 SparkProcedureUtils.convertToPartitionPredicate(

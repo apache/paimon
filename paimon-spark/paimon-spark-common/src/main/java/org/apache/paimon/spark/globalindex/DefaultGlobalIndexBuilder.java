@@ -35,6 +35,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
@@ -127,9 +128,14 @@ public class DefaultGlobalIndexBuilder implements Serializable {
             if (multiColumn) {
                 GlobalIndexMultiColumnWriter multiWriter =
                         (GlobalIndexMultiColumnWriter) indexWriter;
+                int[] projection = new int[indexFields.size()];
+                for (int i = 0; i < indexFields.size(); i++) {
+                    projection[i] = readType.getFieldIndex(indexFields.get(i).name());
+                }
+                ProjectedRow projectedRow = ProjectedRow.from(projection);
                 rows.forEachRemaining(
                         row -> {
-                            multiWriter.write(row);
+                            multiWriter.write(projectedRow.replaceRow(row));
                             rowCounter.add(1);
                         });
             } else {

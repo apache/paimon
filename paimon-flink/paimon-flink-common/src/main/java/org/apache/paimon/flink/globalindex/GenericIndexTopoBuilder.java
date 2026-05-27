@@ -51,6 +51,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -573,6 +574,7 @@ public class GenericIndexTopoBuilder {
         private transient InternalRow.FieldGetter[] indexFieldGetters;
         private transient int rowIdFieldIndex;
         private transient boolean multiColumn;
+        private transient ProjectedRow writerProjection;
 
         BuildIndexOperator(
                 ReadBuilder readBuilder,
@@ -602,6 +604,13 @@ public class GenericIndexTopoBuilder {
             }
             this.rowIdFieldIndex = projectedRowType.getFieldIndex(SpecialFields.ROW_ID.name());
             this.multiColumn = indexFields.size() > 1;
+            if (multiColumn) {
+                int[] projection = new int[indexFields.size()];
+                for (int i = 0; i < indexFields.size(); i++) {
+                    projection[i] = projectedRowType.getFieldIndex(indexFields.get(i).name());
+                }
+                this.writerProjection = ProjectedRow.from(projection);
+            }
         }
 
         @Override
@@ -664,7 +673,8 @@ public class GenericIndexTopoBuilder {
                                             task.shardRange.to);
                                     break;
                                 }
-                                ((GlobalIndexMultiColumnWriter) indexWriter).write(row);
+                                ((GlobalIndexMultiColumnWriter) indexWriter)
+                                        .write(writerProjection.replaceRow(row));
                             } else {
                                 Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
                                 if (fieldData == null) {
