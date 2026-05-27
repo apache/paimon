@@ -27,6 +27,7 @@ import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
@@ -42,6 +43,7 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -92,9 +94,7 @@ public class CompactChainTableProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitionStr = args.getString(1);
         boolean overwrite = !args.isNullAt(2) && args.getBoolean(2);
-        checkArgument(
-                partitionStr == null || !partitionStr.isEmpty(),
-                "Partition string cannot be empty");
+        checkArgument(StringUtils.isNotEmpty(partitionStr), "Partition string cannot be empty");
 
         return modifyPaimonTable(
                 tableIdent,
@@ -127,31 +127,19 @@ public class CompactChainTableProcedure extends BaseProcedure {
         String partition = SparkProcedureUtils.toWhere(partitionStr);
         FileStoreTable snapshotTable = table.wrapped();
 
-        // Check if target partition already exists in snapshot branch
-        PartitionPredicate snapshotPartitionPredicate =
-                SparkProcedureUtils.convertToPartitionPredicate(
-                        partition,
-                        snapshotTable.schema().logicalPartitionType(),
-                        spark(),
-                        relation);
-        boolean partitionExists =
-                !snapshotTable
-                        .newScan()
-                        .withPartitionFilter(snapshotPartitionPredicate)
-                        .plan()
-                        .splits()
-                        .isEmpty();
-
         FallbackReadFileStoreTable.FallbackReadScan scan =
                 (FallbackReadFileStoreTable.FallbackReadScan) table.newScan();
         PartitionPredicate partitionPredicate =
                 SparkProcedureUtils.convertToPartitionPredicate(
                         partition, table.schema().logicalPartitionType(), spark(), relation);
+
+        // Check if target partition already exists in snapshot branch
+        boolean partitionExists = checkPartitionExists(snapshotTable, partition, relation);
         if (partitionExists) {
             if (overwrite) {
                 scan.withPartitionFilter(
                         SparkProcedureUtils.convertToPartitionPredicate(
-                                "!(" + partition + ")",
+                                "NOT (" + partition + ")",
                                 table.schema().logicalPartitionType(),
                                 spark(),
                                 relation),
@@ -167,30 +155,48 @@ public class CompactChainTableProcedure extends BaseProcedure {
             scan.withPartitionFilter(partitionPredicate);
         }
 
+        List<Split> splits = scan.plan().splits();
+        if (splits.isEmpty()) {
+            LOG.warn(
+                    "Table {} partition {} has no data to compact, skipping.", table, partitionStr);
+            return false;
+        }
+
         Dataset<Row> datasetForWrite =
                 PaimonUtils.createDataset(
                         spark(),
                         ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                scan.plan().splits().toArray(new Split[0]), relation));
+                                splits.toArray(new Split[0]), relation));
 
-        if (datasetForWrite != null) {
-            PaimonSparkWriter writer = PaimonSparkWriter.apply(snapshotTable);
-            if (partitionExists) {
-                writer.writeBuilder().withOverwrite();
-            }
-            Map<String, String> targetPartition = ParameterUtils.getPartitions(partitionStr).get(0);
-            for (Map.Entry<String, String> entry : targetPartition.entrySet()) {
-                datasetForWrite =
-                        datasetForWrite.withColumn(
-                                entry.getKey(), functions.expr(entry.getValue()));
-            }
-            writer.commit(writer.write(datasetForWrite));
-            LOG.info("Successfully compacted partition {} to snapshot branch.", partitionStr);
-            return true;
-        } else {
-            LOG.warn("Table {} is empty, skip compaction.", table);
-            return false;
+        PaimonSparkWriter writer = PaimonSparkWriter.apply(snapshotTable);
+        if (partitionExists) {
+            writer.writeBuilder().withOverwrite();
         }
+        Map<String, String> targetPartition = ParameterUtils.getPartitions(partitionStr).get(0);
+        for (Map.Entry<String, String> entry : targetPartition.entrySet()) {
+            datasetForWrite =
+                    datasetForWrite.withColumn(entry.getKey(), functions.expr(entry.getValue()));
+        }
+        writer.commit(writer.write(datasetForWrite));
+        LOG.info("Successfully compacted partition {} to snapshot branch.", partitionStr);
+        return true;
+    }
+
+    private boolean checkPartitionExists(
+            FileStoreTable snapshotTable, String partition, DataSourceV2Relation relation) {
+        PartitionPredicate snapshotPartitionPredicate =
+                SparkProcedureUtils.convertToPartitionPredicate(
+                        partition,
+                        snapshotTable.schema().logicalPartitionType(),
+                        spark(),
+                        relation);
+
+        return !snapshotTable
+                .newScan()
+                .withPartitionFilter(snapshotPartitionPredicate)
+                .plan()
+                .splits()
+                .isEmpty();
     }
 
     public static ProcedureBuilder builder() {
