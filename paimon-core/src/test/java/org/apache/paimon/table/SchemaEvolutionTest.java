@@ -211,13 +211,14 @@ public class SchemaEvolutionTest {
                         ""));
 
         // bare directive — no user comment, appended to existing blob-field value.
-        // directive + user comment — BLOB_DESCRIPTOR_FIELD newly registered.
+        // directive + user comment, SDK caller passes a BlobType directly (allowed when
+        // accompanied by a directive so the storage mode is explicit).
         schemaManager.commitChanges(
                 ImmutableList.of(
                         SchemaChange.addColumn("picture", DataTypes.BYTES(), "__BLOB_FIELD", null),
                         SchemaChange.addColumn(
                                 "desc_col",
-                                DataTypes.BYTES(),
+                                DataTypes.BLOB(),
                                 "__BLOB_DESCRIPTOR_FIELD; descriptor comment",
                                 null)));
 
@@ -269,7 +270,7 @@ public class SchemaEvolutionTest {
                                                         "__BLOB_FIELD",
                                                         null))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be of BYTES or BINARY type");
+                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
 
         // nested column rejected.
         assertThatThrownBy(

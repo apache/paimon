@@ -356,9 +356,11 @@ public class SchemaManager implements Serializable {
                             String.join(".", addColumn.fieldNames()));
                     DataTypeRoot root = requestedDataType.getTypeRoot();
                     Preconditions.checkArgument(
-                            root == DataTypeRoot.VARBINARY || root == DataTypeRoot.BINARY,
-                            "Column %s declared with a BLOB directive must be of BYTES or "
-                                    + "BINARY type, but was %s.",
+                            root == DataTypeRoot.VARBINARY
+                                    || root == DataTypeRoot.BINARY
+                                    || root == DataTypeRoot.BLOB,
+                            "Column %s declared with a BLOB directive must be of BYTES, "
+                                    + "BINARY or BLOB type, but was %s.",
                             addColumn.fieldNames()[0],
                             requestedDataType);
                     requestedDataType = new BlobType(requestedDataType.isNullable());
@@ -367,7 +369,7 @@ public class SchemaManager implements Serializable {
                     BlobSchemaUtils.modifyBlobOptions(
                             blobDirective.optionKey(), addColumn.fieldNames()[0], newOptions);
                 } else if (requestedDataType.is(DataTypeRoot.BLOB)) {
-                    // We do not permit directly adding blob type column,
+                    // We do not permit adding blob type column without comment hint,
                     // since we don't know the storage mode i.e. native blob or descriptor blob.
                     throw new UnsupportedOperationException(
                             String.format(
