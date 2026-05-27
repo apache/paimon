@@ -366,6 +366,16 @@ public class SchemaManager implements Serializable {
 
                     BlobSchemaUtils.modifyBlobOptions(
                             blobDirective.optionKey(), addColumn.fieldNames()[0], newOptions);
+                } else if (requestedDataType.is(DataTypeRoot.BLOB)) {
+                    // We do not permit directly adding blob type column,
+                    // since we don't know the storage mode i.e. native blob or descriptor blob.
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Adding BLOB column %s requires a comment directive ('%s' "
+                                            + "or '%s') so the storage mode is explicit.",
+                                    String.join(".", addColumn.fieldNames()),
+                                    BlobSchemaUtils.BLOB_FIELD_DIRECTIVE,
+                                    BlobSchemaUtils.BLOB_DESCRIPTOR_FIELD_DIRECTIVE));
                 }
 
                 int id = highestFieldId.incrementAndGet();

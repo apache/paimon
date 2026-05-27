@@ -297,6 +297,17 @@ public class SchemaEvolutionTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported BLOB directive");
 
+        // raw BlobType without any directive rejected — SDK callers must go through the
+        // directive path so the storage mode (blob-field vs blob-descriptor-field) is explicit.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "raw_blob", DataTypes.BLOB(), null, null))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("requires a comment directive");
+
         // SET OPTION on blob-field is rejected (the option is @Immutable).
         TableSchema oldSchema = schemaManager.latest().get();
         LazyField<Boolean> hasSnapshots = new LazyField<>(() -> true);
