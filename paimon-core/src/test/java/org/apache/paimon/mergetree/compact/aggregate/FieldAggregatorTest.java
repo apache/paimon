@@ -504,6 +504,78 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldProductByteOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.agg((byte) 64, (byte) 2))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldProductAgg.agg((byte) -64, (byte) 4))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductShortOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.agg((short) 1000, (short) 100))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldProductAgg.agg(Short.MIN_VALUE, (short) 2))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductIntOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new IntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.agg(100_000, 100_000))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldProductAgg.agg(Integer.MIN_VALUE, -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductLongOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.agg(Long.MAX_VALUE, 2L))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldProductAgg.agg(Long.MIN_VALUE, -1L))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductByteRetractOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new TinyIntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.retract(Byte.MIN_VALUE, (byte) -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductShortRetractOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new SmallIntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.retract(Short.MIN_VALUE, (short) -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductIntRetractOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new IntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.retract(Integer.MIN_VALUE, -1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldProductLongRetractOverflow() {
+        FieldProductAgg fieldProductAgg =
+                new FieldProductAggFactory().create(new BigIntType(), null, null);
+        assertThatThrownBy(() -> fieldProductAgg.retract(Long.MIN_VALUE, -1L))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
     public void testFieldProductFloatAgg() {
         FieldProductAgg fieldProductAgg =
                 new FieldProductAggFactory().create(new FloatType(), null, null);

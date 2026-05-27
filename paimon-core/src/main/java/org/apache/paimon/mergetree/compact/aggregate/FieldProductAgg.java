@@ -57,16 +57,16 @@ public class FieldProductAgg extends FieldAggregator {
                 product = fromBigDecimal(mul, mergeFieldDD.precision(), mergeFieldDD.scale());
                 break;
             case TINYINT:
-                product = (byte) ((byte) accumulator * (byte) inputField);
+                product = multiplyExactByte((byte) accumulator, (byte) inputField);
                 break;
             case SMALLINT:
-                product = (short) ((short) accumulator * (short) inputField);
+                product = multiplyExactShort((short) accumulator, (short) inputField);
                 break;
             case INTEGER:
-                product = (int) accumulator * (int) inputField;
+                product = multiplyExactInt((int) accumulator, (int) inputField);
                 break;
             case BIGINT:
-                product = (long) accumulator * (long) inputField;
+                product = multiplyExactLong((long) accumulator, (long) inputField);
                 break;
             case FLOAT:
                 product = (float) accumulator * (float) inputField;
@@ -82,6 +82,72 @@ public class FieldProductAgg extends FieldAggregator {
                 throw new IllegalArgumentException(msg);
         }
         return product;
+    }
+
+    private static byte multiplyExactByte(byte a, byte b) {
+        int value = a * b;
+        if (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE) {
+            throw new ArithmeticException(
+                    String.format("byte overflow: %d * %d = %d", a, b, value));
+        }
+        return (byte) value;
+    }
+
+    private static short multiplyExactShort(short a, short b) {
+        int value = a * b;
+        if (value > Short.MAX_VALUE || value < Short.MIN_VALUE) {
+            throw new ArithmeticException(
+                    String.format("short overflow: %d * %d = %d", a, b, value));
+        }
+        return (short) value;
+    }
+
+    private static int multiplyExactInt(int a, int b) {
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("int overflow: %d * %d", a, b));
+        }
+    }
+
+    private static long multiplyExactLong(long a, long b) {
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException e) {
+            throw new ArithmeticException(String.format("long overflow: %d * %d", a, b));
+        }
+    }
+
+    private static byte divideExactByte(byte a, byte b) {
+        int value = a / b;
+        if (value > Byte.MAX_VALUE || value < Byte.MIN_VALUE) {
+            throw new ArithmeticException(
+                    String.format("byte overflow: %d / %d = %d", a, b, value));
+        }
+        return (byte) value;
+    }
+
+    private static short divideExactShort(short a, short b) {
+        int value = a / b;
+        if (value > Short.MAX_VALUE || value < Short.MIN_VALUE) {
+            throw new ArithmeticException(
+                    String.format("short overflow: %d / %d = %d", a, b, value));
+        }
+        return (short) value;
+    }
+
+    private static int divideExactInt(int a, int b) {
+        if (a == Integer.MIN_VALUE && b == -1) {
+            throw new ArithmeticException(String.format("int overflow: %d / %d", a, b));
+        }
+        return a / b;
+    }
+
+    private static long divideExactLong(long a, long b) {
+        if (a == Long.MIN_VALUE && b == -1L) {
+            throw new ArithmeticException(String.format("long overflow: %d / %d", a, b));
+        }
+        return a / b;
     }
 
     @Override
@@ -105,16 +171,16 @@ public class FieldProductAgg extends FieldAggregator {
                     product = fromBigDecimal(div, mergeFieldDD.precision(), mergeFieldDD.scale());
                     break;
                 case TINYINT:
-                    product = (byte) ((byte) accumulator / (byte) inputField);
+                    product = divideExactByte((byte) accumulator, (byte) inputField);
                     break;
                 case SMALLINT:
-                    product = (short) ((short) accumulator / (short) inputField);
+                    product = divideExactShort((short) accumulator, (short) inputField);
                     break;
                 case INTEGER:
-                    product = (int) accumulator / (int) inputField;
+                    product = divideExactInt((int) accumulator, (int) inputField);
                     break;
                 case BIGINT:
-                    product = (long) accumulator / (long) inputField;
+                    product = divideExactLong((long) accumulator, (long) inputField);
                     break;
                 case FLOAT:
                     product = (float) accumulator / (float) inputField;
