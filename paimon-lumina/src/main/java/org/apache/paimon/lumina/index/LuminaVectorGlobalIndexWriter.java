@@ -91,7 +91,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private int count;
     private boolean closed;
 
-    private long logicalRowId;
+    private int logicalRowId;
 
     public LuminaVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
