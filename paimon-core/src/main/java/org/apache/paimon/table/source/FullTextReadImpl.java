@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -34,6 +35,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
 import java.util.ArrayList;
@@ -78,10 +80,24 @@ public class FullTextReadImpl implements FullTextRead {
             return GlobalIndexResult.createEmpty();
         }
 
-        String indexType = splits.get(0).fullTextIndexFiles().get(0).indexType();
-        GlobalIndexer globalIndexer =
-                GlobalIndexerFactoryUtils.load(indexType)
-                        .create(textColumn, table.coreOptions().toConfiguration());
+        IndexFileMeta firstFile = splits.get(0).fullTextIndexFiles().get(0);
+        String indexType = firstFile.indexType();
+        GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
+        GlobalIndexer globalIndexer;
+        if (firstMeta.indexFieldId() == GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID) {
+            RowType rowType = table.rowType();
+            List<DataField> fields = new ArrayList<>();
+            for (int id : firstMeta.extraFieldIds()) {
+                fields.add(rowType.getField(id));
+            }
+            globalIndexer =
+                    GlobalIndexerFactoryUtils.load(indexType)
+                            .create(fields, table.coreOptions().toConfiguration());
+        } else {
+            globalIndexer =
+                    GlobalIndexerFactoryUtils.load(indexType)
+                            .create(textColumn, table.coreOptions().toConfiguration());
+        }
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
