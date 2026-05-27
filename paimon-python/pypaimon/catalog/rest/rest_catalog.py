@@ -646,16 +646,18 @@ class RESTCatalog(Catalog):
         Get FileIO for data access, supporting FUSE local path mapping.
         """
         if self._fuse_resolver is not None:
-            return self._fuse_resolver.get_file_io(
+            file_io = self._fuse_resolver.get_file_io(
                 table_path, identifier, self.data_token_enabled,
                 rest_token_file_io_factory=lambda: RESTTokenFileIO(
                     identifier, table_path, self.context.options),
                 default_file_io_factory=lambda: self.file_io_from_options(table_path),
             )
-
-        # Fallback to original logic
-        return RESTTokenFileIO(identifier, table_path, self.context.options) \
-            if self.data_token_enabled else self.file_io_from_options(table_path)
+        elif self.data_token_enabled:
+            file_io = RESTTokenFileIO(identifier, table_path, self.context.options)
+        else:
+            file_io = self.file_io_from_options(table_path)
+        return CachingFileIO.wrap_with_caching_if_needed(
+            file_io, self.context.options, self._cache_manager)
 
     def load_table(self,
                    identifier: Identifier,

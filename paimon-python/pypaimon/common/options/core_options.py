@@ -16,15 +16,14 @@
 # under the License.
 
 import sys
+from datetime import timedelta
 from enum import Enum
 from typing import Dict, Optional
 
-from datetime import timedelta
-
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
-from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.config_option import ConfigOption
+from pypaimon.common.options.config_options import ConfigOptions
 
 
 class ExternalPathStrategy(str, Enum):
@@ -220,6 +219,28 @@ class CoreOptions:
         )
     )
 
+    BLOB_EXTERNAL_STORAGE_PATH: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "The external storage path where raw BLOB data from fields configured "
+            "by 'blob-external-storage-field' is written at write time. "
+            "Orphan file cleanup is not applied to this path."
+        )
+    )
+
+    BLOB_EXTERNAL_STORAGE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') "
+            "whose raw data will be written to external storage at write time. "
+            "The external storage path is configured via 'blob-external-storage-path'."
+        )
+    )
+
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("target-file-size")
         .memory_type()
@@ -233,6 +254,21 @@ class CoreOptions:
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description("The target file size for blob files.")
     )
+
+    VECTOR_FILE_FORMAT: ConfigOption[str] = (
+        ConfigOptions.key("vector.file.format")
+        .string_type()
+        .no_default_value()
+        .with_description("Store VECTOR type columns separately in the specified file format.")
+    )
+
+    VECTOR_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("vector.target-file-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Target file size for vector data. Default is the same as target-file-size.")
+    )
+
     DATA_FILE_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("data-file.prefix")
         .string_type()
@@ -633,6 +669,19 @@ class CoreOptions:
             return {str(field).strip() for field in value if str(field).strip()}
         return set()
 
+    def blob_external_storage_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
+
+    def blob_external_storage_path(self, default=None):
+        return self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, default)
+
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
                                 MemorySize.of_mebi_bytes(
@@ -647,6 +696,20 @@ class CoreOptions:
         """
         if self.options.contains(CoreOptions.BLOB_TARGET_FILE_SIZE):
             return self.options.get(CoreOptions.BLOB_TARGET_FILE_SIZE, None).get_bytes()
+        elif default is not None:
+            return MemorySize.parse(default).get_bytes()
+        else:
+            return self.target_file_size(has_primary_key=False)
+
+    def vector_file_format(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
+
+    def with_vector_format(self) -> bool:
+        return self.options.contains(CoreOptions.VECTOR_FILE_FORMAT)
+
+    def vector_target_file_size(self, default=None):
+        if self.options.contains(CoreOptions.VECTOR_TARGET_FILE_SIZE):
+            return self.options.get(CoreOptions.VECTOR_TARGET_FILE_SIZE, None).get_bytes()
         elif default is not None:
             return MemorySize.parse(default).get_bytes()
         else:

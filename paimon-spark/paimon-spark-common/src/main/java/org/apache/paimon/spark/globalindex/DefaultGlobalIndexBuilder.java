@@ -38,6 +38,9 @@ import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collections;
@@ -49,6 +52,7 @@ import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileM
 /** Default global index builder. */
 public class DefaultGlobalIndexBuilder implements Serializable {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DefaultGlobalIndexBuilder.class);
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
@@ -129,15 +133,34 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                 GlobalIndexMultiColumnWriter multiWriter =
                         (GlobalIndexMultiColumnWriter) indexWriter;
                 int[] projection = new int[indexFields.size()];
+                InternalRow.FieldGetter[] getters = new InternalRow.FieldGetter[indexFields.size()];
                 for (int i = 0; i < indexFields.size(); i++) {
-                    projection[i] = readType.getFieldIndex(indexFields.get(i).name());
+                    DataField field = indexFields.get(i);
+                    projection[i] = readType.getFieldIndex(field.name());
+                    getters[i] =
+                            InternalRow.createFieldGetter(
+                                    field.type(), readType.getFieldIndex(field.name()));
                 }
                 ProjectedRow projectedRow = ProjectedRow.from(projection);
-                rows.forEachRemaining(
-                        row -> {
-                            multiWriter.write(projectedRow.replaceRow(row));
-                            rowCounter.add(1);
-                        });
+                while (rows.hasNext()) {
+                    InternalRow row = rows.next();
+                    boolean hasNull = false;
+                    for (InternalRow.FieldGetter getter : getters) {
+                        if (getter.getFieldOrNull(row) == null) {
+                            hasNull = true;
+                            break;
+                        }
+                    }
+                    if (hasNull) {
+                        LOG.info(
+                                "Null value in indexed columns, stopping shard [{}, {}].",
+                                rowRange.from,
+                                rowRange.to);
+                        break;
+                    }
+                    multiWriter.write(projectedRow.replaceRow(row));
+                    rowCounter.add(1);
+                }
             } else {
                 DataField indexField = indexFields.get(0);
                 GlobalIndexSingletonWriter singleWriter = (GlobalIndexSingletonWriter) indexWriter;

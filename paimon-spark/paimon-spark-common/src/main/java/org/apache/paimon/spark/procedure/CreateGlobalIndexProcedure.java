@@ -45,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -127,6 +128,17 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         .map(String::trim)
                                         .filter(s -> !s.isEmpty())
                                         .collect(Collectors.toList());
+                        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
+                        checkArgument(
+                                indexColumns.size() == new HashSet<>(indexColumns).size(),
+                                "Duplicate index columns are not allowed: %s",
+                                indexColumns);
+                        // No hard cap on the number of index columns: unlike row-store B-tree
+                        // indexes (e.g. MySQL 16, PostgreSQL 32) whose limit comes from composing
+                        // columns into a single key, the global index is built on per-type index
+                        // frameworks. Whether multiple columns are supported, and any practical
+                        // limit, is decided by each index type (single-column types reject
+                        // multi-column via UnsupportedOperationException).
                         for (String col : indexColumns) {
                             checkArgument(
                                     rowType.containsField(col),

@@ -159,15 +159,23 @@ trait SparkShim {
       notMatchedBySourceActions: Seq[MergeAction],
       withSchemaEvolution: Boolean): MergeIntoTable
 
+  // Spark 3.4 added `notMatchedBySourceActions` to `MergeIntoTable`. On 3.2/3.3 the field doesn't
+  // exist on the AST, so this returns `Seq.empty`. Lets `paimon-spark-common` (which compiles
+  // against 3.5/4.1) reference NMBS via a single accessor that works on all minor versions.
+  def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction]
+
+  // Per-version shim: Spark 4.1 added a 3rd `fromStar: Boolean = false` field. A 2-arg call site
+  // compiled against 4.1 emits an `apply$default$3()` lookup absent on 4.0. Paimon tracks star
+  // intent via [[PaimonMergeActionTags]], so `fromStar` stays unused here.
+  def createUpdateAction(condition: Option[Expression], assignments: Seq[Assignment]): UpdateAction
+
+  def createInsertAction(condition: Option[Expression], assignments: Seq[Assignment]): InsertAction
+
   def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[org.apache.spark.sql.catalyst.expressions.AttributeReference])
       : DataSourceV2Relation
-
-  def copyUpdateAction(action: UpdateAction, assignments: Seq[Assignment]): UpdateAction
-
-  def copyInsertAction(action: InsertAction, assignments: Seq[Assignment]): InsertAction
 
   /**
    * Returns the list of "early" substitution rules Paimon needs to apply on a parsed view plan.

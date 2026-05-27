@@ -148,6 +148,18 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       </td>
     </tr>
     <tr>
+      <td><h5>blob-view.resolve.enabled</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>true</td>
+      <td>Boolean</td>
+      <td>
+        Controls whether <code>blob-view-field</code> values are resolved to the upstream BLOB
+        content at read time. Set this dynamic option to <code>false</code> when forwarding blob view
+        references from one view table to another view table and you want the target table to keep
+        referencing the original upstream BLOB.
+      </td>
+    </tr>
+    <tr>
       <td><h5>blob-external-storage-field</h5></td>
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>(none)</td>
@@ -372,6 +384,36 @@ FROM `image_table$row_tracking`;
 ```
 
 Reads from `image_view_table.image_ref` return the referenced BLOB bytes in the same way as normal blob fields. The referenced upstream table and row must remain available for the view to be resolved.
+
+#### Forward Blob View References
+
+By default, reading a blob view field resolves the `BlobViewStruct` and returns the upstream BLOB
+content. If you want to import data from one blob view table into another blob view table without
+copying the BLOB bytes, read the source table with `blob-view.resolve.enabled=false` and write the
+result into a target field configured by `blob-view-field`.
+
+With this option disabled, Paimon preserves the serialized `BlobViewStruct` during reads. When the
+preserved value is written to another blob view field, the target table stores the same upstream
+reference instead of creating a chained view reference.
+
+For example, if table `T1` contains blob view references to BLOBs in table `T0`, importing `T1` into
+`T2` with `blob-view.resolve.enabled=false` makes `T2` keep referencing `T0` directly.
+
+```sql
+CREATE TABLE t2 (
+    id INT,
+    image_ref BYTES
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'blob-view-field' = 'image_ref'
+);
+
+-- Flink SQL example: the source table is read with blob view resolution disabled.
+INSERT INTO t2
+SELECT id, image_ref
+FROM t1 /*+ OPTIONS('blob-view.resolve.enabled'='false') */;
+```
 
 ### MERGE INTO Support
 

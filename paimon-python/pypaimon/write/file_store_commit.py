@@ -39,6 +39,7 @@ from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import ConflictDetection
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
 
@@ -330,21 +331,6 @@ class FileStoreCommit:
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
-        # Check if row tracking is enabled
-        row_tracking_enabled = self.table.options.row_tracking_enabled()
-
-        # Apply row tracking logic if enabled
-        next_row_id = None
-        if row_tracking_enabled:
-            # Assign snapshot ID to delta files
-            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
-
-            # Get the next row ID start from the latest snapshot
-            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
-
-            # Assign row IDs to new files and get the next row ID for the snapshot
-            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
-
         # Conflict detection: read base entries from latest snapshot, then check conflicts
         if detect_conflicts and latest_snapshot is not None:
             base_entries = self.commit_scanner.read_all_entries_from_changed_partitions(
@@ -357,6 +343,14 @@ class FileStoreCommit:
                     if self.rollback.try_to_rollback(latest_snapshot):
                         return RetryResult(latest_snapshot, conflict_exception)
                 raise conflict_exception
+
+        # Apply row tracking logic after conflict detection (matches Java ordering)
+        row_tracking_enabled = self.table.options.row_tracking_enabled()
+        next_row_id = None
+        if row_tracking_enabled:
+            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
+            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
 
         try:
             new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
@@ -737,8 +731,14 @@ class FileStoreCommit:
         ]
 
     def _assign_snapshot_id(self, snapshot_id: int, commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
-        """Assign snapshot ID to all commit entries."""
-        return [entry.assign_sequence_number(snapshot_id, snapshot_id) for entry in commit_entries]
+        """Assign snapshot ID to delta entries whose minSequenceNumber is 0."""
+        result = []
+        for entry in commit_entries:
+            if entry.file.min_sequence_number == 0:
+                result.append(entry.assign_sequence_number(snapshot_id, snapshot_id))
+            else:
+                result.append(entry)
+        return result
 
     def _get_next_row_id_start(self, latest_snapshot) -> int:
         """Get the next row ID start from the latest snapshot."""
@@ -747,47 +747,60 @@ class FileStoreCommit:
         return 0
 
     def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
-        """
-        Assign row tracking metadata (first_row_id) to new files.
+        """Assign row tracking metadata (first_row_id) to new files.
+
+        Aligned with Java RowTrackingCommitUtils.assignRowTrackingMeta.
         """
         if not commit_entries:
             return commit_entries, first_row_id_start
 
         row_id_assigned = []
         start = first_row_id_start
-        current_data_start = first_row_id_start
-        blob_start_by_field = {}
+        blob_start_default = first_row_id_start
+        blob_starts = {}
+        vector_store_start = first_row_id_start
 
         for entry in commit_entries:
             assert entry.file.file_source is not None, \
                 f"file_source must be present for row-tracking table, file={entry.file.file_name}"
 
-            # Check if this is an append file that needs row ID assignment
-            if (entry.kind == 0 and  # ADD kind
-                    entry.file.file_source == 0 and  # APPEND file source
-                    entry.file.first_row_id is None):  # No existing first_row_id
+            write_cols = entry.file.write_cols
+            contains_row_id = (
+                write_cols is not None
+                and SpecialFields.ROW_ID.name in write_cols
+            )
+
+            if (entry.file.file_source == 0
+                    and entry.file.first_row_id is None
+                    and not contains_row_id):
+                row_count = entry.file.row_count
 
                 if DataFileMeta.is_blob_file(entry.file.file_name):
-                    # Handle blob files specially. Each blob field tracks row ids independently.
-                    if current_data_start >= start:
+                    blob_field_name = entry.file.write_cols[0]
+                    blob_start = blob_starts.get(blob_field_name, blob_start_default)
+                    if blob_start >= start:
                         raise RuntimeError(
-                            f"This is a bug, blobStart {current_data_start} should be less than start {start} "
-                            f"when assigning a blob entry file."
+                            f"This is a bug, blobStart {blob_start} should be less than "
+                            f"start {start} when assigning a blob entry file."
                         )
-                    row_count = entry.file.row_count
-                    blob_field_key = tuple(entry.file.write_cols or [])
-                    field_blob_start = blob_start_by_field.get(blob_field_key, current_data_start)
-                    row_id_assigned.append(entry.assign_first_row_id(field_blob_start))
-                    blob_start_by_field[blob_field_key] = field_blob_start + row_count
+                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
+                    blob_starts[blob_field_name] = blob_start + row_count
+
+                elif DataFileMeta.is_vector_file(entry.file.file_name):
+                    if vector_store_start >= start:
+                        raise RuntimeError(
+                            f"This is a bug, vectorStoreStart {vector_store_start} should be "
+                            f"less than start {start} when assigning a vector-store entry file."
+                        )
+                    row_id_assigned.append(entry.assign_first_row_id(vector_store_start))
+                    vector_store_start += row_count
+
                 else:
-                    # Handle regular files
-                    row_count = entry.file.row_count
                     row_id_assigned.append(entry.assign_first_row_id(start))
-                    current_data_start = start
-                    blob_start_by_field.clear()
+                    blob_start_default = start
+                    blob_starts.clear()
                     start += row_count
             else:
-                # For compact files or files that already have first_row_id, don't assign
                 row_id_assigned.append(entry)
 
         return row_id_assigned, start

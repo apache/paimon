@@ -244,6 +244,178 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testUpdateColumnNullability() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.BIGINT())
+                        .build();
+        schemaManager.createTable(schema);
+
+        // nullable -> NOT NULL (disabled by default)
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnNullability("f0", false))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("nullable to non nullable");
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")));
+
+        // nullable -> NOT NULL
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability("f0", false)));
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isFalse();
+
+        // NOT NULL -> nullable
+        tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability("f0", true)));
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isTrue();
+    }
+
+    @Test
+    public void testUpdatePrimaryKeyNullability() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.BIGINT())
+                        .primaryKey("k")
+                        .build();
+        schemaManager.createTable(schema);
+
+        List<SchemaChange> changes =
+                Collections.singletonList(SchemaChange.updateColumnNullability("k", true));
+        assertThatThrownBy(() -> schemaManager.commitChanges(changes))
+                .hasMessageContaining("Cannot change nullability of primary key");
+    }
+
+    @Test
+    public void testUpdateFieldTypeWithNullabilityChange() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.BIGINT())
+                        .build();
+        schemaManager.createTable(schema);
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")));
+
+        // updateColumnType with keepNullability=true should preserve nullability
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType(
+                                        "f0", DataTypes.BIGINT().notNull(), true)));
+        assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isTrue();
+
+        // updateColumnType with keepNullability=false should update nullability
+        tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType(
+                                        "f0", DataTypes.DOUBLE().notNull(), false)));
+        assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.DOUBLE().notNull());
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isFalse();
+    }
+
+    @Test
+    public void testUpdateNestedColumnNullability() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.INT()),
+                        new DataField(3, "f2", DataTypes.BIGINT()));
+        RowType outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", innerType));
+
+        Schema schema =
+                new Schema(
+                        outerType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.createTable(schema);
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")));
+
+        // update nested field nullability
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability(
+                                        new String[] {"v", "f1"}, false)));
+        RowType resultType = tableSchema.logicalRowType();
+        RowType nestedType = (RowType) resultType.getFields().get(1).type();
+        assertThat(nestedType.getFields().get(0).type().isNullable()).isFalse();
+        assertThat(nestedType.getFields().get(1).type().isNullable()).isTrue();
+    }
+
+    @Test
+    public void testUpdateColumnNullabilityWithData() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(GenericRow.of(1, 1L));
+        write.write(GenericRow.of(2, null));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                SchemaChange.setOption(
+                        CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false"));
+        // change f0 to NOT NULL
+        schemaManager.commitChanges(SchemaChange.updateColumnNullability("f0", false));
+
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        // data written before nullability change should still be readable
+        List<String> rows = readRecords(table, null);
+        assertThat(rows).containsExactlyInAnyOrder("1, 1", "2, NULL");
+
+        // write new data after nullability change
+        write = table.newWrite(commitUser);
+        write.write(GenericRow.of(3, 3L));
+        commit = table.newCommit(commitUser);
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        rows = readRecords(table, null);
+        assertThat(rows).containsExactlyInAnyOrder("1, 1", "2, NULL", "3, 3");
+    }
+
+    @Test
     public void testRenameField() throws Exception {
         Schema schema =
                 new Schema(
