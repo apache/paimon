@@ -489,12 +489,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             Function<ManifestEntry, T> converter,
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
-        Function<ManifestEntry, T> finalConverter =
-                dropStats ? e -> converter.apply(dropStats(e)) : converter;
 
         Filter<InternalRow> entryRowFilter = createEntryRowFilter();
 
-        List<T> entries =
+        List<ManifestEntry> entries =
                 manifestFileFactory
                         .create()
                         .withCacheMetrics(
@@ -502,16 +500,21 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
-                                entryRowFilter,
+                                manifestsReader.partitionFilter(),
+                                createBucketFilter(),
                                 entryRowFilter.and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
-                                                && filterByStats(entry),
-                                finalConverter);
-        LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
-        return entries;
+                                                && filterByStats(entry));
+
+        List<T> result = new ArrayList<>(entries.size());
+        for (ManifestEntry entry : entries) {
+            result.add(converter.apply(dropStats ? dropStats(entry) : entry));
+        }
+        LOG.info("Read {} manifest entries from {}", result.size(), manifest.fileName());
+        return result;
     }
 
     protected ManifestEntry dropStats(ManifestEntry entry) {
