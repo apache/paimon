@@ -600,7 +600,7 @@ public class GenericIndexTopoBuilder {
                             createIndexWriter(table, indexType, indexField, mergedOptions);
 
             try {
-                long rowsWritten = 0;
+                long rowsSeen = 0;
                 long lastRowId = Long.MIN_VALUE;
                 try (RecordReader<InternalRow> reader = tableRead.createReader(task.split);
                         CloseableIterator<InternalRow> iter = reader.toCloseableIterator()) {
@@ -627,34 +627,33 @@ public class GenericIndexTopoBuilder {
                         // Only write rows within this shard's range
                         if (currentRowId >= task.shardRange.from) {
                             Object fieldData = indexFieldGetter.getFieldOrNull(row);
-                            if (fieldData == null) {
-                                LOG.info(
-                                        "Null vector at rowId={}, stopping shard [{}, {}].",
-                                        currentRowId,
-                                        task.shardRange.from,
-                                        task.shardRange.to);
-                                break;
-                            }
                             indexWriter.write(fieldData);
-                            rowsWritten++;
+                            rowsSeen++;
                         }
                     }
                 }
 
                 List<ResultEntry> resultEntries = indexWriter.finish();
+                if (!resultEntries.isEmpty() && resultEntries.get(0).rowCount() != rowsSeen) {
+                    LOG.warn(
+                            "rowCount mismatch: writer reported {} but caller saw {} rows",
+                            resultEntries.get(0).rowCount(),
+                            rowsSeen);
+                }
                 long elapsed = System.currentTimeMillis() - startTime;
                 LOG.info(
-                        "Finished shard [{}, {}]: wrote {} rows, "
+                        "Finished shard [{}, {}]: saw {} rows, "
                                 + "produced {} result entries in {} ms.",
                         task.shardRange.from,
                         task.shardRange.to,
-                        rowsWritten,
+                        rowsSeen,
                         resultEntries.size(),
                         elapsed);
 
-                if (rowsWritten == 0) {
+                if (resultEntries.isEmpty()) {
                     LOG.warn(
-                            "Shard [{}, {}] produced 0 rows, skipping index flush.",
+                            "Shard [{}, {}] produced no index (all null or empty), "
+                                    + "skipping index flush.",
                             task.shardRange.from,
                             task.shardRange.to);
                     return;
