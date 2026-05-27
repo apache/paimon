@@ -42,7 +42,6 @@ import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -81,19 +80,17 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private final LuminaVectorIndexOptions options;
     private final int dim;
 
-    /** Temporary file storing vectors as raw native-order floats. */
+    /** Temporary file storing records as [rowId (long)][float * dim] in native byte order. */
     private File tempVectorFile;
 
     private FileChannel writeChannel;
     private ByteBuffer writeBuf;
 
+    private final int recordSizeInBytes;
     private int count;
     private boolean closed;
 
     private long logicalRowId;
-    private long currentSegmentStart;
-    private long currentSegmentCount;
-    private final List<long[]> segments = new ArrayList<>();
 
     public LuminaVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
@@ -104,6 +101,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         this.dim = options.dimension();
         this.count = 0;
         this.closed = false;
+        this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
 
         validateFieldType(fieldType);
 
@@ -145,26 +143,32 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     @Override
     public void write(Object fieldData) {
         if (fieldData == null) {
-            flushSegmentMeta();
             logicalRowId++;
             return;
         }
 
-        if (currentSegmentCount == 0) {
-            currentSegmentStart = logicalRowId;
-        }
+        // Validate before writing anything to avoid partial records in temp file
+        float[] validated = validateVector(fieldData);
 
-        int bytesNeeded = dim * Float.BYTES;
-        if (writeBuf.remaining() < bytesNeeded) {
+        if (writeBuf.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
         }
+        writeBuf.putLong(logicalRowId);
+        for (int i = 0; i < dim; i++) {
+            writeBuf.putFloat(validated[i]);
+        }
+        logicalRowId++;
+        count++;
+    }
 
+    private float[] validateVector(Object fieldData) {
+        float[] result = new float[dim];
         if (fieldData instanceof float[]) {
             float[] vector = (float[]) fieldData;
             checkDimension(vector.length);
             for (int i = 0; i < dim; i++) {
                 checkFinite(vector[i], i);
-                writeBuf.putFloat(vector[i]);
+                result[i] = vector[i];
             }
         } else if (fieldData instanceof InternalVector) {
             InternalVector vector = (InternalVector) fieldData;
@@ -172,7 +176,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             for (int i = 0; i < dim; i++) {
                 float v = vector.getFloat(i);
                 checkFinite(v, i);
-                writeBuf.putFloat(v);
+                result[i] = v;
             }
         } else if (fieldData instanceof InternalArray) {
             InternalArray array = (InternalArray) fieldData;
@@ -183,22 +187,13 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                 }
                 float v = array.getFloat(i);
                 checkFinite(v, i);
-                writeBuf.putFloat(v);
+                result[i] = v;
             }
         } else {
             throw new RuntimeException(
                     "Unsupported vector type: " + fieldData.getClass().getName());
         }
-        currentSegmentCount++;
-        logicalRowId++;
-        count++;
-    }
-
-    private void flushSegmentMeta() {
-        if (currentSegmentCount > 0) {
-            segments.add(new long[] {currentSegmentStart, currentSegmentCount});
-            currentSegmentCount = 0;
-        }
+        return result;
     }
 
     private void flushWriteBuffer() {
@@ -216,8 +211,10 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     @Override
     public List<ResultEntry> finish() {
         try {
-            flushSegmentMeta();
             if (count == 0) {
+                writeChannel.close();
+                writeChannel = null;
+                writeBuf = null;
                 return Collections.emptyList();
             }
             // Flush remaining data and close the write channel
@@ -257,7 +254,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             long phaseStart = System.currentTimeMillis();
             LOG.info("Lumina pretrain phase started");
             try (FileBackedDataset ds =
-                    new FileBackedDataset(tempVectorFile, dim, count, segments, "pretrain")) {
+                    new FileBackedDataset(tempVectorFile, dim, count, "pretrain")) {
                 index.pretrainFrom(ds);
             }
             LOG.info(
@@ -266,7 +263,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             phaseStart = System.currentTimeMillis();
             LOG.info("Lumina insert phase started");
             try (FileBackedDataset ds =
-                    new FileBackedDataset(tempVectorFile, dim, count, segments, "insert")) {
+                    new FileBackedDataset(tempVectorFile, dim, count, "insert")) {
                 index.insertFrom(ds);
             }
             LOG.info("Lumina insert phase done in {} ms", System.currentTimeMillis() - phaseStart);
@@ -285,6 +282,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                     System.currentTimeMillis() - buildStart);
 
             LuminaIndexMeta meta = new LuminaIndexMeta(options.toLuminaOptions());
+            // rowCount = logical rows including nulls (not just indexed vectors)
             return new ResultEntry(fileName, logicalRowId, meta.serialize());
         }
     }
@@ -358,6 +356,18 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
     }
 
+    private static int checkedRecordSize(int dim, int bufferCapacity) {
+        long recordSize = Long.BYTES + (long) dim * Float.BYTES;
+        if (recordSize > bufferCapacity || recordSize > Integer.MAX_VALUE) {
+            throw new IllegalStateException(
+                    "Vector record size "
+                            + recordSize
+                            + " exceeds buffer capacity "
+                            + bufferCapacity);
+        }
+        return (int) recordSize;
+    }
+
     @Override
     public void close() {
         if (!closed) {
@@ -385,29 +395,24 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         private final FileChannel channel;
         private final int dim;
         private final int totalCount;
+        private final int recordSizeInBytes;
         private int cursor;
         private final ByteBuffer readBuf;
         private final String phase;
         private int lastLoggedPercent;
-        private final List<long[]> segments;
-        private int segIdx;
-        private long offsetInSeg;
 
-        FileBackedDataset(File file, int dim, int totalCount, List<long[]> segments, String phase)
-                throws IOException {
+        FileBackedDataset(File file, int dim, int totalCount, String phase) throws IOException {
             this.raf = new RandomAccessFile(file, "r");
             this.channel = raf.getChannel();
             this.dim = dim;
             this.totalCount = totalCount;
+            this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
             this.cursor = 0;
             this.readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
             this.readBuf.order(ByteOrder.nativeOrder());
             this.readBuf.limit(0); // empty initially
             this.phase = phase;
             this.lastLoggedPercent = -1;
-            this.segments = segments;
-            this.segIdx = 0;
-            this.offsetInSeg = 0;
         }
 
         @Override
@@ -429,46 +434,19 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             int maxByVectorBuf = vectorBuf.length / dim;
             int batchSize = Math.min(Math.min(maxByVectorBuf, idBuf.length), remaining);
 
-            int floatsNeeded = batchSize * dim;
-            int destOffset = 0;
             try {
-                while (destOffset < floatsNeeded) {
-                    if (readBuf.remaining() < Float.BYTES) {
-                        // Compact any partial float bytes and refill
-                        readBuf.compact();
-                        int bytesRead = channel.read(readBuf);
-                        readBuf.flip();
-                        if (bytesRead == -1 && readBuf.remaining() < Float.BYTES) {
-                            throw new IOException(
-                                    "Unexpected end of temp file: read "
-                                            + destOffset
-                                            + " floats but need "
-                                            + floatsNeeded);
-                        }
+                for (int i = 0; i < batchSize; i++) {
+                    ensureAvailable(recordSizeInBytes);
+                    idBuf[i] = readBuf.getLong();
+                    int base = i * dim;
+                    for (int d = 0; d < dim; d++) {
+                        vectorBuf[base + d] = readBuf.getFloat();
                     }
-                    int availableFloats = readBuf.remaining() / Float.BYTES;
-                    int toRead = Math.min(availableFloats, floatsNeeded - destOffset);
-                    readBuf.asFloatBuffer().get(vectorBuf, destOffset, toRead);
-                    readBuf.position(readBuf.position() + toRead * Float.BYTES);
-                    destOffset += toRead;
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to read vectors from temp file", e);
             }
 
-            for (int i = 0; i < batchSize; i++) {
-                if (segIdx >= segments.size()) {
-                    throw new IllegalStateException(
-                            "Segment index out of bounds: segments exhausted at vector "
-                                    + (cursor + i));
-                }
-                idBuf[i] = segments.get(segIdx)[0] + offsetInSeg;
-                offsetInSeg++;
-                if (offsetInSeg >= segments.get(segIdx)[1]) {
-                    segIdx++;
-                    offsetInSeg = 0;
-                }
-            }
             cursor += batchSize;
 
             int percent = (int) ((long) cursor * 100 / totalCount);
@@ -480,6 +458,17 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             }
 
             return batchSize;
+        }
+
+        private void ensureAvailable(int minBytes) throws IOException {
+            while (readBuf.remaining() < minBytes) {
+                readBuf.compact();
+                int bytesRead = channel.read(readBuf);
+                readBuf.flip();
+                if (bytesRead == -1) {
+                    throw new IOException("Unexpected end of temp file");
+                }
+            }
         }
 
         @Override
