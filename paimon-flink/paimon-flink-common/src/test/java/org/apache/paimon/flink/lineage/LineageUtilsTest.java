@@ -20,7 +20,10 @@ package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
-import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
+import org.apache.paimon.flink.sink.PaimonDiscardingSink;
+import org.apache.paimon.flink.source.ContinuousFileStoreSource;
+import org.apache.paimon.flink.source.PaimonDataStreamSource;
+import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
@@ -33,6 +36,7 @@ import org.apache.paimon.types.VarCharType;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.streaming.api.lineage.DatasetConfigFacet;
+import org.apache.flink.streaming.api.lineage.DatasetSchemaFacet;
 import org.apache.flink.streaming.api.lineage.LineageDataset;
 import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
@@ -178,6 +182,24 @@ class LineageUtilsTest {
     }
 
     @Test
+    void testSchemaFacetContainsPaimonFields() throws Exception {
+        FileStoreTable table =
+                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
+
+        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table);
+        LineageDataset dataset = vertex.datasets().get(0);
+
+        Map<String, LineageDatasetFacet> facets = dataset.facets();
+        assertThat(facets).containsKey("schema");
+
+        DatasetSchemaFacet schemaFacet = (DatasetSchemaFacet) facets.get("schema");
+        assertThat(schemaFacet.fields()).containsOnlyKeys("f0", "f1", "f2");
+        assertThat(schemaFacet.fields().get("f0").type()).isEqualTo("INT NOT NULL");
+        assertThat(schemaFacet.fields().get("f1").type()).isEqualTo("VARCHAR(100)");
+        assertThat(schemaFacet.fields().get("f2").type()).isEqualTo("INT");
+    }
+
+    @Test
     void testScanProviderImplementsLineageVertexProvider() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
@@ -193,16 +215,47 @@ class LineageUtilsTest {
     }
 
     @Test
-    void testSinkProviderImplementsLineageVertexProvider() throws Exception {
+    void testSinkLineageViaPaimonDiscardingSink() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
-        PaimonDataStreamSinkProvider provider =
-                new PaimonDataStreamSinkProvider(dataStream -> null, "paimon.db.sink", table);
+        PaimonDiscardingSink<?> sink = new PaimonDiscardingSink<>(table);
 
-        assertThat(provider).isInstanceOf(LineageVertexProvider.class);
-        LineageVertex vertex = provider.getLineageVertex();
+        assertThat(sink).isInstanceOf(LineageVertexProvider.class);
+        LineageVertex vertex = sink.getLineageVertex();
         assertThat(vertex.datasets()).hasSize(1);
-        assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon.db.sink");
+    }
+
+    @Test
+    void testPaimonDataStreamSourceWrapsMonitorSourceLineageVertex() throws Exception {
+        FileStoreTable table =
+                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
+
+        PaimonDataStreamSource<?, ?, ?> source =
+                new PaimonDataStreamSource<>(
+                        new MonitorSource(table.newReadBuilder(), 10, false, true), table);
+
+        assertThat(source).isInstanceOf(LineageVertexProvider.class);
+        SourceLineageVertex vertex = (SourceLineageVertex) source.getLineageVertex();
+        assertThat(vertex.boundedness()).isEqualTo(Boundedness.BOUNDED);
+        assertThat(vertex.datasets()).hasSize(1);
+        assertThat(vertex.datasets().get(0).name()).isEqualTo(table.fullName());
+    }
+
+    @Test
+    void testPaimonDataStreamSourceWrapsFlinkSourceLineageVertex() throws Exception {
+        FileStoreTable table =
+                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
+
+        PaimonDataStreamSource<?, ?, ?> source =
+                new PaimonDataStreamSource<>(
+                        new ContinuousFileStoreSource(
+                                table.newReadBuilder(), table.options(), null),
+                        table);
+
+        SourceLineageVertex vertex = (SourceLineageVertex) source.getLineageVertex();
+        assertThat(vertex.boundedness()).isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
+        assertThat(vertex.datasets()).hasSize(1);
+        assertThat(vertex.datasets().get(0).name()).isEqualTo(table.fullName());
     }
 }

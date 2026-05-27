@@ -78,7 +78,8 @@ public class LineageUtils {
     public static SourceLineageVertex sourceLineageVertex(
             String name, boolean isBounded, Table table) {
         LineageDataset dataset =
-                new PaimonLineageDataset(name, getNamespace(table), buildConfigMap(table));
+                new PaimonLineageDataset(
+                        name, getNamespace(table), buildConfigMap(table), table.rowType());
         Boundedness boundedness =
                 isBounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
         return new PaimonSourceLineageVertex(boundedness, Collections.singletonList(dataset));
@@ -92,7 +93,8 @@ public class LineageUtils {
      */
     public static LineageVertex sinkLineageVertex(String name, Table table) {
         LineageDataset dataset =
-                new PaimonLineageDataset(name, getNamespace(table), buildConfigMap(table));
+                new PaimonLineageDataset(
+                        name, getNamespace(table), buildConfigMap(table), table.rowType());
         return new PaimonSinkLineageVertex(Collections.singletonList(dataset));
     }
 }
