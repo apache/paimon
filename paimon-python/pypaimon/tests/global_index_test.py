@@ -16,8 +16,16 @@
 # under the License.
 
 import unittest
+from unittest.mock import patch
+
+import pyarrow as pa
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.tests.data_evolution_test_helpers import (
+    BatchModeMixin,
+    DataEvolutionTestBase,
+)
 from pypaimon.utils.range import Range
 
 
@@ -38,3 +46,41 @@ class GlobalIndexTest(unittest.TestCase):
             result = result.and_(other)
 
         self.assertEqual(result.results().cardinality(), 10001)
+
+
+class PlanSnapshotFetchRegressionTest(
+        BatchModeMixin, DataEvolutionTestBase, unittest.TestCase):
+
+    table_options = {
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'global-index.enabled': 'true',
+        'bucket': '-1',
+    }
+
+    def test_plan_fetches_latest_snapshot_only_once(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c'],
+             'age': [10, 20, 30], 'city': ['x', 'y', 'z']},
+            schema=self.pa_schema))
+
+        fresh_table = self.catalog.get_table(table.identifier.get_full_name())
+        rb = fresh_table.new_read_builder()
+        rb = rb.with_filter(rb.new_predicate_builder().equal('id', 1))
+
+        orig_get_latest = SnapshotManager.get_latest_snapshot
+        call_count = [0]
+
+        def counting(self_sm, *args, **kwargs):
+            call_count[0] += 1
+            return orig_get_latest(self_sm, *args, **kwargs)
+
+        with patch.object(SnapshotManager, 'get_latest_snapshot', counting):
+            rb.new_scan().plan().splits()
+
+        self.assertEqual(
+            1, call_count[0],
+            msg=f"Plan fetched latest snapshot {call_count[0]} times — "
+                "duplicate from #7513: manifest_scanner + "
+                "GlobalIndexScanner.create both fetch independently.")

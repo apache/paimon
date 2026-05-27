@@ -82,12 +82,16 @@ class GlobalIndexScanner:
         return GlobalIndexEvaluator(fields, readers_function, self._executor)
 
     @staticmethod
-    def create(table, index_files=None, partition_filter=None, predicate=None) -> Optional['GlobalIndexScanner']:
+    def create(table, index_files=None, partition_filter=None, predicate=None,
+               snapshot=None) -> Optional['GlobalIndexScanner']:
         """Create a GlobalIndexScanner.
 
         Can be called in two ways:
         1. create(table, index_files) - with explicit index files
-        2. create(table, partition_filter=..., predicate=...) - scan index files from snapshot
+        2. create(table, partition_filter=..., predicate=..., snapshot=...) -
+           scan index files from snapshot. ``snapshot`` may be passed in by the
+           caller to avoid a duplicate ``get_latest_snapshot`` REST round-trip
+           (the caller usually already fetched it for manifest scanning).
         """
         from pypaimon.index.index_file_handler import IndexFileHandler
 
@@ -119,7 +123,8 @@ class GlobalIndexScanner:
                 return False
             return global_index_meta.index_field_id in filter_field_ids
 
-        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if snapshot is None:
+            snapshot = table.snapshot_manager().get_latest_snapshot()
         index_file_handler = IndexFileHandler(table=table)
         entries = index_file_handler.scan(snapshot, index_file_filter)
         scanned_index_files = [entry.index_file for entry in entries]
