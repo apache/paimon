@@ -234,7 +234,7 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
         val e = intercept[IllegalArgumentException] {
           spark.sql(s"""COPY INTO $dbName0.copy_unsup
                        |FROM '${dir.getAbsolutePath}'
-                       |FILE_FORMAT = (TYPE = PARQUET)
+                       |FILE_FORMAT = (TYPE = ORC)
                        |""".stripMargin)
         }
         assert(
@@ -1082,5 +1082,344 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     }
 
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_case")
+  }
+
+  // ========== Parquet Tests ==========
+
+  private def withParquetDir(testBody: File => Unit): Unit = {
+    val dir = Files.createTempDirectory("copy_into_parquet_test").toFile
+    try testBody(dir)
+    finally deleteRecursively(dir)
+  }
+
+  private def createParquetFile(
+      dir: File,
+      name: String,
+      data: Seq[Row],
+      schema: org.apache.spark.sql.types.StructType): Unit = {
+    val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+    df.coalesce(1).write.parquet(new File(dir, name).getAbsolutePath)
+  }
+
+  private def createParquetSingleFile(
+      dir: File,
+      fileName: String,
+      data: Seq[Row],
+      schema: org.apache.spark.sql.types.StructType): Unit = {
+    val tmpDir = new File(dir, s"_tmp_$fileName")
+    val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+    df.coalesce(1).write.parquet(tmpDir.getAbsolutePath)
+    val partFile = tmpDir.listFiles().find(_.getName.endsWith(".parquet")).get
+    partFile.renameTo(new File(dir, fileName))
+    deleteRecursively(tmpDir)
+  }
+
+  test("COPY INTO: basic Parquet import") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_basic")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_basic (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType),
+            StructField("name", StringType),
+            StructField("age", IntegerType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_basic
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_basic ORDER BY id"),
+          Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_basic")
+  }
+
+  test("COPY INTO: Parquet column name matching ignores order") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_order")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_order (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema = StructType(
+          Seq(
+            StructField("age", IntegerType),
+            StructField("name", StringType),
+            StructField("id", IntegerType)))
+        createParquetFile(dir, "data", Seq(Row(30, "Alice", 1), Row(25, "Bob", 2)), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_order
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_order ORDER BY id"),
+          Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_order")
+  }
+
+  test("COPY INTO: Parquet with explicit column list") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_cols")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_cols (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice"), Row(2, "Bob")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_cols (id, name)
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_cols ORDER BY id"),
+          Seq(Row(1, "Alice", null), Row(2, "Bob", null)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_cols")
+  }
+
+  test("COPY INTO: Parquet export") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_export")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_export (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_parquet_export VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withParquetDir {
+      dir =>
+        val outputPath = new File(dir, "output").getAbsolutePath
+        spark.sql(s"""COPY INTO '$outputPath'
+                     |FROM $dbName0.copy_parquet_export
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        val readBack = spark.read.parquet(outputPath)
+        checkAnswer(readBack.orderBy("id"), Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_export")
+  }
+
+  test("COPY INTO: Parquet export with COMPRESSION") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_compress")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_compress (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_parquet_compress VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withParquetDir {
+      dir =>
+        val outputPath = new File(dir, "output").getAbsolutePath
+        spark.sql(s"""COPY INTO '$outputPath'
+                     |FROM $dbName0.copy_parquet_compress
+                     |FILE_FORMAT = (TYPE = PARQUET, COMPRESSION = GZIP)
+                     |""".stripMargin)
+
+        val readBack = spark.read.parquet(outputPath)
+        checkAnswer(readBack.orderBy("id"), Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_compress")
+  }
+
+  test("COPY INTO: Parquet export then import round-trip") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_src")
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_dst")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_rt_src (id INT, name STRING, score DOUBLE)")
+    spark.sql(
+      s"INSERT INTO $dbName0.copy_parquet_rt_src VALUES (1, 'Alice', 95.5), (2, 'Bob', 87.3)")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_rt_dst (id INT, name STRING, score DOUBLE)")
+
+    withParquetDir {
+      dir =>
+        val outputPath = new File(dir, "export").getAbsolutePath
+        spark.sql(s"""COPY INTO '$outputPath'
+                     |FROM $dbName0.copy_parquet_rt_src
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_rt_dst
+                     |FROM '$outputPath'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_rt_dst ORDER BY id"),
+          Seq(Row(1, "Alice", 95.5), Row(2, "Bob", 87.3)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_src")
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_dst")
+  }
+
+  test("COPY INTO: Parquet extra fields are ignored") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_extra")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_extra (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType),
+            StructField("name", StringType),
+            StructField("extra", StringType)))
+        createParquetFile(
+          dir,
+          "data",
+          Seq(Row(1, "Alice", "ignore"), Row(2, "Bob", "ignore")),
+          schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_extra
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_extra ORDER BY id"),
+          Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_extra")
+  }
+
+  test("COPY INTO: Parquet missing fields become null") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_missing")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_missing (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice"), Row(2, "Bob")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_missing
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_missing ORDER BY id"),
+          Seq(Row(1, "Alice", null), Row(2, "Bob", null)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_missing")
+  }
+
+  test("COPY INTO: Parquet FORCE=FALSE skips already-loaded files") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_force")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_force (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_force
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_force
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |FORCE = FALSE
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_force ORDER BY id"),
+          Seq(Row(1, "Alice")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_force")
+  }
+
+  test("COPY INTO: Parquet PATTERN filters files") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_pattern")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_pattern (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetSingleFile(dir, "include_data.parquet", Seq(Row(1, "Alice")), schema)
+        createParquetSingleFile(dir, "exclude_data.parquet", Seq(Row(2, "Bob")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_pattern
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |PATTERN = 'include.*'
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_pattern ORDER BY id"),
+          Seq(Row(1, "Alice")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_pattern")
+  }
+
+  test("COPY INTO: Parquet unsupported option errors") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_opt_err")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_opt_err (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice")), schema)
+
+        intercept[IllegalArgumentException] {
+          spark.sql(s"""COPY INTO $dbName0.copy_parquet_opt_err
+                       |FROM '${dir.getAbsolutePath}/data'
+                       |FILE_FORMAT = (TYPE = PARQUET, FIELD_DELIMITER = ',')
+                       |""".stripMargin)
+        }
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_opt_err")
+  }
+
+  test("COPY INTO: Parquet rows_loaded count is accurate") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_count")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_count (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(
+          dir,
+          "data",
+          Seq(Row(1, "Alice"), Row(2, "Bob"), Row(3, "Charlie")),
+          schema)
+
+        val result = spark.sql(s"""COPY INTO $dbName0.copy_parquet_count
+                                  |FROM '${dir.getAbsolutePath}/data'
+                                  |FILE_FORMAT = (TYPE = PARQUET)
+                                  |""".stripMargin)
+
+        val rows = result.collect()
+        val totalLoaded = rows.map(_.getLong(2)).sum
+        assert(totalLoaded == 3)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_count")
   }
 }

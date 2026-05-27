@@ -54,6 +54,8 @@ case class CopyIntoLocationExec(
     fileFormat.formatType match {
       case FileFormatType.JSON =>
         df.write.options(writerOptions).mode(saveMode).json(targetPath)
+      case FileFormatType.PARQUET =>
+        df.write.options(writerOptions).mode(saveMode).parquet(targetPath)
       case _ =>
         df.write.options(writerOptions).mode(saveMode).csv(targetPath)
     }
