@@ -634,6 +634,12 @@ public class GenericIndexTopoBuilder {
                 }
 
                 List<ResultEntry> resultEntries = indexWriter.finish();
+                if (!resultEntries.isEmpty() && resultEntries.get(0).rowCount() != rowsSeen) {
+                    LOG.warn(
+                            "rowCount mismatch: writer reported {} but caller saw {} rows",
+                            resultEntries.get(0).rowCount(),
+                            rowsSeen);
+                }
                 long elapsed = System.currentTimeMillis() - startTime;
                 LOG.info(
                         "Finished shard [{}, {}]: saw {} rows, "

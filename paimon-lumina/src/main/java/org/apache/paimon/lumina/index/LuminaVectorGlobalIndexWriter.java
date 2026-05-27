@@ -149,7 +149,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             return;
         }
 
-        // Validate and materialize into vectorBuf (single pass); float[] is zero-copy
+        // Validation must complete before any buffer/state mutation below
         float[] src = materializeAndValidate(fieldData);
 
         if (writeBuf.remaining() < recordSizeInBytes) {
@@ -481,9 +481,13 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                 if (bytesRead == -1) {
                     throw new IOException("Unexpected end of temp file");
                 }
-                if (bytesRead == 0 && ++zeroReadCount > 100) {
-                    throw new IOException(
-                            "Unable to read from temp file: repeated zero-byte reads");
+                if (bytesRead == 0) {
+                    if (++zeroReadCount > 100) {
+                        throw new IOException(
+                                "Unable to read from temp file: repeated zero-byte reads");
+                    }
+                } else {
+                    zeroReadCount = 0;
                 }
             }
         }
