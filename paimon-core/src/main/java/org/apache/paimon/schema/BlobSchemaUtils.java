@@ -124,6 +124,51 @@ public final class BlobSchemaUtils {
         options.put(blobKey, newValue);
     }
 
+    /**
+     * Removes {@code fieldName} from every BLOB-related comma-separated option (and the legacy
+     * fallback key for {@code blob-descriptor-field}). When the resulting csv becomes empty the
+     * option key is dropped entirely. Used when a BLOB column is being dropped.
+     */
+    public static void removeFromBlobOptions(String fieldName, Map<String, String> options) {
+        ConfigOption<String>[] keys =
+                new ConfigOption[] {
+                    CoreOptions.BLOB_FIELD,
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD,
+                    CoreOptions.BLOB_VIEW_FIELD,
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD
+                };
+        for (ConfigOption<String> option : keys) {
+            removeFromCsvOption(option.key(), fieldName, options);
+            for (FallbackKey fk : option.fallbackKeys()) {
+                removeFromCsvOption(fk.getKey(), fieldName, options);
+            }
+        }
+    }
+
+    private static void removeFromCsvOption(
+            String key, String fieldName, Map<String, String> options) {
+        String existing = options.get(key);
+        if (existing == null || existing.isEmpty()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String v : existing.split(",")) {
+            String trimmed = v.trim();
+            if (trimmed.isEmpty() || trimmed.equals(fieldName)) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(trimmed);
+        }
+        if (sb.length() == 0) {
+            options.remove(key);
+        } else {
+            options.put(key, sb.toString());
+        }
+    }
+
     /** Parsed BLOB directive: the option key to update and the user-facing comment. */
     public static final class ParsedDirective {
         private final String optionKey;

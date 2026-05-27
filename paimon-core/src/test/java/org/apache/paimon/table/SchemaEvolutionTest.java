@@ -314,6 +314,79 @@ public class SchemaEvolutionTest {
                 .hasMessageContaining(CoreOptions.BLOB_FIELD.key());
     }
 
+    @Test
+    public void testDropBlobColumnCleansOptions() throws Exception {
+        // table with one descriptor BLOB col registered in both blob-descriptor-field and
+        // blob-external-storage-field (subset rule), and one normal blob col in blob-field.
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "ext");
+        options.put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "ext");
+        options.put(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/blob-ext");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(1, "pic", DataTypes.BLOB().copy(true)),
+                                            new DataField(2, "ext", DataTypes.BLOB().copy(true))
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // drop the descriptor BLOB column — it must vanish from both descriptor-field and
+        // external-storage-field; the other BLOB column is untouched.
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("ext")));
+
+        TableSchema latest = schemaManager.latest().get();
+        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
+        assertThat(latest.options()).doesNotContainKey(CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        assertThat(latest.options())
+                .doesNotContainKey(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
+    }
+
+    @Test
+    public void testUpdateColumnTypeOnBlobIsRejected() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(1, "pic", DataTypes.BLOB().copy(true)),
+                                            new DataField(2, "raw", DataTypes.BYTES())
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // BLOB -> BYTES rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "pic", DataTypes.BYTES()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("BLOB");
+
+        // BYTES -> BLOB rejected (must be added via ADD COLUMN directive instead).
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "raw", DataTypes.BLOB()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("BLOB");
+    }
+
     private static Map<String, String> blobEnabledOptions() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");

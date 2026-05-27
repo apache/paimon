@@ -111,4 +111,24 @@ public class BlobSchemaUtilsTest {
                 .containsEntry(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "legacy_col,new_col");
         assertThat(opts).doesNotContainKey("blob.stored-descriptor-fields");
     }
+
+    @Test
+    public void testRemoveFromBlobOptions() {
+        // pre-populated with all 4 canonical keys + the legacy fallback for descriptor.
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.BLOB_FIELD.key(), "a,b");
+        opts.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "b,c");
+        opts.put(CoreOptions.BLOB_VIEW_FIELD.key(), "b");
+        opts.put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "b");
+        opts.put("blob.stored-descriptor-fields", "b,legacy");
+
+        BlobSchemaUtils.removeFromBlobOptions("b", opts);
+
+        // b removed from every csv; keys whose csv becomes empty are dropped.
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "a");
+        assertThat(opts).containsEntry(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "c");
+        assertThat(opts).doesNotContainKey(CoreOptions.BLOB_VIEW_FIELD.key());
+        assertThat(opts).doesNotContainKey(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
+        assertThat(opts).containsEntry("blob.stored-descriptor-fields", "legacy");
+    }
 }

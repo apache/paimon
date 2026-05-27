@@ -461,6 +461,9 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof DropColumn) {
                 DropColumn drop = (DropColumn) change;
                 dropColumnValidation(oldTableSchema, drop);
+                if (drop.fieldNames().length == 1) {
+                    BlobSchemaUtils.removeFromBlobOptions(drop.fieldNames()[0], newOptions);
+                }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -477,6 +480,8 @@ public class SchemaManager implements Serializable {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                assertNotChangingBlobColumnType(
+                        newFields, update.fieldNames(), update.newDataType());
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -946,6 +951,28 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotChangingBlobColumnType(
+            List<DataField> fields, String[] fieldNames, DataType newType) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        for (DataField field : fields) {
+            if (!field.name().equals(fieldName)) {
+                continue;
+            }
+            boolean wasBlob = field.type().is(DataTypeRoot.BLOB);
+            boolean willBeBlob = newType.is(DataTypeRoot.BLOB);
+            if (wasBlob || willBeBlob) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change column type involving BLOB: [%s] %s -> %s",
+                                fieldName, field.type(), newType));
+            }
+            return;
         }
     }
 
