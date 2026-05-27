@@ -1422,4 +1422,239 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_count")
   }
+
+  // ==================== FROM (SELECT ...) export tests ====================
+
+  test("COPY INTO location: FROM (SELECT ...) with CSV") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_query (id INT, name STRING, age INT)")
+    spark.sql(
+      s"INSERT INTO $dbName0.copy_export_query VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Carol', 35)")
+
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "query_export").getAbsolutePath
+        val result =
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM (SELECT id, name FROM $dbName0.copy_export_query WHERE age > 28)
+                       |FILE_FORMAT = (TYPE = CSV)
+                       |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getInt(1) >= 1, "file_count should count at least one data file")
+        assert(rows(0).getLong(2) == 2, "Should export 2 rows (Alice age 30 and Carol age 35)")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query")
+  }
+
+  test("COPY INTO location: FROM (SELECT ...) with JSON") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query_json")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_query_json (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_export_query_json VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withJsonDir {
+      dir =>
+        val exportPath = new File(dir, "json_export").getAbsolutePath
+        val result =
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM (SELECT * FROM $dbName0.copy_export_query_json WHERE id = 1)
+                       |FILE_FORMAT = (TYPE = JSON)
+                       |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getLong(2) == 1, "Should export 1 row")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query_json")
+  }
+
+  test("COPY INTO location: FROM (SELECT ...) with aggregation") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query_agg")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_query_agg (dept STRING, salary INT)")
+    spark.sql(
+      s"INSERT INTO $dbName0.copy_export_query_agg VALUES ('A', 100), ('A', 200), ('B', 150)")
+
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "agg_export").getAbsolutePath
+        val result = spark.sql(
+          s"""COPY INTO '$exportPath'
+             |FROM (SELECT dept, SUM(salary) AS total FROM $dbName0.copy_export_query_agg GROUP BY dept)
+             |FILE_FORMAT = (TYPE = CSV)
+             |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getLong(2) == 2, "Should export 2 aggregated rows")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query_agg")
+  }
+
+  test("COPY INTO location: FROM (SELECT ...) with nested parentheses") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_nested")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_nested (id INT, name STRING)")
+    spark.sql(
+      s"INSERT INTO $dbName0.copy_export_nested VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')")
+
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "nested_export").getAbsolutePath
+        // The subquery contains nested parentheses (IN (...)), which only parse correctly with the
+        // balanced-paren grammar rule.
+        val result =
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM (SELECT id, name FROM $dbName0.copy_export_nested WHERE id IN (1, 3))
+                       |FILE_FORMAT = (TYPE = CSV)
+                       |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getLong(2) == 2, "Should export 2 rows (id 1 and 3)")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_nested")
+  }
+
+  test("COPY INTO location: FROM (SELECT ...) with Parquet") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_parquet")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_parquet (dept STRING, salary INT)")
+    spark.sql(s"INSERT INTO $dbName0.copy_export_parquet VALUES ('A', 100), ('A', 200), ('B', 150)")
+
+    withParquetDir {
+      dir =>
+        val exportPath = new File(dir, "parquet_export").getAbsolutePath
+        val result = spark.sql(
+          s"""COPY INTO '$exportPath'
+             |FROM (SELECT dept, COUNT(*) AS cnt FROM $dbName0.copy_export_parquet GROUP BY dept)
+             |FILE_FORMAT = (TYPE = PARQUET)
+             |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getLong(2) == 2, "Should export 2 aggregated rows")
+
+        val exported = spark.read.parquet(exportPath).collect()
+        assert(exported.length == 2, "Parquet output should contain the 2 aggregated rows")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_parquet")
+  }
+
+  test("COPY INTO location: FROM (SELECT ...) with OVERWRITE = TRUE") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query_ow")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_query_ow (id INT)")
+    spark.sql(s"INSERT INTO $dbName0.copy_export_query_ow VALUES (1), (2), (3)")
+
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "ow_export").getAbsolutePath
+
+        // First export writes 3 rows.
+        spark.sql(s"""COPY INTO '$exportPath'
+                     |FROM (SELECT id FROM $dbName0.copy_export_query_ow)
+                     |FILE_FORMAT = (TYPE = CSV)
+                     |""".stripMargin)
+
+        // OVERWRITE = TRUE replaces the previous output with a 1-row result.
+        val result = spark.sql(s"""COPY INTO '$exportPath'
+                                  |FROM (SELECT id FROM $dbName0.copy_export_query_ow WHERE id = 1)
+                                  |FILE_FORMAT = (TYPE = CSV)
+                                  |OVERWRITE = TRUE
+                                  |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getLong(2) == 1, "Overwrite export should report 1 row")
+
+        val exported = spark.read.csv(exportPath).collect()
+        assert(exported.length == 1, "Overwrite must replace the previous 3-row output")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_query_ow")
+  }
+
+  test("COPY INTO location: FROM () empty query is rejected") {
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "empty_export").getAbsolutePath
+        val error = intercept[IllegalArgumentException] {
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM ()
+                       |FILE_FORMAT = (TYPE = CSV)
+                       |""".stripMargin)
+        }
+        assert(error.getMessage.contains("requires a non-empty query"))
+    }
+  }
+
+  test("COPY INTO location: FROM (query) accepts read-only non-SELECT queries (VALUES)") {
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "values_export").getAbsolutePath
+        // A read-only query that is not a plain SELECT (here a VALUES list) is a valid export
+        // source: the only restriction is "no side effects", not "must be a SELECT".
+        val result =
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM (VALUES (1, 'a'), (2, 'b'))
+                       |FILE_FORMAT = (TYPE = CSV)
+                       |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getLong(2) == 2, "Should export 2 rows from the VALUES list")
+    }
+  }
+
+  test("COPY INTO location: FROM (query) rejects statements with side effects") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_reject")
+    spark.sql(s"CREATE TABLE $dbName0.copy_export_reject (id INT)")
+    spark.sql(s"INSERT INTO $dbName0.copy_export_reject VALUES (1), (2)")
+
+    withCsvDir {
+      dir =>
+        val exportPath = new File(dir, "reject_export").getAbsolutePath
+
+        // A DDL statement must be rejected and must NOT actually drop the table.
+        val dropError = intercept[IllegalArgumentException] {
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM (DROP TABLE $dbName0.copy_export_reject)
+                       |FILE_FORMAT = (TYPE = CSV)
+                       |""".stripMargin)
+        }
+        assert(dropError.getMessage.contains("only supports read-only queries"))
+
+        // An INSERT statement must be rejected as well.
+        val insertError = intercept[IllegalArgumentException] {
+          spark.sql(s"""COPY INTO '$exportPath'
+                       |FROM (INSERT INTO $dbName0.copy_export_reject VALUES (3))
+                       |FILE_FORMAT = (TYPE = CSV)
+                       |""".stripMargin)
+        }
+        assert(insertError.getMessage.contains("only supports read-only queries"))
+
+        // INSERT OVERWRITE DIRECTORY must be rejected (on Spark 3.2 it parses to InsertIntoDir,
+        // which is neither a Command nor a ParsedStatement, so it is rejected explicitly) and must
+        // NOT write any files.
+        val outDir = new File(dir, "evil_dir").getAbsolutePath
+        val dirError = intercept[IllegalArgumentException] {
+          spark.sql(
+            s"""COPY INTO '$exportPath'
+               |FROM (INSERT OVERWRITE DIRECTORY '$outDir' USING csv SELECT * FROM $dbName0.copy_export_reject)
+               |FILE_FORMAT = (TYPE = CSV)
+               |""".stripMargin)
+        }
+        assert(dirError.getMessage.contains("only supports read-only queries"))
+        assert(!new File(outDir).exists(), "INSERT OVERWRITE DIRECTORY must not have written files")
+
+        // The table and its original contents are untouched.
+        val rows = spark.sql(s"SELECT * FROM $dbName0.copy_export_reject").collect()
+        assert(rows.length == 2, "Source table must be unchanged by the rejected statements")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_export_reject")
+  }
 }

@@ -23,6 +23,7 @@ import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
@@ -61,6 +62,21 @@ object PaimonUtils {
 
   def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
     SparkShimLoader.shim.classicApi.createDataset(sparkSession, logicalPlan)
+  }
+
+  /**
+   * Parse a read-only query, preferring [[ParserInterface.parseQuery]] which rejects non-query
+   * statements at parse time. `parseQuery` was added in Spark 3.3, so on Spark 3.2 (where it is
+   * absent) we fall back to [[ParserInterface.parsePlan]]. Callers are responsible for handling any
+   * [[org.apache.spark.sql.catalyst.parser.ParseException]] and for any further validation of the
+   * returned plan.
+   */
+  def parseQueryCompat(parser: ParserInterface, sqlText: String): LogicalPlan = {
+    try {
+      parser.parseQuery(sqlText)
+    } catch {
+      case _: NoSuchMethodError => parser.parsePlan(sqlText)
+    }
   }
 
   def normalizeExprs(exprs: Seq[Expression], attributes: Seq[Attribute]): Seq[Expression] = {

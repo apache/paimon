@@ -431,7 +431,7 @@ Parquet columns are matched **by column name** (not by position). Extra columns 
 
 ```sql
 COPY INTO 'target_path'
-FROM table_name
+FROM { table_name | (SELECT ...) }
 FILE_FORMAT = (TYPE = CSV [, option = value, ...])
 [OVERWRITE = TRUE|FALSE]
 ```
@@ -445,11 +445,19 @@ FILE_FORMAT = (TYPE = CSV, HEADER = TRUE, FIELD_DELIMITER = ',')
 OVERWRITE = TRUE;
 ```
 
+**Write from query:**
+
+```sql
+COPY INTO '/export/active_users/'
+FROM (SELECT id, name FROM my_db.users WHERE active = TRUE)
+FILE_FORMAT = (TYPE = CSV, HEADER = TRUE);
+```
+
 #### Write JSON Files
 
 ```sql
 COPY INTO 'target_path'
-FROM table_name
+FROM { table_name | (SELECT ...) }
 FILE_FORMAT = (TYPE = JSON [, option = value, ...])
 [OVERWRITE = TRUE|FALSE]
 ```
@@ -463,11 +471,19 @@ FILE_FORMAT = (TYPE = JSON)
 OVERWRITE = TRUE;
 ```
 
+**JSON export from query:**
+
+```sql
+COPY INTO '/export/recent_events/'
+FROM (SELECT * FROM my_db.events WHERE event_date > '2024-01-01')
+FILE_FORMAT = (TYPE = JSON);
+```
+
 #### Write Parquet Files
 
 ```sql
 COPY INTO 'target_path'
-FROM table_name
+FROM { table_name | (SELECT ...) }
 FILE_FORMAT = (TYPE = PARQUET [, option = value, ...])
 [OVERWRITE = TRUE|FALSE]
 ```
@@ -488,6 +504,14 @@ COPY INTO '/export/data_compressed/'
 FROM my_db.events
 FILE_FORMAT = (TYPE = PARQUET, COMPRESSION = GZIP)
 OVERWRITE = TRUE;
+```
+
+**Parquet export from aggregation query:**
+
+```sql
+COPY INTO '/export/summary/'
+FROM (SELECT dept, COUNT(*) AS cnt FROM my_db.employees GROUP BY dept)
+FILE_FORMAT = (TYPE = PARQUET);
 ```
 
 #### FILE_FORMAT Options
@@ -614,10 +638,11 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 
 - **CSV column-count mismatch**: Rows with fewer or more columns than the target schema are treated as malformed records. With `ON_ERROR = CONTINUE`, these rows are skipped and counted as errors.
 - Only **CSV**, **JSON**, and **Parquet** formats are supported.
-- Writing files only supports `FROM table_name`; `FROM (SELECT ...)` is not supported.
 - `SINGLE = TRUE` (single-file output) is not supported.
 - File format options must be specified inline in `FILE_FORMAT = (...)`.
 - File listing is **non-recursive**: only direct files under the source path are processed. Subdirectories are ignored.
 - `PATTERN` matches the **base file name** only (not the full path).
 - Concurrent COPY INTO commands targeting the same table may produce duplicate data.
 - `SKIP_HEADER` only supports values `0` or `1`.
+- `FROM (...)` accepts any read-only query (e.g. `SELECT`, `WITH ... SELECT`, `VALUES`); statements with side effects (e.g. `INSERT`, `INSERT OVERWRITE DIRECTORY`, DDL) are rejected.
+- For a `FROM (...)` export, `rows_written` is an execution-time statistic counted by a separate pass before the files are written. Because the DataFrame is lazy and not cached, writing re-executes the query a second time; if the query is non-deterministic (e.g. uses `rand()`, `current_timestamp()`, or reads a volatile source), the two runs can produce different rows, so `rows_written` may not match the actual file contents. The result is intentionally not staged, so the export does not consume extra executor disk.
