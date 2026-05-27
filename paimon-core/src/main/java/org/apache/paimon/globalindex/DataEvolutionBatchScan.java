@@ -41,6 +41,9 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -56,6 +59,8 @@ import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequ
 
 /** Scan for data evolution table. */
 public class DataEvolutionBatchScan implements DataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
 
     private final FileStoreTable table;
     private final DataTableBatchScan batchScan;
@@ -274,7 +279,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
         }
 
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
-            return scanner.scan(filter);
+            Optional<GlobalIndexResult> result = scanner.scan(filter);
+            if (result.isPresent()) {
+                LOG.info("Scan table '{}' with global index.", table.name());
+            }
+            return result;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

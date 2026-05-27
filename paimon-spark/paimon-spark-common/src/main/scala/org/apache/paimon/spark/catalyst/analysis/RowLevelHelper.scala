@@ -26,7 +26,7 @@ import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeIntoTable, UpdateTable}
 
-trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
+trait RowLevelHelper extends SQLConfHelper {
 
   val operation: RowLevelOp
 

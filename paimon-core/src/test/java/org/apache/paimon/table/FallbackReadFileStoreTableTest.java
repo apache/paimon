@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -27,8 +28,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -53,9 +56,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SchemaEvolutionTableTestBase.rowData;
@@ -331,6 +336,70 @@ public class FallbackReadFileStoreTableTest {
                 throw new IOException("injected fallback failure");
             }
         };
+    }
+
+    /**
+     * Test that FallbackReadScan uses separate partition predicates for main and fallback scans.
+     * When withPartitionFilter(mainPredicate, fallbackPredicate) is called, plan() should only list
+     * partitions matching the corresponding predicate from each branch.
+     */
+    @Test
+    public void testMainAndFallbackPartitionPredicates() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(2, 20));
+
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        writeDataIntoTable(
+                branchTable, 0, rowData(1, 100), rowData(2, 200), rowData(3, 300), rowData(4, 400));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+
+        RowType partitionType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"pt"});
+        PartitionPredicate mainPredicate =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(BinaryRow.singleColumn(1)));
+        PartitionPredicate fallbackPredicate =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(BinaryRow.singleColumn(3)));
+
+        // Case 1: both predicates set, pt=1 from main, pt=3 from fallback
+        assertThat(
+                        readAndCollect(
+                                table,
+                                scan -> scan.withPartitionFilter(mainPredicate, fallbackPredicate)))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(3, 300));
+
+        // Case 2: main predicate is null, fallback predicate set
+        assertThat(readAndCollect(table, scan -> scan.withPartitionFilter(null, fallbackPredicate)))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 300));
+
+        // Case 3: main predicate set, fallback predicate is null
+        assertThat(readAndCollect(table, scan -> scan.withPartitionFilter(mainPredicate, null)))
+                .containsExactlyInAnyOrder(
+                        Pair.of(1, 10), Pair.of(2, 200), Pair.of(3, 300), Pair.of(4, 400));
+
+        // Case 4: both null
+        assertThat(readAndCollect(table, scan -> scan.withPartitionFilter(null, null)))
+                .containsExactlyInAnyOrder(
+                        Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 300), Pair.of(4, 400));
+    }
+
+    private List<Pair<Integer, Integer>> readAndCollect(
+            FallbackReadFileStoreTable table,
+            Consumer<FallbackReadFileStoreTable.FallbackReadScan> consumer)
+            throws Exception {
+        FallbackReadFileStoreTable.FallbackReadScan scan =
+                (FallbackReadFileStoreTable.FallbackReadScan) table.newScan();
+        consumer.accept(scan);
+        List<Pair<Integer, Integer>> result = new ArrayList<>();
+        for (Split split : scan.plan().splits()) {
+            RecordReader<InternalRow> reader = table.newRead().createReader(split);
+            reader.forEachRemaining(r -> result.add(Pair.of(r.getInt(0), r.getInt(1))));
+            reader.close();
+        }
+        return result;
     }
 
     @Test

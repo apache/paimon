@@ -29,11 +29,32 @@ Usage::
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Optional
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     import daft
 
     from pypaimon.table.file_store_table import FileStoreTable
+
+
+def _enrich_options_with_rest_token(
+    catalog_options: Dict[str, str], table: "FileStoreTable"
+) -> Dict[str, str]:
+    # REST catalogs (DLF) keep OSS STS tokens on table.file_io and the bucket on table.table_path,
+    # not in catalog_options; fold both in so Daft's IOConfig routes to OSS with valid credentials.
+    if catalog_options.get("metastore") != "rest":
+        return catalog_options
+    file_io = getattr(table, "file_io", None)
+    if file_io is None or not hasattr(file_io, "try_to_refresh_token"):
+        return catalog_options
+    file_io.try_to_refresh_token()
+    if file_io.token is None:
+        return catalog_options
+    enriched = {**catalog_options, **file_io.token.token}
+    parsed = urlparse(getattr(table, "table_path", "") or "")
+    if parsed.scheme and parsed.netloc:
+        enriched["warehouse"] = f"{parsed.scheme}://{parsed.netloc}"
+    return enriched
 
 
 def _read_table(
@@ -68,17 +89,16 @@ def _read_table(
     if catalog_options is None:
         catalog_options = {}
 
-    io_config = io_config or _convert_paimon_catalog_options_to_io_config(catalog_options)
+    io_config = io_config or _convert_paimon_catalog_options_to_io_config(
+        _enrich_options_with_rest_token(catalog_options, table)
+    )
     io_config = io_config or context.get_context().daft_planning_config.default_io_config
 
     multithreaded_io = runners.get_or_create_runner().name != "ray"
     storage_config = StorageConfig(multithreaded_io, io_config)
 
-    warehouse = catalog_options.get("warehouse", "")
-    scan_catalog_options = {"warehouse": warehouse} if warehouse else {}
-
     source = PaimonDataSource(
-        table, storage_config=storage_config, catalog_options=scan_catalog_options
+        table, storage_config=storage_config, catalog_options=catalog_options
     )
     return source.read()
 

@@ -101,7 +101,7 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
             synchronized (this) {
                 if (borrowed == null) {
                     TantivySearcherPool.PooledEntry entry = searcherPool.borrow(poolKey);
-                    if (entry == null) {
+                    if (entry == null || entry.searcher.isClosed()) {
                         entry = createEntry();
                     }
                     borrowed = entry;

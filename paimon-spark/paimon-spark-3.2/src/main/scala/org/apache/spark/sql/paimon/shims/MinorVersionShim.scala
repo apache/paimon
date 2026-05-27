@@ -38,4 +38,7 @@ object MinorVersionShim {
       notMatchedBySourceActions: Seq[MergeAction]): MergeIntoTable = {
     MergeIntoTable(targetTable, sourceTable, mergeCondition, matchedActions, notMatchedActions)
   }
+
+  // Spark 3.2 has no `notMatchedBySourceActions` field on `MergeIntoTable` (added in 3.4).
+  def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] = Seq.empty
 }

@@ -24,7 +24,8 @@ class OffsetRow(InternalRow):
     """A InternalRow to wrap row with offset."""
 
     def __init__(self, row_tuple: Optional[tuple], offset: int, arity: int,
-                 file_io=None, blob_field_indices: Optional[Iterable[int]] = None):
+                 file_io=None, blob_field_indices: Optional[Iterable[int]] = None,
+                 vector_field_indices: Optional[Iterable[int]] = None):
         self.row_tuple = row_tuple
         self.offset = offset
         self.arity = arity
@@ -32,6 +33,9 @@ class OffsetRow(InternalRow):
         self._file_io = file_io
         self._blob_field_indices: FrozenSet[int] = (
             frozenset(blob_field_indices) if blob_field_indices is not None else frozenset()
+        )
+        self._vector_field_indices: FrozenSet[int] = (
+            frozenset(vector_field_indices) if vector_field_indices is not None else frozenset()
         )
 
     def replace(self, row_tuple: tuple) -> 'OffsetRow':
@@ -57,6 +61,16 @@ class OffsetRow(InternalRow):
         if pos not in self._blob_field_indices:
             raise TypeError(f"Field at position {pos} is not a BLOB field")
         return Blob.from_bytes(self.get_field(pos), self._file_io)
+
+    def get_vector(self, pos: int):
+        from pypaimon.table.row.vector import Vector
+
+        if pos not in self._vector_field_indices:
+            raise TypeError(f"Field at position {pos} is not a VECTOR field")
+        value = self.get_field(pos)
+        if value is None:
+            return None
+        return Vector(value.as_py() if hasattr(value, 'as_py') else value)
 
     def get_row_kind(self) -> RowKind:
         return RowKind(self.row_kind_byte)

@@ -54,6 +54,11 @@ class ProjectedRow(InternalRow):
             return None
         return self.row.get_blob(self.index_mapping[pos])
 
+    def get_vector(self, pos: int):
+        if self.index_mapping[pos] < 0:
+            return None
+        return self.row.get_vector(self.index_mapping[pos])
+
     def get_row_kind(self) -> RowKind:
         """Returns the kind of change that this row describes in a changelog."""
         return self.row.get_row_kind()
