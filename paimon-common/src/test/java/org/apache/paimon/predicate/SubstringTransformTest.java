@@ -108,8 +108,7 @@ class SubstringTransformTest {
         inputs.add(3);
         SubstringTransform transform = new SubstringTransform(inputs);
 
-        Object result =
-                transform.transform(GenericRow.of(null, BinaryString.fromString("hello")));
+        Object result = transform.transform(GenericRow.of(null, BinaryString.fromString("hello")));
 
         assertThat(result).isEqualTo(BinaryString.fromString("ell"));
     }
