@@ -47,6 +47,10 @@ object SparkV1PartitionManagement {
 
   private def sessionCatalog(delegate: CatalogPlugin): Option[SessionCatalog] = delegate match {
     case v2SessionCatalog: V2SessionCatalog =>
+      // V2SessionCatalog does not expose its SessionCatalog, but fallback V1 partition DDL must
+      // delegate to SessionCatalog to update Hive metastore partition metadata. The private field
+      // name is stable in Spark 3.2, 3.3, 3.4, 3.5 and 4.0. Do not cache Field across class
+      // loaders; if reflective access fails, fall back to the original V1Table.
       try {
         val field = v2SessionCatalog.getClass.getDeclaredField("catalog")
         field.setAccessible(true)
@@ -70,10 +74,12 @@ class SparkV1PartitionManagement(catalogTable: CatalogTable, catalog: SessionCat
       properties: Array[JMap[String, String]]): Unit = {
     val partitions = idents.zip(properties).map {
       case (ident, partitionProperties) =>
-        val location = Option(partitionProperties.get("location"))
+        val scalaProperties = partitionProperties.asScala.toMap
+        val location = scalaProperties.get("location")
         CatalogTablePartition(
           toPartitionSpec(ident),
-          catalogTable.storage.copy(locationUri = location.map(CatalogUtils.stringToURI)))
+          catalogTable.storage.copy(locationUri = location.map(CatalogUtils.stringToURI)),
+          parameters = scalaProperties - "location")
     }
     catalog.createPartitions(catalogTable.identifier, partitions, ignoreIfExists = false)
   }

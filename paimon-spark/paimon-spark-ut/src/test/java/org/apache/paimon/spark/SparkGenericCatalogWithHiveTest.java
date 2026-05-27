@@ -99,6 +99,13 @@ public class SparkGenericCatalogWithHiveTest {
                             + "ADD PARTITION (dt = '2026-05-29') LOCATION '"
                             + location
                             + "/dt=2026-05-29'");
+            assertThat(
+                            spark
+                                    .sql(
+                                            "SHOW PARTITIONS hive_metastore.paimon_partition_db.parquet_part_tbl2")
+                                    .collectAsList().stream()
+                                    .map(Row::toString))
+                    .containsExactly("[dt=2026-05-29]");
 
             List<Row> rows =
                     spark.sql(
@@ -107,6 +114,15 @@ public class SparkGenericCatalogWithHiveTest {
                             .collectAsList();
             assertThat(rows.stream().map(Row::toString))
                     .containsExactly("[1,a,2026-05-29]", "[2,b,2026-05-29]");
+
+            spark.sql(
+                    "ALTER TABLE hive_metastore.paimon_partition_db.parquet_part_tbl2 "
+                            + "DROP PARTITION (dt = '2026-05-29')");
+            assertThat(
+                            spark.sql(
+                                            "SHOW PARTITIONS hive_metastore.paimon_partition_db.parquet_part_tbl2")
+                                    .collectAsList())
+                    .isEmpty();
         } finally {
             spark.sql("DROP DATABASE IF EXISTS spark_catalog.paimon_partition_db CASCADE");
             spark.stop();

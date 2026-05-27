@@ -171,12 +171,15 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         try {
             return sparkCatalog.loadTable(ident);
         } catch (NoSuchTableException e) {
-            return throwsOldIfExceptionHappens(
-                    () ->
-                            SparkV1PartitionManagement.wrap(
-                                    asTableCatalog().loadTable(ident), getDelegateCatalog()),
-                    e);
+            return throwsOldIfExceptionHappens(() -> loadFallbackTable(ident), e);
         }
+    }
+
+    private Table loadFallbackTable(Identifier ident) throws NoSuchTableException {
+        Table table = asTableCatalog().loadTable(ident);
+        return "spark_catalog".equals(catalogName)
+                ? table
+                : SparkV1PartitionManagement.wrap(table, getDelegateCatalog());
     }
 
     @Override
