@@ -88,10 +88,10 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
     private final int recordSizeInBytes;
     private final float[] vectorBuf;
-    private int count;
+    private long count;
     private boolean closed;
 
-    private int logicalRowId;
+    private long logicalRowId;
 
     public LuminaVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
@@ -401,18 +401,18 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         private final RandomAccessFile raf;
         private final FileChannel channel;
         private final int dim;
-        private final int totalCount;
+        private final long totalCount;
         private final int recordSizeInBytes;
-        private int cursor;
+        private long cursor;
         private final ByteBuffer readBuf;
         private final String phase;
         private int lastLoggedPercent;
 
-        FileBackedDataset(File file, int dim, int totalCount, String phase) throws IOException {
+        FileBackedDataset(File file, int dim, long totalCount, String phase) throws IOException {
             this(file, dim, totalCount, phase, IO_BUFFER_SIZE);
         }
 
-        FileBackedDataset(File file, int dim, int totalCount, String phase, int bufferSize)
+        FileBackedDataset(File file, int dim, long totalCount, String phase, int bufferSize)
                 throws IOException {
             this.raf = new RandomAccessFile(file, "r");
             this.channel = raf.getChannel();
@@ -442,9 +442,9 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             if (cursor >= totalCount) {
                 return 0;
             }
-            int remaining = totalCount - cursor;
+            long remaining = totalCount - cursor;
             int maxByVectorBuf = vectorBuf.length / dim;
-            int batchSize = Math.min(Math.min(maxByVectorBuf, idBuf.length), remaining);
+            int batchSize = (int) Math.min(Math.min(maxByVectorBuf, idBuf.length), remaining);
 
             try {
                 for (int i = 0; i < batchSize; i++) {
@@ -461,7 +461,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
             cursor += batchSize;
 
-            int percent = (int) ((long) cursor * 100 / totalCount);
+            int percent = (int) (cursor * 100 / totalCount);
             if (percent / 10 > lastLoggedPercent / 10) {
                 LOG.info(
                         "Lumina {} progress: {}/{} vectors ({}%)",
