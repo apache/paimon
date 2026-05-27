@@ -21,12 +21,14 @@ package org.apache.paimon.spark.globalindex;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -110,6 +112,13 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
 
         List<ManifestEntry> entries =
                 table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+        List<String> indexColumns =
+                indexFields.stream().map(DataField::name).collect(Collectors.toList());
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long boundaryRowId =
+                GlobalIndexBuilderUtils.findMinNonIndexableRowId(
+                        schemaManager, entries, indexColumns);
+        entries = GlobalIndexBuilderUtils.filterEntriesBefore(entries, boundaryRowId);
         // generate splits for each partition && shard
         Map<BinaryRow, List<IndexedSplit>> splits = split(table, entries, rowsPerShard);
 

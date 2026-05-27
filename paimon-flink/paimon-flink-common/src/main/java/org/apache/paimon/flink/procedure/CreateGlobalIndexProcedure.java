@@ -92,6 +92,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                         .map(String::trim)
                         .filter(s -> !s.isEmpty())
                         .collect(Collectors.toList());
+        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
         for (String col : indexColumns) {
             checkArgument(
                     rowType.containsField(col),
