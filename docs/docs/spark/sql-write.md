@@ -297,7 +297,7 @@ INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
 
 ## COPY INTO
 
-`COPY INTO` provides a SQL command for bulk loading CSV files into Paimon tables and writing table data to CSV files.
+`COPY INTO` provides a SQL command for bulk loading data files into Paimon tables and exporting table data to files. Supported formats: **CSV** and **JSON**.
 
 ### CSV Import
 
@@ -337,6 +337,35 @@ PATTERN = '.*\.csv'
 FORCE = FALSE;
 ```
 
+### JSON Import
+
+```sql
+COPY INTO table_name [(col1, col2, ...)]
+FROM 'source_path'
+FILE_FORMAT = (TYPE = JSON [, option = value, ...])
+[PATTERN = 'regex']
+[FORCE = TRUE|FALSE]
+[ON_ERROR = ABORT_STATEMENT]
+```
+
+**Basic import:**
+
+```sql
+COPY INTO my_db.my_table
+FROM '/data/json_files/'
+FILE_FORMAT = (TYPE = JSON);
+```
+
+**Import multi-line JSON array:**
+
+```sql
+COPY INTO my_db.events
+FROM '/data/events/'
+FILE_FORMAT = (TYPE = JSON, MULTI_LINE = TRUE);
+```
+
+JSON columns are matched **by column name** (not by position), so source field order does not matter.
+
 ### Write CSV Files
 
 ```sql
@@ -355,15 +384,33 @@ FILE_FORMAT = (TYPE = CSV, HEADER = TRUE, FIELD_DELIMITER = ',')
 OVERWRITE = TRUE;
 ```
 
+### Write JSON Files
+
+```sql
+COPY INTO 'target_path'
+FROM table_name
+FILE_FORMAT = (TYPE = JSON [, option = value, ...])
+[OVERWRITE = TRUE|FALSE]
+```
+
+**Basic JSON export:**
+
+```sql
+COPY INTO '/export/events_backup/'
+FROM my_db.events
+FILE_FORMAT = (TYPE = JSON)
+OVERWRITE = TRUE;
+```
+
 ### FILE_FORMAT Options
 
-`FILE_FORMAT` is required and must include `TYPE = CSV`.
+`FILE_FORMAT` is required and must include `TYPE = CSV` or `TYPE = JSON`.
 
-**Import options:**
+**CSV import options:**
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| TYPE | File format type. Must be `CSV`. | (required) |
+| TYPE | File format type. `CSV` or `JSON`. | (required) |
 | FIELD_DELIMITER | Column delimiter character. | `,` |
 | SKIP_HEADER | Skip the first line as header. Only `0` or `1`. | `0` |
 | QUOTE | Quote character for enclosing fields. | `"` |
@@ -372,15 +419,34 @@ OVERWRITE = TRUE;
 | EMPTY_FIELD_AS_NULL | Treat empty fields as NULL. `TRUE` or `FALSE`. | `FALSE` |
 | COMPRESSION | Compression codec (e.g. `GZIP`). | `NONE` |
 
-**Write options:**
+**JSON import options:**
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| TYPE | File format type. Must be `CSV`. | (required) |
+| TYPE | File format type. `CSV` or `JSON`. | (required) |
+| MULTI_LINE | Parse multi-line JSON (e.g. JSON arrays or pretty-printed objects). | `FALSE` |
+| NULL_IF | List of string values to interpret as NULL. | (none) |
+| EMPTY_FIELD_AS_NULL | Treat empty string values as NULL. | `FALSE` |
+| COMPRESSION | Compression codec (e.g. `GZIP`). | `NONE` |
+
+**CSV write options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| TYPE | File format type. `CSV` or `JSON`. | (required) |
 | FIELD_DELIMITER | Column delimiter character. | `,` |
 | HEADER | Write column names as the first line. `TRUE` or `FALSE`. | `FALSE` |
 | QUOTE | Quote character for enclosing fields. | `"` |
 | ESCAPE | Escape character within quoted fields. | `\` |
+| COMPRESSION | Compression codec (e.g. `GZIP`). | `NONE` |
+
+**JSON write options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| TYPE | File format type. `CSV` or `JSON`. | (required) |
+| DATE_FORMAT | Custom date format pattern. | Spark default |
+| TIMESTAMP_FORMAT | Custom timestamp format pattern. | Spark default |
 | COMPRESSION | Compression codec (e.g. `GZIP`). | `NONE` |
 
 ### Import Options
@@ -401,15 +467,16 @@ OVERWRITE = TRUE;
 
 When an explicit column list is provided (e.g., `COPY INTO t (col1, col2) FROM ...`):
 
-- CSV columns are mapped **positionally** to the specified column list.
-- The number of CSV columns must match the column list length.
+- **CSV**: Columns are mapped **positionally** to the specified column list.
+- **JSON**: Columns are matched **by name** to the specified column list.
+- The number of source columns must match the column list length (CSV). For JSON, missing fields in the source become NULL.
 - Columns not in the list are filled with their **DEFAULT value** (if defined in the table schema) or **NULL**.
 - Non-nullable columns without a default value that are not in the list will cause an error.
 
 When no column list is provided:
 
-- CSV columns are mapped positionally to all writable columns in the target table.
-- The number of CSV columns must match the number of writable columns.
+- **CSV**: Columns are mapped positionally to all writable columns in the target table. The number of CSV columns must match the number of writable columns.
+- **JSON**: Columns are matched by name to the writable columns. Missing fields in JSON become NULL.
 
 ### Repeated Imports
 
@@ -440,7 +507,7 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 
 ### Limitations
 
-- Only **CSV** format is supported.
+- Only **CSV** and **JSON** formats are supported.
 - Writing files only supports `FROM table_name`; `FROM (SELECT ...)` is not supported.
 - `ON_ERROR = CONTINUE` is not supported; any parse or cast error aborts the entire command.
 - `SINGLE = TRUE` (single-file output) is not supported.

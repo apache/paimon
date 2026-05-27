@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.execution
 
-import org.apache.paimon.spark.catalyst.plans.logical.CopyFileFormat
+import org.apache.paimon.spark.catalyst.plans.logical.{CopyFileFormat, FileFormatType}
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 
 import org.apache.hadoop.fs.Path
@@ -51,7 +51,12 @@ case class CopyIntoLocationExec(
     val writerOptions = fileFormat.toSparkWriterOptions
     val saveMode = if (overwrite) SaveMode.Overwrite else SaveMode.ErrorIfExists
 
-    df.write.options(writerOptions).mode(saveMode).csv(targetPath)
+    fileFormat.formatType match {
+      case FileFormatType.JSON =>
+        df.write.options(writerOptions).mode(saveMode).json(targetPath)
+      case _ =>
+        df.write.options(writerOptions).mode(saveMode).csv(targetPath)
+    }
 
     val hadoopConf = spark.sessionState.newHadoopConf()
     val fsPath = new Path(targetPath)

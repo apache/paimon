@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.catalyst.plans.logical.CopyFileFormat
+import org.apache.paimon.spark.catalyst.plans.logical.{CopyFileFormat, FileFormatType}
 import org.apache.paimon.spark.copyinto.{CopyLoadHistoryManager, CopyLoadRecord}
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.FileStoreTable
@@ -72,13 +72,12 @@ case class CopyIntoTableExec(
     }
 
     val filePaths = filesToLoad.map(_.getPath.toString)
-    val stringSchema = StructType(
-      (0 until targetColumns.size).map(i => StructField(s"_c$i", StringType, nullable = true)))
+    val stringSchema = buildStringSchema(targetColumns)
     val readerOptions = fileFormat.toSparkReaderOptions
 
-    val csvDf = readAndProcessCsv(filePaths, stringSchema, readerOptions)
+    val sourceDf = readSourceData(filePaths, stringSchema, readerOptions)
     val finalDf =
-      buildFinalDataFrame(csvDf, targetColumns, writableColumns, fields)
+      buildFinalDataFrame(sourceDf, targetColumns, writableColumns, fields)
     val castedDf = castAndValidate(finalDf, writableColumns, fields)
 
     val tableName = CopyIntoUtils.quoteIdentifier(catalog.name(), ident)
@@ -91,6 +90,16 @@ case class CopyIntoTableExec(
       filePaths,
       stringSchema,
       readerOptions)
+  }
+
+  private def buildStringSchema(targetColumns: Seq[String]): StructType = {
+    fileFormat.formatType match {
+      case FileFormatType.JSON =>
+        StructType(targetColumns.map(name => StructField(name, StringType, nullable = true)))
+      case _ =>
+        StructType(
+          (0 until targetColumns.size).map(i => StructField(s"_c$i", StringType, nullable = true)))
+    }
   }
 
   private def resolveTargetColumns(writableColumns: Seq[String]): Seq[String] = {
@@ -165,14 +174,16 @@ case class CopyIntoTableExec(
     }
   }
 
-  private def readAndProcessCsv(
+  private def readSourceData(
       filePaths: Array[String],
       stringSchema: StructType,
       readerOptions: Map[String, String]): DataFrame = {
-    var df = spark.read
-      .options(readerOptions)
-      .schema(stringSchema)
-      .csv(filePaths: _*)
+    var df = fileFormat.formatType match {
+      case FileFormatType.JSON =>
+        spark.read.options(readerOptions).schema(stringSchema).json(filePaths: _*)
+      case _ =>
+        spark.read.options(readerOptions).schema(stringSchema).csv(filePaths: _*)
+    }
 
     val nullIfVals = fileFormat.nullIfValues
     if (nullIfVals.nonEmpty) {
@@ -199,12 +210,17 @@ case class CopyIntoTableExec(
   }
 
   private def buildFinalDataFrame(
-      csvDf: DataFrame,
+      sourceDf: DataFrame,
       targetColumns: Seq[String],
       writableColumns: Seq[String],
       fields: Seq[DataField]): DataFrame = {
-    val renamedDf = targetColumns.zipWithIndex.foldLeft(csvDf) {
-      case (df, (targetCol, idx)) => df.withColumnRenamed(s"_c$idx", targetCol)
+    val renamedDf = fileFormat.formatType match {
+      case FileFormatType.JSON =>
+        sourceDf
+      case _ =>
+        targetColumns.zipWithIndex.foldLeft(sourceDf) {
+          case (df, (targetCol, idx)) => df.withColumnRenamed(s"_c$idx", targetCol)
+        }
     }
 
     if (columns.isDefined) {
@@ -290,10 +306,14 @@ case class CopyIntoTableExec(
     val snapshotId = paimonTable.snapshotManager().latestSnapshotId()
     val loadedAt = System.currentTimeMillis()
 
-    val rowCounts = spark.read
-      .options(readerOptions)
-      .schema(stringSchema)
-      .csv(filePaths: _*)
+    val countDf = fileFormat.formatType match {
+      case FileFormatType.JSON =>
+        spark.read.options(readerOptions).schema(stringSchema).json(filePaths: _*)
+      case _ =>
+        spark.read.options(readerOptions).schema(stringSchema).csv(filePaths: _*)
+    }
+
+    val rowCounts = countDf
       .groupBy(input_file_name().as("file"))
       .count()
       .collect()
