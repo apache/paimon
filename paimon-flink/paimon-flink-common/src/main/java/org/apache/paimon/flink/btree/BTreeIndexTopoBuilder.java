@@ -195,9 +195,10 @@ public class BTreeIndexTopoBuilder {
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
             commit(table, allStreams.get(0).union(rest));
+            return true;
         }
 
-        return true;
+        return false;
     }
 
     public static void buildIndexAndExecute(

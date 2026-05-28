@@ -310,6 +310,10 @@ class CachingFileIO(FileIO):
         else:
             self._whitelist = whitelist
 
+    # Fallback caps when local-cache.max-size is unset (memory shares the heap).
+    _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
+    _DEFAULT_DISK_CACHE_MAX_SIZE = 10 * 1024 * 1024 * 1024
+
     @staticmethod
     def create_cache_manager(options):
         """Creates a cache manager from options, or returns None if caching is not enabled."""
@@ -319,11 +323,14 @@ class CachingFileIO(FileIO):
             return None
         cache_dir = opts.local_cache_dir()
         max_size_opt = opts.local_cache_max_size()
-        max_size = max_size_opt.get_bytes() if max_size_opt is not None else (2 ** 63 - 1)
         block_size = opts.local_cache_block_size().get_bytes()
         if cache_dir is not None:
+            max_size = (max_size_opt.get_bytes() if max_size_opt is not None
+                        else CachingFileIO._DEFAULT_DISK_CACHE_MAX_SIZE)
             return LocalDiskCacheManager(cache_dir, max_size, block_size)
         else:
+            max_size = (max_size_opt.get_bytes() if max_size_opt is not None
+                        else CachingFileIO._DEFAULT_MEMORY_CACHE_MAX_SIZE)
             return LocalMemoryCacheManager(max_size, block_size)
 
     @staticmethod
@@ -381,6 +388,31 @@ class CachingFileIO(FileIO):
 
     def is_dir(self, path: str) -> bool:
         return self._delegate.is_dir(path)
+
+    # FileIO base has raising / no-op defaults that block __getattr__ — forward explicitly.
+    def to_filesystem_path(self, path: str) -> str:
+        return self._delegate.to_filesystem_path(path)
+
+    def try_to_write_atomic(self, *args, **kwargs):
+        return self._delegate.try_to_write_atomic(*args, **kwargs)
+
+    def write_parquet(self, *args, **kwargs):
+        return self._delegate.write_parquet(*args, **kwargs)
+
+    def write_orc(self, *args, **kwargs):
+        return self._delegate.write_orc(*args, **kwargs)
+
+    def write_avro(self, *args, **kwargs):
+        return self._delegate.write_avro(*args, **kwargs)
+
+    def write_lance(self, *args, **kwargs):
+        return self._delegate.write_lance(*args, **kwargs)
+
+    def write_blob(self, *args, **kwargs):
+        return self._delegate.write_blob(*args, **kwargs)
+
+    def write_vortex(self, *args, **kwargs):
+        return self._delegate.write_vortex(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._delegate, name)

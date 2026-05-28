@@ -36,26 +36,18 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Map;
 
-/**
- * Vortex records writer.
- *
- * <p>Hands record batches to the native Vortex writer via the synchronous {@code
- * writeBatch(byte[])} path: each batch is serialized to an Arrow IPC byte array and copied into
- * native memory by the JNI call. Once {@code writeBatch} returns, the byte array (and the source
- * Arrow buffers) are no longer referenced by the native side, so the underlying {@link
- * ArrowFormatWriter} can be reset and reused immediately. This trades the FFI zero-copy throughput
- * for bounded memory and simpler lifetime management — without it, native asynchronously borrows
- * the Arrow buffers and they must be kept alive until file close, which grows unboundedly with
- * batch count.
- */
+/** Vortex records writer. */
 public class VortexRecordsWriter implements BundleFormatWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(VortexRecordsWriter.class);
+
+    private static final double COMPRESSION_RATIO = 0.25;
 
     private final ArrowFormatWriter arrowFormatWriter;
     private final VortexWriter nativeWriter;
     private final String path;
     private long jniCost = 0;
+    private long ipcBytes = 0;
 
     public VortexRecordsWriter(
             RowType rowType,
@@ -94,9 +86,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
-        // Vortex applies its own compression/encoding, so in-memory Arrow size is much larger
-        // than the actual file size on disk. Always return false to avoid rolling into small files.
-        return false;
+        return suggestedCheck && (long) (ipcBytes * COMPRESSION_RATIO) >= targetSize;
     }
 
     @Override
@@ -143,6 +133,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     private void writeVsr(VectorSchemaRoot vsr) throws IOException {
         byte[] bytes = ArrowUtils.serializeToIpc(vsr);
+        ipcBytes += bytes.length;
         long t1 = System.currentTimeMillis();
         nativeWriter.writeBatch(bytes);
         jniCost += (System.currentTimeMillis() - t1);

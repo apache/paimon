@@ -49,6 +49,10 @@ class InternalRow(ABC):
     def get_blob(self, pos: int) -> Optional[Any]:
         """Returns the Blob at the given position, or None if null."""
 
+    @abstractmethod
+    def get_vector(self, pos: int) -> Optional[Any]:
+        """Returns the Vector at the given position, or None if null."""
+
     def __str__(self) -> str:
         fields = []
         for pos in range(self.__len__()):

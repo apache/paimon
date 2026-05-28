@@ -221,6 +221,23 @@ WHEN NOT MATCHED THEN
 INSERT *      -- when not matched, insert this row without any transformation;
 ```
 
+### Column Alignment
+
+Assignments are aligned to the target table by **column name**.
+
+For explicit clauses (`UPDATE SET col = expr` / `INSERT (col list) VALUES ...`), only the mentioned columns are written. Unmentioned target columns preserve their current value for `UPDATE`, or are filled with NULL / `CURRENT_DEFAULT` for `INSERT`.
+
+For star clauses (`UPDATE SET *` / `INSERT *`), `*` expands against the **target** columns. The behavior when source and target columns don't match exactly depends on `spark.paimon.write.merge-schema` (see [Write Merge Schema](#write-merge-schema)):
+
+| Scenario | `merge-schema=false` (default) | `merge-schema=true` |
+|----------|-------------------------------|---------------------|
+| Top-level source-extra columns | Silently dropped (`*` only covers target columns) | Evolved into the target schema |
+| Top-level target columns missing from source | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
+| Nested struct source-extra fields | Throws | Evolved into the target schema |
+| Nested struct target-missing fields | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
+
+The key difference between top-level and nested: under strict mode (`merge-schema=false`), top-level source-extras are silently dropped because `*` never references them, while nested source-extras inside a struct value throw an error to avoid silent data loss.
+
 ## Write Merge Schema
 
 :::info

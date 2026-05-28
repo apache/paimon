@@ -501,6 +501,40 @@ SELECT * FROM my_table$table_indexes;
 */
 ```
 
+### Row Tracking Table
+
+If you need to query the unique row id assigned to each row in an append table, you can use the `row_tracking` system table.
+The `row_tracking` table appends `_ROW_ID` and `_SEQUENCE_NUMBER` metadata columns to the original table schema.
+
+:::note
+
+The table must have `'row-tracking.enabled' = 'true'` set. This feature is only supported for append tables.
+
+:::
+
+```sql
+SELECT * FROM my_table$row_tracking;
+
+/*
++----------+-----------+---------+------------------+
+|    id    |   data    | _ROW_ID | _SEQUENCE_NUMBER |
++----------+-----------+---------+------------------+
+|       11 |         a |       0 |                1 |
+|       22 |         b |       1 |                1 |
++----------+-----------+---------+------------------+
+2 rows in set
+*/
+```
+
+- `_ROW_ID`: A globally unique row identifier within the table, assigned during write.
+- `_SEQUENCE_NUMBER`: The sequence number (snapshot id) when the row was written.
+
+You can also select these columns directly from the original table (without using the system table) when row tracking is enabled:
+
+```sql
+SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM my_table;
+```
+
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.

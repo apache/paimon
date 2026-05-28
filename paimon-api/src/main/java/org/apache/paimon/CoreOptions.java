@@ -2338,6 +2338,15 @@ public class CoreOptions implements Serializable {
                                     + "as serialized BlobViewStruct bytes inline in data files and "
                                     + "resolve from upstream tables at read time.");
 
+    public static final ConfigOption<Boolean> BLOB_VIEW_RESOLVE_ENABLED =
+            key("blob-view.resolve.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to resolve blob-view-field values from upstream tables at "
+                                    + "read time. Set to false to preserve BlobViewStruct references "
+                                    + "when forwarding blob view values to another blob-view table.");
+
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
                     .booleanType()
@@ -2494,7 +2503,7 @@ public class CoreOptions implements Serializable {
                             Description.builder()
                                     .text(
                                             "Target size of a vector-store file."
-                                                    + " Default is 10 * TARGET_FILE_SIZE.")
+                                                    + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
     @Immutable
@@ -3009,6 +3018,11 @@ public class CoreOptions implements Serializable {
      */
     public Set<String> blobViewField() {
         return parseCommaSeparatedSet(BLOB_VIEW_FIELD);
+    }
+
+    /** Whether to resolve blob view references at read time. */
+    public boolean blobViewResolveEnabled() {
+        return options.get(BLOB_VIEW_RESOLVE_ENABLED);
     }
 
     /** Resolve blob fields that are stored inline in normal data files. */
@@ -3930,10 +3944,9 @@ public class CoreOptions implements Serializable {
     }
 
     public long vectorTargetFileSize() {
-        // Since vectors are large, it would be better to set a larger target size for vectors.
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
-                .orElse(10 * targetFileSize(false));
+                .orElse(targetFileSize(false));
     }
 
     /** Specifies the merge engine for table with primary key. */

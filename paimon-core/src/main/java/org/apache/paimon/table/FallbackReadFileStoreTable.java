@@ -369,7 +369,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         protected final Function<FileStoreTable, DataTableScan> scanCreator;
         protected final DataTableScan mainScan;
         protected final DataTableScan fallbackScan;
-        private PartitionPredicate partitionPredicate;
+        private PartitionPredicate mainPartitionPredicate;
+        private PartitionPredicate fallbackPartitionPredicate;
 
         public FallbackReadScan(
                 FileStoreTable wrappedTable,
@@ -475,6 +476,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             return this;
         }
 
+        public InnerTableScan withPartitionFilter(
+                PartitionPredicate mainPartitionPredicate,
+                PartitionPredicate fallbackPartitionPredicate) {
+            mainScan.withPartitionFilter(mainPartitionPredicate);
+            fallbackScan.withPartitionFilter(fallbackPartitionPredicate);
+            setPartitionPredicate(mainPartitionPredicate, fallbackPartitionPredicate);
+            return this;
+        }
+
         @Override
         public FallbackReadScan withBucketFilter(Filter<Integer> bucketFilter) {
             mainScan.withBucketFilter(bucketFilter);
@@ -521,15 +531,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public TableScan.Plan plan() {
             List<Split> splits = new ArrayList<>();
             Set<BinaryRow> completePartitions =
-                    new HashSet<>(
-                            newPartitionListingScan(true, partitionPredicate).listPartitions());
+                    new HashSet<>(newPartitionListingScan(true).listPartitions());
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
                 splits.add(toFallbackSplit(dataSplit, false));
             }
 
             List<BinaryRow> remainingPartitions =
-                    newPartitionListingScan(false, partitionPredicate).listPartitions().stream()
+                    newPartitionListingScan(false).listPartitions().stream()
                             .filter(p -> !completePartitions.contains(p))
                             .collect(Collectors.toList());
             if (!remainingPartitions.isEmpty()) {
@@ -543,8 +552,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            DataTableScan mainListingScan = newPartitionListingScan(true, partitionPredicate);
-            DataTableScan fallbackListingScan = newPartitionListingScan(false, partitionPredicate);
+            DataTableScan mainListingScan = newPartitionListingScan(true);
+            DataTableScan fallbackListingScan = newPartitionListingScan(false);
             List<PartitionEntry> partitionEntries =
                     new ArrayList<>(mainListingScan.listPartitionEntries());
             Set<BinaryRow> partitions =
@@ -560,18 +569,31 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         protected void setPartitionPredicate(PartitionPredicate predicate) {
-            this.partitionPredicate = predicate;
+            this.mainPartitionPredicate = predicate;
+            this.fallbackPartitionPredicate = predicate;
         }
 
-        protected PartitionPredicate getPartitionPredicate() {
-            return partitionPredicate;
+        protected void setPartitionPredicate(
+                PartitionPredicate mainPartitionPredicate,
+                PartitionPredicate fallbackPartitionPredicate) {
+            this.mainPartitionPredicate = mainPartitionPredicate;
+            this.fallbackPartitionPredicate = fallbackPartitionPredicate;
         }
 
-        private DataTableScan newPartitionListingScan(
-                boolean isMain, PartitionPredicate scanPartitionPredicate) {
+        protected PartitionPredicate getMainPartitionPredicate() {
+            return mainPartitionPredicate;
+        }
+
+        protected PartitionPredicate getFallbackPartitionPredicate() {
+            return fallbackPartitionPredicate;
+        }
+
+        private DataTableScan newPartitionListingScan(boolean isMain) {
             DataTableScan scan = scanCreator.apply(isMain ? wrappedTable : fallbackTable);
-            if (scanPartitionPredicate != null) {
-                scan.withPartitionFilter(scanPartitionPredicate);
+            if (isMain && getMainPartitionPredicate() != null) {
+                scan.withPartitionFilter(getMainPartitionPredicate());
+            } else if (!isMain && getFallbackPartitionPredicate() != null) {
+                scan.withPartitionFilter(getFallbackPartitionPredicate());
             }
             return scan;
         }

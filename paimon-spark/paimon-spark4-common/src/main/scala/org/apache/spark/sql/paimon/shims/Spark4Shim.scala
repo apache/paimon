@@ -240,23 +240,24 @@ class Spark4Shim extends SparkShim {
       withSchemaEvolution)
   }
 
+  override def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] =
+    merge.notMatchedBySourceActions
+
+  override def createUpdateAction(
+      condition: Option[Expression],
+      assignments: Seq[Assignment]): UpdateAction =
+    UpdateAction(condition, assignments)
+
+  override def createInsertAction(
+      condition: Option[Expression],
+      assignments: Seq[Assignment]): InsertAction =
+    InsertAction(condition, assignments)
+
   override def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation = {
     relation.copy(table = table, output = output)
-  }
-
-  override def copyUpdateAction(
-      action: UpdateAction,
-      assignments: Seq[Assignment]): UpdateAction = {
-    action.copy(assignments = assignments)
-  }
-
-  override def copyInsertAction(
-      action: InsertAction,
-      assignments: Seq[Assignment]): InsertAction = {
-    action.copy(assignments = assignments)
   }
 
   override def earlyBatchRules(): Seq[Rule[LogicalPlan]] = Seq(CTESubstitution)
