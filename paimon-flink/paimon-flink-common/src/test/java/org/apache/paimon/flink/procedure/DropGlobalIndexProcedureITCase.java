@@ -75,7 +75,7 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
                                 + "`index_type` => 'btree')");
         assertThat(createResult).hasSize(1);
         assertThat(createResult.get(0).getField(0))
-                .isEqualTo("Btree global index created successfully for table: T");
+                .isEqualTo("BTree global index created successfully for table: T");
 
         // Verify index was created
         table = paimonTable("T");
