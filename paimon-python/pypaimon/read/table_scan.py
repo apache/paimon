@@ -158,3 +158,7 @@ class TableScan:
     def with_global_index_result(self, result) -> 'TableScan':
         self.file_scanner.with_global_index_result(result)
         return self
+
+    def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'TableScan':
+        self.file_scanner.with_chunk_shuffle(seed, chunk_size)
+        return self
