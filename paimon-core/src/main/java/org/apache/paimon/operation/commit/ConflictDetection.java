@@ -95,7 +95,7 @@ public class ConflictDetection {
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
-    private @Nullable Long overwriteConflictCheckFromSnapshot = null;
+    private @Nullable Long overwriteConflictWithIndexCheckFromSnapshot = null;
 
     public ConflictDetection(
             String tableName,
@@ -132,13 +132,14 @@ public class ConflictDetection {
         return rowIdCheckFromSnapshot != null;
     }
 
-    public void setOverwriteConflictCheckFromSnapshot(
-            @Nullable Long overwriteConflictCheckFromSnapshot) {
-        this.overwriteConflictCheckFromSnapshot = overwriteConflictCheckFromSnapshot;
+    public void setOverwriteConflictWithIndexCheckFromSnapshot(
+            @Nullable Long overwriteConflictWithIndexCheckFromSnapshot) {
+        this.overwriteConflictWithIndexCheckFromSnapshot =
+                overwriteConflictWithIndexCheckFromSnapshot;
     }
 
-    public boolean hasOverwriteConflictCheckFromSnapshot() {
-        return overwriteConflictCheckFromSnapshot != null;
+    public boolean hasOverwriteConflictWithIndexCheckFromSnapshot() {
+        return overwriteConflictWithIndexCheckFromSnapshot != null;
     }
 
     @Nullable
@@ -247,7 +248,7 @@ public class ConflictDetection {
             return exception;
         }
 
-        exception = checkOverwriteConflicts(latestSnapshot, deltaEntries, deltaIndexEntries);
+        exception = checkOverwriteConflicts(latestSnapshot, deltaIndexEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -560,22 +561,25 @@ public class ConflictDetection {
     }
 
     private Optional<RuntimeException> checkOverwriteConflicts(
-            Snapshot latestSnapshot,
-            List<SimpleFileEntry> deltaEntries,
-            List<IndexManifestEntry> deltaIndexEntries) {
+            Snapshot latestSnapshot, List<IndexManifestEntry> deltaIndexEntries) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
-        if (overwriteConflictCheckFromSnapshot == null) {
+        if (overwriteConflictWithIndexCheckFromSnapshot == null) {
             return Optional.empty();
         }
-        if (latestSnapshot.id() <= overwriteConflictCheckFromSnapshot) {
+        if (latestSnapshot.id() <= overwriteConflictWithIndexCheckFromSnapshot) {
             return Optional.empty();
         }
 
-        List<BinaryRow> changedPartitions =
-                changedPartitionsIncludingAllIndexFiles(deltaEntries, deltaIndexEntries);
-        for (long id = overwriteConflictCheckFromSnapshot + 1; id <= latestSnapshot.id(); id++) {
+        List<BinaryRow> changedPartitions = changedIndexPartitions(deltaIndexEntries);
+        if (changedPartitions.isEmpty()) {
+            return Optional.empty();
+        }
+
+        for (long id = overwriteConflictWithIndexCheckFromSnapshot + 1;
+                id <= latestSnapshot.id();
+                id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitKind() != CommitKind.OVERWRITE) {
                 continue;
@@ -587,7 +591,7 @@ public class ConflictDetection {
                                         "Overwrite barrier snapshot %s was committed after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
-                                        id, overwriteConflictCheckFromSnapshot)));
+                                        id, overwriteConflictWithIndexCheckFromSnapshot)));
             }
             if (overwriteChangedTargetPartitions(snapshot, changedPartitions)) {
                 return Optional.of(
@@ -596,7 +600,7 @@ public class ConflictDetection {
                                         "Overwrite snapshot %s changed partitions after the "
                                                 + "task planned from snapshot %s. The task must "
                                                 + "be retried with the latest row ids.",
-                                        id, overwriteConflictCheckFromSnapshot)));
+                                        id, overwriteConflictWithIndexCheckFromSnapshot)));
             }
         }
         return Optional.empty();
@@ -613,12 +617,8 @@ public class ConflictDetection {
                 && !commitScanner.readIncrementalEntries(snapshot, changedPartitions).isEmpty();
     }
 
-    private List<BinaryRow> changedPartitionsIncludingAllIndexFiles(
-            List<SimpleFileEntry> dataFileChanges, List<IndexManifestEntry> indexFileChanges) {
+    private List<BinaryRow> changedIndexPartitions(List<IndexManifestEntry> indexFileChanges) {
         Set<BinaryRow> changedPartitions = new HashSet<>();
-        for (SimpleFileEntry file : dataFileChanges) {
-            changedPartitions.add(file.partition());
-        }
         for (IndexManifestEntry file : indexFileChanges) {
             changedPartitions.add(file.partition());
         }

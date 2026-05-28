@@ -206,7 +206,8 @@ public class BTreeIndexTopoBuilder {
                             ? table
                             : table.copy(
                                     Collections.singletonMap(
-                                            CoreOptions.COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT
+                                            CoreOptions
+                                                    .COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT
                                                     .key(),
                                             String.valueOf(overwriteConflictCheckFromSnapshot)));
             commit(commitTable, allStreams.get(0).union(rest));

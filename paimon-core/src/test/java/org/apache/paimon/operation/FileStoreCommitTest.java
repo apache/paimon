@@ -31,8 +31,11 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -1104,7 +1107,49 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testOverwriteConflictFromOptions() throws Exception {
+    public void testOverwriteConflictWithIndexFromOptions() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+
+        Map<String, String> barrierProperties = new HashMap<>();
+        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.replaceManifestList(
+                                    latest,
+                                    latest.totalRecordCount(),
+                                    baseManifestList(latest),
+                                    deltaManifestList(latest),
+                                    latest.indexManifest(),
+                                    latest.nextRowId(),
+                                    barrierProperties))
+                    .isTrue();
+        }
+
+        Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
+        dynamicOptions.put(
+                CoreOptions.COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT.key(), "1");
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "overwrite-barrier-check",
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        new CoreOptions(dynamicOptions),
+                        true)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            indexCommittable(partition, "barrier-index"), false))
+                    .hasMessageContaining("Overwrite barrier snapshot 2")
+                    .hasMessageContaining("task planned from snapshot 1");
+        }
+    }
+
+    @Test
+    public void testOverwriteConflictWithIndexIgnoresDataOnlyDelta() throws Exception {
         TestFileStore store = createStore(false);
 
         List<KeyValue> keyValues = generateDataList(1);
@@ -1138,17 +1183,16 @@ public class FileStoreCommitTest {
                 (commit, committable) -> committableRef.set(committable));
 
         Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
-        dynamicOptions.put(CoreOptions.COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT.key(), "1");
+        dynamicOptions.put(
+                CoreOptions.COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT.key(), "1");
         try (FileStoreCommitImpl commit =
                 newCommitWithSnapshotCommit(
                         store,
-                        "overwrite-barrier-check",
+                        "overwrite-barrier-data-only-check",
                         new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
                         new CoreOptions(dynamicOptions),
                         true)) {
-            assertThatThrownBy(() -> commit.commit(checkNotNull(committableRef.get()), false))
-                    .hasMessageContaining("Overwrite barrier snapshot 2")
-                    .hasMessageContaining("task planned from snapshot 1");
+            commit.commit(checkNotNull(committableRef.get()), false);
         }
     }
 
@@ -1274,6 +1318,26 @@ public class FileStoreCommitTest {
                                 store.snapshotManager(),
                                 scanner),
                 null);
+    }
+
+    private ManifestCommittable indexCommittable(BinaryRow partition, String fileName) {
+        ManifestCommittable committable = new ManifestCommittable(0);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        null,
+                        DataIncrement.indexIncrement(
+                                Collections.singletonList(
+                                        new IndexFileMeta(
+                                                "btree",
+                                                fileName,
+                                                1,
+                                                1,
+                                                (GlobalIndexMeta) null,
+                                                null))),
+                        CompactIncrement.emptyIncrement()));
+        return committable;
     }
 
     private static class FalseSuccessSnapshotCommit implements SnapshotCommit {
