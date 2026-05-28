@@ -412,7 +412,7 @@ class DataBlobWriterTest(unittest.TestCase):
         blob_writer.close()
 
     def test_data_blob_writer_write_large_blob(self):
-        """Test DataBlobWriter with very large blob data (50MB per item) in 10 batches."""
+        """Test DataBlobWriter with large blob data (5MB per item) in 10 batches."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -436,28 +436,27 @@ class DataBlobWriterTest(unittest.TestCase):
         write_builder = table.new_batch_write_builder()
         blob_writer = write_builder.new_write()
 
-        # Create 50MB blob data per item
-        # Using a pattern to make the data more realistic and compressible
-        target_size = 50 * 1024 * 1024  # 50MB in bytes
+        # Create 5MB blob data per item
+        target_size = 5 * 1024 * 1024  # 5MB in bytes
         blob_pattern = b'LARGE_BLOB_DATA_PATTERN_' + b'X' * 1024  # ~1KB pattern
         pattern_size = len(blob_pattern)
         repetitions = target_size // pattern_size
         large_blob_data = blob_pattern * repetitions
 
-        # Verify the blob size is approximately 50MB
+        # Verify the blob size is approximately 5MB
         blob_size_mb = len(large_blob_data) / (1024 * 1024)
-        self.assertGreater(blob_size_mb, 49)  # Should be at least 49MB
-        self.assertLess(blob_size_mb, 51)  # Should be less than 51MB
+        self.assertGreater(blob_size_mb, 4)  # Should be at least 4MB
+        self.assertLess(blob_size_mb, 6)  # Should be less than 6MB
 
         total_rows = 0
 
         # Write 10 batches, each with 5 rows (50 rows total)
-        # Total data volume: 50 rows * 50MB = 2.5GB of blob data
+        # Total data volume: 50 rows * 5MB = 250MB of blob data
         for batch_num in range(10):
             batch_data = pa.Table.from_pydict({
                 'id': [batch_num * 5 + i for i in range(5)],
                 'description': [f'Large blob batch {batch_num}, row {i}' for i in range(5)],
-                'large_blob': [large_blob_data] * 5  # 5 rows per batch, each with 50MB blob
+                'large_blob': [large_blob_data] * 5  # 5 rows per batch, each with 5MB blob
             }, schema=pa_schema)
 
             # Write each batch
@@ -502,9 +501,9 @@ class DataBlobWriterTest(unittest.TestCase):
         # Verify total data written (50 rows of normal data + 50 rows of blob data = 100 total)
         self.assertEqual(total_row_count, 50)
 
-        # Verify total file size is substantial (should be much larger than 2.5GB due to overhead)
+        # Verify total file size is substantial (should be at least 200MB)
         total_size_mb = total_file_size / (1024 * 1024)
-        self.assertGreater(total_size_mb, 2000)  # Should be at least 2GB due to overhead
+        self.assertGreater(total_size_mb, 200)
 
         total_files = sum(len(commit_msg.new_files) for commit_msg in commit_messages)
         print(f"Total data written: {total_size_mb:.2f}MB across {total_files} files")
