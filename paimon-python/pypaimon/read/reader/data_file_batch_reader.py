@@ -27,6 +27,7 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -62,7 +63,6 @@ class DataFileBatchReader(RecordBatchReader):
         self.blob_descriptor_fields = blob_descriptor_fields or set()
         self.blob_view_fields = blob_view_fields or set()
         self.file_io = file_io
-        self.table = table
         self.blob_field_names = {
             field.name
             for field in fields
@@ -73,12 +73,6 @@ class DataFileBatchReader(RecordBatchReader):
             for field_name in self.blob_descriptor_fields
             if field_name in self.blob_field_names
         }
-        self.view_blob_fields = {
-            field_name
-            for field_name in self.blob_view_fields
-            if field_name in self.blob_field_names
-        }
-        self._blob_view_lookup = None
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -184,13 +178,12 @@ class DataFileBatchReader(RecordBatchReader):
     def _convert_inline_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
         if isinstance(self.format_reader, FormatBlobReader):
             return record_batch
-        if not self.descriptor_blob_fields and not self.view_blob_fields:
+        if not self.descriptor_blob_fields:
             return record_batch
 
         schema_names = set(record_batch.schema.names)
         target_fields = [f for f in self.descriptor_blob_fields if f in schema_names]
-        view_fields = [f for f in self.view_blob_fields if f in schema_names]
-        if not target_fields and not view_fields:
+        if not target_fields:
             return record_batch
 
         arrays = list(record_batch.columns)
@@ -202,17 +195,6 @@ class DataFileBatchReader(RecordBatchReader):
                 converted = [self._normalize_blob_cell(v) for v in values]
             else:
                 converted = [self._blob_cell_to_data(v) for v in values]
-            arrays[field_idx] = pa.array(converted, type=pa.large_binary())
-
-        for field_name in view_fields:
-            field_idx = record_batch.schema.get_field_index(field_name)
-            values = record_batch.column(field_idx).to_pylist()
-            self._preload_blob_views(values)
-
-            if self.blob_as_descriptor:
-                converted = [self._blob_view_cell_to_descriptor(v) for v in values]
-            else:
-                converted = [self._blob_view_cell_to_data(v) for v in values]
             arrays[field_idx] = pa.array(converted, type=pa.large_binary())
 
         return pa.RecordBatch.from_arrays(arrays, schema=record_batch.schema)
@@ -236,43 +218,6 @@ class DataFileBatchReader(RecordBatchReader):
         if not isinstance(value, bytes):
             return value
         return Blob.from_bytes(value, self.file_io).to_data()
-
-    def _blob_view_cell_to_descriptor(self, value):
-        view_struct = self._deserialize_blob_view_or_none(value)
-        if view_struct is None:
-            return self._normalize_blob_cell(value)
-        return self._blob_view_lookup_or_create().resolve_descriptor(view_struct).serialize()
-
-    def _blob_view_cell_to_data(self, value):
-        view_struct = self._deserialize_blob_view_or_none(value)
-        if view_struct is None:
-            return self._normalize_blob_cell(value)
-        return self._blob_view_lookup_or_create().resolve_data(view_struct)
-
-    @staticmethod
-    def _deserialize_blob_view_or_none(value):
-        value = DataFileBatchReader._normalize_blob_cell(value)
-        if value is None or not isinstance(value, bytes):
-            return None
-        if not BlobViewStruct.is_blob_view_struct(value):
-            return None
-        return BlobViewStruct.deserialize(value)
-
-    def _preload_blob_views(self, values):
-        view_structs = []
-        for value in values:
-            view_struct = self._deserialize_blob_view_or_none(value)
-            if view_struct is not None:
-                view_structs.append(view_struct)
-        if view_structs:
-            self._blob_view_lookup_or_create().preload(view_structs)
-
-    def _blob_view_lookup_or_create(self):
-        if self.table is None:
-            raise ValueError("Cannot resolve blob view without table context.")
-        if self._blob_view_lookup is None:
-            self._blob_view_lookup = BlobViewLookup(self.table)
-        return self._blob_view_lookup
 
     def _assign_row_tracking(self, record_batch: RecordBatch) -> RecordBatch:
         """Assign row tracking meta fields (_ROW_ID and _SEQUENCE_NUMBER)."""

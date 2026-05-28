@@ -320,7 +320,6 @@ class SplitRead(ABC):
 
         blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
         blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
-        blob_view_fields = CoreOptions.blob_view_fields(self.table.options)
 
         index_mapping = self.create_index_mapping()
         partition_info = self._create_partition_info()
@@ -351,7 +350,6 @@ class SplitRead(ABC):
                 system_fields,
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
-                blob_view_fields=blob_view_fields,
                 file_io=self.table.file_io,
                 row_id_offsets=row_indices,
                 table=self.table)
@@ -368,7 +366,6 @@ class SplitRead(ABC):
                 system_fields,
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
-                blob_view_fields=blob_view_fields,
                 file_io=self.table.file_io,
                 row_id_offsets=row_indices,
                 table=self.table)
@@ -844,9 +841,9 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
-        if (not CoreOptions.blob_as_descriptor(self.table.options)
-                and (CoreOptions.blob_descriptor_fields(self.table.options)
-                     or CoreOptions.blob_view_fields(self.table.options))):
+        if (CoreOptions.blob_view_fields(self.table.options)
+                or (not CoreOptions.blob_as_descriptor(self.table.options)
+                    and CoreOptions.blob_descriptor_fields(self.table.options))):
             reader = BlobDescriptorConvertReader(reader, self.table)
 
         if self.limit is not None:

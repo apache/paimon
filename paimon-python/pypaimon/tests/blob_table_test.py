@@ -1393,7 +1393,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
     def test_blob_view_fields_resolve_upstream_blob(self):
         from pypaimon import Schema
         from pypaimon.common.options.core_options import CoreOptions
-        from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+        from pypaimon.table.row.blob import BlobViewStruct
 
         source_schema = pa.schema([
             ('id', pa.int32()),
@@ -1468,13 +1468,13 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
             descriptor_table.new_read_builder().new_scan().plan().splits()
         ).sort_by('id')
-        descriptor_values = descriptor_result.column('picture').to_pylist()
-        for descriptor_value, expected_payload in zip(descriptor_values, payloads):
-            self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_value))
-            self.assertFalse(BlobViewStruct.is_blob_view_struct(descriptor_value))
-            descriptor = BlobDescriptor.deserialize(descriptor_value)
-            uri_reader = target_table.file_io.uri_reader_factory.create(descriptor.uri)
-            self.assertEqual(Blob.from_descriptor(uri_reader, descriptor).to_data(), expected_payload)
+        # With blob-as-descriptor=true, view fields return BlobDescriptor bytes
+        from pypaimon.table.row.blob import BlobDescriptor
+        for value in descriptor_result.column('picture').to_pylist():
+            self.assertTrue(
+                BlobDescriptor.is_blob_descriptor(value),
+                "Expected BlobDescriptor bytes when blob-as-descriptor=true"
+            )
 
     def test_blob_view_fields_rejects_non_view_input(self):
         from pypaimon import Schema

@@ -17,7 +17,8 @@
 ################################################################################
 
 import os
-from typing import Dict, Iterable, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, Iterable, List, Tuple
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
@@ -26,6 +27,9 @@ from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
 
+_PRELOAD_THREAD_NUM = 100
+_MIN_ROWS_PER_TASK = 100
+
 
 class BlobViewLookup:
     """Resolve BlobViewStruct references by reading upstream blob descriptors."""
@@ -33,28 +37,24 @@ class BlobViewLookup:
     def __init__(self, table):
         self._table = table
         self._table_cache = {}
-        self._field_descriptor_cache: Dict[Tuple[str, int], Dict[int, BlobDescriptor]] = {}
+        self._uri_reader_cache: Dict[str, UriReader] = {}
+        self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
 
     def preload(self, view_structs: Iterable[BlobViewStruct]) -> None:
-        requests = {}
+        unique_structs = []
         for view_struct in view_structs:
-            key = (view_struct.identifier.get_full_name(), view_struct.field_id)
-            if key not in requests:
-                requests[key] = (view_struct.identifier, set())
-            requests[key][1].add(int(view_struct.row_id))
-
-        for key, (identifier, row_ids) in requests.items():
-            descriptors = self._field_descriptor_cache.setdefault(key, {})
-            missing_row_ids = sorted(row_id for row_id in row_ids if row_id not in descriptors)
-            if not missing_row_ids:
-                continue
-            descriptors.update(self._load_field_descriptors(identifier, key[1], missing_row_ids))
+            if view_struct not in self._descriptor_cache:
+                unique_structs.append(view_struct)
+        if not unique_structs:
+            return
+        resolved = self._preload_descriptors(unique_structs)
+        self._descriptor_cache.update(resolved)
 
     def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
-        self.preload([view_struct])
-        key = (view_struct.identifier.get_full_name(), view_struct.field_id)
-        descriptors = self._field_descriptor_cache[key]
-        descriptor = descriptors.get(int(view_struct.row_id))
+        descriptor = self._descriptor_cache.get(view_struct)
+        if descriptor is None:
+            self.preload([view_struct])
+            descriptor = self._descriptor_cache.get(view_struct)
         if descriptor is None:
             raise ValueError(
                 "Cannot resolve BlobViewStruct {} because row id {} was not found "
@@ -65,34 +65,112 @@ class BlobViewLookup:
     def resolve_data(self, view_struct: BlobViewStruct) -> bytes:
         descriptor = self.resolve_descriptor(view_struct)
         upstream_table = self._load_table(view_struct.identifier)
-        uri_reader = self._create_uri_reader(upstream_table, descriptor)
+        uri_reader = self._get_or_create_uri_reader(upstream_table, descriptor)
         return Blob.from_descriptor(uri_reader, descriptor).to_data()
 
-    def _load_field_descriptors(
-            self,
-            identifier: Identifier,
-            field_id: int,
-            row_ids: Iterable[int]) -> Dict[int, BlobDescriptor]:
-        row_ids = list(row_ids)
-        if not row_ids:
+    def _preload_descriptors(
+            self, view_structs: List[BlobViewStruct]) -> Dict[BlobViewStruct, BlobDescriptor]:
+        if not view_structs:
             return {}
 
+        grouped = self._group_by_table(view_structs)
+        plans = []
+        for identifier, table_refs in grouped.items():
+            plans.append(self._create_table_read_plan(identifier, table_refs))
+
+        target_rows = self._target_rows_per_task(plans)
+        tasks = []
+        for plan in plans:
+            for range_chunk in self._split_row_ranges(plan["row_ranges"], target_rows):
+                tasks.append((plan, range_chunk))
+
+        if len(tasks) <= 1:
+            resolved = {}
+            for plan, range_chunk in tasks:
+                resolved.update(self._load_descriptor_chunk(plan, range_chunk))
+            return resolved
+
+        resolved = {}
+        with ThreadPoolExecutor(max_workers=min(_PRELOAD_THREAD_NUM, len(tasks))) as executor:
+            futures = {
+                executor.submit(self._load_descriptor_chunk, plan, range_chunk): (plan, range_chunk)
+                for plan, range_chunk in tasks
+            }
+            for future in as_completed(futures):
+                try:
+                    resolved.update(future.result())
+                except Exception as exc:
+                    raise RuntimeError("Failed to preload blob descriptors.") from exc
+        return resolved
+
+    def _group_by_table(
+            self, view_structs: List[BlobViewStruct]
+    ) -> Dict[str, Dict]:
+        grouped = {}
+        for view_struct in view_structs:
+            key = view_struct.identifier.get_full_name()
+            if key not in grouped:
+                grouped[key] = {
+                    "identifier": view_struct.identifier,
+                    "fields_by_id": {},
+                    "row_ids": [],
+                }
+            refs = grouped[key]
+            refs["fields_by_id"].setdefault(view_struct.field_id, []).append(view_struct)
+            refs["row_ids"].append(int(view_struct.row_id))
+        return grouped
+
+    def _create_table_read_plan(self, table_key: str, table_refs: Dict) -> Dict:
+        identifier = table_refs["identifier"]
         upstream_table = self._load_table(identifier)
-        field = self._field_by_id(upstream_table, field_id)
+
+        fields = []
+        for field_id in table_refs["fields_by_id"]:
+            field = self._field_by_id(upstream_table, field_id)
+            fields.append({"field_id": field_id, "field": field})
+
+        row_ranges = self._to_sorted_distinct_ranges(table_refs["row_ids"])
+        return {
+            "identifier": identifier,
+            "upstream_table": upstream_table,
+            "fields": fields,
+            "row_ranges": row_ranges,
+        }
+
+    def _load_descriptor_chunk(
+            self, plan: Dict, row_ranges: List[Tuple[int, int]]
+    ) -> Dict[BlobViewStruct, BlobDescriptor]:
+        identifier = plan["identifier"]
+        upstream_table = plan["upstream_table"]
+        fields = plan["fields"]
+
+        field_names = [f["field"].name for f in fields]
+        projection = field_names + [SpecialFields.ROW_ID.name]
+
         descriptor_table = upstream_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
-        read_builder = descriptor_table.new_read_builder().with_projection(
-            [field.name, SpecialFields.ROW_ID.name]
-        )
-        if SpecialFields.ROW_ID.name not in [data_field.name for data_field in read_builder.read_type()]:
+        read_builder = descriptor_table.new_read_builder().with_projection(projection)
+
+        if SpecialFields.ROW_ID.name not in [
+            data_field.name for data_field in read_builder.read_type()
+        ]:
             raise ValueError(
                 "Cannot resolve blob view for table {} because row tracking is not readable."
                 .format(identifier.get_full_name())
             )
+
         predicate_builder = read_builder.new_predicate_builder()
-        if len(row_ids) == 1:
-            predicate = predicate_builder.equal(SpecialFields.ROW_ID.name, row_ids[0])
+        range_predicates = []
+        for range_from, range_to in row_ranges:
+            if range_from == range_to:
+                range_predicates.append(
+                    predicate_builder.equal(SpecialFields.ROW_ID.name, range_from))
+            else:
+                range_predicates.append(
+                    predicate_builder.between(SpecialFields.ROW_ID.name, range_from, range_to))
+        if len(range_predicates) == 1:
+            predicate = range_predicates[0]
         else:
-            predicate = predicate_builder.is_in(SpecialFields.ROW_ID.name, row_ids)
+            predicate = predicate_builder.or_predicates(range_predicates)
         read_builder.with_filter(predicate)
         result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
 
@@ -101,21 +179,79 @@ class BlobViewLookup:
                 "Cannot resolve blob view for table {} because row tracking is not readable."
                 .format(identifier.get_full_name())
             )
-        if field.name not in result.schema.names:
-            raise ValueError(
-                "Cannot resolve blob field {} in upstream table {}."
-                .format(field_id, identifier.get_full_name())
-            )
 
-        row_ids = result.column(SpecialFields.ROW_ID.name).to_pylist()
-        values = result.column(field.name).to_pylist()
-        descriptors = {}
-        for row_id, value in zip(row_ids, values):
-            if value is None:
+        row_id_values = result.column(SpecialFields.ROW_ID.name).to_pylist()
+        resolved = {}
+        for field_info in fields:
+            field_id = field_info["field_id"]
+            field_name = field_info["field"].name
+            if field_name not in result.schema.names:
                 continue
-            descriptor = self._to_descriptor(value)
-            descriptors[int(row_id)] = descriptor
-        return descriptors
+            values = result.column(field_name).to_pylist()
+            for row_id, value in zip(row_id_values, values):
+                if value is None:
+                    continue
+                descriptor = self._to_descriptor(value)
+                view_struct = BlobViewStruct(
+                    identifier.get_full_name(), field_id, int(row_id))
+                resolved[view_struct] = descriptor
+        return resolved
+
+    @staticmethod
+    def _to_sorted_distinct_ranges(row_ids: List[int]) -> List[Tuple[int, int]]:
+        if not row_ids:
+            return []
+        sorted_ids = sorted(set(row_ids))
+        ranges = []
+        range_start = sorted_ids[0]
+        range_end = range_start
+        for i in range(1, len(sorted_ids)):
+            row_id = sorted_ids[i]
+            if row_id == range_end + 1:
+                range_end = row_id
+            else:
+                ranges.append((range_start, range_end))
+                range_start = row_id
+                range_end = row_id
+        ranges.append((range_start, range_end))
+        return ranges
+
+    @staticmethod
+    def _split_row_ranges(
+            row_ranges: List[Tuple[int, int]], target_rows_per_task: int
+    ) -> List[List[Tuple[int, int]]]:
+        if not row_ranges:
+            return []
+
+        chunks = []
+        current_chunk = []
+        current_chunk_rows = 0
+        for range_from, range_to in row_ranges:
+            next_from = range_from
+            while next_from <= range_to:
+                if current_chunk_rows == target_rows_per_task:
+                    chunks.append(current_chunk)
+                    current_chunk = []
+                    current_chunk_rows = 0
+                remaining = target_rows_per_task - current_chunk_rows
+                next_to = min(range_to, next_from + remaining - 1)
+                current_chunk.append((next_from, next_to))
+                current_chunk_rows += next_to - next_from + 1
+                next_from = next_to + 1
+        if current_chunk:
+            chunks.append(current_chunk)
+        return chunks
+
+    @staticmethod
+    def _target_rows_per_task(plans: List[Dict]) -> int:
+        total_rows = 0
+        for plan in plans:
+            for range_from, range_to in plan["row_ranges"]:
+                total_rows += range_to - range_from + 1
+        if total_rows <= 0:
+            return _MIN_ROWS_PER_TASK
+        target = (total_rows + _PRELOAD_THREAD_NUM - 1) // _PRELOAD_THREAD_NUM
+        return max(_MIN_ROWS_PER_TASK, target)
 
     def _load_table(self, identifier: Identifier):
         key = identifier.get_full_name()
@@ -181,9 +317,14 @@ class BlobViewLookup:
             raise ValueError("Blob view upstream value is not a serialized BlobDescriptor.")
         return BlobDescriptor.deserialize(value)
 
-    @staticmethod
-    def _create_uri_reader(table, descriptor: BlobDescriptor) -> UriReader:
+    def _get_or_create_uri_reader(self, table, descriptor: BlobDescriptor) -> UriReader:
+        cache_key = table.identifier.get_full_name()
+        if cache_key in self._uri_reader_cache:
+            return self._uri_reader_cache[cache_key]
         uri_reader_factory = getattr(table.file_io, "uri_reader_factory", None)
         if uri_reader_factory is not None:
-            return uri_reader_factory.create(descriptor.uri)
-        return UriReader.from_file(table.file_io)
+            uri_reader = uri_reader_factory.create(descriptor.uri)
+        else:
+            uri_reader = UriReader.from_file(table.file_io)
+        self._uri_reader_cache[cache_key] = uri_reader
+        return uri_reader
