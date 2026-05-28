@@ -1122,7 +1122,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 latest.indexManifest(),
                 latest.nextRowId(),
-                withoutOverwriteBarrierProperties(latest.properties()));
+                withoutOverwriteBarrierProperty(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1139,7 +1139,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaManifestList,
                 indexManifest,
                 nextRowId,
-                withoutOverwriteBarrierProperties(latest.properties()));
+                withoutOverwriteBarrierProperty(latest.properties()));
     }
 
     public boolean replaceManifestList(
@@ -1250,13 +1250,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        withoutOverwriteBarrierProperties(latestSnapshot.properties()),
+                        withoutOverwriteBarrierProperty(latestSnapshot.properties()),
                         latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
 
-    private static @Nullable Map<String, String> withoutOverwriteBarrierProperties(
+    // The overwrite barrier is a one-shot marker for the snapshot that rewrites row IDs. Derived
+    // snapshots, such as manifest compaction snapshots, must not inherit it and become barriers.
+    private static @Nullable Map<String, String> withoutOverwriteBarrierProperty(
             @Nullable Map<String, String> properties) {
         if (properties == null || !properties.containsKey(Snapshot.OVERWRITE_BARRIER_PROPERTY)) {
             return properties;
