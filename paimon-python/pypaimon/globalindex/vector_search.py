@@ -17,6 +17,7 @@
 
 """VectorSearch for performing vector similarity search."""
 
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 import numpy as np
@@ -83,7 +84,7 @@ class VectorSearch:
             )
         return self
 
-    def visit(self, visitor: 'GlobalIndexReader') -> Optional['GlobalIndexResult']:
+    def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[GlobalIndexResult]]':
         """Visit the global index reader with this vector search."""
         return visitor.visit_vector_search(self)
 

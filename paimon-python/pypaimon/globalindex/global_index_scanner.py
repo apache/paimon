@@ -17,7 +17,6 @@
 
 """Scanner for shard-based global indexes."""
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Collection, Optional
 
@@ -43,7 +42,7 @@ class GlobalIndexScanner:
         thread_num: Optional[int] = None,
     ):
         self._executor = ThreadPoolExecutor(
-            max_workers=thread_num or os.cpu_count() or 4
+            max_workers=thread_num or 32
         )
         self._evaluator = self._create_evaluator(
             fields, file_io, index_path, index_files
@@ -76,10 +75,12 @@ class GlobalIndexScanner:
             )
             index_metas[field_id][index_type][range_key].append(io_meta)
 
-        def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
-            return _create_readers(file_io, index_path, index_metas.get(field.id), field)
+        executor = self._executor
 
-        return GlobalIndexEvaluator(fields, readers_function, self._executor)
+        def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
+            return _create_readers(file_io, index_path, index_metas.get(field.id), field, executor)
+
+        return GlobalIndexEvaluator(fields, readers_function)
 
     @staticmethod
     def create(table, index_files=None, partition_filter=None, predicate=None) -> Optional['GlobalIndexScanner']:
@@ -150,7 +151,7 @@ class GlobalIndexScanner:
         self.close()
 
 
-def _create_readers(file_io, index_path, index_type_metas, field):
+def _create_readers(file_io, index_path, index_type_metas, field, executor=None):
     """Create readers for a specific field, dispatched by index_type.
 
     Unknown indexTypes raise — a silent skip would make
@@ -172,7 +173,7 @@ def _create_readers(file_io, index_path, index_type_metas, field):
         offset_readers = []
         for range_key, io_metas in range_metas.items():
             inner_readers = _create_inner_readers(
-                index_type, file_io, index_path, field, io_metas)
+                index_type, file_io, index_path, field, io_metas, executor)
             for inner in inner_readers:
                 offset_readers.append(
                     OffsetGlobalIndexReader(
@@ -182,28 +183,25 @@ def _create_readers(file_io, index_path, index_type_metas, field):
     return readers
 
 
-def _create_inner_readers(index_type, file_io, index_path, field, io_metas):
+def _create_inner_readers(index_type, file_io, index_path, field, io_metas, executor=None):
     """Build per-file (or per-shard) readers for a single indexType/range."""
     if index_type == 'btree':
-        from pypaimon.globalindex.btree import BTreeIndexReader
+        from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
         from pypaimon.globalindex.btree.key_serializer import create_serializer
         key_serializer = create_serializer(field.type)
-        return [
-            BTreeIndexReader(
-                key_serializer=key_serializer,
-                file_io=file_io,
-                index_path=index_path,
-                io_meta=io_meta,
-            )
-            for io_meta in io_metas
-        ]
+        return [LazyFilteredBTreeReader(
+            key_serializer=key_serializer,
+            file_io=file_io,
+            index_path=index_path,
+            io_metas=io_metas,
+            executor=executor,
+        )]
 
     from pypaimon.globalindex.tantivy import (
         TANTIVY_FULLTEXT_IDENTIFIER,
         TantivyFullTextGlobalIndexReader,
     )
     if index_type == TANTIVY_FULLTEXT_IDENTIFIER:
-        # Tantivy expects one file per shard; create one reader per io_meta.
         return [
             TantivyFullTextGlobalIndexReader(file_io, index_path, [io_meta])
             for io_meta in io_metas

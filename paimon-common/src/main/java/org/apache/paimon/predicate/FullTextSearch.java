@@ -18,11 +18,7 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
-
 import java.io.Serializable;
-import java.util.Optional;
 
 /** FullTextSearch to perform full-text search on a text column. */
 public class FullTextSearch implements Serializable {
@@ -58,10 +54,6 @@ public class FullTextSearch implements Serializable {
 
     public String fieldName() {
         return fieldName;
-    }
-
-    public Optional<ScoredGlobalIndexResult> visit(GlobalIndexReader visitor) {
-        return visitor.visitFullTextSearch(this);
     }
 
     @Override

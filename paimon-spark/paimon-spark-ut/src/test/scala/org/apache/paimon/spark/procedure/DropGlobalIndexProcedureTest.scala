@@ -29,7 +29,7 @@ import scala.collection.JavaConverters._
 
 class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
 
-  test("drop bitmap global index") {
+  test("drop btree global index") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, name STRING)
@@ -46,42 +46,42 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
 
       var output =
         spark
-          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap')")
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree')")
           .collect()
           .head
 
       assert(output.getBoolean(0))
 
       var table = loadTable("T")
-      var bitmapEntries = table
+      var btreeEntries = table
         .store()
         .newIndexFileHandler()
         .scanEntries()
         .asScala
-        .filter(_.indexFile().indexType() == "bitmap")
-      assert(bitmapEntries.nonEmpty)
-      val totalRowCount = bitmapEntries.map(_.indexFile().rowCount()).sum
+        .filter(_.indexFile().indexType() == "btree")
+      assert(btreeEntries.nonEmpty)
+      val totalRowCount = btreeEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100000L)
 
       output = spark
-        .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap')")
+        .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'btree')")
         .collect()
         .head
 
       assert(output.getBoolean(0))
 
       table = loadTable("T")
-      bitmapEntries = table
+      btreeEntries = table
         .store()
         .newIndexFileHandler()
         .scanEntries()
         .asScala
-        .filter(_.indexFile().indexType() == "bitmap")
-      assert(bitmapEntries.isEmpty)
+        .filter(_.indexFile().indexType() == "btree")
+      assert(btreeEntries.isEmpty)
     }
   }
 
-  test("create bitmap global index with partition") {
+  test("create btree global index with partition") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, name STRING, pt STRING)
@@ -117,22 +117,22 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
 
       var output =
         spark
-          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap')")
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree')")
           .collect()
           .head
 
       assert(output.getBoolean(0))
 
       val table = loadTable("T")
-      var bitmapEntries = table
+      var btreeEntries = table
         .store()
         .newIndexFileHandler()
         .scanEntries()
         .asScala
-        .filter(_.indexFile().indexType() == "bitmap")
-      assert(bitmapEntries.nonEmpty)
+        .filter(_.indexFile().indexType() == "btree")
+      assert(btreeEntries.nonEmpty)
 
-      var ranges = bitmapEntries
+      var ranges = btreeEntries
         .map(
           s =>
             new Range(
@@ -143,7 +143,7 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
       var mergedRange = Range.sortAndMergeOverlap(ranges, true)
       assert(mergedRange.size() == 1)
       assert(mergedRange.get(0).equals(new Range(0, 189087)))
-      val totalRowCount = bitmapEntries
+      val totalRowCount = btreeEntries
         .map(
           x =>
             x.indexFile()
@@ -153,19 +153,19 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
       assert(totalRowCount == 189088L)
 
       output = spark
-        .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap', partitions => 'pt=\"p1\"')")
+        .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'btree', partitions => 'pt=\"p1\"')")
         .collect()
         .head
 
-      bitmapEntries = table
+      btreeEntries = table
         .store()
         .newIndexFileHandler()
         .scanEntries()
         .asScala
-        .filter(_.indexFile().indexType() == "bitmap")
-      assert(bitmapEntries.nonEmpty)
+        .filter(_.indexFile().indexType() == "btree")
+      assert(btreeEntries.nonEmpty)
 
-      ranges = bitmapEntries
+      ranges = btreeEntries
         .map(
           s =>
             new Range(

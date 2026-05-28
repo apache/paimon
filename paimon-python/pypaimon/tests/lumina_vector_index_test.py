@@ -98,7 +98,7 @@ class LuminaVectorIndexTest(unittest.TestCase):
                 options=paimon_options,
             ) as reader:
                 vs = VectorSearch(vector=raw[:dim], limit=5, field_name="embedding")
-                result = reader.visit_vector_search(vs)
+                result = reader.visit_vector_search(vs).result()
 
                 self.assertIsNotNone(result)
                 row_ids = result.results()
@@ -157,7 +157,7 @@ class LuminaVectorIndexTest(unittest.TestCase):
                 vector=raw[:dim], limit=3, field_name="embedding",
                 include_row_ids=include_ids,
             )
-            result = reader.visit_vector_search(vs)
+            result = reader.visit_vector_search(vs).result()
 
             self.assertIsNotNone(result)
             for row_id in result.results():

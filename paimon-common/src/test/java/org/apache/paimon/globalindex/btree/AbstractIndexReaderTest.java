@@ -167,33 +167,33 @@ public abstract class AbstractIndexReaderTest {
                 Object literal = data.get(literalIdx).getKey();
 
                 // 1. test <= literal
-                result = reader.visitLessOrEqual(ref, literal).get();
+                result = reader.visitLessOrEqual(ref, literal).join().get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) <= 0));
 
                 // 2. test < literal
-                result = reader.visitLessThan(ref, literal).get();
+                result = reader.visitLessThan(ref, literal).join().get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) < 0));
 
                 // 3. test >= literal
-                result = reader.visitGreaterOrEqual(ref, literal).get();
+                result = reader.visitGreaterOrEqual(ref, literal).join().get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) >= 0));
 
                 // 4. test > literal
-                result = reader.visitGreaterThan(ref, literal).get();
+                result = reader.visitGreaterThan(ref, literal).join().get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) > 0));
 
                 // 5. test equal
-                result = reader.visitEqual(ref, literal).get();
+                result = reader.visitEqual(ref, literal).join().get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) == 0));
 
                 // 6. test not equal
-                result = reader.visitNotEqual(ref, literal).get();
+                result = reader.visitNotEqual(ref, literal).join().get();
                 assertResult(result, filter(obj -> comparator.compare(obj, literal) != 0));
 
                 // 7. test between
                 int betweenOffset = random.nextInt(dataNum - literalIdx);
                 Object toLiteral = data.get(literalIdx + betweenOffset).getKey();
-                result = reader.visitBetween(ref, literal, toLiteral).get();
+                result = reader.visitBetween(ref, literal, toLiteral).join().get();
                 assertResult(
                         result,
                         filter(
@@ -204,12 +204,12 @@ public abstract class AbstractIndexReaderTest {
 
             // 8. test < min
             Object literal7 = data.get(0).getKey();
-            result = reader.visitLessThan(ref, literal7).get();
+            result = reader.visitLessThan(ref, literal7).join().get();
             Assertions.assertTrue(result.results().isEmpty());
 
             // 9. test > max
             Object literal8 = data.get(dataNum - 1).getKey();
-            result = reader.visitGreaterThan(ref, literal8).get();
+            result = reader.visitGreaterThan(ref, literal8).join().get();
             Assertions.assertTrue(result.results().isEmpty());
 
             // 10. test between
@@ -217,10 +217,10 @@ public abstract class AbstractIndexReaderTest {
                 Integer min = (Integer) (data.get(0).getKey());
                 Integer max = (Integer) (data.get(dataNum - 1).getKey());
 
-                result = reader.visitBetween(ref, min - 100, min - 1).get();
+                result = reader.visitBetween(ref, min - 100, min - 1).join().get();
                 Assertions.assertTrue(result.results().isEmpty());
 
-                result = reader.visitBetween(ref, max + 1, max + 100).get();
+                result = reader.visitBetween(ref, max + 1, max + 100).join().get();
                 Assertions.assertTrue(result.results().isEmpty());
             }
         }
@@ -239,10 +239,10 @@ public abstract class AbstractIndexReaderTest {
         try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
             GlobalIndexResult result;
 
-            result = reader.visitIsNull(ref).get();
+            result = reader.visitIsNull(ref).join().get();
             assertResult(result, filter(Objects::isNull));
 
-            result = reader.visitIsNotNull(ref).get();
+            result = reader.visitIsNotNull(ref).join().get();
             assertResult(result, filter(Objects::nonNull));
         }
     }
@@ -264,11 +264,11 @@ public abstract class AbstractIndexReaderTest {
                 set.addAll(literals);
 
                 // 1. test in
-                result = reader.visitIn(ref, literals).get();
+                result = reader.visitIn(ref, literals).join().get();
                 assertResult(result, filter(set::contains));
 
                 // 2. test not in
-                result = reader.visitNotIn(ref, literals).get();
+                result = reader.visitNotIn(ref, literals).join().get();
                 assertResult(result, filter(obj -> !set.contains(obj)));
             }
         }

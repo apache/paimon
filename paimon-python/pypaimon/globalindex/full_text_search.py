@@ -17,6 +17,7 @@
 
 """FullTextSearch for performing full-text search on a text column."""
 
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Optional
 
@@ -44,7 +45,7 @@ class FullTextSearch:
         if not self.field_name:
             raise ValueError("Field name cannot be null or empty")
 
-    def visit(self, visitor: 'GlobalIndexReader') -> Optional['ScoredGlobalIndexResult']:
+    def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[ScoredGlobalIndexResult]]':
         """Visit the global index reader with this full-text search."""
         return visitor.visit_full_text_search(self)
 

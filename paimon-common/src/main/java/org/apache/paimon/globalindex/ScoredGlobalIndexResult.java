@@ -18,12 +18,10 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.Comparator;
 import java.util.PriorityQueue;
-import java.util.function.Supplier;
 
 /** Vector search global index result for scored index. */
 public interface ScoredGlobalIndexResult extends GlobalIndexResult {
@@ -46,8 +44,7 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             roaringNavigableMap64Offset.add(rowId + offset);
         }
 
-        return create(
-                () -> roaringNavigableMap64Offset, rowId -> thisScoreGetter.score(rowId - offset));
+        return create(roaringNavigableMap64Offset, rowId -> thisScoreGetter.score(rowId - offset));
     }
 
     @Override
@@ -109,18 +106,16 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
             topKRowIds.add(entry[0]);
         }
 
-        return ScoredGlobalIndexResult.create(() -> topKRowIds, scoreGetter);
+        return ScoredGlobalIndexResult.create(topKRowIds, scoreGetter);
     }
 
     /** Returns an empty {@link ScoredGlobalIndexResult}. */
     static ScoredGlobalIndexResult createEmpty() {
-        return create(RoaringNavigableMap64::new, rowId -> 0);
+        return create(new RoaringNavigableMap64(), rowId -> 0);
     }
 
-    /** Returns a new {@link ScoredGlobalIndexResult} from supplier. */
-    static ScoredGlobalIndexResult create(
-            Supplier<RoaringNavigableMap64> supplier, ScoreGetter scoreGetter) {
-        LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
+    /** Returns a new {@link ScoredGlobalIndexResult} from bitmap. */
+    static ScoredGlobalIndexResult create(RoaringNavigableMap64 bitmap, ScoreGetter scoreGetter) {
         return new ScoredGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
@@ -129,7 +124,7 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
 
             @Override
             public RoaringNavigableMap64 results() {
-                return lazyField.get();
+                return bitmap;
             }
         };
     }
