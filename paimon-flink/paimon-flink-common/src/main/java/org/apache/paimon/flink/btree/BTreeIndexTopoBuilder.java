@@ -27,7 +27,6 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.globalindex.GlobalIndexCommitUtils;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CommitterOperatorFactory;
@@ -202,7 +201,15 @@ public class BTreeIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            commit(table, allStreams.get(0).union(rest), overwriteConflictCheckFromSnapshot);
+            FileStoreTable commitTable =
+                    overwriteConflictCheckFromSnapshot == null
+                            ? table
+                            : table.copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT
+                                                    .key(),
+                                            String.valueOf(overwriteConflictCheckFromSnapshot)));
+            commit(commitTable, allStreams.get(0).union(rest));
             return true;
         }
 
@@ -324,13 +331,7 @@ public class BTreeIndexTopoBuilder {
         return new RowType(readType.isNullable(), fields);
     }
 
-    private static void commit(
-            FileStoreTable table,
-            DataStream<Committable> written,
-            Long overwriteConflictCheckFromSnapshot) {
-        FileStoreTable commitTable =
-                GlobalIndexCommitUtils.withOverwriteConflictCheck(
-                        table, overwriteConflictCheckFromSnapshot);
+    private static void commit(FileStoreTable table, DataStream<Committable> written) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
@@ -338,9 +339,7 @@ public class BTreeIndexTopoBuilder {
                         "BTreeIndexCommitter-" + UUID.randomUUID(),
                         context ->
                                 new StoreCommitter(
-                                        commitTable,
-                                        commitTable.newCommit(context.commitUser()),
-                                        context),
+                                        table, table.newCommit(context.commitUser()), context),
                         new NoopCommittableStateManager());
 
         written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)

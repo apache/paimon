@@ -180,17 +180,25 @@ public class GenericIndexTopoBuilder {
         List<ManifestEntry> entries = indexBuilder.scan();
         List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
         Long overwriteConflictCheckFromSnapshot = indexBuilder.scanSnapshotId().orElse(null);
+        FileStoreTable commitTable =
+                overwriteConflictCheckFromSnapshot == null
+                        ? table
+                        : table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.COMMIT_OVERWRITE_CONFLICT_LAST_SAFE_SNAPSHOT
+                                                .key(),
+                                        String.valueOf(overwriteConflictCheckFromSnapshot)));
 
         return buildTopology(
                 env,
                 table,
+                commitTable,
                 indexColumn,
                 indexType,
                 userOptions,
                 entries,
                 deletedIndexEntries,
-                maxIndexedRowId,
-                overwriteConflictCheckFromSnapshot);
+                maxIndexedRowId);
     }
 
     /**
@@ -205,13 +213,13 @@ public class GenericIndexTopoBuilder {
     private static boolean buildTopology(
             StreamExecutionEnvironment env,
             FileStoreTable table,
+            FileStoreTable commitTable,
             String indexColumn,
             String indexType,
             Options userOptions,
             List<ManifestEntry> entries,
             List<IndexManifestEntry> deletedIndexEntries,
-            long maxIndexedRowId,
-            Long overwriteConflictCheckFromSnapshot)
+            long maxIndexedRowId)
             throws Exception {
         long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
         LOG.info(
@@ -297,7 +305,7 @@ public class GenericIndexTopoBuilder {
             built = built.union(deletes);
         }
 
-        commit(table, indexType, built, overwriteConflictCheckFromSnapshot);
+        commit(commitTable, indexType, built);
         return true;
     }
 
@@ -509,13 +517,7 @@ public class GenericIndexTopoBuilder {
     }
 
     private static void commit(
-            FileStoreTable table,
-            String indexType,
-            DataStream<Committable> written,
-            Long overwriteConflictCheckFromSnapshot) {
-        FileStoreTable commitTable =
-                GlobalIndexCommitUtils.withOverwriteConflictCheck(
-                        table, overwriteConflictCheckFromSnapshot);
+            FileStoreTable table, String indexType, DataStream<Committable> written) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
@@ -523,9 +525,7 @@ public class GenericIndexTopoBuilder {
                         "GenericIndexCommitter-" + indexType + "-" + UUID.randomUUID(),
                         context ->
                                 new StoreCommitter(
-                                        commitTable,
-                                        commitTable.newCommit(context.commitUser()),
-                                        context),
+                                        table, table.newCommit(context.commitUser()), context),
                         new NoopCommittableStateManager());
 
         written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
