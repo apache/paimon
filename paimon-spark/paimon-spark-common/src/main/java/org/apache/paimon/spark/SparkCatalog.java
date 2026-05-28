@@ -99,6 +99,7 @@ import static org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_META
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfigurations;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
+import static org.apache.paimon.spark.util.OptionUtils.withBranchFromOptions;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNoDefaultValue;
 import static org.apache.paimon.spark.utils.CatalogUtils.isUpdateColumnDefaultValue;
@@ -765,7 +766,9 @@ public class SparkCatalog extends SparkBaseCatalog
     protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
             Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
         try {
-            org.apache.paimon.catalog.Identifier tblIdent = toIdentifier(ident, catalogName);
+            org.apache.paimon.catalog.Identifier tblIdent =
+                    withBranchFromOptions(
+                            catalogName, toIdentifier(ident, catalogName), extraOptions);
             org.apache.paimon.table.Table table =
                     copyWithSQLConf(
                             catalog.getTable(tblIdent), catalogName, tblIdent, extraOptions);
