@@ -102,7 +102,7 @@ class PVFSTableIdentifier(PVFSIdentifier):
     def get_actual_path(self, storage_location: str):
         if self.sub_path:
             normalized_sub = posixpath.normpath(self.sub_path)
-            if normalized_sub.startswith("..") or normalized_sub.startswith("/"):
+            if normalized_sub == ".." or normalized_sub.startswith("../") or normalized_sub.startswith("/"):
                 raise ValueError(
                     "Path traversal detected: resolved path escapes table storage boundary"
                 )
