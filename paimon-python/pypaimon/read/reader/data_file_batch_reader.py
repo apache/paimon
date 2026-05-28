@@ -26,8 +26,6 @@ from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
-from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
-from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -44,10 +42,8 @@ class DataFileBatchReader(RecordBatchReader):
                  system_fields: dict,
                  blob_as_descriptor: bool = False,
                  blob_descriptor_fields: Optional[set] = None,
-                 blob_view_fields: Optional[set] = None,
                  file_io: Optional[FileIO] = None,
-                 row_id_offsets: Optional[List[int]] = None,
-                 table=None):
+                 row_id_offsets: Optional[List[int]] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -61,7 +57,6 @@ class DataFileBatchReader(RecordBatchReader):
         self.system_fields = system_fields
         self.blob_as_descriptor = blob_as_descriptor
         self.blob_descriptor_fields = blob_descriptor_fields or set()
-        self.blob_view_fields = blob_view_fields or set()
         self.file_io = file_io
         self.blob_field_names = {
             field.name
@@ -95,7 +90,7 @@ class DataFileBatchReader(RecordBatchReader):
                 record_batch.schema.names, record_batch.columns)
             if self.row_tracking_enabled and self.system_fields:
                 record_batch = self._assign_row_tracking(record_batch)
-            return self._convert_inline_blob_columns(record_batch)
+            return record_batch
 
         inter_arrays = []
         inter_names = []
@@ -145,7 +140,7 @@ class DataFileBatchReader(RecordBatchReader):
         if self.row_tracking_enabled and self.system_fields:
             record_batch = self._assign_row_tracking(record_batch)
 
-        record_batch = self._convert_inline_blob_columns(record_batch)
+        record_batch = self._convert_descriptor_stored_blob_columns(record_batch)
 
         return record_batch
 
@@ -176,6 +171,7 @@ class DataFileBatchReader(RecordBatchReader):
         return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))
 
     def _convert_inline_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
+    def _convert_descriptor_stored_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
         if isinstance(self.format_reader, FormatBlobReader):
             return record_batch
         if not self.descriptor_blob_fields:

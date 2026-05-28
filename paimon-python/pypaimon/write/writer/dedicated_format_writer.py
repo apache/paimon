@@ -69,20 +69,6 @@ class DedicatedFormatWriter(DataWriter):
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
             )
 
-        unknown_view_fields = self.blob_view_fields.difference(set(self.blob_column_names))
-        if unknown_view_fields:
-            raise ValueError(
-                "Fields in 'blob-view-field' must be blob fields in schema. "
-                f"Unknown fields: {sorted(unknown_view_fields)}"
-            )
-
-        overlapping_inline_fields = self.blob_descriptor_fields.intersection(self.blob_view_fields)
-        if overlapping_inline_fields:
-            raise ValueError(
-                "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
-                f"Overlapping fields: {sorted(overlapping_inline_fields)}"
-            )
-
         # Blob fields that should still be written to `.blob` files.
         self.blob_file_column_names = [
             col for col in self.blob_column_names if col not in self.blob_inline_fields

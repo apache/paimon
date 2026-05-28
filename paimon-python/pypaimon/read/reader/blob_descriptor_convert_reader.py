@@ -21,6 +21,7 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 
 
 class BlobDescriptorConvertReader(RecordBatchReader):
@@ -94,7 +95,7 @@ class BlobDescriptorConvertReader(RecordBatchReader):
                 if field_name not in batch.schema.names:
                     continue
                 for value in batch.column(field_name).to_pylist():
-                    value = self._normalize_blob_cell(value)
+                    value = self._normalize_blob_to_bytes(value)
                     if isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value):
                         all_view_structs.append(BlobViewStruct.deserialize(value))
 
@@ -113,13 +114,11 @@ class BlobDescriptorConvertReader(RecordBatchReader):
     def _resolve_view_fields(self, batch, blob_view_lookup, pyarrow):
         """Replace BlobViewStruct bytes in view fields with the corresponding
         BlobDescriptor serialized bytes."""
-        from pypaimon.table.row.blob import BlobViewStruct
-
         result = batch
         for field_name in self._view_fields:
             if field_name not in result.schema.names:
                 continue
-            values = [self._normalize_blob_cell(v) for v in result.column(field_name).to_pylist()]
+            values = [self._normalize_blob_to_bytes(v) for v in result.column(field_name).to_pylist()]
             converted_values = []
             for value in values:
                 if value is None:
@@ -148,57 +147,33 @@ class BlobDescriptorConvertReader(RecordBatchReader):
     # ------------------------------------------------------------------
 
     def _resolve_blob_data(self, batch, pyarrow):
-        """If blob-as-descriptor is true, return batch as-is. Otherwise resolve
-        all BlobDescriptor bytes in descriptor fields and view fields into real
-        blob data bytes."""
         if self._blob_as_descriptor:
             return batch
 
-        from pypaimon.table.row.blob import Blob, BlobDescriptor
-
-        all_fields = self._descriptor_fields | self._view_fields
-        result = batch
-        for field_name in all_fields:
-            if field_name not in result.schema.names:
+        all_inline_blob_fields = self._descriptor_fields | self._view_fields
+        for field_name in all_inline_blob_fields:
+            if field_name not in batch.schema.names:
                 continue
-            values = [self._normalize_blob_cell(v) for v in result.column(field_name).to_pylist()]
+            values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
             converted_values = []
             for value in values:
-                if value is None:
-                    converted_values.append(None)
-                    continue
-                if not isinstance(value, bytes):
-                    converted_values.append(value)
-                    continue
-                if not BlobDescriptor.is_blob_descriptor(value):
-                    converted_values.append(value)
-                    continue
-                descriptor = BlobDescriptor.deserialize(value)
-                if descriptor.serialize() != value:
-                    converted_values.append(value)
-                    continue
-                try:
-                    uri_reader = self._table.file_io.uri_reader_factory.create(descriptor.uri)
-                    converted_values.append(Blob.from_descriptor(uri_reader, descriptor).to_data())
-                except Exception as e:
-                    raise RuntimeError(
-                        "Failed to read blob bytes from descriptor URI."
-                    ) from e
+                blob = Blob.from_bytes(value, self._table.file_io)
+                converted_values.append(blob.to_data() if blob else None)
 
-            column_idx = result.schema.names.index(field_name)
-            result = result.set_column(
+            column_idx = batch.schema.names.index(field_name)
+            batch = batch.set_column(
                 column_idx,
                 pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
                 pyarrow.array(converted_values, type=pyarrow.large_binary()),
             )
-        return result
+        return batch
 
     # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _normalize_blob_cell(value):
+    def _normalize_blob_to_bytes(value):
         if value is None:
             return None
         if hasattr(value, 'as_py'):

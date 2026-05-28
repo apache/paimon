@@ -413,21 +413,6 @@ class Blob(ABC):
         return BlobView(view_struct)
 
     @staticmethod
-    def from_bytes_with_reader(
-            data: bytes,
-            uri_reader: Optional[UriReader],
-            file_io=None,
-            allow_blob_data: bool = True) -> Optional['Blob']:
-        if data is None:
-            return None
-        if BlobViewStruct.is_blob_view_struct(data):
-            return Blob.from_view(BlobViewStruct.deserialize(data))
-        if BlobDescriptor.is_blob_descriptor(data) or not allow_blob_data:
-            descriptor = BlobDescriptor.deserialize(data)
-            return Blob.from_descriptor(uri_reader or UriReader.from_file(file_io), descriptor)
-        return Blob.from_data(data)
-
-    @staticmethod
     def serialize_blob(blob: 'Blob') -> bytes:
         if isinstance(blob, BlobView):
             return blob.view_struct.serialize()

@@ -351,8 +351,7 @@ class SplitRead(ABC):
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
                 file_io=self.table.file_io,
-                row_id_offsets=row_indices,
-                table=self.table)
+                row_id_offsets=row_indices)
         else:
             reader = DataFileBatchReader(
                 format_reader,
@@ -367,8 +366,7 @@ class SplitRead(ABC):
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
                 file_io=self.table.file_io,
-                row_id_offsets=row_indices,
-                table=self.table)
+                row_id_offsets=row_indices)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
         if row_ranges is not None and row_indices is None:

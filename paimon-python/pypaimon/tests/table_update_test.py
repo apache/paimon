@@ -503,7 +503,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
 
     def _run_concurrent_updates(self, table, thread_specs, max_retries):
         """Run a batch of concurrent updates with conflict-retry; return the
-        order in which worker threads observed successful commits."""
+        commit order (``thread_index`` of the winning commit appended last)."""
         errors = []
         completion_order = []
         lock = threading.Lock()
@@ -561,9 +561,12 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             {'row_ids': [0, 1, 2], 'ages': [102, 202, 302]},
             {'row_ids': [0, 1, 2], 'ages': [103, 203, 303]},
         ]
-        self._run_concurrent_updates(table, specs, max_retries=30)
+        completion_order = self._run_concurrent_updates(
+            table, specs, max_retries=30
+        )
+        winner = specs[completion_order[-1]]['ages']
         ages = self._read_all(table)['age'].to_pylist()
-        self.assertIn(ages[:3], [spec['ages'] for spec in specs])
+        self.assertEqual(winner, ages[:3])
         # Rows 3 & 4 must remain at seed values
         self.assertEqual([40, 45], ages[3:])
 
