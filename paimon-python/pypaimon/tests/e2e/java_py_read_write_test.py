@@ -277,6 +277,55 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # which explicitly reads KeyValue objects and checks valueKind
         print(f"Format: {file_format}, Python read completed. ValueKind verification should be done in Java test.")
 
+    def test_py_write_row_append_table(self):
+        """Python writes a ROW-format append-only table for Java to read."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'file.format': 'row', 'bucket': '-1'}
+        )
+
+        table_name = 'default.mixed_test_append_tablep_row'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.table({
+            'id': pa.array([1, 2, 3, 4, 5, 6], type=pa.int32()),
+            'name': pa.array(['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef']),
+            'value': pa.array([1.5, 0.8, 0.6, 1.2, 5.0, 8.0]),
+        })
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Verify Python can read it back
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(result.num_rows, 6)
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        self.assertEqual(set(result.column('name').to_pylist()), expected_names)
+
+    def test_read_row_append_table(self):
+        """Python reads a ROW-format append-only table written by Java."""
+        table = self.catalog.get_table('default.mixed_test_append_tablej_row')
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(result.num_rows, 6)
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        self.assertEqual(set(result.column('name').to_pylist()), expected_names)
+
     def test_pk_dv_read(self):
         pa_schema = pa.schema([
             pa.field('pt', pa.int32(), nullable=False),

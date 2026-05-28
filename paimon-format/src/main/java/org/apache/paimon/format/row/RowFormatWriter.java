@@ -89,7 +89,6 @@ public class RowFormatWriter implements FormatWriter {
         footer.writeTo(out);
 
         out.flush();
-        out.close();
     }
 
     private void flushBlock() throws IOException {
