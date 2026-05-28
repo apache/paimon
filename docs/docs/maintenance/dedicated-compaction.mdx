@@ -451,3 +451,88 @@ Example: compact historical partitions for tables in database
 </TabItem>
 
 </Tabs>
+
+## Skip Expired Partitions in Compaction Job
+
+When [partition expiration](./manage-partitions#expiring-partitions) is configured with
+`partition.expiration-strategy = values-time`, a compaction job may waste resources compacting
+partitions that are already expired and will soon be deleted.
+
+You can set `compaction.skip-expired-partitions = true` to make the compaction job skip these
+already-expired partitions, avoiding unnecessary compaction work on data that will be deleted shortly.
+
+:::info
+
+This option requires `partition.expiration-strategy = values-time` to be configured on the table.
+It only supports primary key tables with fixed or dynamic bucket mode. Unaware bucket (append-only) tables
+and `compact_database` in `combined` mode are not supported — the option will be silently ignored in those cases.
+
+:::
+
+### For Table
+
+<Tabs groupId="skip-expired-partitions-compact">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Run the following sql:
+
+```sql
+-- skip expired partitions compact table
+CALL sys.compact(`table` => 'default.T', options => 'compaction.skip-expired-partitions=true')
+```
+
+</TabItem>
+
+<TabItem value="flink-action-jar" label="Flink Action Jar">
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    compact \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    --table_conf compaction.skip-expired-partitions=true \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+</TabItem>
+
+</Tabs>
+
+### For Databases
+
+<Tabs groupId="skip-expired-partitions-compact-database">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Run the following sql:
+
+```sql
+-- skip expired partitions compact database
+CALL sys.compact_database(
+  including_databases => 'includingDatabases',
+  mode => 'divided',
+  table_options => 'compaction.skip-expired-partitions=true'
+)
+```
+
+</TabItem>
+
+<TabItem value="flink-action-jar" label="Flink Action Jar">
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    compact_database \
+    --warehouse <warehouse-path> \
+    --including_databases <database-name|name-regular-expr> \
+    --mode divided \
+    --table_conf compaction.skip-expired-partitions=true \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+</TabItem>
+
+</Tabs>
