@@ -20,7 +20,7 @@ package org.apache.paimon.spark.aggregate
 
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
-import org.apache.paimon.table.source.PushDownUtils.minmaxAvailable
+import org.apache.paimon.table.source.PushDownUtils.{minmaxAvailable, tightBoundsAvailable}
 import org.apache.paimon.types._
 
 import org.apache.spark.sql.connector.expressions.Expression
@@ -37,7 +37,6 @@ object AggregatePushDownUtils {
       table: FileStoreTable,
       aggregation: Aggregation,
       readBuilder: ReadBuilder): Option[LocalAggregator] = {
-    val options = table.coreOptions()
     val rowType = table.rowType
     val partitionKeys = table.partitionKeys()
 
@@ -53,11 +52,14 @@ object AggregatePushDownUtils {
         if (columns.isEmpty) {
           generateSplits(readBuilder.dropStats())
         } else {
-          if (options.deletionVectorsEnabled() || !table.primaryKeys().isEmpty) {
+          if (!table.primaryKeys().isEmpty) {
             return None
           }
           val splits = generateSplits(readBuilder)
           if (!splits.forall(minmaxAvailable(_, columns.asJava))) {
+            return None
+          }
+          if (!splits.forall(tightBoundsAvailable)) {
             return None
           }
           splits
