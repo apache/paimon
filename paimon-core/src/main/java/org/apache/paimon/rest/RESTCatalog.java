@@ -29,6 +29,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.catalog.TableAccessContext;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.ConsumerInfo;
@@ -307,6 +308,12 @@ public class RESTCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
+        return getTable(identifier, TableAccessContext.direct());
+    }
+
+    @Override
+    public Table getTable(Identifier identifier, TableAccessContext accessContext)
+            throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
                 identifier,
@@ -316,7 +323,8 @@ public class RESTCatalog implements Catalog {
                 null,
                 null,
                 context,
-                true);
+                true,
+                accessContext);
     }
 
     @Override
@@ -614,9 +622,23 @@ public class RESTCatalog implements Catalog {
     @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
+        return authTableQuery(identifier, select, TableAccessContext.direct());
+    }
+
+    @Override
+    public TableQueryAuthResult authTableQuery(
+            Identifier identifier, @Nullable List<String> select, TableAccessContext accessContext)
+            throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
         try {
-            AuthTableQueryResponse response = api.authTableQuery(identifier, select);
+            AuthTableQueryResponse response =
+                    api.authTableQuery(
+                            identifier,
+                            select,
+                            accessContext.accessType().name(),
+                            accessContext.fallbackFrom() == null
+                                    ? null
+                                    : accessContext.fallbackFrom().getFullName());
             return new TableQueryAuthResult(response.filter(), response.columnMasking());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);

@@ -809,7 +809,27 @@ public class RESTApi {
      */
     public AuthTableQueryResponse authTableQuery(
             Identifier identifier, @Nullable List<String> select) {
-        AuthTableQueryRequest request = new AuthTableQueryRequest(select);
+        return authTableQuery(identifier, select, null, null);
+    }
+
+    /**
+     * Auth table query with access context.
+     *
+     * @param identifier database name and table name.
+     * @param select select columns, null if select all
+     * @param accessType type of table access, null for direct table access
+     * @param fallbackFrom source table for fallback access, null for direct table access
+     * @return additional filter for row level access control and column masking rules
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public AuthTableQueryResponse authTableQuery(
+            Identifier identifier,
+            @Nullable List<String> select,
+            @Nullable String accessType,
+            @Nullable String fallbackFrom) {
+        AuthTableQueryRequest request = new AuthTableQueryRequest(select, accessType, fallbackFrom);
         return client.post(
                 resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,

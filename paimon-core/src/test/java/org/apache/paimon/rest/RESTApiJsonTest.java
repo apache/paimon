@@ -22,6 +22,7 @@ import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
+import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
@@ -308,5 +309,25 @@ public class RESTApiJsonTest {
                 RESTApi.fromJson(responseStr, AuthTableQueryResponse.class);
         assertEquals(response.filter(), parseData.filter());
         assertEquals(response.columnMasking(), parseData.columnMasking());
+    }
+
+    @Test
+    public void authTableQueryRequestParseTest() throws Exception {
+        AuthTableQueryRequest request =
+                new AuthTableQueryRequest(
+                        java.util.Arrays.asList("col1", "col2"),
+                        "BLOB_VIEW_FALLBACK",
+                        "db.blob_view");
+        String requestStr = RESTApi.toJson(request);
+        AuthTableQueryRequest parseData = RESTApi.fromJson(requestStr, AuthTableQueryRequest.class);
+        assertEquals(request.select(), parseData.select());
+        assertEquals(request.accessType(), parseData.accessType());
+        assertEquals(request.fallbackFrom(), parseData.fallbackFrom());
+
+        AuthTableQueryRequest oldRequest =
+                RESTApi.fromJson("{\"select\":[\"col1\"]}", AuthTableQueryRequest.class);
+        assertEquals(java.util.Collections.singletonList("col1"), oldRequest.select());
+        assertEquals(null, oldRequest.accessType());
+        assertEquals(null, oldRequest.fallbackFrom());
     }
 }

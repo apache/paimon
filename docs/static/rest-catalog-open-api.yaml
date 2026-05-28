@@ -3167,6 +3167,12 @@ components:
           type: array
           items:
             type: string
+        accessType:
+          type: string
+          description: Type of table access, omitted for direct table access.
+        fallbackFrom:
+          type: string
+          description: Source table for fallback access, omitted for direct table access.
     AuthTableQueryResponse:
       type: object
       properties:
