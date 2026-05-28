@@ -569,7 +569,13 @@ public class SparkCatalog extends SparkBaseCatalog
                 normalizedProperties.put(TYPE.key(), FORMAT_TABLE.toString());
                 normalizedProperties.put(FILE_FORMAT.key(), provider.toLowerCase());
             } else {
-                throw new UnsupportedOperationException("Provider is not supported: " + provider);
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Provider '%s' is not supported by catalog '%s' (implementation: %s). Supported providers: [paimon, %s]",
+                                provider,
+                                catalogName,
+                                getClass().getSimpleName(),
+                                SparkSource.FORMAT_NAMES().mkString(", ")));
             }
         }
         normalizedProperties.remove(TableCatalog.PROP_PROVIDER);
