@@ -445,6 +445,98 @@ class TestFileStoreCommit(unittest.TestCase):
             snapshot_commit.commit.call_args[0][0].index_manifest
         )
 
+    def test_overwrite_commit_inherits_index_manifest(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.table_schema = Mock()
+        self.mock_table.table_schema.id = 7
+        self.mock_table.options.row_tracking_enabled.return_value = False
+
+        snapshot_commit = MagicMock()
+        snapshot_commit.__enter__.return_value = snapshot_commit
+        snapshot_commit.__exit__.return_value = False
+        snapshot_commit.commit.return_value = True
+        file_store_commit.snapshot_commit = snapshot_commit
+
+        file_store_commit._write_manifest_file = Mock(return_value=Mock())
+        file_store_commit._generate_partition_statistics = Mock(return_value=[])
+        file_store_commit.manifest_list_manager.read_all.return_value = []
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 3
+        latest_snapshot.total_record_count = 10
+        latest_snapshot.index_manifest = "index-manifest-existing"
+
+        commit_entry = Mock()
+        commit_entry.kind = 0
+        commit_entry.file = Mock()
+        commit_entry.file.row_count = 2
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="OVERWRITE",
+            commit_entries=[commit_entry],
+            commit_identifier=11,
+            latest_snapshot=latest_snapshot
+        )
+
+        self.assertTrue(result.is_success())
+        self.assertEqual(
+            "index-manifest-existing",
+            snapshot_commit.commit.call_args[0][0].index_manifest,
+            msg="OVERWRITE commit must inherit index_manifest from the previous "
+                "snapshot; otherwise global index files become orphaned in subsequent "
+                "snapshots and global-index lookups silently fall back to full scan."
+        )
+
+    def test_compact_commit_inherits_index_manifest(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.table_schema = Mock()
+        self.mock_table.table_schema.id = 7
+        self.mock_table.options.row_tracking_enabled.return_value = False
+
+        snapshot_commit = MagicMock()
+        snapshot_commit.__enter__.return_value = snapshot_commit
+        snapshot_commit.__exit__.return_value = False
+        snapshot_commit.commit.return_value = True
+        file_store_commit.snapshot_commit = snapshot_commit
+
+        file_store_commit._write_manifest_file = Mock(return_value=Mock())
+        file_store_commit._generate_partition_statistics = Mock(return_value=[])
+        file_store_commit.manifest_list_manager.read_all.return_value = []
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 3
+        latest_snapshot.total_record_count = 10
+        latest_snapshot.index_manifest = "index-manifest-existing"
+
+        commit_entry = Mock()
+        commit_entry.kind = 0
+        commit_entry.file = Mock()
+        commit_entry.file.row_count = 2
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="COMPACT",
+            commit_entries=[commit_entry],
+            commit_identifier=11,
+            latest_snapshot=latest_snapshot
+        )
+
+        self.assertTrue(result.is_success())
+        self.assertEqual(
+            "index-manifest-existing",
+            snapshot_commit.commit.call_args[0][0].index_manifest,
+            msg="COMPACT commit must inherit index_manifest from the previous "
+                "snapshot; compaction rewrites data files but does not touch "
+                "global index files, so the index_manifest pointer must carry over."
+        )
+
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         from pypaimon.data.timestamp import Timestamp

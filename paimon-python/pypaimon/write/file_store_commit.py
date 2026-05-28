@@ -376,7 +376,7 @@ class FileStoreCommit:
 
             total_record_count += delta_record_count
             index_manifest = None
-            if latest_snapshot and commit_kind == "APPEND":
+            if latest_snapshot and commit_kind in ("APPEND", "OVERWRITE", "COMPACT"):
                 index_manifest = latest_snapshot.index_manifest
 
             snapshot_data = Snapshot(
