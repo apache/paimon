@@ -813,7 +813,8 @@ public class BlobTableTest extends TableTestBase {
                         GenericRow.of(
                                 1, BinaryString.fromString("row1"), new BlobData(imageBytes1)),
                         GenericRow.of(
-                                2, BinaryString.fromString("row2"), new BlobData(imageBytes2))));
+                                2, BinaryString.fromString("row2"), new BlobData(imageBytes2)),
+                        GenericRow.of(3, BinaryString.fromString("row3"), null)));
 
         int imageFieldId =
                 upstreamTable.rowType().getFields().stream()
@@ -829,6 +830,7 @@ public class BlobTableTest extends TableTestBase {
         Map<Integer, byte[]> idToBlob = new HashMap<>();
         idToBlob.put(1, imageBytes1);
         idToBlob.put(2, imageBytes2);
+        idToBlob.put(3, null);
         rowIdReader
                 .newRead()
                 .createReader(rowIdReader.newScan().plan())
@@ -837,7 +839,7 @@ public class BlobTableTest extends TableTestBase {
                             int id = row.getInt(0);
                             idToRowId.put(id, row.getLong(1));
                         });
-        assertThat(idToRowId.size()).isEqualTo(2);
+        assertThat(idToRowId.size()).isEqualTo(3);
 
         String downstreamTableName = "DownstreamView";
         Schema.Builder downstreamSchema = Schema.newBuilder();
@@ -871,7 +873,15 @@ public class BlobTableTest extends TableTestBase {
                                         new BlobViewStruct(
                                                 Identifier.fromString(upstreamFullName),
                                                 imageFieldId,
-                                                idToRowId.get(2))))));
+                                                idToRowId.get(2)))),
+                        GenericRow.of(
+                                3,
+                                BinaryString.fromString("label3"),
+                                Blob.fromView(
+                                        new BlobViewStruct(
+                                                Identifier.fromString(upstreamFullName),
+                                                imageFieldId,
+                                                idToRowId.get(3))))));
 
         ReadBuilder downstreamReadBuilder = downstreamTable.newReadBuilder();
         downstreamReadBuilder
@@ -880,6 +890,11 @@ public class BlobTableTest extends TableTestBase {
                 .forEachRemaining(
                         row -> {
                             int id = row.getInt(0);
+                            if (idToBlob.get(id) == null) {
+                                assertThat(row.isNullAt(2)).isTrue();
+                                assertThat(row.getBlob(2)).isNull();
+                                return;
+                            }
                             Blob blob = row.getBlob(2);
                             assertThat(blob).isInstanceOf(BlobView.class);
                             assertThat(((BlobView) blob).isResolved()).isTrue();
