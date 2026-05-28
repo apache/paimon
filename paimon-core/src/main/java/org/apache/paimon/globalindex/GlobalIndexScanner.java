@@ -50,8 +50,10 @@ import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
@@ -81,21 +83,28 @@ public class GlobalIndexScanner implements Closeable {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             int fieldId = meta.indexFieldId();
             String indexType = indexFile.indexType();
-            indexMetas
-                    .computeIfAbsent(fieldId, k -> new HashMap<>())
-                    .computeIfAbsent(indexType, k -> new HashMap<>())
-                    .computeIfAbsent(
-                            new Range(meta.rowRangeStart(), meta.rowRangeEnd()),
-                            k -> new ArrayList<>())
-                    .add(indexFile);
+            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
+            if (fieldId != MULTI_COLUMN_INDEX_FIELD_ID) {
+                indexMetas
+                        .computeIfAbsent(fieldId, k -> new HashMap<>())
+                        .computeIfAbsent(indexType, k -> new HashMap<>())
+                        .computeIfAbsent(range, k -> new ArrayList<>())
+                        .add(indexFile);
+            }
+
+            if (meta.extraFieldIds() != null) {
+                for (int extraId : meta.extraFieldIds()) {
+                    indexMetas
+                            .computeIfAbsent(extraId, k -> new HashMap<>())
+                            .computeIfAbsent(indexType, k -> new HashMap<>())
+                            .computeIfAbsent(range, k -> new ArrayList<>())
+                            .add(indexFile);
+                }
+            }
         }
 
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
-                fieldId ->
-                        createReaders(
-                                indexFileReader,
-                                indexMetas.get(fieldId),
-                                rowType.getField(fieldId));
+                fieldId -> createReaders(indexFileReader, indexMetas.get(fieldId), rowType);
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction, executor);
     }
 
@@ -129,7 +138,17 @@ public class GlobalIndexScanner implements Closeable {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return filterFieldIds.contains(globalIndex.indexFieldId());
+                    if (filterFieldIds.contains(globalIndex.indexFieldId())) {
+                        return true;
+                    }
+                    if (globalIndex.extraFieldIds() != null) {
+                        for (int id : globalIndex.extraFieldIds()) {
+                            if (filterFieldIds.contains(id)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
                 };
 
         List<IndexFileMeta> indexFiles =
@@ -147,7 +166,7 @@ public class GlobalIndexScanner implements Closeable {
     private Collection<GlobalIndexReader> createReaders(
             GlobalIndexFileReader indexFileReadWrite,
             Map<String, Map<Range, List<IndexFileMeta>>> indexMetas,
-            DataField dataField) {
+            RowType rowType) {
         if (indexMetas == null) {
             return Collections.emptyList();
         }
@@ -159,7 +178,8 @@ public class GlobalIndexScanner implements Closeable {
                 Map<Range, List<IndexFileMeta>> metas = entry.getValue();
                 GlobalIndexerFactory globalIndexerFactory =
                         GlobalIndexerFactoryUtils.load(indexType);
-                GlobalIndexer globalIndexer = globalIndexerFactory.create(dataField, options);
+                List<DataField> fields = resolveFields(metas, rowType);
+                GlobalIndexer globalIndexer = globalIndexerFactory.create(fields, options);
 
                 List<GlobalIndexReader> unionReader = new ArrayList<>();
                 for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
@@ -185,6 +205,46 @@ public class GlobalIndexScanner implements Closeable {
         }
 
         return readers;
+    }
+
+    private List<DataField> resolveFields(Map<Range, List<IndexFileMeta>> metas, RowType rowType) {
+        GlobalIndexMeta firstMeta =
+                checkNotNull(metas.values().iterator().next().get(0).globalIndexMeta());
+        int indexFieldId = firstMeta.indexFieldId();
+
+        if (indexFieldId == MULTI_COLUMN_INDEX_FIELD_ID) {
+            int[] expectedExtraIds =
+                    checkNotNull(
+                            firstMeta.extraFieldIds(),
+                            "Multi-column index must have extraFieldIds.");
+            for (List<IndexFileMeta> rangeFiles : metas.values()) {
+                for (IndexFileMeta fileMeta : rangeFiles) {
+                    GlobalIndexMeta meta = checkNotNull(fileMeta.globalIndexMeta());
+                    checkArgument(
+                            meta.indexFieldId() == MULTI_COLUMN_INDEX_FIELD_ID,
+                            "Inconsistent indexFieldId across range groups: expected %s but found %s.",
+                            MULTI_COLUMN_INDEX_FIELD_ID,
+                            meta.indexFieldId());
+                    checkArgument(
+                            java.util.Arrays.equals(meta.extraFieldIds(), expectedExtraIds),
+                            "Inconsistent extraFieldIds across range groups.");
+                }
+            }
+            List<DataField> fields = new ArrayList<>();
+            for (int id : expectedExtraIds) {
+                fields.add(rowType.getField(id));
+            }
+            return fields;
+        }
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(rowType.getField(indexFieldId));
+        if (firstMeta.extraFieldIds() != null) {
+            for (int id : firstMeta.extraFieldIds()) {
+                fields.add(rowType.getField(id));
+            }
+        }
+        return fields;
     }
 
     private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {

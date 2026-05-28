@@ -18,26 +18,17 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.fileindex.FileIndexer;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataField;
+import org.apache.paimon.data.InternalRow;
 
-import java.util.List;
+import javax.annotation.Nullable;
 
-/** File index factory to construct {@link FileIndexer}. */
-public interface GlobalIndexerFactory {
+/** Index writer for global index that accepts multiple column values per row. */
+public interface GlobalIndexMultiColumnWriter extends GlobalIndexWriter {
 
-    String identifier();
-
-    GlobalIndexer create(DataField dataField, Options options);
-
-    default GlobalIndexer create(List<DataField> fields, Options options) {
-        if (fields.size() > 1) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Index type '%s' does not support multi-column index, got columns: %s",
-                            identifier(), fields));
-        }
-        return create(fields.get(0), options);
-    }
+    /**
+     * Write a projected row containing all indexed columns for one record. The row layout matches
+     * the fields order passed to {@link GlobalIndexerFactory#create(java.util.List,
+     * org.apache.paimon.options.Options)}.
+     */
+    void write(@Nullable InternalRow row);
 }

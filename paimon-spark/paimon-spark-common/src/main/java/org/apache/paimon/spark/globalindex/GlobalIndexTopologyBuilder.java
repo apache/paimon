@@ -46,4 +46,31 @@ public interface GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException;
+
+    default List<CommitMessage> buildIndex(
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            PartitionPredicate partitionPredicate,
+            FileStoreTable table,
+            String indexType,
+            RowType readType,
+            List<DataField> indexFields,
+            Options options)
+            throws IOException {
+        if (indexFields.size() > 1) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Topology builder '%s' does not support multi-column index, got columns: %s",
+                            identifier(), indexFields));
+        }
+        return buildIndex(
+                spark,
+                relation,
+                partitionPredicate,
+                table,
+                indexType,
+                readType,
+                indexFields.get(0),
+                options);
+    }
 }

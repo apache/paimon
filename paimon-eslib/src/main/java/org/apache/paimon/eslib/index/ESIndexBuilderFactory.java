@@ -16,28 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.eslib.index;
 
-import org.apache.paimon.fileindex.FileIndexer;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataField;
+import org.elasticsearch.eslib.api.ESIndexBuilder;
+import org.elasticsearch.eslib.api.ESIndexSearcher;
+import org.elasticsearch.eslib.api.model.FieldIndexConfig;
+import org.elasticsearch.eslib.builder.DefaultESIndexBuilder;
+import org.elasticsearch.eslib.searcher.DefaultESIndexSearcher;
 
-import java.util.List;
+import java.io.IOException;
+import java.util.Map;
 
-/** File index factory to construct {@link FileIndexer}. */
-public interface GlobalIndexerFactory {
+/** Factory to create ESIndexBuilder/ESIndexSearcher from eslib-core. */
+public class ESIndexBuilderFactory {
 
-    String identifier();
+    public static ESIndexBuilder create(Map<String, FieldIndexConfig> fieldConfigs)
+            throws IOException {
+        return new DefaultESIndexBuilder(fieldConfigs);
+    }
 
-    GlobalIndexer create(DataField dataField, Options options);
-
-    default GlobalIndexer create(List<DataField> fields, Options options) {
-        if (fields.size() > 1) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Index type '%s' does not support multi-column index, got columns: %s",
-                            identifier(), fields));
-        }
-        return create(fields.get(0), options);
+    public static ESIndexSearcher createSearcher() {
+        return new DefaultESIndexSearcher();
     }
 }

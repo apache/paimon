@@ -61,7 +61,17 @@ public class FullTextScanImpl implements FullTextScan {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return textColumn.id() == globalIndex.indexFieldId();
+                    if (textColumn.id() == globalIndex.indexFieldId()) {
+                        return true;
+                    }
+                    if (globalIndex.extraFieldIds() != null) {
+                        for (int id : globalIndex.extraFieldIds()) {
+                            if (textColumn.id() == id) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
                 };
 
         List<IndexFileMeta> allIndexFiles =
