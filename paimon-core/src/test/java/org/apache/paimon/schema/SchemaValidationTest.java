@@ -40,6 +40,8 @@ import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
+import static org.apache.paimon.schema.TableSchema.CURRENT_VERSION;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -543,6 +545,69 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testBucketAppendBackwardCompatibility() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.STRING()));
+
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(BUCKET.key(), "1");
+
+        TableSchema legacySchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyOptions,
+                        "",
+                        0L);
+
+        assertThatCode(() -> validateTableSchema(legacySchema)).doesNotThrowAnyException();
+
+        Map<String, String> currentOptions = new HashMap<>();
+        currentOptions.put(BUCKET.key(), "1");
+
+        TableSchema currentSchema =
+                new TableSchema(
+                        CURRENT_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        currentOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(currentSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
+
+        Map<String, String> legacyMultiBucketOptions = new HashMap<>();
+        legacyMultiBucketOptions.put(BUCKET.key(), "2");
+
+        TableSchema legacyMultiBucketSchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyMultiBucketOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(legacyMultiBucketSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
     }
 
     @Test

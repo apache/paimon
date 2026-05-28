@@ -78,6 +78,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
@@ -681,7 +682,9 @@ public class SchemaValidation {
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
-            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+            if (schema.primaryKeys().isEmpty()
+                    && schema.bucketKeys().isEmpty()
+                    && (bucket != 1 || schema.version() != PAIMON_07_VERSION)) {
                 throw new RuntimeException(
                         "You should define a 'bucket-key' for bucketed append mode.");
             }
