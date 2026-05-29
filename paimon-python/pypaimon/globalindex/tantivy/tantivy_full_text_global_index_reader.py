@@ -24,12 +24,10 @@ backed by a stream-based Directory. No temp files are created on disk.
 import os
 import struct
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List
 
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
-from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef, _completed_future
 from pypaimon.globalindex.vector_search_result import (
-    ScoredGlobalIndexResult,
     DictBasedScoredIndexResult,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
@@ -142,8 +140,9 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         self._searcher = None
         self._index = None
         self._stream = None
+        self._load_lock = threading.Lock()
 
-    def visit_full_text_search(self, full_text_search) -> Optional[ScoredGlobalIndexResult]:
+    def visit_full_text_search(self, full_text_search):
         self._ensure_loaded()
 
         query_text = full_text_search.query_text
@@ -154,7 +153,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         results = searcher.search(query, limit)
         if not results.hits:
-            return DictBasedScoredIndexResult({})
+            return _completed_future(DictBasedScoredIndexResult({}))
 
         doc_addresses = [addr for score, addr in results.hits]
         scores = [score for score, addr in results.hits]
@@ -164,37 +163,38 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         for row_id, score in zip(row_ids, scores):
             id_to_scores[row_id] = score
 
-        return DictBasedScoredIndexResult(id_to_scores)
+        return _completed_future(DictBasedScoredIndexResult(id_to_scores))
 
     def _ensure_loaded(self):
         if self._searcher is not None:
             return
 
-        import tantivy
+        with self._load_lock:
+            if self._searcher is not None:
+                return
 
-        # Open the archive stream (prefer external_path if the manifest set it).
-        file_path = (self._io_meta.external_path
-                     if self._io_meta.external_path
-                     else os.path.join(self._index_path, self._io_meta.file_name))
-        stream = self._file_io.new_input_stream(file_path)
-        try:
-            # Parse archive header to get file layout
-            file_names, file_offsets, file_lengths = self._parse_archive_header(stream)
-            directory = StreamDirectory(stream, file_names, file_offsets, file_lengths)
+            import tantivy
 
-            # Open tantivy index from stream-backed directory
-            schema_builder = tantivy.SchemaBuilder()
-            schema_builder.add_unsigned_field("row_id", stored=False, indexed=True, fast=True)
-            schema_builder.add_text_field("text", stored=False)
-            schema = schema_builder.build()
+            file_path = (self._io_meta.external_path
+                         if self._io_meta.external_path
+                         else os.path.join(self._index_path, self._io_meta.file_name))
+            stream = self._file_io.new_input_stream(file_path)
+            try:
+                file_names, file_offsets, file_lengths = self._parse_archive_header(stream)
+                directory = StreamDirectory(stream, file_names, file_offsets, file_lengths)
 
-            self._index = tantivy.Index(schema, directory=directory)
-            self._index.reload()
-            self._searcher = self._index.searcher()
-            self._stream = stream
-        except Exception:
-            stream.close()
-            raise
+                schema_builder = tantivy.SchemaBuilder()
+                schema_builder.add_unsigned_field("row_id", stored=False, indexed=True, fast=True)
+                schema_builder.add_text_field("text", stored=False)
+                schema = schema_builder.build()
+
+                self._index = tantivy.Index(schema, directory=directory)
+                self._index.reload()
+                self._searcher = self._index.searcher()
+                self._stream = stream
+            except Exception:
+                stream.close()
+                raise
 
     @staticmethod
     def _parse_archive_header(stream):
@@ -225,50 +225,50 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
     # =================== unsupported =====================
 
-    def visit_equal(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_equal(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_not_equal(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_not_equal(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_less_than(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_less_than(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_less_or_equal(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_less_or_equal(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_greater_than(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_greater_than(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_greater_or_equal(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_greater_or_equal(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_is_null(self, field_ref: FieldRef) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_is_null(self, field_ref: FieldRef):
+        return _completed_future(None)
 
-    def visit_is_not_null(self, field_ref: FieldRef) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_is_not_null(self, field_ref: FieldRef):
+        return _completed_future(None)
 
-    def visit_in(self, field_ref: FieldRef, literals: List[object]) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_in(self, field_ref: FieldRef, literals: List[object]):
+        return _completed_future(None)
 
-    def visit_not_in(self, field_ref: FieldRef, literals: List[object]) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_not_in(self, field_ref: FieldRef, literals: List[object]):
+        return _completed_future(None)
 
-    def visit_starts_with(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_starts_with(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_ends_with(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_ends_with(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_contains(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_contains(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_like(self, field_ref: FieldRef, literal: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_like(self, field_ref: FieldRef, literal: object):
+        return _completed_future(None)
 
-    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> Optional[GlobalIndexResult]:
-        return None
+    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object):
+        return _completed_future(None)
 
     def close(self) -> None:
         self._searcher = None

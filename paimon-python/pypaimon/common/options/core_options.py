@@ -458,10 +458,10 @@ class CoreOptions:
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
-        .no_default_value()
+        .default_value(32)
         .with_description(
-            "The maximum number of concurrent scanner for global index. "
-            "By default is the number of processors available."
+            "The maximum number of concurrent threads for global index I/O. "
+            "Defaults to 32 for optimal I/O parallelism."
         )
     )
 

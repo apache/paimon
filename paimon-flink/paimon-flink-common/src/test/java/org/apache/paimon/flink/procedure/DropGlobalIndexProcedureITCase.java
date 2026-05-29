@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testDropBitmapGlobalIndex() throws Exception {
+    public void testDropBtreeGlobalIndex() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " id INT,"
@@ -65,58 +65,58 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
             commit.close();
         }
 
-        // Create bitmap index
+        // Create btree index
         tEnv.getConfig()
                 .set(org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC, true);
         List<Row> createResult =
                 sql(
                         "CALL sys.create_global_index(`table` => 'default.T', "
                                 + "`index_column` => 'name', "
-                                + "`index_type` => 'bitmap')");
+                                + "`index_type` => 'btree')");
         assertThat(createResult).hasSize(1);
         assertThat(createResult.get(0).getField(0))
-                .isEqualTo("bitmap global index created successfully for table: T");
+                .isEqualTo("BTree global index created successfully for table: T");
 
         // Verify index was created
         table = paimonTable("T");
-        List<IndexManifestEntry> bitmapEntries =
+        List<IndexManifestEntry> btreeEntries =
                 table.store().newIndexFileHandler().scanEntries().stream()
-                        .filter(entry -> entry.indexFile().indexType().equals("bitmap"))
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
                         .collect(Collectors.toList());
-        assertThat(bitmapEntries).isNotEmpty();
+        assertThat(btreeEntries).isNotEmpty();
         long totalRowCount =
-                bitmapEntries.stream()
+                btreeEntries.stream()
                         .map(entry -> entry.indexFile().rowCount())
                         .mapToLong(Long::longValue)
                         .sum();
         assertThat(totalRowCount).isEqualTo(100000L);
 
-        // Drop bitmap index
+        // Drop btree index
         List<Row> dropResult =
                 sql(
                         "CALL sys.drop_global_index(`table` => 'default.T', "
                                 + "`index_column` => 'name', "
-                                + "`index_type` => 'bitmap')");
+                                + "`index_type` => 'btree')");
         assertThat(dropResult).hasSize(1);
         assertThat(dropResult.get(0).getField(0))
                 .isInstanceOf(String.class)
                 .asString()
                 .contains("Dropped")
-                .contains("bitmap")
+                .contains("btree")
                 .contains("global index files")
                 .contains("name");
 
         // Verify index was dropped
         table = paimonTable("T");
-        bitmapEntries =
+        btreeEntries =
                 table.store().newIndexFileHandler().scanEntries().stream()
-                        .filter(entry -> entry.indexFile().indexType().equals("bitmap"))
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
                         .collect(Collectors.toList());
-        assertThat(bitmapEntries).isEmpty();
+        assertThat(btreeEntries).isEmpty();
     }
 
     @Test
-    public void testDropBitmapGlobalIndexWithPartition() throws Exception {
+    public void testDropBtreeGlobalIndexWithPartition() throws Exception {
         sql(
                 "CREATE TABLE T ("
                         + " id INT,"
@@ -194,27 +194,27 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
             commit.close();
         }
 
-        // Create bitmap index
+        // Create btree index
         tEnv.getConfig()
                 .set(org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC, true);
         List<Row> createResult =
                 sql(
                         "CALL sys.create_global_index(`table` => 'default.T', "
                                 + "`index_column` => 'name', "
-                                + "`index_type` => 'bitmap')");
+                                + "`index_type` => 'btree')");
         assertThat(createResult).hasSize(1);
 
         // Verify index was created
         table = paimonTable("T");
-        List<IndexManifestEntry> bitmapEntries =
+        List<IndexManifestEntry> btreeEntries =
                 table.store().newIndexFileHandler().scanEntries().stream()
-                        .filter(entry -> entry.indexFile().indexType().equals("bitmap"))
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
                         .collect(Collectors.toList());
-        assertThat(bitmapEntries).isNotEmpty();
+        assertThat(btreeEntries).isNotEmpty();
 
         // Verify total row count
         long totalRowCount =
-                bitmapEntries.stream()
+                btreeEntries.stream()
                         .map(
                                 entry ->
                                         entry.indexFile().globalIndexMeta().rowRangeEnd()
@@ -226,30 +226,30 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
                         .sum();
         assertThat(totalRowCount).isEqualTo(189088L);
 
-        // Drop bitmap index for partition p1 only
+        // Drop btree index for partition p1 only
         List<Row> dropResult =
                 sql(
                         "CALL sys.drop_global_index(`table` => 'default.T', "
                                 + "`index_column` => 'name', "
-                                + "`index_type` => 'bitmap', "
+                                + "`index_type` => 'btree', "
                                 + "`partitions` => 'pt=p1')");
         assertThat(dropResult).hasSize(1);
         assertThat(dropResult.get(0).getField(0))
                 .isInstanceOf(String.class)
                 .asString()
                 .contains("Dropped")
-                .contains("bitmap");
+                .contains("btree");
 
         // Verify only p1 index was dropped
-        bitmapEntries =
+        btreeEntries =
                 table.store().newIndexFileHandler().scanEntries().stream()
-                        .filter(entry -> entry.indexFile().indexType().equals("bitmap"))
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
                         .collect(Collectors.toList());
-        assertThat(bitmapEntries).isNotEmpty();
+        assertThat(btreeEntries).isNotEmpty();
 
         // Verify remaining row count (p0: 87222 + p2: 33433 = 120655)
         long remainingRowCount =
-                bitmapEntries.stream()
+                btreeEntries.stream()
                         .map(
                                 entry ->
                                         entry.indexFile().globalIndexMeta().rowRangeEnd()
@@ -294,11 +294,11 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
                 sql(
                         "CALL sys.drop_global_index(`table` => 'default.T', "
                                 + "`index_column` => 'name', "
-                                + "`index_type` => 'bitmap')");
+                                + "`index_type` => 'btree')");
         assertThat(dropResult).hasSize(1);
         assertThat(dropResult.get(0).getField(0))
                 .isInstanceOf(String.class)
                 .asString()
-                .contains("No bitmap global index found for column 'name'");
+                .contains("No btree global index found for column 'name'");
     }
 }

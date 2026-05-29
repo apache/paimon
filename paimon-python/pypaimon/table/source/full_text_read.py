@@ -18,7 +18,8 @@
 """Full-text read to read index files."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from concurrent.futures import wait
+from typing import List
 
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
@@ -59,12 +60,19 @@ class FullTextReadImpl(FullTextRead):
         if not splits:
             return GlobalIndexResult.create_empty()
 
-        merged_scores = {}
-        for split in splits:
-            split_result = self._eval(
+        futures = [
+            self._eval(
                 split.row_range_start, split.row_range_end,
                 split.full_text_index_files
             )
+            for split in splits
+        ]
+
+        wait(futures)
+
+        merged_scores = {}
+        for future in futures:
+            split_result = future.result()
             if split_result is not None:
                 score_getter = split_result.score_getter()
                 for row_id in split_result.results():
@@ -73,8 +81,7 @@ class FullTextReadImpl(FullTextRead):
 
         return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
-    def _eval(self, row_range_start, row_range_end, full_text_index_files
-              ) -> Optional[GlobalIndexResult]:
+    def _eval(self, row_range_start, row_range_end, full_text_index_files):
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
@@ -102,11 +109,10 @@ class FullTextReadImpl(FullTextRead):
             field_name=self._text_column.name
         )
 
-        try:
-            offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-            return offset_reader.visit_full_text_search(full_text_search)
-        finally:
-            reader.close()
+        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        future = offset_reader.visit_full_text_search(full_text_search)
+        future.add_done_callback(lambda _: reader.close())
+        return future
 
 
 def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list):

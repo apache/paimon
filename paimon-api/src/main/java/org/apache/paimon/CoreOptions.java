@@ -2446,10 +2446,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(32)
                     .withDescription(
-                            "The maximum number of concurrent scanner for global index."
-                                    + "By default is the number of processors available to the Java virtual machine.");
+                            "The maximum number of concurrent threads for global index I/O.");
 
     public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
             key("overwrite-upgrade")
