@@ -16,7 +16,7 @@
 # under the License.
 
 import struct
-from typing import List, Optional, Any, Iterator
+from typing import List, Optional, Any, Iterator, BinaryIO
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -43,27 +43,33 @@ class FormatBlobReader(RecordBatchReader):
         self._push_down_predicate = push_down_predicate
         self._blob_as_descriptor = blob_as_descriptor
         self._batch_size = batch_size
-        # Get file size
-        self._file_size = file_io.get_file_size(file_path)
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
         self.blob_lengths: List[int] = []
         self.blob_offsets: List[int] = []
         self.returned = False
-        self._read_index()
-
-        # Set up fields and schema
-        if len(read_fields) > 1:
-            raise RuntimeError("Blob reader only supports one field.")
-        self._fields = read_fields
-        full_fields_map = {field.name: field for field in full_fields}
-        projected_data_fields = [full_fields_map[name] for name in read_fields]
-        self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
-
-        # Initialize iterator
+        self._input_stream = None
         self._blob_iterator = None
         self._current_batch = None
+        try:
+            self._file_size = file_io.get_file_size(file_path)
+            self._input_stream = file_io.new_input_stream(file_path)
+            self._read_index()
+            if self._blob_as_descriptor:
+                self._input_stream.close()
+                self._input_stream = None
+
+            # Set up fields and schema
+            if len(read_fields) > 1:
+                raise RuntimeError("Blob reader only supports one field.")
+            self._fields = read_fields
+            full_fields_map = {field.name: field for field in full_fields}
+            projected_data_fields = [full_fields_map[name] for name in read_fields]
+            self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
+        except Exception:
+            self.close()
+            raise
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         """
@@ -76,7 +82,7 @@ class FormatBlobReader(RecordBatchReader):
             self.returned = True
             batch_iterator = BlobRecordIterator(
                 self._file_io, self.file_path, self.blob_lengths,
-                self.blob_offsets, self._fields[0]
+                self.blob_offsets, self._fields[0], self._input_stream
             )
             self._blob_iterator = iter(batch_iterator)
         read_size = self._batch_size
@@ -140,42 +146,46 @@ class FormatBlobReader(RecordBatchReader):
 
     def close(self):
         self._blob_iterator = None
+        if self._input_stream is not None:
+            self._input_stream.close()
+            self._input_stream = None
 
     def _read_index(self) -> None:
-        with self._file_io.new_input_stream(self.file_path) as f:
-            # Seek to header: last 5 bytes
-            f.seek(self._file_size - 5)
-            header = f.read(5)
+        f = self._input_stream
 
-            if len(header) != 5:
-                raise IOError("Invalid blob file: cannot read header")
+        # Seek to header: last 5 bytes
+        f.seek(self._file_size - 5)
+        header = f.read(5)
 
-            # Parse header
-            index_length = struct.unpack('<I', header[:4])[0]  # Little endian
-            version = header[4]
+        if len(header) != 5:
+            raise IOError("Invalid blob file: cannot read header")
 
-            if version != 1:
-                raise IOError(f"Unsupported blob file version: {version}")
+        # Parse header
+        index_length = struct.unpack('<I', header[:4])[0]  # Little endian
+        version = header[4]
 
-            # Read index data
-            f.seek(self._file_size - 5 - index_length)
-            index_bytes = f.read(index_length)
+        if version != 1:
+            raise IOError(f"Unsupported blob file version: {version}")
 
-            if len(index_bytes) != index_length:
-                raise IOError("Invalid blob file: cannot read index")
+        # Read index data
+        f.seek(self._file_size - 5 - index_length)
+        index_bytes = f.read(index_length)
 
-            # Decompress blob lengths and compute offsets
-            blob_lengths = DeltaVarintCompressor.decompress(index_bytes)
-            blob_offsets = []
-            offset = 0
-            for length in blob_lengths:
-                if length < 0:
-                    blob_offsets.append(-1)
-                else:
-                    blob_offsets.append(offset)
-                    offset += length
-            self.blob_lengths = blob_lengths
-            self.blob_offsets = blob_offsets
+        if len(index_bytes) != index_length:
+            raise IOError("Invalid blob file: cannot read index")
+
+        # Decompress blob lengths and compute offsets
+        blob_lengths = DeltaVarintCompressor.decompress(index_bytes)
+        blob_offsets = []
+        offset = 0
+        for length in blob_lengths:
+            if length < 0:
+                blob_offsets.append(-1)
+            else:
+                blob_offsets.append(offset)
+                offset += length
+        self.blob_lengths = blob_lengths
+        self.blob_offsets = blob_offsets
 
 
 class BlobRecordIterator:
@@ -185,9 +195,11 @@ class BlobRecordIterator:
     PLACE_HOLDER_LENGTH = -2
 
     def __init__(self, file_io: FileIO, file_path: str, blob_lengths: List[int],
-                 blob_offsets: List[int], field_name: str):
+                 blob_offsets: List[int], field_name: str,
+                 input_stream: Optional[BinaryIO] = None):
         self.file_io = file_io
         self.file_path = file_path
+        self.input_stream = input_stream
         self.field_name = field_name
         self.blob_lengths = blob_lengths
         self.blob_offsets = blob_offsets
@@ -211,9 +223,28 @@ class BlobRecordIterator:
         # Skip magic number (4 bytes) and exclude length (8 bytes) + CRC (4 bytes) = 12 bytes
         blob_offset = self.blob_offsets[self.current_position] + self.MAGIC_NUMBER_SIZE  # Skip magic number
         blob_length = length - self.METADATA_OVERHEAD
-        blob = Blob.from_file(self.file_io, self.file_path, blob_offset, blob_length)
+        if self.input_stream is not None:
+            blob = Blob.from_data(self._read_inline_blob(blob_offset, blob_length))
+        else:
+            blob = Blob.from_file(self.file_io, self.file_path, blob_offset, blob_length)
         self.current_position += 1
         return GenericRow([blob], fields, RowKind.INSERT)
 
     def returned_position(self) -> int:
         return self.current_position
+
+    def _read_inline_blob(self, position: int, length: int) -> bytes:
+        self.input_stream.seek(position)
+        data = self._read_fully(length)
+        if len(data) != length:
+            raise IOError("Invalid blob file: cannot read blob data")
+        return data
+
+    def _read_fully(self, length: int) -> bytes:
+        data = bytearray()
+        while len(data) < length:
+            chunk = self.input_stream.read(length - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        return bytes(data)
