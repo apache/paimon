@@ -180,12 +180,6 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(restored.field_id, 7)
         self.assertEqual(restored.row_id, 42)
 
-        blob = Blob.from_bytes(serialized)
-        self.assertIsInstance(blob, BlobView)
-        self.assertEqual(Blob.serialize_blob(blob), serialized)
-        with self.assertRaises(RuntimeError):
-            blob.to_data()
-
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
         test_data = b"interface test data"

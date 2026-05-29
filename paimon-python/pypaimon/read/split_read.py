@@ -820,15 +820,16 @@ class DataEvolutionSplitRead(SplitRead):
         return reader
 
     def _create_raw_reader(self) -> RecordReader:
-        """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter.
-        Does NOT include BlobView wrapping to avoid recursion during prescan."""
+        """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
         files = self.split.files
         suppliers = []
 
+        # Split files by row ID
         split_by_row_id = self._split_by_row_id(files)
 
         for need_merge_files in split_by_row_id:
             if len(need_merge_files) == 1 or not self.read_fields:
+                # No need to merge fields, just create a single file reader
                 suppliers.append(
                     lambda f=need_merge_files[0]: self._create_file_reader(f, self._get_final_read_data_fields())
                 )

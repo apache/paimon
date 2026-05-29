@@ -393,8 +393,6 @@ class Blob(ABC):
         if not isinstance(data, (bytes, bytearray)):
             raise TypeError(f"Blob.from_bytes expects bytes, got {type(data)}")
         data = bytes(data)
-        if BlobViewStruct.is_blob_view_struct(data):
-            return Blob.from_view(BlobViewStruct.deserialize(data))
         is_descriptor = BlobDescriptor.is_blob_descriptor(data)
         if not allow_blob_data and not is_descriptor:
             raise ValueError(
@@ -407,16 +405,6 @@ class Blob(ABC):
             uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
             return BlobRef(uri_reader, descriptor)
         return BlobData(data)
-
-    @staticmethod
-    def from_view(view_struct: BlobViewStruct) -> 'Blob':
-        return BlobView(view_struct)
-
-    @staticmethod
-    def serialize_blob(blob: 'Blob') -> bytes:
-        if isinstance(blob, BlobView):
-            return blob.view_struct.serialize()
-        return blob.to_descriptor().serialize()
 
 
 class _PlaceholderBlob(Blob):
@@ -512,8 +500,8 @@ BlobConsumer = Callable[[str, Optional[BlobDescriptor]], bool]
 class BlobView(Blob):
 
     def __init__(self, view_struct: BlobViewStruct):
-        self._view_struct = view_struct
-        self._resolved_blob = None
+        self._view_struct: BlobViewStruct = view_struct
+        self._resolved_blob: Optional[BlobRef] = None
 
     @property
     def view_struct(self) -> BlobViewStruct:
