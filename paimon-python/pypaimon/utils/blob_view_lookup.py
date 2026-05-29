@@ -22,7 +22,7 @@ from typing import Dict, List, Tuple
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.uri_reader import UriReader
-from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 
