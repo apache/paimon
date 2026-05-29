@@ -39,8 +39,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -102,8 +100,8 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                                     GlobalIndexMeta globalIndexMeta =
                                             entry.indexFile().globalIndexMeta();
                                     if (globalIndexMeta != null) {
-                                        Collection<String> indexedNames =
-                                                getIndexedFieldNames(globalIndexMeta, rowType);
+                                        List<String> indexedNames =
+                                                globalIndexMeta.getIndexedFieldNames(rowType);
                                         boolean overlaps =
                                                 indexedNames.stream()
                                                         .anyMatch(updatedColumns::contains);
@@ -121,7 +119,7 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                     Set<String> conflictedColumns =
                             affectedEntries.stream()
                                     .map(file -> file.indexFile().globalIndexMeta())
-                                    .flatMap(meta -> getIndexedFieldNames(meta, rowType).stream())
+                                    .flatMap(meta -> meta.getIndexedFieldNames(rowType).stream())
                                     .collect(Collectors.toSet());
 
                     throw new RuntimeException(
@@ -162,24 +160,5 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                     throw new UnsupportedOperationException("Unsupported option: " + updateAction);
             }
         }
-    }
-
-    private static Collection<String> getIndexedFieldNames(GlobalIndexMeta meta, RowType rowType) {
-        int fieldId = meta.indexFieldId();
-        if (meta.isMultiColumn()) {
-            List<String> names = new ArrayList<>();
-            for (int id : meta.extraFieldIds()) {
-                names.add(rowType.getField(id).name());
-            }
-            return names;
-        }
-        List<String> names = new ArrayList<>();
-        names.add(rowType.getField(fieldId).name());
-        if (meta.extraFieldIds() != null) {
-            for (int id : meta.extraFieldIds()) {
-                names.add(rowType.getField(id).name());
-            }
-        }
-        return names;
     }
 }

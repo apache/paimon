@@ -21,7 +21,6 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID
 import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
@@ -596,7 +595,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         if (globalIndexMeta == null) {
           false
         } else {
-          val indexedNames = getIndexedFieldNames(globalIndexMeta, rowType)
+          val indexedNames = globalIndexMeta.getIndexedFieldNames(rowType).asScala
           affectedParts.contains(entry.partition()) && updateColumns.exists(
             col => indexedNames.contains(col.name))
         }
@@ -615,7 +614,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         case GlobalIndexColumnUpdateAction.THROW_ERROR =>
           val updatedColNames = updateColumns.map(_.name)
           val conflicted = affectedIndexEntries
-            .flatMap(e => getIndexedFieldNames(e.indexFile().globalIndexMeta(), rowType))
+            .flatMap(e => e.indexFile().globalIndexMeta().getIndexedFieldNames(rowType).asScala)
             .toSet
           throw new RuntimeException(
             s"""MergeInto: update columns contain globally indexed columns, not supported now.
@@ -636,20 +635,6 @@ case class MergeIntoPaimonDataEvolutionTable(
           }
           updateCommit ++ deleteCommitMessages
       }
-    }
-  }
-
-  private def getIndexedFieldNames(
-      meta: GlobalIndexMeta,
-      rowType: org.apache.paimon.types.RowType): Seq[String] = {
-    if (meta.indexFieldId() == MULTI_COLUMN_INDEX_FIELD_ID) {
-      meta.extraFieldIds().map(id => rowType.getField(id).name()).toSeq
-    } else {
-      val names = ArrayBuffer(rowType.getField(meta.indexFieldId()).name())
-      if (meta.extraFieldIds() != null) {
-        meta.extraFieldIds().foreach(id => names += rowType.getField(id).name())
-      }
-      names.toSeq
     }
   }
 

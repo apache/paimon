@@ -28,7 +28,9 @@ import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /** Schema for global index. */
 public class GlobalIndexMeta {
@@ -91,5 +93,22 @@ public class GlobalIndexMeta {
     @Nullable
     public byte[] indexMeta() {
         return indexMeta;
+    }
+
+    public List<String> getIndexedFieldNames(RowType rowType) {
+        List<String> names = new ArrayList<>();
+        if (isMultiColumn()) {
+            for (int id : extraFieldIds) {
+                names.add(rowType.getField(id).name());
+            }
+        } else {
+            names.add(rowType.getField(indexFieldId).name());
+            if (extraFieldIds != null) {
+                for (int id : extraFieldIds) {
+                    names.add(rowType.getField(id).name());
+                }
+            }
+        }
+        return names;
     }
 }

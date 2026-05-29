@@ -208,7 +208,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         throw new RuntimeException(
                                 String.format(
                                         "Failed to create %s index for columns '%s' on table '%s'.",
-                                        indexType, column, tableIdent),
+                                        indexType, indexColumns, tableIdent),
                                 e);
                     }
                 });
