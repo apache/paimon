@@ -41,7 +41,7 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
 
   def mergeSchema(sparkSession: SparkSession, input: DataFrame, options: Options): DataFrame = {
     val dataSchema = SparkSystemColumns.filterSparkSystemColumns(input.schema)
-    val writeSchema = mergeSchema(dataSchema, options)
+    val writeSchema = mergeSchema(sparkSession, dataSchema, options)
     if (!PaimonUtils.sameType(writeSchema, dataSchema)) {
       val resolve = sparkSession.sessionState.conf.resolver
       val cols = SchemaHelper.alignColumns(writeSchema, dataSchema, resolve)
@@ -52,6 +52,13 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
   }
 
   def mergeSchema(dataSchema: StructType, options: Options): StructType = {
+    mergeSchema(SparkSession.active, dataSchema, options)
+  }
+
+  def mergeSchema(
+      sparkSession: SparkSession,
+      dataSchema: StructType,
+      options: Options): StructType = {
     val mergeSchemaEnabled =
       options.get(SparkConnectorOptions.MERGE_SCHEMA) || OptionUtils.writeMergeSchemaEnabled()
     if (!mergeSchemaEnabled) {
@@ -61,9 +68,10 @@ private[spark] trait SchemaHelper extends WithFileStoreTable {
     val filteredDataSchema = SparkSystemColumns.filterSparkSystemColumns(dataSchema)
     val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST) || OptionUtils
       .writeMergeSchemaExplicitCastEnabled()
-    SchemaHelper.mergeAndCommitSchema(table, filteredDataSchema, allowExplicitCast).foreach {
-      updatedTable => newTable = Some(updatedTable)
-    }
+    val caseSensitive = sparkSession.sessionState.conf.caseSensitiveAnalysis
+    SchemaHelper
+      .mergeAndCommitSchema(table, filteredDataSchema, allowExplicitCast, caseSensitive)
+      .foreach { updatedTable => newTable = Some(updatedTable) }
 
     val writeSchema = SparkTypeUtils.fromPaimonRowType(table.schema().logicalRowType())
     if (!PaimonUtils.sameType(writeSchema, filteredDataSchema)) {
@@ -87,9 +95,10 @@ private[spark] object SchemaHelper {
   def mergeAndCommitSchema(
       table: FileStoreTable,
       dataSchema: StructType,
-      allowExplicitCast: Boolean): Option[FileStoreTable] = {
+      allowExplicitCast: Boolean,
+      caseSensitive: Boolean = true): Option[FileStoreTable] = {
     val dataRowType = SparkTypeUtils.toPaimonType(dataSchema).asInstanceOf[RowType]
-    if (table.store().mergeSchema(dataRowType, allowExplicitCast)) {
+    if (table.store().mergeSchema(dataRowType, allowExplicitCast, caseSensitive)) {
       Some(table.copyWithLatestSchema())
     } else {
       None
