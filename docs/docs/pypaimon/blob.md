@@ -24,7 +24,7 @@ under the License.
 # Blob Storage in pypaimon
 
 For Paimon's Blob storage concepts (storage modes, table options, SQL usage,
-Java API), see [Blob Storage](../append-table/blob).
+Java API), see [Blob Storage](../multimodal-table/blob).
 
 This page covers the Python API for reading and writing BLOB columns.
 
@@ -148,7 +148,7 @@ header). This mirrors Java's `Blob.fromBytes(...)`.
 
 ## See Also
 
-- [Blob Storage](../append-table/blob) — concept, storage modes,
+- [Blob Storage](../multimodal-table/blob) — concept, storage modes,
   SQL/Java API
 - [Data Evolution](./data-evolution) — required for
   blob tables

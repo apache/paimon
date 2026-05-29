@@ -342,7 +342,7 @@ All available procedures are listed below.
             matched_update_set => 'matchedUpdateSet',<br/>
             sink_parallelism => sinkParallelism) <br/><br/>
       </td>
-      <td>To perform "MERGE INTO" syntax specially implemented for data-evolution tables. Please see <a href="/docs/master/append-table/data-evolution/">data evolution</a> for more information. </td>
+      <td>To perform "MERGE INTO" syntax specially implemented for data-evolution tables. Please see <a href="/docs/master/multimodal-table/data-evolution/">data evolution</a> for more information. </td>
       <td>
          -- for Flink 1.18<br/>
          CALL [catalog].sys.data_evolution_merge_into('default.T', '', '', 'S', 'T.id=S.id', 'name=S.name', 2) <br/><br/>

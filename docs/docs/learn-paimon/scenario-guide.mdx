@@ -338,7 +338,7 @@ See [Bucketed Streaming](../append-table/bucketed#bucketed-streaming).
 
 Paimon is a multimodal lakehouse for AI. You can keep multimodal data, metadata, and embeddings in the same table and
 query them via vector search, full-text search, or SQL. All multimodal features are built on top of Append Tables with
-[Data Evolution](../append-table/data-evolution) mode enabled.
+[Data Evolution](../multimodal-table/data-evolution) mode enabled.
 
 ### Scenario 8: Storing Multimodal Data (Blob Table)
 
@@ -383,7 +383,7 @@ CREATE TABLE image_table (
 
 </Tabs>
 
-**Why:** The [Blob Storage](../append-table/blob) separates large binary data into dedicated `.blob` files
+**Why:** The [Blob Storage](../multimodal-table/blob) separates large binary data into dedicated `.blob` files
 while metadata stays in standard columnar files (Parquet/ORC). This means:
 
 - `SELECT id, name, label FROM image_table` does **not** load any blob data — very fast.
@@ -470,7 +470,7 @@ SELECT * FROM vector_search('doc_embeddings', 'embedding', array(0.1f, 0.2f, ...
 
 The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
 
-**Why:** The [Global Index](../append-table/global-index) with DiskANN provides high-performance ANN search.
+**Why:** The [Global Index](../multimodal-table/global-index) with DiskANN provides high-performance ANN search.
 Vector data is stored in dedicated `.vector.lance` files optimized for dense vectors, while scalar columns stay in
 Parquet. You can also build a **BTree Index** on scalar columns for efficient filtering:
 
@@ -518,7 +518,7 @@ ON t.user_id = s.user_id
 WHEN MATCHED THEN UPDATE SET t.embedding = s.embedding;
 ```
 
-**Why:** [Data Evolution](../append-table/data-evolution) mode writes only the updated columns to new files
+**Why:** [Data Evolution](../multimodal-table/data-evolution) mode writes only the updated columns to new files
 and merges them at read time. This is ideal for:
 
 - Adding new feature columns and backfilling data without rewriting the entire table.

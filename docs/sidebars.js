@@ -57,7 +57,21 @@ const sidebars = {
   },
   {
     type: "category",
-    "label": "Table with PK",
+    "label": "Append Table",
+    "collapsed": true,
+    "link": {
+      type: "doc",
+      "id": "append-table/index"
+    },
+    "items": [
+      "append-table/incremental-clustering",
+      "append-table/bucketed",
+      "append-table/row-tracking"
+    ]
+  },
+  {
+    type: "category",
+    "label": "PrimaryKey Table",
     "collapsed": true,
     "link": {
       type: "doc",
@@ -90,20 +104,17 @@ const sidebars = {
   },
   {
     type: "category",
-    "label": "Table w/o PK",
+    "label": "Multimodal Table",
     "collapsed": true,
     "link": {
       type: "doc",
-      "id": "append-table/index"
+      "id": "multimodal-table/index"
     },
     "items": [
-      "append-table/incremental-clustering",
-      "append-table/bucketed",
-      "append-table/row-tracking",
-      "append-table/data-evolution",
-      "append-table/blob",
-      "append-table/vector",
-      "append-table/global-index"
+      "multimodal-table/data-evolution",
+      "multimodal-table/blob",
+      "multimodal-table/vector",
+      "multimodal-table/global-index"
     ]
   },
   {
