@@ -499,6 +499,308 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Write merge schema: case-insensitive column matching with new column") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING)")
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("INSERT INTO t BY NAME SELECT 3 AS ID, 'c' AS NAME, 100 AS extra")
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(
+        columnNames.length == 3,
+        s"Expected 3 columns (id, name, extra) but got ${columnNames.length}: ${columnNames.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, "a", null), Row(2, "b", null), Row(3, "c", 100)))
+    }
+  }
+
+  test("Write merge schema: case-insensitive dataframe write") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING)")
+      Seq((1, "a"), (2, "b"))
+        .toDF("id", "name")
+        .write
+        .format("paimon")
+        .mode("append")
+        .saveAsTable("t")
+
+      Seq((3, "c", 100))
+        .toDF("ID", "NAME", "extra")
+        .write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("t")
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(
+        columnNames.length == 3,
+        s"Expected 3 columns but got ${columnNames.length}: ${columnNames.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, "a", null), Row(2, "b", null), Row(3, "c", 100)))
+    }
+  }
+
+  test("Write merge schema: only case differs, no schema change") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING)")
+      sql("INSERT INTO t VALUES (1, 'a')")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("INSERT INTO t BY NAME SELECT 2 AS ID, 'b' AS NAME")
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(
+        columnNames.toSeq == Seq("id", "name"),
+        s"Schema changed unexpectedly: ${columnNames.mkString(", ")}")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, "a"), Row(2, "b")))
+    }
+  }
+
+  test("Write merge schema: repeated writes with alternating case") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING)")
+      sql("INSERT INTO t VALUES (1, 'a')")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("INSERT INTO t BY NAME SELECT 2 AS ID, 'b' AS NAME")
+        sql("INSERT INTO t BY NAME SELECT 3 AS Id, 'c' AS NaMe")
+        sql("INSERT INTO t BY NAME SELECT 4 AS iD, 'd' AS nAmE")
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(columnNames.length == 2, s"Expected 2 columns but got: ${columnNames.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, "a"), Row(2, "b"), Row(3, "c"), Row(4, "d")))
+    }
+  }
+
+  test("Write merge schema: nested struct case mismatch with new sub-field") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("CREATE TABLE t (id INT, info STRUCT<key1: STRING, key2: STRING>)")
+        sql("INSERT INTO t VALUES (1, named_struct('key1', 'a', 'key2', 'b'))")
+
+        sql(
+          "INSERT INTO t BY NAME SELECT 2 AS id, " +
+            "named_struct('KEY1', 'A', 'KEY2', 'B', 'key3', 'C') AS info")
+
+        val infoFields = spark
+          .table("t")
+          .schema("info")
+          .dataType
+          .asInstanceOf[org.apache.spark.sql.types.StructType]
+          .fieldNames
+        assert(
+          infoFields.length == 3,
+          s"Expected 3 sub-fields but got ${infoFields.length}: ${infoFields.mkString(", ")}")
+
+        checkAnswer(
+          sql("SELECT id, info.key1, info.key2, info.key3 FROM t ORDER BY id"),
+          Seq(Row(1, "a", "b", null), Row(2, "A", "B", "C")))
+      }
+    }
+  }
+
+  test("Merge into with merge-schema: source uppercase should not create duplicate columns") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING, value INT)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a', 10), (2, 'b', 20)")
+
+      spark
+        .sql("SELECT 1 AS ID, 'A' AS NAME, 100 AS VALUE UNION ALL SELECT 3 AS ID, 'c' AS NAME, 30 AS VALUE")
+        .createOrReplaceTempView("s")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.ID
+              | WHEN MATCHED THEN UPDATE SET *
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames.toSeq
+      assert(
+        columnNames.size == 3,
+        s"Expected 3 columns but got ${columnNames.size}: ${columnNames.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT id, name, value FROM t ORDER BY id"),
+        Seq(Row(1, "A", 100), Row(2, "b", 20), Row(3, "c", 30)))
+    }
+  }
+
+  test("Merge into with merge-schema: extra column with case-mismatched existing columns") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      spark
+        .sql("SELECT 1 AS ID, 'A' AS NAME, 100 AS extra_col UNION ALL SELECT 3 AS ID, 'c' AS NAME, 30 AS extra_col")
+        .createOrReplaceTempView("s")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.ID
+              | WHEN MATCHED THEN UPDATE SET *
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames.toSeq
+      assert(
+        columnNames.size == 3,
+        s"Expected 3 columns (id, name, extra_col) but got ${columnNames.size}: ${columnNames.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT id, name, extra_col FROM t ORDER BY id"),
+        Seq(Row(1, "A", 100), Row(2, "b", null), Row(3, "c", 30)))
+    }
+  }
+
+  test("Merge into with merge-schema: only case differs, schema should not change") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a')")
+
+      spark.sql("SELECT 1 AS ID, 'A' AS NAME").createOrReplaceTempView("s")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.ID
+              | WHEN MATCHED THEN UPDATE SET *""".stripMargin)
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(
+        columnNames.toSeq == Seq("id", "name"),
+        s"Schema changed unexpectedly: ${columnNames.mkString(", ")}")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, "A")))
+    }
+  }
+
+  test("Merge into with merge-schema: nested struct fields case mismatch") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, info STRUCT<key1: STRING, key2: STRING>)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, named_struct('key1', 'a', 'key2', 'b'))")
+
+      spark
+        .sql("SELECT 1 AS id, named_struct('KEY1', 'A', 'KEY2', 'B', 'key3', 'C') AS info")
+        .createOrReplaceTempView("s")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.id
+              | WHEN MATCHED THEN UPDATE SET *
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      val infoFields = spark
+        .table("t")
+        .schema("info")
+        .dataType
+        .asInstanceOf[org.apache.spark.sql.types.StructType]
+        .fieldNames
+      assert(
+        infoFields.length == 3,
+        s"Expected 3 sub-fields but got ${infoFields.length}: ${infoFields.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT id, info.key1, info.key2, info.key3 FROM t"),
+        Seq(Row(1, "A", "B", "C")))
+    }
+  }
+
+  test("Merge into with merge-schema: repeated writes with alternating case") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a')")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        spark.sql("SELECT 2 AS ID, 'b' AS NAME").createOrReplaceTempView("s1")
+        sql("""MERGE INTO t USING s1 ON t.id = s1.ID
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+
+        spark.sql("SELECT 3 AS Id, 'c' AS NaMe").createOrReplaceTempView("s2")
+        sql("""MERGE INTO t USING s2 ON t.id = s2.Id
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(columnNames.length == 2, s"Expected 2 columns but got: ${columnNames.mkString(", ")}")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
+    }
+  }
+
+  test("Merge into without merge-schema: case-insensitive matching works normally") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      spark
+        .sql("SELECT 1 AS ID, 'A' AS NAME UNION ALL SELECT 3 AS ID, 'c' AS NAME")
+        .createOrReplaceTempView("s")
+
+      sql("""MERGE INTO t USING s ON t.id = s.ID
+            | WHEN MATCHED THEN UPDATE SET *
+            | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+
+      val schema = spark.table("t").schema
+      assert(
+        schema.fieldNames.length == 2,
+        s"Expected 2 columns but got: ${schema.fieldNames.mkString(", ")}")
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "A"), Row(2, "b"), Row(3, "c")))
+    }
+  }
+
+  test("Merge into with merge-schema: case-sensitive mode treats different case as new columns") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a')")
+
+      spark
+        .sql("SELECT 1 AS ID, 'A' AS NAME, 100 AS extra")
+        .createOrReplaceTempView("s")
+
+      withSparkSQLConf(
+        "spark.paimon.write.merge-schema" -> "true",
+        "spark.sql.caseSensitive" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.ID
+              | WHEN MATCHED THEN UPDATE SET *
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(
+        columnNames.length == 5,
+        s"Expected 5 columns (id, name, ID, NAME, extra) but got ${columnNames.length}: ${columnNames.mkString(", ")}")
+    }
+  }
+
   test("Write merge schema: array of struct missing nested field by dataframe") {
     withTable("t") {
       sql("""
@@ -544,6 +846,24 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT * FROM t"),
         Seq(Row(Seq(1L, 2L), 1L, 2L, Seq(Row(10, "v2", "v3", "v4", "v5", null)))))
+    }
+  }
+
+  test("Write merge schema: case-sensitive mode treats different case as new columns") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING)")
+      sql("INSERT INTO t VALUES (1, 'a')")
+
+      withSparkSQLConf(
+        "spark.paimon.write.merge-schema" -> "true",
+        "spark.sql.caseSensitive" -> "true") {
+        sql("INSERT INTO t BY NAME SELECT 2 AS ID, 'b' AS NAME, 100 AS extra")
+      }
+
+      val columnNames = spark.table("t").schema.fieldNames
+      assert(
+        columnNames.length == 5,
+        s"Expected 5 columns (id, name, ID, NAME, extra) but got ${columnNames.length}: ${columnNames.mkString(", ")}")
     }
   }
 }

@@ -83,8 +83,9 @@ trait MergeSchemaEvolutionHelper extends ExpressionHelper {
         .map(a => StructField(a.name, a.dataType, a.nullable)))
     val filteredSourceSchema = SparkSystemColumns.filterSparkSystemColumns(sourceSchema)
     val allowExplicitCast = OptionUtils.writeMergeSchemaExplicitCastEnabled()
+    val caseSensitive = spark.sessionState.conf.caseSensitiveAnalysis
     val updatedFileStoreTable = SchemaHelper
-      .mergeAndCommitSchema(fileStoreTable, filteredSourceSchema, allowExplicitCast)
+      .mergeAndCommitSchema(fileStoreTable, filteredSourceSchema, allowExplicitCast, caseSensitive)
       .getOrElse(return None)
 
     // Invalidate Spark catalog cache so subsequent queries see the new schema.
