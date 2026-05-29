@@ -134,18 +134,18 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         int index = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
 
         // parallelism of commit operator is always 1, so commitUser will never be null
-        committer =
-                committerFactory.create(
-                        Committer.createContext(
-                                commitUser,
-                                getMetricGroup(),
-                                streamingCheckpointEnabled,
-                                context.isRestored(),
-                                new OperatorBackendStateStore(context.getOperatorStateStore()),
-                                parallelism,
-                                index));
+        Committer.Context committerContext =
+                Committer.createContext(
+                        commitUser,
+                        getMetricGroup(),
+                        streamingCheckpointEnabled,
+                        context.isRestored(),
+                        new OperatorBackendStateStore(context.getOperatorStateStore()),
+                        parallelism,
+                        index);
+        committer = committerFactory.create(committerContext);
 
-        committableStateManager.initializeState(context, committer);
+        committableStateManager.initializeState(committerContext, committer);
     }
 
     @Override
@@ -165,7 +165,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
         pollInputs();
-        committableStateManager.snapshotState(context, committables(committablesPerCheckpoint));
+        committableStateManager.snapshotState(committables(committablesPerCheckpoint));
     }
 
     private List<GlobalCommitT> committables(NavigableMap<Long, GlobalCommitT> map) {
