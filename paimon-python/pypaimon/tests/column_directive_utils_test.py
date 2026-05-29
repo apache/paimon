@@ -144,6 +144,16 @@ class TestApplyAddColumnDirective(unittest.TestCase):
         )
         self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "a,b")
 
+    def test_migrates_legacy_fallback_key(self):
+        opts = {"blob.stored-descriptor-fields": "legacy_col"}
+        apply_add_column_directive(
+            "__BLOB_DESCRIPTOR_FIELD", "new_col", AtomicType("BYTES"), opts
+        )
+        self.assertEqual(
+            opts[CoreOptions.BLOB_DESCRIPTOR_FIELD.key()], "legacy_col,new_col"
+        )
+        self.assertNotIn("blob.stored-descriptor-fields", opts)
+
 
 class TestApplyDirectives(unittest.TestCase):
 
@@ -198,6 +208,15 @@ class TestRemoveDroppedDirectiveOptions(unittest.TestCase):
         self.assertEqual(opts[CoreOptions.VECTOR_FIELD.key()], "emb2")
         self.assertNotIn("field.emb.vector-dim", opts)
         self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "a")
+
+    def test_drop_blob_cleans_fallback_keys(self):
+        opts = {
+            CoreOptions.BLOB_DESCRIPTOR_FIELD.key(): "b,c",
+            "blob.stored-descriptor-fields": "b,legacy",
+        }
+        remove_dropped_directive_options("b", "BLOB", opts)
+        self.assertEqual(opts[CoreOptions.BLOB_DESCRIPTOR_FIELD.key()], "c")
+        self.assertEqual(opts["blob.stored-descriptor-fields"], "legacy")
 
     def test_drop_non_directive_is_noop(self):
         opts = {CoreOptions.BLOB_FIELD.key(): "a"}

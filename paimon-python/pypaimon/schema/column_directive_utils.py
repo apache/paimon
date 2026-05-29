@@ -56,6 +56,12 @@ _VECTOR_OPTIONS = [
     CoreOptions.VECTOR_FIELD,
 ]
 
+# Legacy fallback keys that map to canonical option keys.
+# Java's blob-descriptor-field has fallback key "blob.stored-descriptor-fields".
+_FALLBACK_KEYS = {
+    CoreOptions.BLOB_DESCRIPTOR_FIELD.key(): ["blob.stored-descriptor-fields"],
+}
+
 
 @dataclass
 class ParsedDirective:
@@ -159,6 +165,12 @@ def _convert_type(directive: ParsedDirective, field_name: str, source_type: Data
 
 def _modify_field_options(option_key: str, field_name: str, options: Dict[str, str]):
     existing = options.get(option_key)
+    if not existing:
+        for fk in _FALLBACK_KEYS.get(option_key, []):
+            fallback_value = options.pop(fk, None)
+            if fallback_value:
+                existing = fallback_value
+                break
     if existing:
         options[option_key] = existing + "," + field_name
     else:
@@ -216,6 +228,8 @@ def remove_dropped_directive_options(
     if type_root == 'BLOB':
         for opt in _BLOB_OPTIONS:
             _remove_from_csv_option(opt.key(), field_name, options)
+            for fk in _FALLBACK_KEYS.get(opt.key(), []):
+                _remove_from_csv_option(fk, field_name, options)
     elif type_root == 'VECTOR':
         for opt in _VECTOR_OPTIONS:
             _remove_from_csv_option(opt.key(), field_name, options)
