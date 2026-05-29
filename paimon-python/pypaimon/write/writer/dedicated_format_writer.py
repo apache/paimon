@@ -200,12 +200,13 @@ class DedicatedFormatWriter(DataWriter):
             normal_data, blob_data_map, vector_data = self._split_data(data)
             self._validate_descriptor_stored_fields_input(data)
 
-            # Process and accumulate normal data
+            # Process and accumulate normal data (may be None for partial writes)
             processed_normal = self._process_normal_data(normal_data)
-            if self.pending_normal_data is None:
-                self.pending_normal_data = processed_normal
-            else:
-                self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
+            if processed_normal is not None:
+                if self.pending_normal_data is None:
+                    self.pending_normal_data = processed_normal
+                else:
+                    self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
 
             # Write blob-file columns to dedicated blob writers.
             for blob_column, blob_data in blob_data_map.items():
@@ -239,8 +240,7 @@ class DedicatedFormatWriter(DataWriter):
             return
 
         try:
-            if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
-                self._close_current_writers()
+            self._close_current_writers()
             if self._external_storage_writer:
                 self._external_storage_writer.close()
         except Exception as e:
@@ -310,10 +310,10 @@ class DedicatedFormatWriter(DataWriter):
                     ) from e
 
     @staticmethod
-    def _process_normal_data(data: pa.RecordBatch) -> pa.Table:
+    def _process_normal_data(data: pa.RecordBatch) -> Optional[pa.Table]:
         """Process normal data (similar to base DataWriter)."""
         if data is None or data.num_rows == 0:
-            return pa.Table.from_batches([])
+            return None
         return pa.Table.from_batches([data])
 
     @staticmethod
@@ -334,35 +334,35 @@ class DedicatedFormatWriter(DataWriter):
 
     def _close_current_writers(self):
         """Close normal, blob, and vector writers; add metadata in order: normal, blob, vector."""
-        if self.pending_normal_data is None or self.pending_normal_data.num_rows == 0:
-            return
-
-        # Close normal writer and get metadata
-        normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+        normal_meta = None
+        if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
+            normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
 
         blob_metas = []
         for blob_column in self.blob_file_column_names:
             writer_metas = self.blob_writers[blob_column].prepare_commit()
-            self._validate_consistency(normal_meta, writer_metas, blob_column)
+            if normal_meta is not None:
+                self._validate_consistency(normal_meta, writer_metas, blob_column)
             blob_metas.extend(writer_metas)
 
         vector_metas = []
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
             self.vector_writer.committed_files.clear()
-            if vector_metas:
+            if vector_metas and normal_meta is not None:
                 self._validate_consistency(normal_meta, vector_metas, 'vector')
 
-        # Add metadata in order: normal, blob, vector
-        self.committed_files.append(normal_meta)
+        if normal_meta is not None:
+            self.committed_files.append(normal_meta)
         self.committed_files.extend(blob_metas)
         self.committed_files.extend(vector_metas)
 
-        # Reset pending data
         self.pending_normal_data = None
 
-        logger.info(f"Closed writers - normal: {normal_meta.file_name}, "
-                    f"{len(blob_metas)} blob metas, {len(vector_metas)} vector metas")
+        if normal_meta is not None or blob_metas or vector_metas:
+            normal_name = normal_meta.file_name if normal_meta is not None else '<none>'
+            logger.info(f"Closed writers - normal: {normal_name}, "
+                        f"{len(blob_metas)} blob metas, {len(vector_metas)} vector metas")
 
     def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:
         if data.num_rows == 0:

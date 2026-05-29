@@ -135,7 +135,7 @@ class TableRead:
 
     @staticmethod
     def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
-        if batch.schema.equals(target_schema):
+        if batch.schema.names == target_schema.names:
             return batch
 
         columns = []
@@ -144,8 +144,6 @@ class TableRead:
         for field in target_schema:
             if field.name in batch.schema.names:
                 col = batch.column(field.name)
-                if not col.type.equals(field.type):
-                    col = col.cast(field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)

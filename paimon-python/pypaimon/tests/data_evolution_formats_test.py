@@ -237,13 +237,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.column('payload').to_pylist(), blobs)
 
     def test_blob_column_subset_evolution(self):
-        """Write normal+blob cols in one commit, overwrite normal col in another, merge-read.
-
-        Note: writing blob-only subsets (with_write_type containing only blob columns
-        and no normal columns) is not supported by DedicatedFormatWriter. This test writes
-        blob alongside a normal column, then uses data evolution to overwrite the
-        normal column separately.
-        """
+        """Write normal+blob cols in one commit, overwrite normal col in another, merge-read."""
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -916,6 +910,77 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual2.column('id').to_pylist(), [1, 2, 3, 4, 5])
         self.assertEqual(actual2.column('doc').to_pylist(),
                          [b'aaa', b'bbb', b'ccc', b'ddd', b'eee'])
+
+    def test_blob_vector_partial_write_vector_only(self):
+        """Blob+vector table with with_write_type(['embed']) — vector-only partial write.
+
+        When normal_column_names is empty, the writer must still flush vector
+        metadata without crashing on an empty normal data path.
+        """
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('doc', pa.large_binary()),
+            ('embed', pa.list_(pa.float32(), 3)),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'parquet',
+        })
+        self.catalog.create_table('default.fmt_blob_vec_partial', schema, False)
+        table = self.catalog.get_table('default.fmt_blob_vec_partial')
+        wb = table.new_batch_write_builder()
+
+        # commit 1: write all columns
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.table({
+            'id': pa.array([1, 2, 3], type=pa.int64()),
+            'doc': pa.array([b'aaa', b'bbb', b'ccc'], type=pa.large_binary()),
+            'embed': pa.FixedSizeListArray.from_arrays(
+                pa.array([1.0, 0.0, 0.0,
+                          0.0, 1.0, 0.0,
+                          0.0, 0.0, 1.0], type=pa.float32()), 3),
+        }))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        # commit 2: write only vector column — no normal columns
+        tw = wb.new_write().with_write_type(['embed'])
+        tc = wb.new_commit()
+        tw.write_arrow(pa.table({
+            'embed': pa.FixedSizeListArray.from_arrays(
+                pa.array([0.5, 0.5, 0.0,
+                          0.0, 0.5, 0.5,
+                          0.5, 0.0, 0.5], type=pa.float32()), 3),
+        }))
+        cmts = tw.prepare_commit()
+
+        # should produce only vector files, no normal or blob files
+        all_files = [nf for m in cmts for nf in m.new_files]
+        self.assertGreater(len(all_files), 0, "should produce vector files")
+        for f in all_files:
+            self.assertTrue(DataFileMeta.is_vector_file(f.file_name),
+                            f"Expected vector file, got {f.file_name}")
+
+        for m in cmts:
+            for nf in m.new_files:
+                nf.first_row_id = 0
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        # read back and verify the vector column was updated
+        rb = table.new_read_builder()
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(actual.column('doc').to_pylist(), [b'aaa', b'bbb', b'ccc'])
+        embed = actual.column('embed')
+        self.assertEqual(embed[0].as_py(), [0.5, 0.5, 0.0])
+        self.assertEqual(embed[1].as_py(), [0.0, 0.5, 0.5])
+        self.assertEqual(embed[2].as_py(), [0.5, 0.0, 0.5])
 
     # ------------------------------------------------------------------
     # Projection and _ROW_ID across formats
