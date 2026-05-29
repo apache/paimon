@@ -1839,4 +1839,25 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 UnsupportedOperationException.class,
                                 "Cannot drop primary keys on a non-empty table."));
     }
+
+    private static final String BLOB_TABLE_OPTIONS =
+            "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'bucket'='-1'";
+
+    @Test
+    public void testAddBlobColumnViaCommentDirective() {
+        sql("CREATE TABLE T (id INT, data STRING) WITH (" + BLOB_TABLE_OPTIONS + ")");
+
+        // bare directive — no user comment
+        sql("ALTER TABLE T ADD desc_col BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD'");
+        // directive + user comment
+        sql("ALTER TABLE T ADD picture BYTES COMMENT '__BLOB_FIELD; profile picture'");
+
+        String createSql = sql("SHOW CREATE TABLE T").get(0).toString();
+        assertThat(createSql).doesNotContain("__BLOB");
+        assertThat(createSql).contains("`desc_col`");
+        assertThat(createSql).contains("`picture`");
+        assertThat(createSql).contains("COMMENT 'profile picture'");
+        assertThat(createSql).contains("'blob-field' = 'picture'");
+        assertThat(createSql).contains("'blob-descriptor-field' = 'desc_col'");
+    }
 }

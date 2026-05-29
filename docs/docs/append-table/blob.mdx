@@ -268,6 +268,56 @@ CREATE TABLE image_table (
 
 </Tabs>
 
+### Adding a Blob Column to an Existing Table
+
+A BLOB column can be added to an existing blob-enabled table with a single `ALTER TABLE ADD COLUMN` statement. Because most SQL engines do not have a `BLOB` syntax, the new column is declared as `BYTES` or `BINARY` and the BLOB storage mode is selected via a **comment directive**:
+
+- `__BLOB_FIELD` — store the column as a default blob (raw bytes written to `.blob` files, equivalent to `blob-field`).
+- `__BLOB_DESCRIPTOR_FIELD` — store the column as a descriptor-only blob inline in data files (equivalent to `blob-descriptor-field`).
+
+Anything after the optional `;` separator is preserved as the column's real comment.
+
+<Tabs groupId="blob-add-column">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+-- Add a blob-field column (no extra user comment)
+ALTER TABLE image_table ADD picture BYTES COMMENT '__BLOB_FIELD';
+
+-- Add a descriptor-field column with a real user comment
+ALTER TABLE image_table
+    ADD video BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; promotional video';
+```
+
+</TabItem>
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+-- Add a blob-field column (no extra user comment)
+ALTER TABLE image_table ADD COLUMN picture BINARY COMMENT '__BLOB_FIELD';
+
+-- Add a descriptor-field column with a real user comment
+ALTER TABLE image_table
+    ADD COLUMN video BINARY COMMENT '__BLOB_DESCRIPTOR_FIELD; promotional video';
+```
+
+</TabItem>
+
+</Tabs>
+
+Paimon converts the declared `BYTES`/`BINARY` type to `BLOB`, appends the new column to the corresponding option (`blob-field` or `blob-descriptor-field`), and stores the trimmed real comment on the column. The whole operation is atomic — no need to `SET` an option first and then `ADD COLUMN`.
+
+#### Limitations
+
+1. **Storage mode must be explicit.** Only `__BLOB_FIELD` and `__BLOB_DESCRIPTOR_FIELD` are accepted. `blob-view-field` and `blob-external-storage-field` cannot be added this way; they must be configured at table creation time.
+2. **An unknown `__BLOB`-prefixed directive is rejected** so typos do not silently fall through as a regular comment.
+3. **Column type must be `BYTES` / `BINARY` (or `BLOB` when calling the Java API directly).** Other types with a BLOB directive are rejected.
+4. **Raw BLOB without directive is rejected.** When calling the Java SDK and passing `DataTypes.BLOB()` to `SchemaChange.addColumn`, the directive is still required so the storage mode (default vs descriptor) is unambiguous.
+5. **Existing columns cannot be converted to/from BLOB.** `ALTER TABLE ... CHANGE`/`ALTER COLUMN TYPE` between BLOB and any other type is rejected — both directions break already-written data.
+6. **Dropping a BLOB column cleans the options automatically.** When you `ALTER TABLE ... DROP COLUMN`, Paimon removes the dropped name from `blob-field` / `blob-descriptor-field` / `blob-view-field` / `blob-external-storage-field` so the remaining options stay consistent with the schema.
+
 ### Inserting Blob Data
 
 <Tabs groupId="blob-insert">
