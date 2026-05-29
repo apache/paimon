@@ -18,7 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.api.common.state.OperatorStateStore;
+import org.apache.paimon.flink.sink.state.StateStore;
+
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 
 import javax.annotation.Nullable;
@@ -61,6 +62,15 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
 
     Map<Long, List<CommitT>> groupByCheckpoint(Collection<CommitT> committables);
 
+    /**
+     * Persist any per-checkpoint state that this committer (and its listeners) owns. Called by the
+     * containing operator / coordinator at the snapshot boundary, before the committables for the
+     * current checkpoint are flushed to the {@link CommittableStateManager}.
+     *
+     * <p>Default implementation is a no-op for backwards compatibility.
+     */
+    default void snapshotState() throws Exception {}
+
     /** Factory to create {@link Committer}. */
     interface Factory<CommitT, GlobalCommitT> extends Serializable {
 
@@ -79,7 +89,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
 
         boolean isRestored();
 
-        OperatorStateStore stateStore();
+        StateStore stateStore();
 
         int getParallelism();
 
@@ -91,7 +101,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             @Nullable OperatorMetricGroup metricGroup,
             boolean streamingCheckpointEnabled,
             boolean isRestored,
-            OperatorStateStore stateStore,
+            StateStore stateStore,
             int parallelism,
             int subtaskIndex) {
         return new Committer.Context() {
@@ -116,7 +126,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             }
 
             @Override
-            public OperatorStateStore stateStore() {
+            public StateStore stateStore() {
                 return stateStore;
             }
 

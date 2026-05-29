@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.sink.state.OperatorBackendStateStore;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.utils.Preconditions;
 
@@ -140,7 +141,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                                 getMetricGroup(),
                                 streamingCheckpointEnabled,
                                 context.isRestored(),
-                                context.getOperatorStateStore(),
+                                new OperatorBackendStateStore(context.getOperatorStateStore()),
                                 parallelism,
                                 index));
 
