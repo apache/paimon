@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index;
 
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -76,6 +77,10 @@ public class GlobalIndexMeta {
 
     public int indexFieldId() {
         return indexFieldId;
+    }
+
+    public boolean isMultiColumn() {
+        return indexFieldId == GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
     }
 
     @Nullable

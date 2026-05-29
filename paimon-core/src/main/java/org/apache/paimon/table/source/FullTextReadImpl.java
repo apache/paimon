@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -84,7 +83,7 @@ public class FullTextReadImpl implements FullTextRead {
         String indexType = firstFile.indexType();
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer globalIndexer;
-        if (firstMeta.indexFieldId() == GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID) {
+        if (firstMeta.isMultiColumn()) {
             RowType rowType = table.rowType();
             List<DataField> fields = new ArrayList<>();
             for (int id : firstMeta.extraFieldIds()) {

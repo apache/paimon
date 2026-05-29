@@ -234,9 +234,20 @@ public class TableIndexesTable implements ReadonlyTable {
             GlobalIndexMeta globalMeta = indexManifestEntry.indexFile().globalIndexMeta();
             String indexFieldName = null;
             if (globalMeta != null) {
-                try {
-                    indexFieldName = logicalRowType.getField(globalMeta.indexFieldId()).name();
-                } catch (RuntimeException ignored) {
+                if (globalMeta.isMultiColumn() && globalMeta.extraFieldIds() != null) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < globalMeta.extraFieldIds().length; i++) {
+                        if (i > 0) {
+                            sb.append(",");
+                        }
+                        sb.append(logicalRowType.getField(globalMeta.extraFieldIds()[i]).name());
+                    }
+                    indexFieldName = sb.toString();
+                } else {
+                    try {
+                        indexFieldName = logicalRowType.getField(globalMeta.indexFieldId()).name();
+                    } catch (RuntimeException ignored) {
+                    }
                 }
             }
             return GenericRow.of(

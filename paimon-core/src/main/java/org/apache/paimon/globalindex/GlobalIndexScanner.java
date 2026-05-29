@@ -52,7 +52,6 @@ import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -91,8 +90,7 @@ public class GlobalIndexScanner implements Closeable {
             String indexType = indexFile.indexType();
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
 
-            if (meta.indexFieldId() == MULTI_COLUMN_INDEX_FIELD_ID
-                    && meta.extraFieldIds() != null) {
+            if (meta.isMultiColumn() && meta.extraFieldIds() != null) {
                 // Multi-column index: all participating fields share the same IndexFileMeta,
                 // so looking up from any fieldId returns identical index files.
                 List<Integer> fieldIds =

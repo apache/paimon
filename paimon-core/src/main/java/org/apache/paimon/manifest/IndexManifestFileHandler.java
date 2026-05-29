@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -239,14 +240,30 @@ public class IndexManifestFileHandler {
 
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
-                    if (addedMeta == null
-                            || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                            || !Range.intersect(
-                                    retainedMeta.rowRangeStart(),
-                                    retainedMeta.rowRangeEnd(),
-                                    addedMeta.rowRangeStart(),
-                                    addedMeta.rowRangeEnd())) {
+                    if (addedMeta == null) {
                         continue;
+                    }
+
+                    // Single-column: skip if different fieldId or no range overlap
+                    if (!retainedMeta.isMultiColumn()) {
+                        if (retainedMeta.indexFieldId() != addedMeta.indexFieldId()
+                                || !Range.intersect(
+                                        retainedMeta.rowRangeStart(),
+                                        retainedMeta.rowRangeEnd(),
+                                        addedMeta.rowRangeStart(),
+                                        addedMeta.rowRangeEnd())) {
+                            continue;
+                        }
+                    } else {
+                        // Multi-column: skip if different column group or no range overlap
+                        if (!Arrays.equals(retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
+                                || !Range.intersect(
+                                        retainedMeta.rowRangeStart(),
+                                        retainedMeta.rowRangeEnd(),
+                                        addedMeta.rowRangeStart(),
+                                        addedMeta.rowRangeEnd())) {
+                            continue;
+                        }
                     }
 
                     throw new IllegalStateException(

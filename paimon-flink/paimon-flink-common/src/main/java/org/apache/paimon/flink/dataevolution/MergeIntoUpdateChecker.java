@@ -48,8 +48,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
-
 /**
  * The checker for merge into update result. It will check each committable to see if some
  * global-indexed columns are updated. It will take some actions according to {@link
@@ -168,7 +166,7 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
 
     private static Collection<String> getIndexedFieldNames(GlobalIndexMeta meta, RowType rowType) {
         int fieldId = meta.indexFieldId();
-        if (fieldId == MULTI_COLUMN_INDEX_FIELD_ID) {
+        if (meta.isMultiColumn()) {
             List<String> names = new ArrayList<>();
             for (int id : meta.extraFieldIds()) {
                 names.add(rowType.getField(id).name());
