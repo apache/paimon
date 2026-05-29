@@ -72,21 +72,21 @@ For details about the blob file format structure, see [File Format - BLOB](../co
 
 ## Storage Modes
 
-Paimon supports four storage modes for BLOB fields:
+Paimon supports four storage modes for BLOB fields, selected via **comment directives** on the column:
 
-1. **Default blob storage**
+1. **Default blob storage** (`__BLOB_FIELD`)
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
 
-2. **Descriptor-only storage**
-   Fields configured in `blob-descriptor-field` store only serialized `BlobDescriptor` bytes inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
+2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
+   Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
 
-3. **External-storage descriptor mode**
-   Fields configured in `blob-external-storage-field` are a subset of `blob-descriptor-field`. At write time, Paimon writes the raw blob data to the configured `blob-external-storage-path` and stores only serialized `BlobDescriptor` bytes inline in data files.
+3. **External-storage descriptor mode** (`__BLOB_EXTERNAL_STORAGE_FIELD`)
+   At write time, Paimon writes the raw blob data to the configured `blob-external-storage-path` and stores only serialized `BlobDescriptor` bytes inline in data files.
 
-4. **Blob view storage**
-   Fields configured in `blob-view-field` store serialized `BlobViewStruct` bytes inline in data files. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
+4. **Blob view storage** (`__BLOB_VIEW_FIELD`)
+   Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
 
-This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, descriptor-based BLOB fields backed by external storage, and view fields that reference upstream BLOB values.
+This allows one table to mix different storage modes for different BLOB columns.
 
 ## Table Options
 
@@ -102,30 +102,11 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
     </thead>
     <tbody>
     <tr>
-      <td><h5>blob-field</h5></td>
-      <td>No</td>
-      <td style={{wordWrap: "break-word"}}>(none)</td>
-      <td>String</td>
-      <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in <code>blob-descriptor-field</code> or <code>blob-view-field</code> are also treated as BLOB fields.</td>
-    </tr>
-    <tr>
       <td><h5>blob-as-descriptor</h5></td>
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>false</td>
       <td>Boolean</td>
       <td>Controls read output format for blob fields. When set to true, queries return serialized BlobDescriptor bytes; when false, queries return actual blob bytes. This option is dynamic and can be changed with <code>ALTER TABLE ... SET</code>.</td>
-    </tr>
-    <tr>
-      <td><h5>blob-descriptor-field</h5></td>
-      <td>No</td>
-      <td style={{wordWrap: "break-word"}}>(none)</td>
-      <td>String</td>
-      <td>
-        Comma-separated field names treated as BLOB fields and stored as serialized <code>BlobDescriptor</code> bytes inline in normal data files.
-        By default, all blob fields store blob bytes in separate <code>.blob</code> files.
-        If configured, one table can mix:
-        some BLOB fields in <code>.blob</code> files and some as descriptor references.
-      </td>
     </tr>
     <tr>
       <td><h5>blob-write-null-on-missing-file</h5></td>
@@ -137,37 +118,14 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       </td>
     </tr>
     <tr>
-      <td><h5>blob-view-field</h5></td>
-      <td>No</td>
-      <td style={{wordWrap: "break-word"}}>(none)</td>
-      <td>String</td>
-      <td>
-        Comma-separated field names treated as BLOB fields and stored as serialized <code>BlobViewStruct</code> bytes inline in normal data files.
-        The field values reference BLOB values in upstream tables and are resolved at read time.
-        This option must not overlap with <code>blob-descriptor-field</code>.
-      </td>
-    </tr>
-    <tr>
       <td><h5>blob-view.resolve.enabled</h5></td>
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>true</td>
       <td>Boolean</td>
       <td>
-        Controls whether <code>blob-view-field</code> values are resolved to the upstream BLOB
-        content at read time. Set this dynamic option to <code>false</code> when forwarding blob view
-        references from one view table to another view table and you want the target table to keep
-        referencing the original upstream BLOB.
-      </td>
-    </tr>
-    <tr>
-      <td><h5>blob-external-storage-field</h5></td>
-      <td>No</td>
-      <td style={{wordWrap: "break-word"}}>(none)</td>
-      <td>String</td>
-      <td>
-        Comma-separated BLOB field names whose raw data should be written to external storage at write time.
-        This option must be a subset of <code>blob-descriptor-field</code>.
-        For these fields, Paimon stores serialized <code>BlobDescriptor</code> bytes inline in data files.
+        Controls whether blob view fields are resolved to the upstream BLOB
+        content at read time. Set to <code>false</code> when forwarding blob view
+        references from one view table to another.
       </td>
     </tr>
     <tr>
@@ -176,7 +134,7 @@ This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, 
       <td style={{wordWrap: "break-word"}}>(none)</td>
       <td>String</td>
       <td>
-        External storage path used by fields configured in <code>blob-external-storage-field</code>.
+        External storage path for fields declared with <code>__BLOB_EXTERNAL_STORAGE_FIELD</code>.
         Orphan file cleanup is not applied to this path.
       </td>
     </tr>
@@ -214,35 +172,42 @@ you can configure it as below (using flink sql as an example):
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES
+    image BYTES COMMENT '__BLOB_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
-    'blob-field' = 'image',
     'fs.oss.endpoint' = 'aaa',                   -- This is for Paimon's own config
     'blob-descriptor.fs.oss.endpoint' = 'bbb'    -- This is for input blob descriptors' config
 );
 ```
 
-## SQL Usage
+## Creating a Table
 
-### Creating a Table
+The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column type to `BLOB` and registers it in the corresponding option.
 
 <Tabs groupId="blob-create-table">
 
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
--- Create a table with a blob field
--- Note: In Flink SQL, use BYTES type and specify blob-field option
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES
+    image BYTES COMMENT '__BLOB_FIELD; product image'
 ) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
+);
+
+-- Multiple blob columns with different storage modes
+CREATE TABLE media_table (
+    id INT,
+    photo BYTES COMMENT '__BLOB_FIELD; original photo',
+    thumbnail BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; thumbnail descriptor',
+    preview BYTES COMMENT '__BLOB_VIEW_FIELD; preview from upstream'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
 );
 ```
 
@@ -251,41 +216,81 @@ CREATE TABLE image_table (
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
--- Create a table with a blob field
--- Note: In Spark SQL, use BINARY type and specify blob-field option
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BINARY
+    image BINARY COMMENT '__BLOB_FIELD; product image'
 ) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
 );
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+// Java API uses BlobType directly, with comment directive for auto option registration
+Schema schema = Schema.newBuilder()
+        .column("id", DataTypes.INT())
+        .column("name", DataTypes.STRING())
+        .column("image", DataTypes.BYTES(), "__BLOB_FIELD; product image")
+        .option("row-tracking.enabled", "true")
+        .option("data-evolution.enabled", "true")
+        .build();
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+import pyarrow as pa
+from pypaimon import Schema
+
+# pa.large_binary() is automatically recognized as BLOB type
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('image', pa.large_binary()),
+])
+
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+    }
+)
 ```
 
 </TabItem>
 
 </Tabs>
 
-### Adding a Blob Column to an Existing Table
+The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts the `BYTES`/`BINARY` type to `BLOB`, registers the field in the corresponding option, and stores the text after `;` as the column's real comment.
 
-A BLOB column can be added to an existing blob-enabled table with a single `ALTER TABLE ADD COLUMN` statement. Because most SQL engines do not have a `BLOB` syntax, the new column is declared as `BYTES` or `BINARY` and the BLOB storage mode is selected via a **comment directive**:
+Supported directives:
 
-- `__BLOB_FIELD` — store the column as a default blob (raw bytes written to `.blob` files, equivalent to `blob-field`).
-- `__BLOB_DESCRIPTOR_FIELD` — store the column as a descriptor-only blob inline in data files (equivalent to `blob-descriptor-field`).
+| Directive | Storage mode | Option |
+|-----------|-------------|--------|
+| `__BLOB_FIELD` | Raw bytes in `.blob` files | `blob-field` |
+| `__BLOB_DESCRIPTOR_FIELD` | Descriptor bytes inline | `blob-descriptor-field` |
+| `__BLOB_VIEW_FIELD` | View reference inline | `blob-view-field` |
+| `__BLOB_EXTERNAL_STORAGE_FIELD` | Raw data to external path, descriptor inline | `blob-external-storage-field` + `blob-descriptor-field` |
 
-Anything after the optional `;` separator is preserved as the column's real comment.
+## Adding a Blob Column
+
+The same comment directive works with `ALTER TABLE ADD COLUMN`:
 
 <Tabs groupId="blob-add-column">
 
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
--- Add a blob-field column (no extra user comment)
 ALTER TABLE image_table ADD picture BYTES COMMENT '__BLOB_FIELD';
 
--- Add a descriptor-field column with a real user comment
 ALTER TABLE image_table
     ADD video BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; promotional video';
 ```
@@ -295,40 +300,52 @@ ALTER TABLE image_table
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
--- Add a blob-field column (no extra user comment)
 ALTER TABLE image_table ADD COLUMN picture BINARY COMMENT '__BLOB_FIELD';
 
--- Add a descriptor-field column with a real user comment
 ALTER TABLE image_table
     ADD COLUMN video BINARY COMMENT '__BLOB_DESCRIPTOR_FIELD; promotional video';
 ```
 
 </TabItem>
 
+<TabItem value="java" label="Java API">
+
+```java
+// Java API: add column with BlobType directly
+schemaManager.commitChanges(
+    SchemaChange.addColumn("picture", DataTypes.BLOB()));
+
+// Or use comment directive like SQL
+schemaManager.commitChanges(
+    SchemaChange.addColumn("video", DataTypes.BYTES(),
+        "__BLOB_DESCRIPTOR_FIELD; promotional video", null));
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+# pa.large_binary() is automatically recognized as BLOB type
+catalog.alter_table(
+    'default.image_table',
+    [('add', 'picture', pa.large_binary())]
+)
+```
+
+</TabItem>
+
 </Tabs>
 
-Paimon converts the declared `BYTES`/`BINARY` type to `BLOB`, appends the new column to the corresponding option (`blob-field` or `blob-descriptor-field`), and stores the trimmed real comment on the column. The whole operation is atomic — no need to `SET` an option first and then `ADD COLUMN`.
-
-#### Limitations
-
-1. **Storage mode must be explicit.** Only `__BLOB_FIELD` and `__BLOB_DESCRIPTOR_FIELD` are accepted. `blob-view-field` and `blob-external-storage-field` cannot be added this way; they must be configured at table creation time.
-2. **An unknown `__BLOB`-prefixed directive is rejected** so typos do not silently fall through as a regular comment.
-3. **Column type must be `BYTES` / `BINARY` (or `BLOB` when calling the Java API directly).** Other types with a BLOB directive are rejected.
-4. **Raw BLOB without directive is rejected.** When calling the Java SDK and passing `DataTypes.BLOB()` to `SchemaChange.addColumn`, the directive is still required so the storage mode (default vs descriptor) is unambiguous.
-5. **Existing columns cannot be converted to/from BLOB.** `ALTER TABLE ... CHANGE`/`ALTER COLUMN TYPE` between BLOB and any other type is rejected — both directions break already-written data.
-6. **Dropping a BLOB column cleans the options automatically.** When you `ALTER TABLE ... DROP COLUMN`, Paimon removes the dropped name from `blob-field` / `blob-descriptor-field` / `blob-view-field` / `blob-external-storage-field` so the remaining options stay consistent with the schema.
-
-### Inserting Blob Data
+## Inserting Blob Data
 
 <Tabs groupId="blob-insert">
 
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
--- Insert data with inline blob bytes
 INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A');
 
--- Insert from another table
 INSERT INTO image_table
 SELECT id, name, content FROM source_table;
 ```
@@ -338,15 +355,44 @@ SELECT id, name, content FROM source_table;
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
--- Insert data with inline blob bytes
 INSERT INTO image_table VALUES (1, 'sample', X'89504E470D0A1A0A');
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+GenericRow row = GenericRow.of(
+        1,
+        BinaryString.fromString("sample"),
+        new BlobData(imageBytes)
+);
+write.write(row);
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+data = pa.table({
+    'id': pa.array([1], type=pa.int32()),
+    'name': pa.array(['sample']),
+    'image': pa.array([b'\x89PNG\r\n\x1a\n'], type=pa.large_binary()),
+})
+writer.write_arrow(data)
 ```
 
 </TabItem>
 
 </Tabs>
 
-### Querying Blob Data
+## Querying Blob Data
+
+<Tabs groupId="blob-query">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 -- Select all columns including blob
@@ -355,32 +401,94 @@ SELECT * FROM image_table;
 -- Select only non-blob columns (efficient - doesn't load blob data)
 SELECT id, name FROM image_table;
 
--- Select specific rows with blob
-SELECT * FROM image_table WHERE id = 1;
+-- Return descriptor bytes instead of actual blob bytes
+ALTER TABLE image_table SET ('blob-as-descriptor' = 'true');
+SELECT image FROM image_table;
 ```
 
-### Blob Read Output Mode (`blob-as-descriptor`)
+</TabItem>
 
-`blob-as-descriptor` only controls how blob values are returned when reading.
+<TabItem value="java" label="Java API">
+
+```java
+Blob blob = row.getBlob(2);
+
+// Load into memory
+byte[] data = blob.toData();
+
+// Stream (recommended for large blobs)
+try (SeekableInputStream in = blob.newInputStream()) {
+    in.seek(100);  // random access
+    byte[] buffer = new byte[1024];
+    int bytesRead = in.read(buffer);
+}
+
+// Get descriptor reference (for descriptor-based blobs)
+BlobDescriptor descriptor = blob.toDescriptor();
+```
+
+</TabItem>
+
+</Tabs>
+
+## Blob Construct Sources (Java API)
+
+```java
+Blob blob = Blob.fromData(imageBytes);                                         // byte array
+Blob blob = Blob.fromLocal("/path/to/image.png");                              // local file
+Blob blob = Blob.fromFile(fileIO, "s3://bucket/path/to/image.png");            // any FileIO
+Blob blob = Blob.fromFile(fileIO, "s3://bucket/large-file.bin", 1024, 2048);   // partial file
+Blob blob = Blob.fromHttp("https://example.com/image.png");                    // HTTP URL
+Blob blob = Blob.fromInputStream(() -> new FileInputStream("..."));            // InputStream
+Blob blob = Blob.fromDescriptor(uriReader, descriptor);                        // BlobDescriptor
+```
+
+## Descriptor-Only Storage
+
+If you want downstream tables to **reuse** upstream blob files (no copying and no new `.blob` files), use `__BLOB_DESCRIPTOR_FIELD`:
 
 ```sql
--- Return descriptor bytes
-ALTER TABLE blob_table SET ('blob-as-descriptor' = 'true');
-SELECT image FROM blob_table;
-
--- Return actual blob bytes
-ALTER TABLE blob_table SET ('blob-as-descriptor' = 'false');
-SELECT image FROM blob_table;
+CREATE TABLE descriptor_table (
+    id INT,
+    image BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; reused image'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
 ```
 
-### Blob View
+Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
+
+## External Storage
+
+If you want Paimon to write raw blob data to a separate external location while keeping only descriptor bytes inline, use `__BLOB_EXTERNAL_STORAGE_FIELD`:
+
+```sql
+CREATE TABLE external_table (
+    id INT,
+    image BYTES COMMENT '__BLOB_EXTERNAL_STORAGE_FIELD'
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'blob-external-storage-path' = 'oss://bucket/path/'
+);
+```
+
+For these fields:
+
+- raw blob data is written to the configured external storage path
+- normal data files keep only serialized `BlobDescriptor` bytes
+- writes can still start from raw BLOB input
+- the field is treated as descriptor-based for operations such as `MERGE INTO`
+
+## Blob View
 
 Blob view is useful when a downstream table should reference BLOB values already stored in an upstream table, without copying the bytes or creating new `.blob` files. A blob view field stores only a small `BlobViewStruct` inline. When the field is read, Paimon resolves the referenced BLOB from the upstream table.
 
 Blob view requires:
 
 - the upstream table to have row tracking enabled, so each row has a stable `_ROW_ID`
-- the downstream field to be listed in `blob-view-field`
+- the downstream field to be declared with `__BLOB_VIEW_FIELD` comment directive
 - writes to provide a serialized `BlobViewStruct`; in Flink SQL, use the built-in `sys.blob_view` function
 
 The Flink SQL function signature is:
@@ -401,21 +509,19 @@ The following example writes a downstream table whose `image_ref` field views th
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES
+    image BYTES COMMENT '__BLOB_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
 );
 
 CREATE TABLE image_view_table (
     id INT,
     label STRING,
-    image_ref BYTES
+    image_ref BYTES COMMENT '__BLOB_VIEW_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-view-field' = 'image_ref'
+    'data-evolution.enabled' = 'true'
 );
 
 INSERT INTO image_view_table
@@ -435,12 +541,12 @@ FROM `image_table$row_tracking`;
 
 Reads from `image_view_table.image_ref` return the referenced BLOB bytes in the same way as normal blob fields. The referenced upstream table and row must remain available for the view to be resolved.
 
-#### Forward Blob View References
+**Forward Blob View References**
 
 By default, reading a blob view field resolves the `BlobViewStruct` and returns the upstream BLOB
 content. If you want to import data from one blob view table into another blob view table without
 copying the BLOB bytes, read the source table with `blob-view.resolve.enabled=false` and write the
-result into a target field configured by `blob-view-field`.
+result into a target field declared with `__BLOB_VIEW_FIELD`.
 
 With this option disabled, Paimon preserves the serialized `BlobViewStruct` during reads. When the
 preserved value is written to another blob view field, the target table stores the same upstream
@@ -452,11 +558,10 @@ For example, if table `T1` contains blob view references to BLOBs in table `T0`,
 ```sql
 CREATE TABLE t2 (
     id INT,
-    image_ref BYTES
+    image_ref BYTES COMMENT '__BLOB_VIEW_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-view-field' = 'image_ref'
+    'data-evolution.enabled' = 'true'
 );
 
 -- Flink SQL example: the source table is read with blob view resolution disabled.
@@ -465,362 +570,12 @@ SELECT id, image_ref
 FROM t1 /*+ OPTIONS('blob-view.resolve.enabled'='false') */;
 ```
 
-### MERGE INTO Support
+## MERGE INTO Support
 
 For Data Evolution writes in Flink and Spark:
 
 - raw-data BLOB columns are still rejected in partial-column `MERGE INTO` updates
 - descriptor-based BLOB columns are allowed
-
-## Java API Usage
-
-### Creating a Table
-
-The following example demonstrates how to create a table with a blob column, write blob data, and read it back using Paimon's Java API.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.types.DataTypes;
-
-import java.io.ByteArrayInputStream;
-import java.nio.file.Files;
-
-public class BlobTableExample {
-
-    public static void main(String[] args) throws Exception {
-        // 1. Create catalog
-        Path warehouse = new Path("/tmp/paimon-warehouse");
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
-        catalog.createDatabase("my_db", true);
-
-        // 2. Define schema with BLOB column
-        Schema schema = Schema.newBuilder()
-                .column("id", DataTypes.INT())
-                .column("name", DataTypes.STRING())
-                .column("image", DataTypes.BLOB())  // Blob column for storing images
-                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                .build();
-
-        // 3. Create table
-        Identifier tableId = Identifier.create("my_db", "image_table");
-        catalog.createTable(tableId, schema, true);
-        Table table = catalog.getTable(tableId);
-
-        // 4. Write blob data
-        writeBlobData(table);
-
-        // 5. Read blob data back
-        readBlobData(table);
-    }
-
-    private static void writeBlobData(Table table) throws Exception {
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-
-        try (BatchTableWrite write = writeBuilder.newWrite();
-             BatchTableCommit commit = writeBuilder.newCommit()) {
-
-            // Method 1: Create blob from byte array
-            byte[] imageBytes = loadImageBytes("/path/to/image1.png");
-            GenericRow row1 = GenericRow.of(
-                    1,
-                    BinaryString.fromString("image1"),
-                    new BlobData(imageBytes)
-            );
-            write.write(row1);
-
-            // Method 2: Create blob from local file
-            GenericRow row2 = GenericRow.of(
-                    2,
-                    BinaryString.fromString("image2"),
-                    Blob.fromLocal("/path/to/image2.png")
-            );
-            write.write(row2);
-
-            // Method 3: Create blob from InputStream (useful for streaming data)
-            byte[] streamData = loadImageBytes("/path/to/image3.png");
-            ByteArrayInputStream inputStream = new ByteArrayInputStream(streamData);
-            GenericRow row3 = GenericRow.of(
-                    3,
-                    BinaryString.fromString("image3"),
-                    Blob.fromInputStream(() -> SeekableInputStream.wrap(inputStream))
-            );
-            write.write(row3);
-
-            // Method 4: Create blob from HTTP URL
-            GenericRow row4 = GenericRow.of(
-                    4,
-                    BinaryString.fromString("remote_image"),
-                    Blob.fromHttp("https://example.com/image.png")
-            );
-            write.write(row4);
-
-            // Commit all writes
-            commit.commit(write.prepareCommit());
-        }
-
-        System.out.println("Successfully wrote 4 rows with blob data");
-    }
-
-    private static void readBlobData(Table table) throws Exception {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
-
-        reader.forEachRemaining(row -> {
-            int id = row.getInt(0);
-            String name = row.getString(1).toString();
-            Blob blob = row.getBlob(2);
-
-            // Method 1: Read blob as byte array (loads entire blob into memory)
-            byte[] data = blob.toData();
-            System.out.println("Row " + id + ": " + name + ", blob size: " + data.length);
-
-            // Method 2: Read blob as stream (better for large blobs)
-            try (SeekableInputStream in = blob.newInputStream()) {
-                // Process stream without loading entire blob into memory
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-                long totalSize = 0;
-                while ((bytesRead = in.read(buffer)) != -1) {
-                    totalSize += bytesRead;
-                    // Process buffer...
-                }
-                System.out.println("Streamed " + totalSize + " bytes");
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        });
-    }
-
-    private static byte[] loadImageBytes(String path) throws Exception {
-        return Files.readAllBytes(java.nio.file.Path.of(path));
-    }
-}
-```
-
-### Construct blob from different sources
-
-```java
-// From byte array (data already in memory)
-Blob blob = Blob.fromData(imageBytes);
-
-// From local file system
-Blob blob = Blob.fromLocal("/path/to/image.png");
-
-// From any FileIO (supports HDFS, S3, OSS, etc.)
-FileIO fileIO = FileIO.get(new Path("s3://bucket"), catalogContext);
-Blob blob = Blob.fromFile(fileIO, "s3://bucket/path/to/image.png");
-
-// From FileIO with offset and length (read partial file)
-Blob blob = Blob.fromFile(fileIO, "s3://bucket/large-file.bin", 1024, 2048);
-
-// From HTTP/HTTPS URL
-Blob blob = Blob.fromHttp("https://example.com/image.png");
-
-// From InputStream supplier (lazy loading)
-Blob blob = Blob.fromInputStream(() -> new FileInputStream("/path/to/image.png"));
-
-// From BlobDescriptor (reconstruct blob reference from descriptor)
-BlobDescriptor descriptor = new BlobDescriptor("s3://bucket/path/to/image.png", 0, 1024);
-UriReader uriReader = UriReader.fromFile(fileIO);
-Blob blob = Blob.fromDescriptor(uriReader, descriptor);
-```
-
-### Querying Blob Data
-
-```java
-// Get blob from row (column index 2 in this example)
-Blob blob = row.getBlob(2);
-
-// Read as byte array (simple but loads entire blob into memory)
-byte[] data = blob.toData();
-
-// Read as stream (recommended for large blobs)
-try (SeekableInputStream in = blob.newInputStream()) {
-    // SeekableInputStream supports random access
-    in.seek(100);  // Jump to position 100
-    byte[] buffer = new byte[1024];
-    int bytesRead = in.read(buffer);
-}
-
-// Get blob descriptor (for reference-based blobs)
-// Note: Only works for BlobRef, not BlobData
-BlobDescriptor descriptor = blob.toDescriptor();
-String uri = descriptor.uri();      // e.g., "s3://bucket/path/to/blob"
-long offset = descriptor.offset();  // Starting position in the file
-long length = descriptor.length();  // Length of the blob data
-```
-
-### Descriptor-Aware Write Behavior
-
-Paimon write path is descriptor-aware automatically:
-
-1. For blob fields stored in `.blob` files, input can be either blob bytes or a `BlobDescriptor`.
-2. For fields configured in `blob-descriptor-field`, Paimon stores descriptor bytes inline in data files (no `.blob` files for those fields), and input must be a descriptor.
-3. For fields configured in `blob-external-storage-field`, Paimon writes the blob data to `blob-external-storage-path` and stores descriptor bytes inline in data files.
-4. This behavior does not depend on `blob-as-descriptor`.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.types.DataTypes;
-
-public class BlobDescriptorExample {
-
-    public static void main(String[] args) throws Exception {
-        Path warehouse = new Path("s3://my-bucket/paimon-warehouse");
-        CatalogContext catalogContext = CatalogContext.create(warehouse);
-        Catalog catalog = CatalogFactory.createCatalog(catalogContext);
-        catalog.createDatabase("my_db", true);
-
-        // Create table: store "video" as descriptor bytes inline
-        Schema schema = Schema.newBuilder()
-                .column("id", DataTypes.INT())
-                .column("name", DataTypes.STRING())
-                .column("video", DataTypes.BLOB())
-                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                .option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "video")
-                .build();
-
-        Identifier tableId = Identifier.create("my_db", "video_table");
-        catalog.createTable(tableId, schema, true);
-        Table table = catalog.getTable(tableId);
-
-        // Write blob using descriptor reference
-        writeLargeBlobWithDescriptor(table);
-
-        // Read blob data
-        readBlobData(table);
-    }
-
-    private static void writeLargeBlobWithDescriptor(Table table) throws Exception {
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-
-        try (BatchTableWrite write = writeBuilder.newWrite();
-             BatchTableCommit commit = writeBuilder.newCommit()) {
-
-            // For a very large file (e.g., 2GB video), instead of loading into memory:
-            //   byte[] hugeVideo = Files.readAllBytes(...);  // This would cause OutOfMemoryError!
-            //
-            // Create a descriptor reference to external blob
-            String externalUri = "s3://my-bucket/videos/large_video.mp4";
-            long fileSize = 2L * 1024 * 1024 * 1024;  // 2GB
-
-            BlobDescriptor descriptor = new BlobDescriptor(externalUri, 0, fileSize);
-            // file io should be accessible to externalUri
-            FileIO fileIO = Table.fileIO();
-            UriReader uriReader = UriReader.fromFile(fileIO);
-            Blob blob = Blob.fromDescriptor(uriReader, descriptor);
-
-            GenericRow row = GenericRow.of(
-                    1,
-                    BinaryString.fromString("large_video"),
-                    blob);
-            write.write(row);
-
-            commit.commit(write.prepareCommit());
-        }
-
-        System.out.println("Successfully wrote large blob using descriptor reference");
-    }
-
-    private static void readBlobData(Table table) throws Exception {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
-
-        reader.forEachRemaining(row -> {
-            int id = row.getInt(0);
-            String name = row.getString(1).toString();
-            Blob blob = row.getBlob(2);
-
-            // Field is configured in blob-descriptor-field, so descriptor is stored inline
-            BlobDescriptor descriptor = blob.toDescriptor();
-            System.out.println("Row " + id + ": " + name);
-            System.out.println("  Blob URI: " + descriptor.uri());
-            System.out.println("  Length: " + descriptor.length());
-        });
-    }
-}
-```
-
-**Reading blob data with different output modes:**
-
-The `blob-as-descriptor` option affects only read output:
-
-```sql
--- When blob-as-descriptor = true: Returns BlobDescriptor bytes (reference to Paimon blob file)
-ALTER TABLE video_table SET ('blob-as-descriptor' = 'true');
-SELECT * FROM video_table;  -- Returns serialized BlobDescriptor
-
--- When blob-as-descriptor = false: Returns actual blob bytes
-ALTER TABLE video_table SET ('blob-as-descriptor' = 'false');
-SELECT * FROM video_table;  -- Returns actual blob bytes from Paimon storage
-```
-
-### Blob storage mode: DESCRIPTOR ONLY
-
-If you want downstream tables to **reuse** upstream blob files (no copying and no new <code>.blob</code> files), configure the target blob field(s):
-
-```sql
-'blob-descriptor-field' = 'image'
-```
-
-For these configured fields, Paimon stores only serialized <code>BlobDescriptor</code> bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
-
-### Blob storage mode: EXTERNAL STORAGE
-
-If you want Paimon to write raw blob data to a separate external location while keeping only descriptor bytes inline, configure the target blob field(s):
-
-```sql
-'blob-descriptor-field' = 'image',
-'blob-external-storage-field' = 'image',
-'blob-external-storage-path' = 'oss://bucket/path/'
-```
-
-For these configured fields:
-
-- raw blob data is written to the configured external storage path
-- normal data files keep only serialized <code>BlobDescriptor</code> bytes
-- writes can still start from raw BLOB input
-- the field is treated as descriptor-based for operations such as `MERGE INTO`
 
 For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
@@ -839,12 +594,12 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
 2. **Set Appropriate Target File Size**: Configure `blob.target-file-size` based on your blob sizes. Larger values mean fewer files but larger individual files.
 
-3. **Use Descriptor Fields When Reusing External Blob Files**: Configure `blob-descriptor-field` for fields that should keep descriptor references instead of writing new `.blob` files.
+3. **Use Descriptor Fields When Reusing External Blob Files**: Use `__BLOB_DESCRIPTOR_FIELD` for fields that should keep descriptor references instead of writing new `.blob` files.
 
-4. **Use External-Storage Fields When Accepting Raw Input But Storing Descriptors**: Configure `blob-external-storage-field` together with `blob-external-storage-path` when upstream writes raw blob bytes but you want descriptor-based storage.
+4. **Use External-Storage Fields When Accepting Raw Input But Storing Descriptors**: Use `__BLOB_EXTERNAL_STORAGE_FIELD` with `blob-external-storage-path` when upstream writes raw blob bytes but you want descriptor-based storage.
 
 5. **Manage External Storage Lifecycle Separately**: Files written to `blob-external-storage-path` are not cleaned up by Paimon, so retention and deletion should be managed externally.
 
-6. **Use Blob View to Avoid Copying BLOB Data**: Configure `blob-view-field` when a downstream table only needs to reference BLOB values from an upstream table.
+6. **Use Blob View to Avoid Copying BLOB Data**: Use `__BLOB_VIEW_FIELD` when a downstream table only needs to reference BLOB values from an upstream table.
 
 7. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.

@@ -23,6 +23,9 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options import CoreOptions, Options
+from pypaimon.schema.column_directive_utils import (
+    apply_add_column_directive, apply_directives,
+    remove_dropped_directive_options)
 from pypaimon.schema.data_types import AtomicInteger, DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
@@ -107,14 +110,28 @@ def _drop_column_validation(schema: 'TableSchema', change: DropColumn):
         )
 
 
-def _handle_drop_column(change: DropColumn, new_fields: List[DataField]):
+def _handle_drop_column(change: DropColumn, new_fields: List[DataField],
+                        new_options: dict):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
     if field_index is None:
         raise ColumnNotExistException(field_name)
+    if len(change.field_names) == 1:
+        field = new_fields[field_index]
+        type_root = _get_type_root(field.type)
+        remove_dropped_directive_options(field_name, type_root, new_options)
     new_fields.pop(field_index)
     if not new_fields:
         raise ValueError("Cannot drop all fields in table")
+
+
+def _get_type_root(data_type) -> str:
+    from pypaimon.schema.data_types import AtomicType, VectorType
+    if isinstance(data_type, VectorType):
+        return 'VECTOR'
+    if isinstance(data_type, AtomicType) and data_type.type == 'BLOB':
+        return 'BLOB'
+    return getattr(data_type, 'type', '')
 
 
 def _assert_not_updating_partition_keys(
@@ -242,7 +259,8 @@ def _handle_add_column(
     new_fields: List[DataField],
     highest_field_id: AtomicInteger,
     partition_keys: List[str],
-    add_column_before_partition: bool
+    add_column_before_partition: bool,
+    new_options: dict
 ):
     if not change.data_type.nullable:
         raise ValueError(
@@ -252,7 +270,20 @@ def _handle_add_column(
     field_name = change.field_names[-1]
     if _find_field_index(new_fields, field_name) is not None:
         raise ColumnAlreadyExistException(field_name)
-    new_field = DataField(field_id, field_name, change.data_type, change.comment)
+
+    data_type = change.data_type
+    comment = change.comment
+    converted = apply_add_column_directive(comment, field_name, data_type, new_options)
+    if converted is not None:
+        if len(change.field_names) > 1:
+            raise ValueError(
+                f"Comment directive cannot be used on a nested column "
+                f"{'.'.join(change.field_names)}."
+            )
+        data_type = converted.type
+        comment = converted.comment
+
+    new_field = DataField(field_id, field_name, data_type, comment)
     if change.move:
         _apply_move(new_fields, new_field, change.move)
     elif (
@@ -321,6 +352,17 @@ class SchemaManager:
             latest = self.latest()
             if latest is not None:
                 raise RuntimeError("Schema in filesystem exists, creation is not allowed.")
+
+            fields = list(schema.fields)
+            options = dict(schema.options)
+            apply_directives(fields, options)
+            schema = Schema(
+                fields=fields,
+                partition_keys=schema.partition_keys,
+                primary_keys=schema.primary_keys,
+                options=options,
+                comment=schema.comment,
+            )
 
             _validate_blob_external_storage_fields(schema.fields, schema.options)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
@@ -419,7 +461,8 @@ class SchemaManager:
             elif isinstance(change, AddColumn):
                 _handle_add_column(
                     change, new_fields, highest_field_id,
-                    partition_keys, add_column_before_partition
+                    partition_keys, add_column_before_partition,
+                    new_options
                 )
             elif isinstance(change, RenameColumn):
                 _assert_not_updating_partition_keys(
@@ -429,7 +472,7 @@ class SchemaManager:
                 _handle_rename_column(change, new_fields)
             elif isinstance(change, DropColumn):
                 _drop_column_validation(old_table_schema, change)
-                _handle_drop_column(change, new_fields)
+                _handle_drop_column(change, new_fields, new_options)
             elif isinstance(change, UpdateColumnType):
                 _assert_not_updating_partition_keys(
                     old_table_schema, change.field_names, "update"

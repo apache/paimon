@@ -210,6 +210,13 @@ class CoreOptions:
         .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
     )
 
+    BLOB_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated column names that should be stored as blob type.")
+    )
+
     BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-descriptor-field")
         .string_type()
@@ -240,6 +247,20 @@ class CoreOptions:
             "whose raw data will be written to external storage at write time. "
             "The external storage path is configured via 'blob-external-storage-path'."
         )
+    )
+
+    BLOB_VIEW_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-view-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated field names to treat as BLOB view fields.")
+    )
+
+    VECTOR_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("vector-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated column names that should be stored as vector type.")
     )
 
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
