@@ -16,14 +16,12 @@
 # limitations under the License.
 ################################################################################
 
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List, Tuple
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.uri_reader import UriReader
-from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
@@ -61,42 +59,12 @@ class BlobViewLookup:
 
     def __init__(self, table):
         self._table = table
-        self._table_cache: Dict[str, object] = {}
         self._uri_reader_cache: Dict[str, UriReader] = {}
         self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
 
-    def preload(self, view_structs: Iterable[BlobViewStruct]) -> None:
-        unique_structs: List[BlobViewStruct] = []
-        for view_struct in view_structs:
-            if view_struct not in self._descriptor_cache:
-                unique_structs.append(view_struct)
-        if not unique_structs:
-            return
-        resolved: Dict[BlobViewStruct, BlobDescriptor] = self._preload_descriptors(unique_structs)
-        self._descriptor_cache.update(resolved)
-
-    def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
-        descriptor: BlobDescriptor = self._descriptor_cache.get(view_struct)
-        if descriptor is None:
-            self.preload([view_struct])
-            descriptor = self._descriptor_cache.get(view_struct)
-        if descriptor is None:
-            raise ValueError(
-                "Cannot resolve BlobViewStruct {} because row id {} was not found "
-                "in upstream table.".format(view_struct, view_struct.row_id)
-            )
-        return descriptor
-
-    def resolve_data(self, view_struct: BlobViewStruct) -> bytes:
-        descriptor = self.resolve_descriptor(view_struct)
-        upstream_table = self._load_table(view_struct.identifier)
-        uri_reader = self._get_or_create_uri_reader(upstream_table, descriptor)
-        return Blob.from_descriptor(uri_reader, descriptor).to_data()
-
-    def _preload_descriptors(
-            self, view_structs: List[BlobViewStruct]) -> Dict[BlobViewStruct, BlobDescriptor]:
+    def preload(self, view_structs: List[BlobViewStruct]):
         if not view_structs:
-            return {}
+            return
 
         grouped: Dict[str, TableReferences] = self._group_by_table(view_structs)
         plans: List[TableReadPlan] = []
@@ -104,18 +72,16 @@ class BlobViewLookup:
             plans.append(self._create_table_read_plan(table_refs))
 
         target_rows: int = self._target_rows_per_task(plans)
-        tasks: List[Tuple[TableReadPlan, List[Tuple[int, int]]]] = []
+        tasks: List[Tuple[TableReadPlan, List[Range]]] = []
         for plan in plans:
             for range_chunk in self._split_row_ranges(plan.row_ranges, target_rows):
                 tasks.append((plan, range_chunk))
 
         if len(tasks) <= 1:
-            resolved = {}
             for plan, range_chunk in tasks:
-                resolved.update(self._load_descriptor_chunk(plan, range_chunk))
-            return resolved
+                self._descriptor_cache.update(self._load_descriptor_chunk(plan, range_chunk))
+            return
 
-        resolved = {}
         with ThreadPoolExecutor(max_workers=min(_PRELOAD_THREAD_NUM, len(tasks))) as executor:
             futures = {
                 executor.submit(self._load_descriptor_chunk, plan, range_chunk): (plan, range_chunk)
@@ -123,13 +89,21 @@ class BlobViewLookup:
             }
             for future in as_completed(futures):
                 try:
-                    resolved.update(future.result())
+                    self._descriptor_cache.update(future.result())
                 except Exception as exc:
                     raise RuntimeError("Failed to preload blob descriptors.") from exc
-        return resolved
+
+    def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
+        descriptor: BlobDescriptor = self._descriptor_cache.get(view_struct)
+        if descriptor is None:
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} because row id {} was not found "
+                "in upstream table.".format(view_struct, view_struct.row_id)
+            )
+        return descriptor
 
     def _group_by_table(
-        self, view_structs: List[BlobViewStruct]
+            self, view_structs: List[BlobViewStruct]
     ) -> Dict[str, TableReferences]:
         grouped: Dict[str, TableReferences] = {}
         for view_struct in view_structs:
@@ -146,11 +120,10 @@ class BlobViewLookup:
         for field_id in table_refs.references_by_field:
             fields.append(self._field_by_id(upstream_table, field_id))
 
-        row_ranges: List[Tuple[int, int]] = self._to_sorted_distinct_ranges(table_refs.row_ids)
-        return TableReadPlan(table_refs.identifier, upstream_table, fields, row_ranges)
+        return TableReadPlan(table_refs.identifier, upstream_table, fields, Range.to_ranges(table_refs.row_ids))
 
     def _load_descriptor_chunk(
-        self, plan: TableReadPlan, row_ranges: List[Range]
+            self, plan: TableReadPlan, row_ranges: List[Range]
     ) -> Dict[BlobViewStruct, BlobDescriptor]:
         identifier: Identifier = plan.identifier
         upstream_table = plan.upstream_table
@@ -208,33 +181,45 @@ class BlobViewLookup:
         return resolved
 
     @staticmethod
-    def _to_sorted_distinct_ranges(row_ids: List[int]) -> List[Range]:
-        return Range.to_ranges(row_ids)
-
-    @staticmethod
     def _split_row_ranges(
-        row_ranges: List[Range], target_rows_per_task: int
+            row_ranges: List[Range], target_rows_per_task: int
     ) -> List[List[Range]]:
+        """
+        Split row ranges into multiple chunks for parallel task processing.
+        """
         if not row_ranges:
             return []
 
         chunks: List[List[Range]] = []
         current_chunk: List[Range] = []
         current_chunk_rows: int = 0
+
         for r in row_ranges:
             next_from = r.from_
+            # Process current range until all rows are allocated
             while next_from <= r.to:
+                # If current chunk is full, save it and start a new one
                 if current_chunk_rows == target_rows_per_task:
                     chunks.append(current_chunk)
                     current_chunk = []
                     current_chunk_rows = 0
+
+                # Calculate remaining capacity in current chunk
                 remaining = target_rows_per_task - current_chunk_rows
+                # Determine the end position for this allocation (don't exceed range boundary)
                 next_to = min(r.to, next_from + remaining - 1)
+
+                # Add the allocated range to current chunk
                 current_chunk.append(Range(next_from, next_to))
                 current_chunk_rows += next_to - next_from + 1
+
+                # Move to next unallocated position
                 next_from = next_to + 1
+
+        # Don't forget the last chunk if it has any ranges
         if current_chunk:
             chunks.append(current_chunk)
+
         return chunks
 
     @staticmethod
@@ -245,50 +230,15 @@ class BlobViewLookup:
                 total_rows += r.count()
         if total_rows <= 0:
             return _MIN_ROWS_PER_TASK
-        target = (total_rows + _PRELOAD_THREAD_NUM - 1) // _PRELOAD_THREAD_NUM
-        return max(_MIN_ROWS_PER_TASK, target)
+
+        return max(_MIN_ROWS_PER_TASK, (total_rows + _PRELOAD_THREAD_NUM - 1) // _PRELOAD_THREAD_NUM)
 
     def _load_table(self, identifier: Identifier):
-        key: str = identifier.get_full_name()
-        if key in self._table_cache:
-            return self._table_cache[key]
-
-        catalog_loader = self._table.catalog_environment.catalog_loader
-        if catalog_loader is not None:
-            catalog = catalog_loader.load()
-            table = catalog.get_table(identifier)
-        else:
-            table = self._load_filesystem_table(identifier)
-
-        self._table_cache[key] = table
-        return table
-
-    def _load_filesystem_table(self, identifier: Identifier):
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        table_path = self._filesystem_table_path(identifier)
-        schema_manager = SchemaManager(
-            self._table.file_io,
-            table_path,
-            branch=identifier.get_branch_name_or_default(),
-        )
-        table_schema = schema_manager.latest()
-        if table_schema is None:
-            raise ValueError("Cannot find upstream table at path: {}".format(table_path))
-        return FileStoreTable(self._table.file_io, identifier, table_path, table_schema)
-
-    def _filesystem_table_path(self, identifier: Identifier) -> str:
-        current_table_path: str = self._table.table_path.rstrip("/")
-        current_db_path: str = os.path.dirname(current_table_path)
-        warehouse: str = os.path.dirname(current_db_path)
-        return "{}/{}.db/{}".format(
-            warehouse.rstrip("/"),
-            identifier.get_database_name(),
-            identifier.get_table_name(),
-        )
+        catalog = self._table.catalog_environment.catalog_loader.load()
+        return catalog.get_table(identifier)
 
     @staticmethod
-    def _field_by_id(table, field_id: int):
+    def _field_by_id(table, field_id: int) -> 'DataField':
         for field in table.table_schema.fields:
             if field.id == field_id:
                 return field
@@ -311,15 +261,3 @@ class BlobViewLookup:
         if not BlobDescriptor.is_blob_descriptor(value):
             raise ValueError("Blob view upstream value is not a serialized BlobDescriptor.")
         return BlobDescriptor.deserialize(value)
-
-    def _get_or_create_uri_reader(self, table, descriptor: BlobDescriptor) -> UriReader:
-        cache_key: str = table.identifier.get_full_name()
-        if cache_key in self._uri_reader_cache:
-            return self._uri_reader_cache[cache_key]
-        uri_reader_factory = getattr(table.file_io, "uri_reader_factory", None)
-        if uri_reader_factory is not None:
-            uri_reader = uri_reader_factory.create(descriptor.uri)
-        else:
-            uri_reader = UriReader.from_file(table.file_io)
-        self._uri_reader_cache[cache_key] = uri_reader
-        return uri_reader
