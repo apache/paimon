@@ -117,13 +117,12 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
-        try {
-            commitListeners.snapshotState();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    public void snapshotState() throws Exception {
+        commitListeners.snapshotState();
+    }
 
+    @Override
+    public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
         Map<Long, List<Committable>> grouped = new HashMap<>();
         for (Committable c : committables) {
             grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);

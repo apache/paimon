@@ -165,6 +165,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
         pollInputs();
+        committer.snapshotState();
         committableStateManager.snapshotState(committables(committablesPerCheckpoint));
     }
 
