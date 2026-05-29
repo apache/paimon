@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
 import org.apache.paimon.schema.SchemaChange.RemoveOption;
@@ -39,7 +40,6 @@ import org.apache.paimon.schema.SchemaChange.UpdateComment;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -102,6 +102,8 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -197,6 +199,7 @@ public class SchemaManager implements Serializable {
                 }
             }
 
+            schema = applyDirectives(schema);
             TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
@@ -344,40 +347,21 @@ public class SchemaManager implements Serializable {
                         String.join(".", addColumn.fieldNames()),
                         lazyIdentifier.get().getFullName());
 
-                BlobSchemaUtils.ParsedDirective blobDirective =
-                        BlobSchemaUtils.parseAddColumnComment(addColumn.description());
+                ConvertedColumn converted =
+                        applyAddColumnDirective(
+                                addColumn.description(),
+                                addColumn.fieldNames()[0],
+                                addColumn.dataType(),
+                                newOptions);
                 DataType requestedDataType = addColumn.dataType();
                 String effectiveComment = addColumn.description();
-                // try convert to blob type
-                if (blobDirective != null) {
+                if (converted != null) {
                     Preconditions.checkArgument(
                             addColumn.fieldNames().length == 1,
-                            "BLOB directive cannot be used on a nested column %s.",
+                            "Comment directive cannot be used on a nested column %s.",
                             String.join(".", addColumn.fieldNames()));
-                    DataTypeRoot root = requestedDataType.getTypeRoot();
-                    Preconditions.checkArgument(
-                            root == DataTypeRoot.VARBINARY
-                                    || root == DataTypeRoot.BINARY
-                                    || root == DataTypeRoot.BLOB,
-                            "Column %s declared with a BLOB directive must be of BYTES, "
-                                    + "BINARY or BLOB type, but was %s.",
-                            addColumn.fieldNames()[0],
-                            requestedDataType);
-                    requestedDataType = new BlobType(requestedDataType.isNullable());
-                    effectiveComment = blobDirective.realComment();
-
-                    BlobSchemaUtils.modifyBlobOptions(
-                            blobDirective.optionKey(), addColumn.fieldNames()[0], newOptions);
-                } else if (requestedDataType.is(DataTypeRoot.BLOB)) {
-                    // We do not permit adding blob type column without comment hint,
-                    // since we don't know the storage mode i.e. native blob or descriptor blob.
-                    throw new UnsupportedOperationException(
-                            String.format(
-                                    "Adding BLOB column %s requires a comment directive ('%s' "
-                                            + "or '%s') so the storage mode is explicit.",
-                                    String.join(".", addColumn.fieldNames()),
-                                    BlobSchemaUtils.BLOB_FIELD_DIRECTIVE,
-                                    BlobSchemaUtils.BLOB_DESCRIPTOR_FIELD_DIRECTIVE));
+                    requestedDataType = converted.type();
+                    effectiveComment = converted.comment();
                 }
 
                 int id = highestFieldId.incrementAndGet();
@@ -474,7 +458,14 @@ public class SchemaManager implements Serializable {
                 DropColumn drop = (DropColumn) change;
                 dropColumnValidation(oldTableSchema, drop);
                 if (drop.fieldNames().length == 1) {
-                    BlobSchemaUtils.removeFromBlobOptions(drop.fieldNames()[0], newOptions);
+                    String dropName = drop.fieldNames()[0];
+                    newFields.stream()
+                            .filter(f -> f.name().equals(dropName))
+                            .findFirst()
+                            .ifPresent(
+                                    f ->
+                                            ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                                                    dropName, f.type().getTypeRoot(), newOptions));
                 }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override

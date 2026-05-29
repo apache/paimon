@@ -285,30 +285,6 @@ public class SchemaEvolutionTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("nested column");
 
-        // unknown __BLOB directive rejected (e.g. __BLOB_VIEW_FIELD is not supported).
-        assertThatThrownBy(
-                        () ->
-                                schemaManager.commitChanges(
-                                        Collections.singletonList(
-                                                SchemaChange.addColumn(
-                                                        "x",
-                                                        DataTypes.BYTES(),
-                                                        "__BLOB_VIEW_FIELD",
-                                                        null))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unsupported BLOB directive");
-
-        // raw BlobType without any directive rejected — SDK callers must go through the
-        // directive path so the storage mode (blob-field vs blob-descriptor-field) is explicit.
-        assertThatThrownBy(
-                        () ->
-                                schemaManager.commitChanges(
-                                        Collections.singletonList(
-                                                SchemaChange.addColumn(
-                                                        "raw_blob", DataTypes.BLOB(), null, null))))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("requires a comment directive");
-
         // SET OPTION on blob-field is rejected (the option is @Immutable).
         TableSchema oldSchema = schemaManager.latest().get();
         LazyField<Boolean> hasSnapshots = new LazyField<>(() -> true);
@@ -327,21 +303,21 @@ public class SchemaEvolutionTest {
     }
 
     @Test
-    public void testDropBlobColumnCleansOptions() throws Exception {
-        // table with one descriptor BLOB col registered in both blob-descriptor-field and
-        // blob-external-storage-field (subset rule), and one normal blob col in blob-field.
+    public void testDropColumnCleansOptions() throws Exception {
         Map<String, String> options = blobEnabledOptions();
-        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
-        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "ext");
-        options.put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "ext");
-        options.put(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/blob-ext");
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaManager.createTable(
                 new Schema(
                         RowType.of(
                                         new DataField[] {
                                             new DataField(0, "k", DataTypes.INT()),
-                                            new DataField(1, "pic", DataTypes.BLOB().copy(true)),
-                                            new DataField(2, "ext", DataTypes.BLOB().copy(true))
+                                            new DataField(
+                                                    1, "pic", DataTypes.BYTES(), "__BLOB_FIELD"),
+                                            new DataField(
+                                                    2,
+                                                    "emb",
+                                                    DataTypes.ARRAY(DataTypes.FLOAT()),
+                                                    "__VECTOR_FIELD;64")
                                         })
                                 .getFields(),
                         Collections.emptyList(),
@@ -349,15 +325,18 @@ public class SchemaEvolutionTest {
                         options,
                         ""));
 
-        // drop the descriptor BLOB column — it must vanish from both descriptor-field and
-        // external-storage-field; the other BLOB column is untouched.
-        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("ext")));
+        TableSchema before = schemaManager.latest().get();
+        assertThat(before.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
+        assertThat(before.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("emb");
 
-        TableSchema latest = schemaManager.latest().get();
-        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
-        assertThat(latest.options()).doesNotContainKey(CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
-        assertThat(latest.options())
-                .doesNotContainKey(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("pic")));
+        TableSchema afterPic = schemaManager.latest().get();
+        assertThat(afterPic.options()).doesNotContainKey(CoreOptions.BLOB_FIELD.key());
+        assertThat(afterPic.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("emb");
+
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("emb")));
+        TableSchema afterEmb = schemaManager.latest().get();
+        assertThat(afterEmb.options()).doesNotContainKey(CoreOptions.VECTOR_FIELD.key());
     }
 
     @Test
@@ -397,6 +376,156 @@ public class SchemaEvolutionTest {
                                                         "raw", DataTypes.BLOB()))))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("BLOB");
+    }
+
+    @Test
+    public void testAddBlobViewColumnViaCommentDirective() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "view_col",
+                                DataTypes.BYTES(),
+                                "__BLOB_VIEW_FIELD; view comment",
+                                null)));
+
+        TableSchema latest = schemaManager.latest().get();
+        DataField viewCol =
+                latest.fields().stream().filter(f -> f.name().equals("view_col")).findFirst().get();
+        assertThat(viewCol.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(viewCol.description()).isEqualTo("view comment");
+        assertThat(latest.options().get(CoreOptions.BLOB_VIEW_FIELD.key())).isEqualTo("view_col");
+    }
+
+    @Test
+    public void testAddVectorColumnViaCommentDirective() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding",
+                                DataTypes.ARRAY(DataTypes.FLOAT()),
+                                "__VECTOR_FIELD;128; embedding vector",
+                                null)));
+
+        TableSchema latest = schemaManager.latest().get();
+        DataField embedding =
+                latest.fields().stream()
+                        .filter(f -> f.name().equals("embedding"))
+                        .findFirst()
+                        .get();
+        assertThat(embedding.type().getTypeRoot()).isEqualTo(DataTypeRoot.VECTOR);
+        assertThat(embedding.description()).isEqualTo("embedding vector");
+        assertThat(latest.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("embedding");
+    }
+
+    @Test
+    public void testAddVectorColumnErrors() throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        ""));
+
+        // non-ARRAY type rejected for vector directive
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "bad",
+                                                        DataTypes.INT(),
+                                                        "__VECTOR_FIELD;128",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be of ARRAY type");
+    }
+
+    @Test
+    public void testCreateTableWithCommentDirectives() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1,
+                                                    "pic",
+                                                    DataTypes.BYTES(),
+                                                    "__BLOB_FIELD; picture"),
+                                            new DataField(
+                                                    2,
+                                                    "view_col",
+                                                    DataTypes.BYTES(),
+                                                    "__BLOB_VIEW_FIELD; view field"),
+                                            new DataField(
+                                                    3,
+                                                    "embedding",
+                                                    DataTypes.ARRAY(DataTypes.FLOAT()),
+                                                    "__VECTOR_FIELD;64; my embedding")
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        TableSchema latest = schemaManager.latest().get();
+
+        DataField pic =
+                latest.fields().stream().filter(f -> f.name().equals("pic")).findFirst().get();
+        assertThat(pic.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(pic.description()).isEqualTo("picture");
+
+        DataField viewCol =
+                latest.fields().stream().filter(f -> f.name().equals("view_col")).findFirst().get();
+        assertThat(viewCol.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(viewCol.description()).isEqualTo("view field");
+
+        DataField embedding =
+                latest.fields().stream()
+                        .filter(f -> f.name().equals("embedding"))
+                        .findFirst()
+                        .get();
+        assertThat(embedding.type().getTypeRoot()).isEqualTo(DataTypeRoot.VECTOR);
+        assertThat(embedding.description()).isEqualTo("my embedding");
+
+        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
+        assertThat(latest.options().get(CoreOptions.BLOB_VIEW_FIELD.key())).isEqualTo("view_col");
+        assertThat(latest.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("embedding");
     }
 
     private static Map<String, String> blobEnabledOptions() {
