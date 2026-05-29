@@ -26,9 +26,34 @@ from pypaimon.common.uri_reader import UriReader
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
 
 _PRELOAD_THREAD_NUM = 100
 _MIN_ROWS_PER_TASK = 100
+
+
+class TableReferences:
+    """Groups BlobViewStruct references by upstream table."""
+
+    def __init__(self, identifier: Identifier):
+        self.identifier: Identifier = identifier
+        self.references_by_field: Dict[int, List[BlobViewStruct]] = {}
+        self.row_ids: List[int] = []
+
+    def add(self, view_struct: BlobViewStruct) -> None:
+        self.references_by_field.setdefault(view_struct.field_id, []).append(view_struct)
+        self.row_ids.append(int(view_struct.row_id))
+
+
+class TableReadPlan:
+    """A plan for reading blob descriptors from one upstream table."""
+
+    def __init__(self, identifier: Identifier, upstream_table,
+                 fields: List, row_ranges: List[Range]):
+        self.identifier: Identifier = identifier
+        self.upstream_table = upstream_table
+        self.fields: List = fields
+        self.row_ranges: List[Range] = row_ranges
 
 
 class BlobViewLookup:
@@ -36,22 +61,22 @@ class BlobViewLookup:
 
     def __init__(self, table):
         self._table = table
-        self._table_cache = {}
+        self._table_cache: Dict[str, object] = {}
         self._uri_reader_cache: Dict[str, UriReader] = {}
         self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
 
     def preload(self, view_structs: Iterable[BlobViewStruct]) -> None:
-        unique_structs = []
+        unique_structs: List[BlobViewStruct] = []
         for view_struct in view_structs:
             if view_struct not in self._descriptor_cache:
                 unique_structs.append(view_struct)
         if not unique_structs:
             return
-        resolved = self._preload_descriptors(unique_structs)
+        resolved: Dict[BlobViewStruct, BlobDescriptor] = self._preload_descriptors(unique_structs)
         self._descriptor_cache.update(resolved)
 
     def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
-        descriptor = self._descriptor_cache.get(view_struct)
+        descriptor: BlobDescriptor = self._descriptor_cache.get(view_struct)
         if descriptor is None:
             self.preload([view_struct])
             descriptor = self._descriptor_cache.get(view_struct)
@@ -69,19 +94,19 @@ class BlobViewLookup:
         return Blob.from_descriptor(uri_reader, descriptor).to_data()
 
     def _preload_descriptors(
-            self, view_structs: List[BlobViewStruct]) -> Dict[BlobViewStruct, BlobDescriptor]:
+        self, view_structs: List[BlobViewStruct]) -> Dict[BlobViewStruct, BlobDescriptor]:
         if not view_structs:
             return {}
 
-        grouped = self._group_by_table(view_structs)
-        plans = []
-        for identifier, table_refs in grouped.items():
-            plans.append(self._create_table_read_plan(identifier, table_refs))
+        grouped: Dict[str, TableReferences] = self._group_by_table(view_structs)
+        plans: List[TableReadPlan] = []
+        for table_refs in grouped.values():
+            plans.append(self._create_table_read_plan(table_refs))
 
-        target_rows = self._target_rows_per_task(plans)
-        tasks = []
+        target_rows: int = self._target_rows_per_task(plans)
+        tasks: List[Tuple[TableReadPlan, List[Tuple[int, int]]]] = []
         for plan in plans:
-            for range_chunk in self._split_row_ranges(plan["row_ranges"], target_rows):
+            for range_chunk in self._split_row_ranges(plan.row_ranges, target_rows):
                 tasks.append((plan, range_chunk))
 
         if len(tasks) <= 1:
@@ -104,48 +129,35 @@ class BlobViewLookup:
         return resolved
 
     def _group_by_table(
-            self, view_structs: List[BlobViewStruct]
-    ) -> Dict[str, Dict]:
-        grouped = {}
+        self, view_structs: List[BlobViewStruct]
+    ) -> Dict[str, TableReferences]:
+        grouped: Dict[str, TableReferences] = {}
         for view_struct in view_structs:
             key = view_struct.identifier.get_full_name()
             if key not in grouped:
-                grouped[key] = {
-                    "identifier": view_struct.identifier,
-                    "fields_by_id": {},
-                    "row_ids": [],
-                }
-            refs = grouped[key]
-            refs["fields_by_id"].setdefault(view_struct.field_id, []).append(view_struct)
-            refs["row_ids"].append(int(view_struct.row_id))
+                grouped[key] = TableReferences(view_struct.identifier)
+            grouped[key].add(view_struct)
         return grouped
 
-    def _create_table_read_plan(self, table_key: str, table_refs: Dict) -> Dict:
-        identifier = table_refs["identifier"]
-        upstream_table = self._load_table(identifier)
+    def _create_table_read_plan(self, table_refs: TableReferences) -> TableReadPlan:
+        upstream_table = self._load_table(table_refs.identifier)
 
-        fields = []
-        for field_id in table_refs["fields_by_id"]:
-            field = self._field_by_id(upstream_table, field_id)
-            fields.append({"field_id": field_id, "field": field})
+        fields: List = []
+        for field_id in table_refs.references_by_field:
+            fields.append(self._field_by_id(upstream_table, field_id))
 
-        row_ranges = self._to_sorted_distinct_ranges(table_refs["row_ids"])
-        return {
-            "identifier": identifier,
-            "upstream_table": upstream_table,
-            "fields": fields,
-            "row_ranges": row_ranges,
-        }
+        row_ranges: List[Tuple[int, int]] = self._to_sorted_distinct_ranges(table_refs.row_ids)
+        return TableReadPlan(table_refs.identifier, upstream_table, fields, row_ranges)
 
     def _load_descriptor_chunk(
-            self, plan: Dict, row_ranges: List[Tuple[int, int]]
+        self, plan: TableReadPlan, row_ranges: List[Range]
     ) -> Dict[BlobViewStruct, BlobDescriptor]:
-        identifier = plan["identifier"]
-        upstream_table = plan["upstream_table"]
-        fields = plan["fields"]
+        identifier: Identifier = plan.identifier
+        upstream_table = plan.upstream_table
+        fields: List = plan.fields
 
-        field_names = [f["field"].name for f in fields]
-        projection = field_names + [SpecialFields.ROW_ID.name]
+        field_names: List[str] = [f.name for f in fields]
+        projection: List[str] = field_names + [SpecialFields.ROW_ID.name]
 
         descriptor_table = upstream_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
         read_builder = descriptor_table.new_read_builder().with_projection(projection)
@@ -159,14 +171,14 @@ class BlobViewLookup:
             )
 
         predicate_builder = read_builder.new_predicate_builder()
-        range_predicates = []
-        for range_from, range_to in row_ranges:
-            if range_from == range_to:
+        range_predicates: List = []
+        for r in row_ranges:
+            if r.from_ == r.to:
                 range_predicates.append(
-                    predicate_builder.equal(SpecialFields.ROW_ID.name, range_from))
+                    predicate_builder.equal(SpecialFields.ROW_ID.name, r.from_))
             else:
                 range_predicates.append(
-                    predicate_builder.between(SpecialFields.ROW_ID.name, range_from, range_to))
+                    predicate_builder.between(SpecialFields.ROW_ID.name, r.from_, r.to))
         if len(range_predicates) == 1:
             predicate = range_predicates[0]
         else:
@@ -180,62 +192,45 @@ class BlobViewLookup:
                 .format(identifier.get_full_name())
             )
 
-        row_id_values = result.column(SpecialFields.ROW_ID.name).to_pylist()
-        resolved = {}
-        for field_info in fields:
-            field_id = field_info["field_id"]
-            field_name = field_info["field"].name
-            if field_name not in result.schema.names:
+        row_id_values: List = result.column(SpecialFields.ROW_ID.name).to_pylist()
+        resolved: Dict[BlobViewStruct, BlobDescriptor] = {}
+        for field in fields:
+            if field.name not in result.schema.names:
                 continue
-            values = result.column(field_name).to_pylist()
+            values = result.column(field.name).to_pylist()
             for row_id, value in zip(row_id_values, values):
                 if value is None:
                     continue
                 descriptor = self._to_descriptor(value)
                 view_struct = BlobViewStruct(
-                    identifier.get_full_name(), field_id, int(row_id))
+                    identifier.get_full_name(), field.id, int(row_id))
                 resolved[view_struct] = descriptor
         return resolved
 
     @staticmethod
-    def _to_sorted_distinct_ranges(row_ids: List[int]) -> List[Tuple[int, int]]:
-        if not row_ids:
-            return []
-        sorted_ids = sorted(set(row_ids))
-        ranges = []
-        range_start = sorted_ids[0]
-        range_end = range_start
-        for i in range(1, len(sorted_ids)):
-            row_id = sorted_ids[i]
-            if row_id == range_end + 1:
-                range_end = row_id
-            else:
-                ranges.append((range_start, range_end))
-                range_start = row_id
-                range_end = row_id
-        ranges.append((range_start, range_end))
-        return ranges
+    def _to_sorted_distinct_ranges(row_ids: List[int]) -> List[Range]:
+        return Range.to_ranges(row_ids)
 
     @staticmethod
     def _split_row_ranges(
-            row_ranges: List[Tuple[int, int]], target_rows_per_task: int
-    ) -> List[List[Tuple[int, int]]]:
+        row_ranges: List[Range], target_rows_per_task: int
+    ) -> List[List[Range]]:
         if not row_ranges:
             return []
 
-        chunks = []
-        current_chunk = []
-        current_chunk_rows = 0
-        for range_from, range_to in row_ranges:
-            next_from = range_from
-            while next_from <= range_to:
+        chunks: List[List[Range]] = []
+        current_chunk: List[Range] = []
+        current_chunk_rows: int = 0
+        for r in row_ranges:
+            next_from = r.from_
+            while next_from <= r.to:
                 if current_chunk_rows == target_rows_per_task:
                     chunks.append(current_chunk)
                     current_chunk = []
                     current_chunk_rows = 0
                 remaining = target_rows_per_task - current_chunk_rows
-                next_to = min(range_to, next_from + remaining - 1)
-                current_chunk.append((next_from, next_to))
+                next_to = min(r.to, next_from + remaining - 1)
+                current_chunk.append(Range(next_from, next_to))
                 current_chunk_rows += next_to - next_from + 1
                 next_from = next_to + 1
         if current_chunk:
@@ -243,18 +238,18 @@ class BlobViewLookup:
         return chunks
 
     @staticmethod
-    def _target_rows_per_task(plans: List[Dict]) -> int:
-        total_rows = 0
+    def _target_rows_per_task(plans: List[TableReadPlan]) -> int:
+        total_rows: int = 0
         for plan in plans:
-            for range_from, range_to in plan["row_ranges"]:
-                total_rows += range_to - range_from + 1
+            for r in plan.row_ranges:
+                total_rows += r.count()
         if total_rows <= 0:
             return _MIN_ROWS_PER_TASK
         target = (total_rows + _PRELOAD_THREAD_NUM - 1) // _PRELOAD_THREAD_NUM
         return max(_MIN_ROWS_PER_TASK, target)
 
     def _load_table(self, identifier: Identifier):
-        key = identifier.get_full_name()
+        key: str = identifier.get_full_name()
         if key in self._table_cache:
             return self._table_cache[key]
 
@@ -283,9 +278,9 @@ class BlobViewLookup:
         return FileStoreTable(self._table.file_io, identifier, table_path, table_schema)
 
     def _filesystem_table_path(self, identifier: Identifier) -> str:
-        current_table_path = self._table.table_path.rstrip("/")
-        current_db_path = os.path.dirname(current_table_path)
-        warehouse = os.path.dirname(current_db_path)
+        current_table_path: str = self._table.table_path.rstrip("/")
+        current_db_path: str = os.path.dirname(current_table_path)
+        warehouse: str = os.path.dirname(current_db_path)
         return "{}/{}.db/{}".format(
             warehouse.rstrip("/"),
             identifier.get_database_name(),
@@ -318,7 +313,7 @@ class BlobViewLookup:
         return BlobDescriptor.deserialize(value)
 
     def _get_or_create_uri_reader(self, table, descriptor: BlobDescriptor) -> UriReader:
-        cache_key = table.identifier.get_full_name()
+        cache_key: str = table.identifier.get_full_name()
         if cache_key in self._uri_reader_cache:
             return self._uri_reader_cache[cache_key]
         uri_reader_factory = getattr(table.file_io, "uri_reader_factory", None)

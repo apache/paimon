@@ -15,110 +15,109 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional
+from typing import Callable, Optional, Set
 
+import pyarrow
 from pyarrow import RecordBatch
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+from pypaimon.table.row.blob import Blob, BlobViewStruct
 
 
 class BlobDescriptorConvertReader(RecordBatchReader):
     """Resolves BlobView and BlobDescriptor fields in record batches.
 
     Processing is split into two clear stages:
-      Stage 1 (BlobView resolution): If view fields exist, prescan all batches,
-               collect BlobViewStructs, bulk-preload their descriptors from
-               upstream tables, and replace view field values with the
-               corresponding BlobDescriptor serialized bytes.
+      Stage 1 (BlobView resolution): If view fields exist, use a lightweight
+               prescan reader (only projecting view columns) to collect
+               BlobViewStructs, bulk-preload their descriptors, then read
+               full data from the main reader and replace view field values
+               with the corresponding BlobDescriptor serialized bytes.
       Stage 2 (BlobData resolution): Controlled by blob-as-descriptor option.
                If false, resolve all BlobDescriptor bytes (from both descriptor
                fields and view fields) into real blob data bytes.
                If true, return as-is.
     """
 
-    def __init__(self, inner: RecordBatchReader, table):
+    def __init__(self, inner: RecordBatchReader, table,
+                 prescan_reader_factory: Optional[Callable[[Set[str]], RecordBatchReader]] = None):
+        """
+        Args:
+            inner: The main data reader (reads all columns).
+            table: The table instance.
+            prescan_reader_factory: Optional factory that creates a lightweight
+                reader projecting only the specified field names. Used for
+                prescan to collect BlobViewStructs without reading all columns.
+                Signature: (field_names: Set[str]) -> RecordBatchReader
+        """
         self._inner = inner
         self._table = table
+        self._prescan_reader_factory = prescan_reader_factory
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self.file_io = inner.file_io
         self.blob_field_indices = inner.blob_field_indices
         self._view_fields = CoreOptions.blob_view_fields(table.options)
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self._blob_as_descriptor = CoreOptions.blob_as_descriptor(table.options)
-        self._cached_batches = None
-        self._batch_index = 0
+        self._prescan_done = False
+        self._blob_view_lookup = None
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        import pyarrow
-        # Stage 1: obtain batch (prescan for view fields, or direct read)
-        if self._view_fields:
-            batch = self._read_with_prescan(pyarrow)
-        else:
-            batch = self._inner.read_arrow_batch()
+        # Ensure prescan is done before reading (only needed for view fields)
+        if self._view_fields and not self._prescan_done:
+            self._prescan_view_structs()
+
+        batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
-        # Stage 2: resolve BlobDescriptor -> real bytes (if blob-as-descriptor=false)
-        return self._resolve_blob_data(batch, pyarrow)
+        # Resolve view fields using the preloaded lookup
+        if self._view_fields and self._blob_view_lookup is not None:
+            batch = self._resolve_view_fields(batch, self._blob_view_lookup)
+        # Resolve BlobDescriptor -> real bytes (if blob-as-descriptor=false)
+        return self._resolve_blob_data(batch)
 
     # ------------------------------------------------------------------
-    # Stage 1: BlobView prescan and resolution
+    # Stage 1: BlobView prescan (lightweight, only reads view columns)
     # ------------------------------------------------------------------
 
-    def _read_with_prescan(self, pyarrow):
-        """Return the next batch from cache (view fields already resolved to
-        BlobDescriptor bytes)."""
-        if self._cached_batches is None:
-            self._prescan_and_resolve_views(pyarrow)
-        if self._batch_index >= len(self._cached_batches):
-            return None
-        batch = self._cached_batches[self._batch_index]
-        self._batch_index += 1
-        return batch
-
-    def _prescan_and_resolve_views(self, pyarrow):
-        """Prescan all batches, collect BlobViewStructs, bulk-preload
-        descriptors, then replace view field values with BlobDescriptor bytes."""
+    def _prescan_view_structs(self):
+        """Use a lightweight prescan reader (projecting only view columns) to
+        collect all BlobViewStructs and bulk-preload their descriptors."""
         from pypaimon.table.row.blob import BlobViewStruct
         from pypaimon.utils.blob_view_lookup import BlobViewLookup
 
-        # Step 1: cache all batches and collect BlobViewStructs
-        raw_batches = []
+        self._prescan_done = True
         all_view_structs = []
-        while True:
-            batch = self._inner.read_arrow_batch()
-            if batch is None:
-                break
-            raw_batches.append(batch)
-            for field_name in self._view_fields:
-                if field_name not in batch.schema.names:
-                    continue
-                for value in batch.column(field_name).to_pylist():
-                    value = self._normalize_blob_to_bytes(value)
-                    if isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value):
-                        all_view_structs.append(BlobViewStruct.deserialize(value))
 
-        # Step 2: bulk-preload BlobViewStruct -> BlobDescriptor mapping
-        blob_view_lookup = None
+        prescan_reader = self._prescan_reader_factory(self._view_fields)
+        try:
+            while True:
+                batch = prescan_reader.read_arrow_batch()
+                if batch is None:
+                    break
+                for field_name in self._view_fields:
+                    if field_name not in batch.schema.names:
+                        continue
+                    for value in batch.column(field_name).to_pylist():
+                        value = self._normalize_blob_to_bytes(value)
+                        if isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value):
+                            all_view_structs.append(BlobViewStruct.deserialize(value))
+        finally:
+            prescan_reader.close()
+
+        # Bulk-preload BlobViewStruct -> BlobDescriptor mapping
         if all_view_structs:
-            blob_view_lookup = BlobViewLookup(self._table)
-            blob_view_lookup.preload(all_view_structs)
+            self._blob_view_lookup = BlobViewLookup(self._table)
+            self._blob_view_lookup.preload(all_view_structs)
 
-        # Step 3: resolve view fields in each batch
-        self._cached_batches = []
-        for batch in raw_batches:
-            batch = self._resolve_view_fields(batch, blob_view_lookup, pyarrow)
-            self._cached_batches.append(batch)
-
-    def _resolve_view_fields(self, batch, blob_view_lookup, pyarrow):
+    def _resolve_view_fields(self, batch, blob_view_lookup):
         """Replace BlobViewStruct bytes in view fields with the corresponding
         BlobDescriptor serialized bytes."""
-        result = batch
         for field_name in self._view_fields:
-            if field_name not in result.schema.names:
+            if field_name not in batch.schema.names:
                 continue
-            values = [self._normalize_blob_to_bytes(v) for v in result.column(field_name).to_pylist()]
+            values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
             converted_values = []
             for value in values:
                 if value is None:
@@ -134,19 +133,19 @@ class BlobDescriptorConvertReader(RecordBatchReader):
                 descriptor = blob_view_lookup.resolve_descriptor(view_struct)
                 converted_values.append(descriptor.serialize())
 
-            column_idx = result.schema.names.index(field_name)
-            result = result.set_column(
+            column_idx = batch.schema.names.index(field_name)
+            batch = batch.set_column(
                 column_idx,
                 pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
                 pyarrow.array(converted_values, type=pyarrow.large_binary()),
             )
-        return result
+        return batch
 
     # ------------------------------------------------------------------
     # Stage 2: BlobData resolution (unified exit)
     # ------------------------------------------------------------------
 
-    def _resolve_blob_data(self, batch, pyarrow):
+    def _resolve_blob_data(self, batch):
         if self._blob_as_descriptor:
             return batch
 
@@ -186,3 +185,22 @@ class BlobDescriptorConvertReader(RecordBatchReader):
 
     def close(self):
         self._inner.close()
+
+
+class _CachedBatchReader(RecordBatchReader):
+    """A simple reader that replays pre-cached RecordBatches.
+    Used as fallback when no prescan_reader_factory is provided."""
+
+    def __init__(self, batches):
+        self._batches = batches
+        self._index = 0
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        if self._index >= len(self._batches):
+            return None
+        batch = self._batches[self._index]
+        self._index += 1
+        return batch
+
+    def close(self):
+        self._batches = None

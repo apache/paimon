@@ -808,15 +808,27 @@ class DataEvolutionSplitRead(SplitRead):
         return None
 
     def create_reader(self) -> RecordReader:
+        reader = self._create_raw_reader()
+
+        if (CoreOptions.blob_view_fields(self.table.options)
+                or (not CoreOptions.blob_as_descriptor(self.table.options)
+                    and CoreOptions.blob_descriptor_fields(self.table.options))):
+            reader = BlobDescriptorConvertReader(
+                reader, self.table,
+                prescan_reader_factory=lambda names: self._create_prescan_reader(names))
+
+        return reader
+
+    def _create_raw_reader(self) -> RecordReader:
+        """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter.
+        Does NOT include BlobView wrapping to avoid recursion during prescan."""
         files = self.split.files
         suppliers = []
 
-        # Split files by row ID
         split_by_row_id = self._split_by_row_id(files)
 
         for need_merge_files in split_by_row_id:
             if len(need_merge_files) == 1 or not self.read_fields:
-                # No need to merge fields, just create a single file reader
                 suppliers.append(
                     lambda f=need_merge_files[0]: self._create_file_reader(f, self._get_final_read_data_fields())
                 )
@@ -839,15 +851,26 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
-        if (CoreOptions.blob_view_fields(self.table.options)
-                or (not CoreOptions.blob_as_descriptor(self.table.options)
-                    and CoreOptions.blob_descriptor_fields(self.table.options))):
-            reader = BlobDescriptorConvertReader(reader, self.table)
-
-        if self.limit is not None:
-            reader = LimitedRecordBatchReader(reader, self.limit)
-
         return reader
+
+    def _create_prescan_reader(self, field_names):
+        """Create a prescan reader by constructing a new DataEvolutionSplitRead
+        instance that only projects the specified field names."""
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+
+        prescan_fields = [f for f in self.read_fields if f.name in field_names]
+        if not prescan_fields:
+            return EmptyRecordBatchReader()
+
+        prescan_read = DataEvolutionSplitRead(
+            table=self.table,
+            predicate=self.predicate,
+            read_type=prescan_fields,
+            split=self.split,
+            row_tracking_enabled=False,
+        )
+        prescan_read.row_ranges = self.row_ranges
+        return prescan_read._create_raw_reader()
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """Split files by firstRowId for data evolution."""
