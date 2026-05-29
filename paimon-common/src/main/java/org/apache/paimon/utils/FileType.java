@@ -33,7 +33,7 @@ import java.util.Set;
  *   <li>{@link #META}: snapshot, schema, manifest, statistics, tag, changelog metadata, hint files,
  *       _SUCCESS, consumer, service files
  *   <li>{@link #DATA}: data files and any unrecognized files (default)
- *   <li>{@link #BUCKET_INDEX}: bucket level index files (Hash, DV)
+ *   <li>{@link #BUCKET_INDEX}: bxucket level index files (Hash, DV)
  *   <li>{@link #GLOBAL_INDEX}: table level global index files (btree, lumina, tantivy)
  *   <li>{@link #FILE_INDEX}: data-file index files (bloom filter, bitmap, etc.)
  * </ul>
