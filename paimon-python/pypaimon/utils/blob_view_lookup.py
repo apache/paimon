@@ -94,7 +94,7 @@ class BlobViewLookup:
         return Blob.from_descriptor(uri_reader, descriptor).to_data()
 
     def _preload_descriptors(
-        self, view_structs: List[BlobViewStruct]) -> Dict[BlobViewStruct, BlobDescriptor]:
+            self, view_structs: List[BlobViewStruct]) -> Dict[BlobViewStruct, BlobDescriptor]:
         if not view_structs:
             return {}
 
