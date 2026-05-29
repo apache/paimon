@@ -41,8 +41,10 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LazyField;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -186,6 +188,223 @@ public class SchemaEvolutionTest {
                 .hasMessage(
                         "Column %s already exists in the %s table.",
                         columnName, identifier.getFullName());
+    }
+
+    @Test
+    public void testAddBlobColumnViaCommentDirective() throws Exception {
+        // create table with one pre-existing BLOB column registered in blob-field, so we can
+        // also verify that ADD COLUMN appends to (rather than overwrites) the existing value.
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "existing_col");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1, "existing_col", DataTypes.BLOB().copy(true))
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // bare directive — no user comment, appended to existing blob-field value.
+        // directive + user comment, SDK caller passes a BlobType directly (allowed when
+        // accompanied by a directive so the storage mode is explicit).
+        schemaManager.commitChanges(
+                ImmutableList.of(
+                        SchemaChange.addColumn("picture", DataTypes.BYTES(), "__BLOB_FIELD", null),
+                        SchemaChange.addColumn(
+                                "desc_col",
+                                DataTypes.BLOB(),
+                                "__BLOB_DESCRIPTOR_FIELD; descriptor comment",
+                                null)));
+
+        TableSchema latest = schemaManager.latest().get();
+
+        DataField picture =
+                latest.fields().stream().filter(f -> f.name().equals("picture")).findFirst().get();
+        assertThat(picture.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(picture.description()).isNull();
+
+        DataField desc =
+                latest.fields().stream().filter(f -> f.name().equals("desc_col")).findFirst().get();
+        assertThat(desc.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(desc.description()).isEqualTo("descriptor comment");
+
+        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key()))
+                .isEqualTo("existing_col,picture");
+        assertThat(latest.options().get(CoreOptions.BLOB_DESCRIPTOR_FIELD.key()))
+                .isEqualTo("desc_col");
+    }
+
+    @Test
+    public void testAddBlobColumnErrors() throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1,
+                                                    "nested",
+                                                    DataTypes.ROW(
+                                                            new DataField(2, "a", DataTypes.INT())))
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        ""));
+
+        // non-BYTES/BINARY type rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "bad",
+                                                        DataTypes.INT(),
+                                                        "__BLOB_FIELD",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
+
+        // nested column rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        new String[] {"nested", "blob"},
+                                                        DataTypes.BYTES(),
+                                                        "__BLOB_FIELD",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nested column");
+
+        // unknown __BLOB directive rejected (e.g. __BLOB_VIEW_FIELD is not supported).
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "x",
+                                                        DataTypes.BYTES(),
+                                                        "__BLOB_VIEW_FIELD",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unsupported BLOB directive");
+
+        // raw BlobType without any directive rejected — SDK callers must go through the
+        // directive path so the storage mode (blob-field vs blob-descriptor-field) is explicit.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "raw_blob", DataTypes.BLOB(), null, null))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("requires a comment directive");
+
+        // SET OPTION on blob-field is rejected (the option is @Immutable).
+        TableSchema oldSchema = schemaManager.latest().get();
+        LazyField<Boolean> hasSnapshots = new LazyField<>(() -> true);
+        LazyField<Identifier> lazyId = new LazyField<>(() -> identifier);
+        assertThatThrownBy(
+                        () ->
+                                SchemaManager.generateTableSchema(
+                                        oldSchema,
+                                        Collections.singletonList(
+                                                SchemaChange.setOption(
+                                                        CoreOptions.BLOB_FIELD.key(), "k")),
+                                        hasSnapshots,
+                                        lazyId))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.BLOB_FIELD.key());
+    }
+
+    @Test
+    public void testDropBlobColumnCleansOptions() throws Exception {
+        // table with one descriptor BLOB col registered in both blob-descriptor-field and
+        // blob-external-storage-field (subset rule), and one normal blob col in blob-field.
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "ext");
+        options.put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "ext");
+        options.put(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/blob-ext");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(1, "pic", DataTypes.BLOB().copy(true)),
+                                            new DataField(2, "ext", DataTypes.BLOB().copy(true))
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // drop the descriptor BLOB column — it must vanish from both descriptor-field and
+        // external-storage-field; the other BLOB column is untouched.
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("ext")));
+
+        TableSchema latest = schemaManager.latest().get();
+        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
+        assertThat(latest.options()).doesNotContainKey(CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        assertThat(latest.options())
+                .doesNotContainKey(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
+    }
+
+    @Test
+    public void testUpdateColumnTypeOnBlobIsRejected() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(1, "pic", DataTypes.BLOB().copy(true)),
+                                            new DataField(2, "raw", DataTypes.BYTES())
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // BLOB -> BYTES rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "pic", DataTypes.BYTES()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("BLOB");
+
+        // BYTES -> BLOB rejected (must be added via ADD COLUMN directive instead).
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "raw", DataTypes.BLOB()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("BLOB");
+    }
+
+    private static Map<String, String> blobEnabledOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        return options;
     }
 
     @Test

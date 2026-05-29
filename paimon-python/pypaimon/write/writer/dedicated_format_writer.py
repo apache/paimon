@@ -25,53 +25,25 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import VectorType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.data_writer import DataWriter
 
 logger = logging.getLogger(__name__)
 
 
-class DataBlobWriter(DataWriter):
-    """
-    A rolling file writer that handles both normal data and blob data. This writer creates separate
-    files for normal columns and blob columns, managing their lifecycle independently.
+class DedicatedFormatWriter(DataWriter):
+    """A rolling file writer that writes normal, blob, and vector columns to dedicated files.
 
-    For example, given a table schema with normal columns (id INT, name STRING) and blob columns
-    (pic1 BLOB, pic2 BLOB), this writer will create separate files for normal columns and each
-    blob-file column.
+    Splits incoming data three ways:
+    - Normal columns → standard data files (.parquet / .orc / .vortex / …)
+    - Blob columns (large_binary) → .blob files
+    - Vector columns (when vector.file.format is configured) → .vector.<format> files
 
-    Key features:
-    - Blob data can roll independently when normal data doesn't need rolling
-    - When normal data rolls, blob data MUST also be closed (Java behavior)
-    - Blob data uses more aggressive rolling (smaller target size) to prevent memory issues
-    - One normal data file may correspond to multiple blob data files
-    - Blob data is written immediately to disk to prevent memory corruption
-    - Blob file metadata is stored as separate DataFileMeta objects after normal file metadata
-    - When TableWrite.with_write_type narrows columns, incoming batches only carry that subset;
-      column lists are narrowed accordingly so splitting never selects missing columns.
+    This mirrors Java's DedicatedFormatRollingFileWriter.
 
-    Rolling behavior:
-    - Normal data rolls: Both normal and blob writers are closed together, blob metadata added after normal metadata
-    - Blob data rolls independently: Only blob writer is closed, blob metadata is cached until normal data rolls
-
-    Metadata organization:
-    - Normal file metadata is added first to committed_files
-    - Blob file metadata is added after normal file metadata in committed_files
-    - When blob rolls independently, metadata is cached until normal data rolls
-    - Result: [normal_meta, blob_meta1, blob_meta2, blob_meta3, ...]
-
-    Example file organization:
-    committed_files = [
-        normal_file1_meta,    # f1.parquet metadata
-        blob_file1_meta,      # b1.blob metadata
-        blob_file2_meta,      # b2.blob metadata
-        blob_file3_meta,      # b3.blob metadata
-        normal_file2_meta,    # f1-2.parquet metadata
-        blob_file4_meta,      # b4.blob metadata
-        blob_file5_meta,      # b5.blob metadata
-    ]
-
-    This matches the Java RollingBlobFileWriter behavior exactly.
+    Metadata order in committed_files:
+        [normal_meta, blob_meta1, …, vector_meta1, …]
     """
 
     # Constant for checking rolling condition periodically
@@ -101,6 +73,13 @@ class DataBlobWriter(DataWriter):
         full_blob_file_set = set(full_blob_file_column_names)
         all_column_names = self.table.field_names
 
+        # Detect vector columns that should be written to dedicated files.
+        full_vector_column_names = self._get_vector_columns_from_schema()
+        full_vector_set = set(full_vector_column_names)
+        # Only split vector columns when vector.file.format is configured.
+        has_dedicated_vector = bool(full_vector_column_names) and options.with_vector_format()
+        dedicated_set = full_blob_file_set | (full_vector_set if has_dedicated_vector else set())
+
         # Narrow columns when TableWrite.with_write_type(...) supplies a partial column list.
         # Incoming RecordBatches only contain those columns; selecting full normal/blob lists
         # would raise KeyError.
@@ -109,13 +88,17 @@ class DataBlobWriter(DataWriter):
             self.blob_file_column_names = [
                 col for col in full_blob_file_column_names if col in write_col_set
             ]
+            self.vector_write_columns = [
+                col for col in full_vector_column_names if col in write_col_set
+            ] if has_dedicated_vector else []
             self.normal_column_names = [
-                col for col in write_cols if col not in full_blob_file_set
+                col for col in write_cols if col not in dedicated_set
             ]
         else:
             self.blob_file_column_names = list(full_blob_file_column_names)
+            self.vector_write_columns = list(full_vector_column_names) if has_dedicated_vector else []
             self.normal_column_names = [
-                col for col in all_column_names if col not in full_blob_file_set
+                col for col in all_column_names if col not in dedicated_set
             ]
         normal_name_set = set(self.normal_column_names)
         self.normal_columns = [
@@ -143,6 +126,20 @@ class DataBlobWriter(DataWriter):
                 options=options
             )
 
+        # Initialize vector writer when vector.file.format is configured.
+        from pypaimon.write.writer.vector_writer import VectorWriter
+        self.vector_writer: Optional[VectorWriter] = None
+        if self.vector_write_columns:
+            self.vector_writer = VectorWriter(
+                table=self.table,
+                partition=self.partition,
+                bucket=self.bucket,
+                max_seq_number=max_seq_number,
+                vector_columns=self.vector_write_columns,
+                vector_file_format=options.vector_file_format(),
+                options=options,
+            )
+
         # Initialize ExternalStorageBlobWriter if configured
         self._external_storage_writer = None
         external_storage_fields = self.options.blob_external_storage_fields()
@@ -159,10 +156,11 @@ class DataBlobWriter(DataWriter):
             )
 
         logger.info(
-            "Initialized DataBlobWriter with blob columns: %s, blob file columns: %s, descriptor "
-            "stored columns: %s, external storage fields: %s",
+            "Initialized DedicatedFormatWriter with blob columns: %s, blob file columns: %s, "
+            "vector columns: %s, descriptor stored columns: %s, external storage fields: %s",
             self.blob_column_names,
             self.blob_file_column_names,
+            self.vector_write_columns,
             sorted(self.blob_descriptor_fields),
             sorted(external_storage_fields) if external_storage_fields else [],
         )
@@ -178,8 +176,14 @@ class DataBlobWriter(DataWriter):
             raise ValueError("No blob field found in table schema.")
         return blob_columns
 
+    def _get_vector_columns_from_schema(self) -> List[str]:
+        return [
+            field.name for field in self.table.table_schema.fields
+            if isinstance(field.type, VectorType)
+        ]
+
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        normal_data, _ = self._split_data(data)
+        normal_data, _, _ = self._split_data(data)
         return normal_data
 
     def _merge_data(self, existing_data: pa.Table, new_data: pa.Table) -> pa.Table:
@@ -192,21 +196,26 @@ class DataBlobWriter(DataWriter):
             if self._external_storage_writer:
                 data = self._external_storage_writer.transform_batch(data)
 
-            # Split data into normal and blob parts
-            normal_data, blob_data_map = self._split_data(data)
+            # Split data into normal, blob, and vector parts
+            normal_data, blob_data_map, vector_data = self._split_data(data)
             self._validate_descriptor_stored_fields_input(data)
 
-            # Process and accumulate normal data
+            # Process and accumulate normal data (may be None for partial writes)
             processed_normal = self._process_normal_data(normal_data)
-            if self.pending_normal_data is None:
-                self.pending_normal_data = processed_normal
-            else:
-                self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
+            if processed_normal is not None:
+                if self.pending_normal_data is None:
+                    self.pending_normal_data = processed_normal
+                else:
+                    self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
 
             # Write blob-file columns to dedicated blob writers.
             for blob_column, blob_data in blob_data_map.items():
                 if blob_data is not None and blob_data.num_rows > 0:
                     self.blob_writers[blob_column].write(blob_data)
+
+            # Write vector columns to dedicated vector writer.
+            if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
+                self.vector_writer.write(vector_data)
 
             self.record_count += data.num_rows
 
@@ -231,8 +240,7 @@ class DataBlobWriter(DataWriter):
             return
 
         try:
-            if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
-                self._close_current_writers()
+            self._close_current_writers()
             if self._external_storage_writer:
                 self._external_storage_writer.close()
         except Exception as e:
@@ -246,18 +254,27 @@ class DataBlobWriter(DataWriter):
         """Abort all writers and clean up resources."""
         for blob_writer in self.blob_writers.values():
             blob_writer.abort()
+        if self.vector_writer is not None:
+            self.vector_writer.abort()
         if self._external_storage_writer:
             self._external_storage_writer.abort()
         self.pending_normal_data = None
         self.committed_files.clear()
 
-    def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, Dict[str, pa.RecordBatch]]:
-        """Split data into normal and blob parts based on column names."""
+    def _split_data(self, data: pa.RecordBatch) -> Tuple[
+            pa.RecordBatch, Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
+        """Split data into normal, blob, and vector parts based on column names."""
         normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
         blob_data_map = {
             blob_column: data.select([blob_column]) for blob_column in self.blob_file_column_names
         }
-        return normal_data, blob_data_map
+        vector_data = (
+            pa.RecordBatch.from_arrays(
+                [data.column(name) for name in self.vector_write_columns],
+                names=self.vector_write_columns,
+            ) if self.vector_write_columns else None
+        )
+        return normal_data, blob_data_map, vector_data
 
     def _validate_descriptor_stored_fields_input(self, data: pa.RecordBatch):
         if not self.blob_descriptor_fields:
@@ -293,10 +310,10 @@ class DataBlobWriter(DataWriter):
                     ) from e
 
     @staticmethod
-    def _process_normal_data(data: pa.RecordBatch) -> pa.Table:
+    def _process_normal_data(data: pa.RecordBatch) -> Optional[pa.Table]:
         """Process normal data (similar to base DataWriter)."""
         if data is None or data.num_rows == 0:
-            return pa.Table.from_batches([])
+            return None
         return pa.Table.from_batches([data])
 
     @staticmethod
@@ -316,30 +333,36 @@ class DataBlobWriter(DataWriter):
         return current_size > self.target_file_size
 
     def _close_current_writers(self):
-        """Close both normal and blob writers and add blob metadata after normal metadata (Java behavior)."""
-        if self.pending_normal_data is None or self.pending_normal_data.num_rows == 0:
-            return
-
-        # Close normal writer and get metadata
-        normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+        """Close normal, blob, and vector writers; add metadata in order: normal, blob, vector."""
+        normal_meta = None
+        if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
+            normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
 
         blob_metas = []
         for blob_column in self.blob_file_column_names:
             writer_metas = self.blob_writers[blob_column].prepare_commit()
-            self._validate_consistency(normal_meta, writer_metas, blob_column)
+            if normal_meta is not None:
+                self._validate_consistency(normal_meta, writer_metas, blob_column)
             blob_metas.extend(writer_metas)
 
-        # Add normal file metadata first
-        self.committed_files.append(normal_meta)
+        vector_metas = []
+        if self.vector_writer is not None:
+            vector_metas = self.vector_writer.prepare_commit()
+            self.vector_writer.committed_files.clear()
+            if vector_metas and normal_meta is not None:
+                self._validate_consistency(normal_meta, vector_metas, 'vector')
 
-        # Add blob file metadata after normal metadata
+        if normal_meta is not None:
+            self.committed_files.append(normal_meta)
         self.committed_files.extend(blob_metas)
+        self.committed_files.extend(vector_metas)
 
-        # Reset pending data
         self.pending_normal_data = None
 
-        logger.info(f"Closed both writers - normal: {normal_meta.file_name}, "
-                    f"added {len(blob_metas)} blob file metadata after normal metadata")
+        if normal_meta is not None or blob_metas or vector_metas:
+            normal_name = normal_meta.file_name if normal_meta is not None else '<none>'
+            logger.info(f"Closed writers - normal: {normal_name}, "
+                        f"{len(blob_metas)} blob metas, {len(vector_metas)} vector metas")
 
     def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:
         if data.num_rows == 0:
@@ -359,6 +382,8 @@ class DataBlobWriter(DataWriter):
             self.file_io.write_lance(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
             self.file_io.write_vortex(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
+            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 

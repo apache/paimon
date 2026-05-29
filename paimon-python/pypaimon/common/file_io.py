@@ -257,6 +257,9 @@ class FileIO(ABC):
     def write_vortex(self, path: str, data, **kwargs):
         raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
 
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_row must be implemented by FileIO subclasses")
+
     def close(self):
         pass
 

@@ -414,6 +414,9 @@ class CachingFileIO(FileIO):
     def write_vortex(self, *args, **kwargs):
         return self._delegate.write_vortex(*args, **kwargs)
 
+    def write_row(self, *args, **kwargs):
+        return self._delegate.write_row(*args, **kwargs)
+
     def __getattr__(self, name):
         return getattr(self._delegate, name)
 

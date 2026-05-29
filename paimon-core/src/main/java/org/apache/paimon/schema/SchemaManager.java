@@ -39,6 +39,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateComment;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -342,8 +343,46 @@ public class SchemaManager implements Serializable {
                         "Column %s cannot specify NOT NULL in the %s table.",
                         String.join(".", addColumn.fieldNames()),
                         lazyIdentifier.get().getFullName());
+
+                BlobSchemaUtils.ParsedDirective blobDirective =
+                        BlobSchemaUtils.parseAddColumnComment(addColumn.description());
+                DataType requestedDataType = addColumn.dataType();
+                String effectiveComment = addColumn.description();
+                // try convert to blob type
+                if (blobDirective != null) {
+                    Preconditions.checkArgument(
+                            addColumn.fieldNames().length == 1,
+                            "BLOB directive cannot be used on a nested column %s.",
+                            String.join(".", addColumn.fieldNames()));
+                    DataTypeRoot root = requestedDataType.getTypeRoot();
+                    Preconditions.checkArgument(
+                            root == DataTypeRoot.VARBINARY
+                                    || root == DataTypeRoot.BINARY
+                                    || root == DataTypeRoot.BLOB,
+                            "Column %s declared with a BLOB directive must be of BYTES, "
+                                    + "BINARY or BLOB type, but was %s.",
+                            addColumn.fieldNames()[0],
+                            requestedDataType);
+                    requestedDataType = new BlobType(requestedDataType.isNullable());
+                    effectiveComment = blobDirective.realComment();
+
+                    BlobSchemaUtils.modifyBlobOptions(
+                            blobDirective.optionKey(), addColumn.fieldNames()[0], newOptions);
+                } else if (requestedDataType.is(DataTypeRoot.BLOB)) {
+                    // We do not permit adding blob type column without comment hint,
+                    // since we don't know the storage mode i.e. native blob or descriptor blob.
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Adding BLOB column %s requires a comment directive ('%s' "
+                                            + "or '%s') so the storage mode is explicit.",
+                                    String.join(".", addColumn.fieldNames()),
+                                    BlobSchemaUtils.BLOB_FIELD_DIRECTIVE,
+                                    BlobSchemaUtils.BLOB_DESCRIPTOR_FIELD_DIRECTIVE));
+                }
+
                 int id = highestFieldId.incrementAndGet();
-                DataType dataType = ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
+                DataType dataType = ReassignFieldId.reassign(requestedDataType, highestFieldId);
+                String storedComment = effectiveComment;
                 new NestedColumnModifier(addColumn.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -352,8 +391,7 @@ public class SchemaManager implements Serializable {
                                     Catalog.ColumnNotExistException {
                         assertColumnNotExists(newFields, fieldName, lazyIdentifier);
 
-                        DataField dataField =
-                                new DataField(id, fieldName, dataType, addColumn.description());
+                        DataField dataField = new DataField(id, fieldName, dataType, storedComment);
 
                         // key: name ; value : index
                         Map<String, Integer> map = new HashMap<>();
@@ -435,6 +473,9 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof DropColumn) {
                 DropColumn drop = (DropColumn) change;
                 dropColumnValidation(oldTableSchema, drop);
+                if (drop.fieldNames().length == 1) {
+                    BlobSchemaUtils.removeFromBlobOptions(drop.fieldNames()[0], newOptions);
+                }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -451,6 +492,8 @@ public class SchemaManager implements Serializable {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                assertNotChangingBlobColumnType(
+                        newFields, update.fieldNames(), update.newDataType());
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -920,6 +963,28 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotChangingBlobColumnType(
+            List<DataField> fields, String[] fieldNames, DataType newType) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        for (DataField field : fields) {
+            if (!field.name().equals(fieldName)) {
+                continue;
+            }
+            boolean wasBlob = field.type().is(DataTypeRoot.BLOB);
+            boolean willBeBlob = newType.is(DataTypeRoot.BLOB);
+            if (wasBlob || willBeBlob) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change column type involving BLOB: [%s] %s -> %s",
+                                fieldName, field.type(), newType));
+            }
+            return;
         }
     }
 
