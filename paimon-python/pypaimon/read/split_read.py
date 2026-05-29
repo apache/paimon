@@ -190,13 +190,14 @@ class SplitRead(ABC):
 
         batch_size = self.table.options.read_batch_size()
 
-        # Convert global row_ranges (IndexedSplit) to local row_indices for Vortex/Lance native pushdown
+        # Convert global row_ranges (IndexedSplit) to local row_indices for native pushdown.
         row_indices = None
         if row_ranges is not None:
             effective_row_ranges = Range.and_(row_ranges, [file.row_id_range()])
             if len(effective_row_ranges) == 0:
                 return EmptyRecordBatchReader()
-            row_index_formats = (CoreOptions.FILE_FORMAT_VORTEX,
+            row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
+                                 CoreOptions.FILE_FORMAT_VORTEX,
                                  CoreOptions.FILE_FORMAT_LANCE,
                                  CoreOptions.FILE_FORMAT_ROW)
             if file_format in row_index_formats:
@@ -240,7 +241,8 @@ class SplitRead(ABC):
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
-                                             batch_size=batch_size)
+                                             batch_size=batch_size,
+                                             row_indices=row_indices)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(

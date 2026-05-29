@@ -37,7 +37,7 @@ class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
-                 batch_size: int = 1024):
+                 batch_size: int = 1024, row_indices: Optional[Any] = None):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
@@ -56,6 +56,7 @@ class FormatBlobReader(RecordBatchReader):
             self._file_size = file_io.get_file_size(file_path)
             self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
+            self._apply_row_indices(row_indices)
             if self._blob_as_descriptor:
                 self._input_stream.close()
                 self._input_stream = None
@@ -186,6 +187,26 @@ class FormatBlobReader(RecordBatchReader):
                 offset += length
         self.blob_lengths = blob_lengths
         self.blob_offsets = blob_offsets
+
+    def _apply_row_indices(self, row_indices: Optional[Any]) -> None:
+        if row_indices is None:
+            return
+
+        selected_lengths = []
+        selected_offsets = []
+        record_count = len(self.blob_lengths)
+        for row_index in row_indices:
+            row_index = int(row_index)
+            if row_index < 0 or row_index >= record_count:
+                raise IndexError(
+                    f"Blob row index {row_index} is out of range for file "
+                    f"{self.file_path}, record count: {record_count}."
+                )
+            selected_lengths.append(self.blob_lengths[row_index])
+            selected_offsets.append(self.blob_offsets[row_index])
+
+        self.blob_lengths = selected_lengths
+        self.blob_offsets = selected_offsets
 
 
 class BlobRecordIterator:

@@ -3177,14 +3177,14 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.catalog.create_table('test_db.blob_rowid_equal', schema, False)
         table = self.catalog.get_table('test_db.blob_rowid_equal')
 
-        blob_bytes = os.urandom(248 * 1024)
+        blob_values = [bytes([i]) * (248 * 1024) for i in range(20)]
         write_builder = table.new_batch_write_builder()
         tw = write_builder.new_write()
         tc = write_builder.new_commit()
         batch = pa.Table.from_pydict({
             'id': list(range(20)),
             'name': [f'item_{i}' for i in range(20)],
-            'data': [blob_bytes] * 20,
+            'data': blob_values,
         }, schema=pa_schema)
         tw.write_arrow(batch)
         tc.commit(tw.prepare_commit())
@@ -3195,6 +3195,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         from pypaimon.table.special_fields import SpecialFields
 
         rb = table.new_read_builder()
+        rb.with_projection(['id', 'name', 'data', SpecialFields.ROW_ID.name])
         fields = list(table.fields)
         fields.append(SpecialFields.ROW_ID)
         pb = PredicateBuilder(fields)
@@ -3206,6 +3207,10 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         read = rb.new_read()
         result = read.to_arrow(splits)
         self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('id').to_pylist(), [5])
+        self.assertEqual(result.column('name').to_pylist(), ['item_5'])
+        self.assertEqual(result.column('data').to_pylist(), [blob_values[5]])
+        self.assertEqual(result.column(SpecialFields.ROW_ID.name).to_pylist(), [5])
 
     def test_rename_blob_column_should_fail(self):
         pa_schema = pa.schema([
