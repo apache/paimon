@@ -565,11 +565,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
             "index_manifest lost after Python data write - indexes become invisible"
         )
 
-        # Bug reproduction: updating the indexed column 'k' should be refused
-        # (THROW_ERROR by default) because it leaves the btree index stale.
-        # Without the guard, the update silently succeeds and the index returns
-        # wrong results (queries for the new value miss; queries for the old
-        # value hit a row whose data has changed).
         read_builder = table.new_read_builder()
         predicate_builder = read_builder.new_predicate_builder()
         read_builder.with_filter(predicate_builder.equal('k', 'k2'))
@@ -584,26 +579,10 @@ class JavaPyReadWriteTest(unittest.TestCase):
             '_ROW_ID': pa.array(row_ids, type=pa.int64()),
             'k': ['k_updated'] * len(row_ids),
         })
-        msgs = tu.update_by_arrow_with_row_id(update_data)
-        wb.new_commit().commit(msgs)
-
-        # The update succeeded — now demonstrate the consequence:
-        # the btree index is stale and returns wrong results.
-        read_builder2 = table.new_read_builder()
-        pb2 = read_builder2.new_predicate_builder()
-
-        # Query for the NEW value via index → it SHOULD find the updated row,
-        # but with a stale index it won't (the index still maps 'k2', not 'k_updated').
-        read_builder2.with_filter(pb2.equal('k', 'k_updated'))
-        splits2 = read_builder2.new_scan().plan().splits()
-        result_new = read_builder2.new_read().to_arrow(splits2)
-        self.assertGreater(
-            len(result_new), 0,
-            "Index is stale after updating indexed column 'k': querying the "
-            "new value 'k_updated' via btree index returns no rows, even though "
-            "the data was successfully updated. The update should have been "
-            "refused or the index invalidated."
-        )
+        with self.assertRaises(RuntimeError) as cm:
+            tu.update_by_arrow_with_row_id(update_data)
+        self.assertIn("'k'", str(cm.exception))
+        self.assertIn("DROP_PARTITION_INDEX", str(cm.exception))
 
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):

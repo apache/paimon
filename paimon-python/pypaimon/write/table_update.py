@@ -142,9 +142,20 @@ class TableUpdate:
         expose the signature appropriate to its mode (batch vs stream).
         Produced commit messages are tagged with ``commit_identifier``.
         """
-        return TableUpdateByRowId(
+        from pypaimon.write.global_index_update import (
+            apply_global_index_update_action,
+        )
+
+        msgs = TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
         ).update_columns(table, self.update_cols)
+        if self.update_cols:
+            snapshot = self.table.snapshot_manager().get_latest_snapshot()
+            written_partitions = {tuple(m.partition) for m in msgs}
+            msgs.extend(apply_global_index_update_action(
+                self.table, snapshot, self.update_cols, written_partitions,
+            ))
+        return msgs
 
     def _upsert_by_arrow_with_key(
             self,

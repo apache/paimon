@@ -85,8 +85,10 @@ def apply_global_index_update_action(
     conflicted = sorted(
         {field_by_id.get(e.index_file.global_index_meta.index_field_id) for e in affected}
     )
-    raise NotImplementedError(
-        f"Update would modify columns {conflicted} covered by a global index; "
-        f"set 'global-index.column-update-action' = 'DROP_PARTITION_INDEX' to "
-        f"drop the affected index instead (rebuild afterwards)."
+    raise RuntimeError(
+        f"Update columns contain globally indexed columns, not supported now.\n"
+        f"Updated columns: {sorted(update_set)}\n"
+        f"Conflicted columns: {conflicted}\n"
+        f"Set 'global-index.column-update-action' = 'DROP_PARTITION_INDEX' "
+        f"to drop the affected index instead (rebuild afterwards)."
     )
