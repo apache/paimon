@@ -23,6 +23,7 @@ sealed trait FileFormatType
 object FileFormatType {
   case object CSV extends FileFormatType
   case object JSON extends FileFormatType
+  case object PARQUET extends FileFormatType
   case class Unsupported(name: String) extends FileFormatType
 }
 
@@ -49,6 +50,15 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
           case (k, v) =>
             k match {
               case "MULTI_LINE" => mapped("multiLine") = v.toLowerCase
+              case "COMPRESSION" => mapped("compression") = v
+              case _ =>
+            }
+        }
+      case FileFormatType.PARQUET =>
+        mapped.remove("mode")
+        options.foreach {
+          case (k, v) =>
+            k match {
               case "COMPRESSION" => mapped("compression") = v
               case _ =>
             }
@@ -83,6 +93,14 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
               case _ =>
             }
         }
+      case FileFormatType.PARQUET =>
+        options.foreach {
+          case (k, v) =>
+            k match {
+              case "COMPRESSION" => mapped("compression") = v
+              case _ =>
+            }
+        }
       case _ =>
     }
     mapped.toMap
@@ -108,6 +126,7 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
     }
     val validKeys = formatType match {
       case FileFormatType.JSON => CopyFileFormat.VALID_JSON_IMPORT_KEYS
+      case FileFormatType.PARQUET => CopyFileFormat.VALID_PARQUET_IMPORT_KEYS
       case _ => CopyFileFormat.VALID_CSV_IMPORT_KEYS
     }
     val invalid = options.keys.filterNot(validKeys.contains)
@@ -132,6 +151,7 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
     validateFormatType()
     val validKeys = formatType match {
       case FileFormatType.JSON => CopyFileFormat.VALID_JSON_EXPORT_KEYS
+      case FileFormatType.PARQUET => CopyFileFormat.VALID_PARQUET_EXPORT_KEYS
       case _ => CopyFileFormat.VALID_CSV_EXPORT_KEYS
     }
     val invalid = options.keys.filterNot(validKeys.contains)
@@ -145,9 +165,10 @@ case class CopyFileFormat(formatType: FileFormatType, options: Map[String, Strin
     formatType match {
       case FileFormatType.CSV =>
       case FileFormatType.JSON =>
+      case FileFormatType.PARQUET =>
       case FileFormatType.Unsupported(name) =>
         throw new IllegalArgumentException(
-          s"Unsupported file format type: $name. Supported types: CSV, JSON")
+          s"Unsupported file format type: $name. Supported types: CSV, JSON, PARQUET")
     }
   }
 }
@@ -185,6 +206,14 @@ object CopyFileFormat {
     "TIMESTAMP_FORMAT"
   )
 
+  val VALID_PARQUET_IMPORT_KEYS: Set[String] = Set(
+    "COMPRESSION"
+  )
+
+  val VALID_PARQUET_EXPORT_KEYS: Set[String] = Set(
+    "COMPRESSION"
+  )
+
   // Unit Separator (U+001F) used to encode multi-value lists in a single string
   val LIST_SEPARATOR: String = "\u001f"
 
@@ -192,6 +221,7 @@ object CopyFileFormat {
     typeStr.toUpperCase match {
       case "CSV" => FileFormatType.CSV
       case "JSON" => FileFormatType.JSON
+      case "PARQUET" => FileFormatType.PARQUET
       case other => FileFormatType.Unsupported(other)
     }
   }
