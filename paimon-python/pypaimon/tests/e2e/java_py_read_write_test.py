@@ -584,6 +584,32 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn("'k'", str(cm.exception))
         self.assertIn("DROP_PARTITION_INDEX", str(cm.exception))
 
+        table_drop = table.copy(
+            {'global-index.column-update-action': 'DROP_PARTITION_INDEX'}
+        )
+        wb_drop = table_drop.new_batch_write_builder()
+        tu_drop = wb_drop.new_update().with_update_type(['k'])
+        wb_drop.new_commit().commit(tu_drop.update_by_arrow_with_row_id(update_data))
+
+        table_after = self.catalog.get_table('default.test_btree_index_string')
+        rb = table_after.new_read_builder()
+        rb.with_filter(rb.new_predicate_builder().equal('k', 'k_updated'))
+        rows_new = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertGreater(len(rows_new), 0,
+                           "after DROP_PARTITION_INDEX, new value should read")
+
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+        snap = table_after.snapshot_manager().get_latest_snapshot()
+        entries = (IndexManifestFile(table_after).read(snap.index_manifest)
+                   if snap.index_manifest else [])
+        field_by_id = {f.id: f.name for f in table_after.fields}
+        remaining = [e for e in entries
+                     if e.index_file.global_index_meta is not None
+                     and field_by_id.get(
+                         e.index_file.global_index_meta.index_field_id) == 'k']
+        self.assertEqual(remaining, [],
+                         "btree index entries for 'k' should be dropped")
+
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):
         table = self.catalog.get_table(
