@@ -28,6 +28,7 @@ import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.RecordWriter
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.Row
 
@@ -39,7 +40,7 @@ import scala.collection.mutable.ListBuffer
 case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
-    firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)],
+    firstRowIdToPartitionMap: mutable.HashMap[Long, (Array[Byte], Long)],
     catalogContext: CatalogContext)
   extends InnerTableV1DataWrite {
 
@@ -73,7 +74,8 @@ case class DataEvolutionTableDataWrite(
           s"Available first row IDs: ${firstRowIdToPartitionMap.keys.mkString(", ")}")
     }
 
-    val (partition, numRecords) = pair
+    val (partitionBytes, numRecords) = pair
+    val partition = SerializationUtils.deserializeBinaryRow(partitionBytes)
 
     val writer = writeBuilder
       .newWrite()
