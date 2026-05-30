@@ -78,7 +78,6 @@ _INDEX_ENTRY_VERSION = 1
 
 
 class IndexManifestFile:
-    """Index manifest file reader/writer for index manifest entries."""
 
     DELETION_VECTORS_INDEX = "DELETION_VECTORS"
 
@@ -226,18 +225,11 @@ class IndexManifestFile:
             index_meta=global_index_record.get('_INDEX_META')
         )
 
-    def combine(
+    def combine_deletes(
         self,
         previous_name: Optional[str],
         deletes: List[IndexManifestEntry],
     ) -> Optional[str]:
-        """Apply DELETE entries to the previous index manifest and write a new one.
-
-        Mirrors Java GlobalIndexCombiner: the stored manifest only holds ADD
-        entries; deleting means dropping the entries whose index file name
-        appears in *deletes*. Returns the new manifest file name, or
-        *previous_name* unchanged when there is nothing to delete.
-        """
         if not deletes:
             return previous_name
         previous = self.read(previous_name) if previous_name else []
@@ -246,7 +238,6 @@ class IndexManifestFile:
         return self.write(survivors)
 
     def write(self, entries: List[IndexManifestEntry]) -> str:
-        """Serialize *entries* to a new Avro index manifest, return its name."""
         file_name = f"{FileStorePathFactory.INDEX_MANIFEST_PREFIX}{uuid.uuid4()}"
         path = f"{self.manifest_path}/{file_name}"
         records = [self._to_avro_record(e) for e in entries]
@@ -257,7 +248,9 @@ class IndexManifestFile:
                 output_stream.write(buffer.getvalue())
         except Exception as e:
             self.file_io.delete_quietly(path)
-            raise RuntimeError(f"Failed to write index manifest file: {e}") from e
+            raise RuntimeError(
+                f"Exception occurs when writing records to {path}. Clean up."
+            ) from e
         return file_name
 
     def _to_avro_record(self, entry: IndexManifestEntry) -> dict:

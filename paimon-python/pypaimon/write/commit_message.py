@@ -30,7 +30,7 @@ class CommitMessage:
     bucket: int
     new_files: List[DataFileMeta]
     check_from_snapshot: Optional[int] = -1
-    index_files: List['IndexManifestEntry'] = field(default_factory=list)
+    index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
 
     def is_empty(self):
-        return not self.new_files and not self.index_files
+        return not self.new_files and not self.index_deletes

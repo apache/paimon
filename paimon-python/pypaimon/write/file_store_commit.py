@@ -145,7 +145,7 @@ class FileStoreCommit:
 
         index_deletes = []
         for msg in commit_messages:
-            index_deletes.extend(msg.index_files)
+            index_deletes.extend(msg.index_deletes)
 
         commit_kind = "APPEND"
         detect_conflicts = False
@@ -389,7 +389,7 @@ class FileStoreCommit:
             if index_deletes:
                 from pypaimon.manifest.index_manifest_file import IndexManifestFile
                 previous_index_manifest = index_manifest
-                index_manifest = IndexManifestFile(self.table).combine(
+                index_manifest = IndexManifestFile(self.table).combine_deletes(
                     previous_index_manifest, index_deletes)
                 if index_manifest != previous_index_manifest:
                     new_index_manifest = index_manifest

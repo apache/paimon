@@ -136,13 +136,7 @@ class TableUpdate:
     def _update_by_arrow_with_row_id(
             self, table: pa.Table, commit_identifier: int
     ) -> List[CommitMessage]:
-        """Shared implementation for ``update_by_arrow_with_row_id``.
-
-        The public method lives on the concrete subclasses so each can
-        expose the signature appropriate to its mode (batch vs stream).
-        Produced commit messages are tagged with ``commit_identifier``.
-        """
-        from pypaimon.write.global_index_update import (
+        from pypaimon.write.global_index_update_checker import (
             apply_global_index_update_action,
         )
 

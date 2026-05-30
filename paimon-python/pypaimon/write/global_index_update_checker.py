@@ -30,7 +30,6 @@ def scan_global_index_entries(table, snapshot):
 
 
 def build_index_delete_msgs(entries) -> list:
-    """Group scanned index entries by partition into index-delete messages."""
     from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
     from pypaimon.write.commit_message import CommitMessage
 
@@ -43,7 +42,7 @@ def build_index_delete_msgs(entries) -> list:
             )
         )
     return [
-        CommitMessage(partition=key, bucket=0, new_files=[], index_files=dels)
+        CommitMessage(partition=key, bucket=0, new_files=[], index_deletes=dels)
         for key, dels in by_partition.items()
     ]
 
@@ -54,14 +53,6 @@ def apply_global_index_update_action(
     updated_cols: Sequence[str],
     written_partitions: Set[Tuple],
 ) -> list:
-    """Enforce ``global-index.column-update-action`` when an update touches
-    columns covered by a global index.
-
-    Scoped to the partitions actually written and the updated indexed columns
-    (mirrors Spark's ``checkUpdateResult``). THROW_ERROR (default) raises;
-    DROP_PARTITION_INDEX drops the affected index entries, returned as
-    index-delete commit messages to commit alongside the update.
-    """
     if snapshot is None or not updated_cols or not written_partitions:
         return []
     entries = scan_global_index_entries(table, snapshot)

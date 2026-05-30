@@ -94,7 +94,7 @@ class IndexManifestWriteTest(unittest.TestCase):
         imf = IndexManifestFile(self._table())
         previous = imf.write([self._entry('idx-a', 1), self._entry('idx-b', 2)])
         deletes = [self._entry('idx-a', 1)]
-        new_name = imf.combine(previous, deletes)
+        new_name = imf.combine_deletes(previous, deletes)
         self.assertNotEqual(previous, new_name)
         survivors = {e.index_file.file_name for e in imf.read(new_name)}
         self.assertEqual({'idx-b'}, survivors)
@@ -102,14 +102,14 @@ class IndexManifestWriteTest(unittest.TestCase):
     def test_combine_unknown_delete_is_noop_on_content(self):
         imf = IndexManifestFile(self._table())
         previous = imf.write([self._entry('idx-a', 1)])
-        new_name = imf.combine(previous, [self._entry('idx-zzz', 9)])
+        new_name = imf.combine_deletes(previous, [self._entry('idx-zzz', 9)])
         survivors = {e.index_file.file_name for e in imf.read(new_name)}
         self.assertEqual({'idx-a'}, survivors)
 
     def test_combine_empty_deletes_returns_previous(self):
         imf = IndexManifestFile(self._table())
         previous = imf.write([self._entry('idx-a', 1)])
-        self.assertEqual(previous, imf.combine(previous, []))
+        self.assertEqual(previous, imf.combine_deletes(previous, []))
 
 
 if __name__ == '__main__':
