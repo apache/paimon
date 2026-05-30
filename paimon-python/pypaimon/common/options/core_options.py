@@ -56,6 +56,14 @@ class MergeEngine(str, Enum):
     FIRST_ROW = "first-row"
 
 
+class GlobalIndexColumnUpdateAction(str, Enum):
+    """
+    Action when an update modifies columns covered by a global index.
+    """
+    THROW_ERROR = "THROW_ERROR"
+    DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -495,6 +503,16 @@ class CoreOptions:
         )
     )
 
+    GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
+        ConfigOptions.key("global-index.column-update-action")
+        .enum_type(GlobalIndexColumnUpdateAction)
+        .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
+        .with_description(
+            "Defines the action to take when an update modifies columns that "
+            "are covered by a global index. THROW_ERROR or DROP_PARTITION_INDEX."
+        )
+    )
+
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("local-cache.enabled")
         .boolean_type()
@@ -784,6 +802,9 @@ class CoreOptions:
 
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
+
+    def global_index_column_update_action(self, default=None):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION, default)
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)

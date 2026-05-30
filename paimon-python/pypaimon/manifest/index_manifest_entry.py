@@ -41,22 +41,3 @@ class IndexManifestEntry:
     def __hash__(self):
         return hash((self.kind, tuple(self.partition.values),
                      self.bucket, self.index_file))
-
-
-INDEX_MANIFEST_ENTRY = {
-    "type": "record",
-    "name": "IndexManifestEntry",
-    "fields": [
-        {"name": "_VERSION", "type": "int"},
-        {"name": "_KIND", "type": "byte"},
-        {"name": "_PARTITION", "type": "bytes"},
-        {"name": "_BUCKET", "type": "int"},
-        {"name": "_INDEX_TYPE", "type": "string"},
-        {"name": "_FILE_NAME", "type": "string"},
-        {"name": "_FILE_SIZE", "type": "long"},
-        {"name": "_ROW_COUNT", "type": "long"},
-        {"name": "_DELETIONS_VECTORS_RANGES", "type": {"type": "array", "elementType": "DeletionVectorMeta"}},
-        {"name": "_EXTERNAL_PATH", "type": ["null", "string"]},
-        {"name": "_GLOBAL_INDEX", "type": "GlobalIndexMeta"}
-    ]
-}

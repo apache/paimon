@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import uuid
 from io import BytesIO
 from typing import List, Optional
 
@@ -24,11 +25,60 @@ from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
-from pypaimon.table.row.generic_row import GenericRowDeserializer
+from pypaimon.table.row.generic_row import (GenericRowDeserializer,
+                                            GenericRowSerializer)
+from pypaimon.utils.file_store_path_factory import FileStorePathFactory
+
+_DELETION_VECTOR_META_SCHEMA = {
+    "type": "record",
+    "name": "DeletionVectorMeta",
+    "fields": [
+        {"name": "f0", "type": "string"},
+        {"name": "f1", "type": "long"},
+        {"name": "f2", "type": "int"},
+        {"name": "_CARDINALITY", "type": ["null", "long"], "default": None},
+    ],
+}
+
+_GLOBAL_INDEX_META_SCHEMA = {
+    "type": "record",
+    "name": "GlobalIndexMeta",
+    "fields": [
+        {"name": "_ROW_RANGE_START", "type": "long"},
+        {"name": "_ROW_RANGE_END", "type": "long"},
+        {"name": "_INDEX_FIELD_ID", "type": "int"},
+        {"name": "_EXTRA_FIELD_IDS",
+         "type": ["null", {"type": "array", "items": "int"}], "default": None},
+        {"name": "_INDEX_META", "type": ["null", "bytes"], "default": None},
+    ],
+}
+
+INDEX_MANIFEST_ENTRY_SCHEMA = {
+    "type": "record",
+    "name": "IndexManifestEntry",
+    "fields": [
+        {"name": "_VERSION", "type": "int"},
+        {"name": "_KIND", "type": "int"},
+        {"name": "_PARTITION", "type": "bytes"},
+        {"name": "_BUCKET", "type": "int"},
+        {"name": "_INDEX_TYPE", "type": "string"},
+        {"name": "_FILE_NAME", "type": "string"},
+        {"name": "_FILE_SIZE", "type": "long"},
+        {"name": "_ROW_COUNT", "type": "long"},
+        {"name": "_DELETIONS_VECTORS_RANGES",
+         "type": ["null", {"type": "array", "items": _DELETION_VECTOR_META_SCHEMA}],
+         "default": None},
+        {"name": "_EXTERNAL_PATH", "type": ["null", "string"], "default": None},
+        {"name": "_GLOBAL_INDEX",
+         "type": ["null", _GLOBAL_INDEX_META_SCHEMA], "default": None},
+    ],
+}
+
+_INDEX_ENTRY_VERSION = 1
 
 
 class IndexManifestFile:
-    """Index manifest file reader for reading index manifest entries."""
+    """Index manifest file reader/writer for index manifest entries."""
 
     DELETION_VECTORS_INDEX = "DELETION_VECTORS"
 
@@ -172,5 +222,73 @@ class IndexManifestFile:
             row_range_start=global_index_record.get('_ROW_RANGE_START', 0),
             row_range_end=global_index_record.get('_ROW_RANGE_END', 0),
             index_field_id=global_index_record.get('_INDEX_FIELD_ID', 0),
+            extra_field_ids=global_index_record.get('_EXTRA_FIELD_IDS'),
             index_meta=global_index_record.get('_INDEX_META')
         )
+
+    def combine(
+        self,
+        previous_name: Optional[str],
+        deletes: List[IndexManifestEntry],
+    ) -> Optional[str]:
+        """Apply DELETE entries to the previous index manifest and write a new one.
+
+        Mirrors Java GlobalIndexCombiner: the stored manifest only holds ADD
+        entries; deleting means dropping the entries whose index file name
+        appears in *deletes*. Returns the new manifest file name, or
+        *previous_name* unchanged when there is nothing to delete.
+        """
+        if not deletes:
+            return previous_name
+        previous = self.read(previous_name) if previous_name else []
+        delete_names = {e.index_file.file_name for e in deletes}
+        survivors = [e for e in previous if e.index_file.file_name not in delete_names]
+        return self.write(survivors)
+
+    def write(self, entries: List[IndexManifestEntry]) -> str:
+        """Serialize *entries* to a new Avro index manifest, return its name."""
+        file_name = f"{FileStorePathFactory.INDEX_MANIFEST_PREFIX}{uuid.uuid4()}"
+        path = f"{self.manifest_path}/{file_name}"
+        records = [self._to_avro_record(e) for e in entries]
+        try:
+            buffer = BytesIO()
+            fastavro.writer(buffer, INDEX_MANIFEST_ENTRY_SCHEMA, records)
+            with self.file_io.new_output_stream(path) as output_stream:
+                output_stream.write(buffer.getvalue())
+        except Exception as e:
+            self.file_io.delete_quietly(path)
+            raise RuntimeError(f"Failed to write index manifest file: {e}") from e
+        return file_name
+
+    def _to_avro_record(self, entry: IndexManifestEntry) -> dict:
+        index_file = entry.index_file
+        dv_ranges = None
+        if index_file.dv_ranges:
+            dv_ranges = [
+                {"f0": dv.data_file_name, "f1": dv.offset, "f2": dv.length,
+                 "_CARDINALITY": dv.cardinality}
+                for dv in index_file.dv_ranges.values()
+            ]
+        global_index = None
+        if index_file.global_index_meta is not None:
+            gim = index_file.global_index_meta
+            global_index = {
+                "_ROW_RANGE_START": gim.row_range_start,
+                "_ROW_RANGE_END": gim.row_range_end,
+                "_INDEX_FIELD_ID": gim.index_field_id,
+                "_EXTRA_FIELD_IDS": gim.extra_field_ids,
+                "_INDEX_META": gim.index_meta,
+            }
+        return {
+            "_VERSION": _INDEX_ENTRY_VERSION,
+            "_KIND": entry.kind,
+            "_PARTITION": GenericRowSerializer.to_bytes(entry.partition),
+            "_BUCKET": entry.bucket,
+            "_INDEX_TYPE": index_file.index_type,
+            "_FILE_NAME": index_file.file_name,
+            "_FILE_SIZE": index_file.file_size,
+            "_ROW_COUNT": index_file.row_count,
+            "_DELETIONS_VECTORS_RANGES": dv_ranges,
+            "_EXTERNAL_PATH": index_file.external_path,
+            "_GLOBAL_INDEX": global_index,
+        }
