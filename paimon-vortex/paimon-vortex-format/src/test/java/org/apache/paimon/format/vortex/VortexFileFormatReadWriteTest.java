@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import dev.vortex.api.DType;
 import org.junit.jupiter.api.BeforeAll;
 
 import java.math.BigDecimal;
@@ -54,15 +53,6 @@ public class VortexFileFormatReadWriteTest extends FormatReadWriteTest {
     private static boolean isNativeAvailable() {
         try {
             dev.vortex.jni.NativeLoader.loadJni();
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    private static boolean isFixedSizeListSupported() {
-        try {
-            DType.newFixedSizeList(DType.newInt(false), 2, false);
             return true;
         } catch (Throwable t) {
             return false;

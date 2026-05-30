@@ -18,41 +18,203 @@
 
 package dev.vortex.api;
 
-import dev.vortex.api.expressions.*;
-import java.util.List;
-import java.util.Optional;
+import dev.vortex.jni.NativeExpression;
 
-/** Vortex expression language. */
-public interface Expression {
-    String id();
+import java.math.BigInteger;
 
-    List<Expression> children();
+/** A Vortex expression backed by a native pointer. */
+public final class Expression implements AutoCloseable {
 
-    Optional<byte[]> metadata();
+    private long pointer;
 
-    default <T> T accept(Visitor<T> visitor) {
-        return visitor.visitOther(this);
+    private Expression(long pointer) {
+        this.pointer = pointer;
     }
 
-    interface Visitor<T> {
-        T visitLiteral(Literal<?> literal);
+    public long nativePointer() {
+        return pointer;
+    }
 
-        T visitRoot(Root root);
+    @Override
+    public void close() {
+        if (pointer != 0) {
+            NativeExpression.free(pointer);
+            pointer = 0;
+        }
+    }
 
-        T visitBinary(Binary binary);
+    // -- Structure navigation --
 
-        T visitNot(Not not);
+    public static Expression root() {
+        return new Expression(NativeExpression.root());
+    }
 
-        T visitGetItem(GetItem getItem);
+    public static Expression column(String name) {
+        long rootPtr = NativeExpression.root();
+        return new Expression(NativeExpression.getItem(name, rootPtr));
+    }
 
-        default T visitIsNull(IsNull isNull) {
-            return visitOther(isNull);
+    public static Expression select(String[] columns, Expression parent) {
+        return new Expression(NativeExpression.select(columns, parent.pointer));
+    }
+
+    // -- Logical combinators --
+
+    public static Expression and(Expression... exprs) {
+        long[] ptrs = new long[exprs.length];
+        for (int i = 0; i < exprs.length; i++) {
+            ptrs[i] = exprs[i].pointer;
+        }
+        return new Expression(NativeExpression.and(ptrs));
+    }
+
+    public static Expression or(Expression... exprs) {
+        long[] ptrs = new long[exprs.length];
+        for (int i = 0; i < exprs.length; i++) {
+            ptrs[i] = exprs[i].pointer;
+        }
+        return new Expression(NativeExpression.or(ptrs));
+    }
+
+    public static Expression not(Expression expr) {
+        return new Expression(NativeExpression.not(expr.pointer));
+    }
+
+    // -- Comparison / binary ops --
+
+    public static Expression binary(BinaryOp op, Expression left, Expression right) {
+        return new Expression(NativeExpression.binary(op.code(), left.pointer, right.pointer));
+    }
+
+    // -- Null checks --
+
+    public static Expression isNull(Expression expr) {
+        return new Expression(NativeExpression.isNull(expr.pointer));
+    }
+
+    public static Expression isNotNull(Expression expr) {
+        return new Expression(NativeExpression.isNotNull(expr.pointer));
+    }
+
+    // -- Primitive literals --
+
+    public static Expression literal(boolean value) {
+        return new Expression(NativeExpression.literalBool(value, false));
+    }
+
+    public static Expression literal(byte value) {
+        return new Expression(NativeExpression.literalI8(value, false));
+    }
+
+    public static Expression literal(short value) {
+        return new Expression(NativeExpression.literalI16(value, false));
+    }
+
+    public static Expression literal(int value) {
+        return new Expression(NativeExpression.literalI32(value, false));
+    }
+
+    public static Expression literal(long value) {
+        return new Expression(NativeExpression.literalI64(value, false));
+    }
+
+    public static Expression literal(float value) {
+        return new Expression(NativeExpression.literalF32(value, false));
+    }
+
+    public static Expression literal(double value) {
+        return new Expression(NativeExpression.literalF64(value, false));
+    }
+
+    public static Expression literal(String value) {
+        return new Expression(NativeExpression.literalString(value));
+    }
+
+    // -- Decimal literals --
+
+    public static Expression literalDecimal(BigInteger unscaledValue, int precision, int scale) {
+        byte[] bytes = unscaledValue.toByteArray();
+        return new Expression(NativeExpression.literalDecimal(bytes, precision, scale, false));
+    }
+
+    // -- Date/time literals --
+
+    public static Expression literalDate(long value, TimeUnit unit) {
+        return new Expression(NativeExpression.literalDate(value, unit.tag(), false));
+    }
+
+    public static Expression literalTimestamp(long value, TimeUnit unit, String timezone) {
+        return new Expression(
+                NativeExpression.literalTimestamp(value, unit.tag(), timezone, false));
+    }
+
+    // -- Null literals --
+
+    public static Expression nullLiteral(DType dtype) {
+        return new Expression(NativeExpression.literalNull(dtype.tag()));
+    }
+
+    /** Binary operation codes. */
+    public enum BinaryOp {
+        EQ((byte) 0),
+        NOT_EQ((byte) 1),
+        GT((byte) 2),
+        GTE((byte) 3),
+        LT((byte) 4),
+        LTE((byte) 5),
+        AND((byte) 6),
+        OR((byte) 7);
+
+        private final byte code;
+
+        BinaryOp(byte code) {
+            this.code = code;
         }
 
-        default T visitIsNotNull(IsNotNull isNotNull) {
-            return visitOther(isNotNull);
+        public byte code() {
+            return code;
+        }
+    }
+
+    /** Data type tags for null literals. */
+    public enum DType {
+        BOOL((byte) 0),
+        I8((byte) 1),
+        I16((byte) 2),
+        I32((byte) 3),
+        I64((byte) 4),
+        F32((byte) 5),
+        F64((byte) 6),
+        UTF8((byte) 7),
+        BINARY((byte) 8);
+
+        private final byte tag;
+
+        DType(byte tag) {
+            this.tag = tag;
         }
 
-        T visitOther(Expression expression);
+        public byte tag() {
+            return tag;
+        }
+    }
+
+    /** Time unit tags for date/time literals. */
+    public enum TimeUnit {
+        NANOSECONDS((byte) 0),
+        MICROSECONDS((byte) 1),
+        MILLISECONDS((byte) 2),
+        SECONDS((byte) 3),
+        DAYS((byte) 4);
+
+        private final byte tag;
+
+        TimeUnit(byte tag) {
+            this.tag = tag;
+        }
+
+        public byte tag() {
+            return tag;
+        }
     }
 }

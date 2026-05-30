@@ -18,22 +18,32 @@
 
 package dev.vortex.jni;
 
-import java.util.Map;
-
-/** Native JNI methods for writing Vortex files. */
-public final class NativeWriterMethods {
+/** Native methods for Vortex scan operations. */
+public final class NativeScan {
 
     static {
         NativeLoader.loadJni();
     }
 
-    private NativeWriterMethods() {}
+    private NativeScan() {}
 
-    public static native long create(String uri, long dtype, Map<String, String> options);
+    public static native long create(
+            long dataSourcePtr,
+            long projectionExprPtr,
+            long filterExprPtr,
+            long rowRangeBegin,
+            long rowRangeEnd,
+            long[] selectionIndices,
+            byte selectionModeCode,
+            long limit,
+            boolean ordered);
 
-    public static native boolean writeBatch(long writerPtr, byte[] arrowData);
+    public static native void free(long scanPtr);
 
-    public static native boolean writeBatchFfi(long writerPtr, long arrowArrayAddr, long arrowSchemaAddr);
+    public static native void arrowSchema(long scanPtr, long arrowSchemaOutAddr);
 
-    public static native void close(long writerPtr);
+    public static native void partitionCount(long scanPtr, long[] resultOut);
+
+    /** Returns the next partition pointer, or 0 when exhausted. */
+    public static native long nextPartition(long scanPtr);
 }

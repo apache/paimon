@@ -18,14 +18,13 @@
 
 package org.apache.paimon.format.vortex;
 
-import org.apache.paimon.arrow.vector.ArrowFormatWriter;
+import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import java.io.IOException;
@@ -37,13 +36,10 @@ import static org.apache.paimon.format.vortex.VortexUtils.toVortexSpecifiedForWr
 /** A factory to create Vortex {@link FormatWriter}. */
 public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectWrite {
 
-    private final RowType rowType;
-    private final Supplier<ArrowFormatWriter> arrowFormatWriterSupplier;
+    private final Supplier<ArrowFormatCWriter> cWriterSupplier;
 
-    public VortexWriterFactory(
-            RowType rowType, Supplier<ArrowFormatWriter> arrowFormatWriterSupplier) {
-        this.rowType = rowType;
-        this.arrowFormatWriterSupplier = arrowFormatWriterSupplier;
+    public VortexWriterFactory(Supplier<ArrowFormatCWriter> cWriterSupplier) {
+        this.cWriterSupplier = cWriterSupplier;
     }
 
     @Override
@@ -57,9 +53,6 @@ public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectW
     public FormatWriter create(FileIO fileIO, Path path, String compression) throws IOException {
         Pair<Path, Map<String, String>> vortexSpecified = toVortexSpecifiedForWriter(fileIO, path);
         return new VortexRecordsWriter(
-                rowType,
-                arrowFormatWriterSupplier.get(),
-                vortexSpecified.getLeft(),
-                vortexSpecified.getRight());
+                cWriterSupplier, vortexSpecified.getLeft(), vortexSpecified.getRight());
     }
 }
