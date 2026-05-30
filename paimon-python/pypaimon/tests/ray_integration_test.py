@@ -306,6 +306,33 @@ class RayIntegrationTest(unittest.TestCase):
         df = result.to_pandas()
         self.assertEqual(list(df['id']), [3])
 
+    def test_write_paimon_empty_overwrite_unpartitioned(self):
+        """write_paimon(overwrite=True) with empty data clears an unpartitioned table."""
+        from pypaimon.ray import read_paimon, write_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.int64()),
+        ])
+        identifier = 'default.test_write_empty_overwrite_unpartitioned'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+
+        initial = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [1, 2], 'val': [10, 20]}, schema=pa_schema)
+        )
+        write_paimon(initial, identifier, self.catalog_options)
+        self.assertEqual(read_paimon(identifier, self.catalog_options).count(), 2)
+
+        empty = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [], 'val': []}, schema=pa_schema)
+        )
+        write_paimon(empty, identifier, self.catalog_options, overwrite=True)
+
+        result = read_paimon(identifier, self.catalog_options)
+        self.assertEqual(result.count(), 0)
+
     def test_read_paimon_primary_key(self):
         """read_paimon() merges PK rows correctly after an upsert."""
         from pypaimon.ray import read_paimon
