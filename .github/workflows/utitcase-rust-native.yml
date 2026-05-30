@@ -50,23 +50,6 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Install Rust toolchain
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Clone and build Vortex native library
-        run: |
-          git clone --depth 1  -b 0.69.0 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
-          cd ${RUNNER_TEMP}/vortex
-          cargo build --package vortex-jni --release
-
-      - name: Copy native library to resources
-        run: |
-          RESOURCE_DIR=paimon-vortex/paimon-vortex-jni/src/main/resources/native/linux-amd64
-          mkdir -p ${RESOURCE_DIR}
-          cp ${RUNNER_TEMP}/vortex/target/release/libvortex_jni.so ${RESOURCE_DIR}/
-
       - name: Build and test Vortex modules
         timeout-minutes: 30
         run: |

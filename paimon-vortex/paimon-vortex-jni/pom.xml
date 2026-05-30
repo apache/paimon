@@ -33,7 +33,7 @@ under the License.
 
     <properties>
         <target.java.version>1.8</target.java.version>
-        <vortex.jni.version>0.69.0</vortex.jni.version>
+        <vortex.jni.version>0.73.0</vortex.jni.version>
         <protobuf.version>3.25.5</protobuf.version>
         <immutables.version>2.10.1</immutables.version>
         <!-- vortex-jni uses shaded Guava, skip spotless/checkstyle rewriting -->
@@ -130,6 +130,34 @@ under the License.
                         <goals>
                             <goal>detect</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Extract native libraries from published vortex-jni jar -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>unpack-vortex-native</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>dev.vortex</groupId>
+                                    <artifactId>vortex-jni</artifactId>
+                                    <version>${vortex.jni.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>true</overWrite>
+                                </artifactItem>
+                            </artifactItems>
+                            <includes>native/**</includes>
+                            <outputDirectory>${project.build.directory}/classes</outputDirectory>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
