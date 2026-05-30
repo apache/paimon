@@ -56,6 +56,8 @@ from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.partial_update_merge_function import \
     PartialUpdateMergeFunction
+from pypaimon.read.reader.first_row_merge_function import \
+    FirstRowMergeFunction
 from pypaimon.read.reader.sort_merge_reader import (DeduplicateMergeFunction,
                                                     SortMergeReaderWithMinHeap)
 from pypaimon.read.push_down_utils import _get_all_fields
@@ -688,6 +690,10 @@ class MergeFileSplitRead(SplitRead):
                 key_arity=len(self.trimmed_primary_key),
                 value_arity=self.value_arity,
                 nullables=[f.type.nullable for f in self.value_fields],
+            )
+        if engine == MergeEngine.FIRST_ROW:
+            return FirstRowMergeFunction(
+                ignore_delete=self.table.options.ignore_delete(),
             )
         # check_supported() rejects everything else at TableRead.__init__.
         raise AssertionError(
