@@ -39,6 +39,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         return createFieldNestedUpdateAgg(
                 fieldType,
                 options.fieldNestedUpdateAggNestedKey(field),
+                options.fieldNestedUpdateAggNestedSequenceField(field),
                 options.fieldNestedUpdateAggCountLimit(field));
     }
 
@@ -48,9 +49,16 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
     }
 
     private FieldNestedUpdateAgg createFieldNestedUpdateAgg(
-            DataType fieldType, List<String> nestedKey, int countLimit) {
+            DataType fieldType,
+            List<String> nestedKey,
+            List<String> nestedSequenceField,
+            int countLimit) {
         if (nestedKey == null) {
             nestedKey = Collections.emptyList();
+        }
+
+        if (nestedSequenceField == null) {
+            nestedSequenceField = Collections.emptyList();
         }
 
         String typeErrorMsg =
@@ -59,6 +67,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         ArrayType arrayType = (ArrayType) fieldType;
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
-        return new FieldNestedUpdateAgg(identifier(), arrayType, nestedKey, countLimit);
+        return new FieldNestedUpdateAgg(
+                identifier(), arrayType, nestedKey, nestedSequenceField, countLimit);
     }
 }
