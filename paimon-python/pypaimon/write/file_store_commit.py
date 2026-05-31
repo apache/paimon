@@ -147,6 +147,25 @@ class FileStoreCommit:
         for msg in commit_messages:
             index_deletes.extend(msg.index_deletes)
 
+        if not index_deletes:
+            from pypaimon.write.global_index_update_checker import (
+                apply_global_index_update_action,
+            )
+            updated_cols = set()
+            written_partitions = set()
+            for msg in commit_messages:
+                for f in msg.new_files:
+                    if f.write_cols:
+                        updated_cols.update(f.write_cols)
+                        written_partitions.add(msg.partition)
+            if updated_cols:
+                snapshot = self.snapshot_manager.get_latest_snapshot()
+                index_msgs = apply_global_index_update_action(
+                    self.table, snapshot, list(updated_cols), written_partitions,
+                )
+                for m in index_msgs:
+                    index_deletes.extend(m.index_deletes)
+
         commit_kind = "APPEND"
         detect_conflicts = False
         allow_rollback = False

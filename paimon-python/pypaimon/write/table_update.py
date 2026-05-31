@@ -136,20 +136,9 @@ class TableUpdate:
     def _update_by_arrow_with_row_id(
             self, table: pa.Table, commit_identifier: int
     ) -> List[CommitMessage]:
-        from pypaimon.write.global_index_update_checker import (
-            apply_global_index_update_action,
-        )
-
-        msgs = TableUpdateByRowId(
+        return TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
         ).update_columns(table, self.update_cols)
-        if self.update_cols:
-            snapshot = self.table.snapshot_manager().get_latest_snapshot()
-            written_partitions = {tuple(m.partition) for m in msgs}
-            msgs.extend(apply_global_index_update_action(
-                self.table, snapshot, self.update_cols, written_partitions,
-            ))
-        return msgs
 
     def _upsert_by_arrow_with_key(
             self,

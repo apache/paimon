@@ -29,6 +29,8 @@ from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
+# DV and global-index sub-schemas required by INDEX_MANIFEST_ENTRY_SCHEMA for
+# Avro compatibility with Java; values are always null in data-evolution tables.
 _DELETION_VECTOR_META_SCHEMA = {
     "type": "record",
     "name": "DeletionVectorMeta",
