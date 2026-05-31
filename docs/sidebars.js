@@ -301,7 +301,8 @@ const sidebars = {
     "items": [
       "project/download",
       "project/contributing",
-      "project/committer"
+      "project/committer",
+      "project/security"
     ]
   },
   {
