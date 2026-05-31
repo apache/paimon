@@ -567,23 +567,22 @@ class PyArrowFileIO(FileIO):
             (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
             instead of the specified level.
             """
-            import sys
+            import inspect
 
             import pyarrow.orc as orc
 
             data = self._cast_time_columns_for_orc(data)
 
             with self.new_output_stream(path) as output_stream:
-                # Check Python version - if 3.6, don't use compression parameter
-                if sys.version_info[:2] == (3, 6):
-                    orc.write_table(data, output_stream, **kwargs)
-                else:
+                if 'compression' in inspect.signature(orc.write_table).parameters:
                     orc.write_table(
                         data,
                         output_stream,
                         compression=compression,
                         **kwargs
                     )
+                else:
+                    orc.write_table(data, output_stream, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
