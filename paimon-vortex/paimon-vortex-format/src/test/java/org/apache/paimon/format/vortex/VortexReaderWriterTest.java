@@ -107,8 +107,7 @@ public class VortexReaderWriterTest {
     }
 
     @Test
-    public void testReadWithColumnProjection(@TempDir java.nio.file.Path tempDir)
-            throws Exception {
+    public void testReadWithColumnProjection(@TempDir java.nio.file.Path tempDir) throws Exception {
         RowType fullRowType =
                 RowType.builder()
                         .field("f_int", DataTypes.INT())
@@ -122,8 +121,7 @@ public class VortexReaderWriterTest {
                         .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
 
         FileIO fileIO = new LocalFileIO();
-        Path testFile =
-                new Path(new Path(tempDir.toUri()), "test_projection_" + UUID.randomUUID());
+        Path testFile = new Path(new Path(tempDir.toUri()), "test_projection_" + UUID.randomUUID());
 
         // Write 3 columns
         try (FormatWriter writer =
@@ -136,8 +134,7 @@ public class VortexReaderWriterTest {
         InternalRowSerializer serializer;
 
         // Read only f_string column
-        RowType projectedRowType =
-                RowType.builder().field("f_string", DataTypes.STRING()).build();
+        RowType projectedRowType = RowType.builder().field("f_string", DataTypes.STRING()).build();
         serializer = new InternalRowSerializer(projectedRowType);
         FormatReaderFactory readerFactory =
                 format.createReaderFactory(fullRowType, projectedRowType, null);

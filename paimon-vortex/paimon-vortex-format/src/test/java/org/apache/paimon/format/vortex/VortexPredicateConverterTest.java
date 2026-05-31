@@ -189,16 +189,14 @@ public class VortexPredicateConverterTest {
 
     @Test
     public void testDecimalLiteral() {
-        RowType decRowType =
-                RowType.builder().field("f_dec", DataTypes.DECIMAL(10, 2)).build();
+        RowType decRowType = RowType.builder().field("f_dec", DataTypes.DECIMAL(10, 2)).build();
         PredicateBuilder decBuilder = new PredicateBuilder(decRowType);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(
                         Collections.singletonList(
                                 decBuilder.equal(
                                         0,
-                                        Decimal.fromBigDecimal(
-                                                new BigDecimal("123.45"), 10, 2))));
+                                        Decimal.fromBigDecimal(new BigDecimal("123.45"), 10, 2))));
         assertValidExpression(result);
     }
 
@@ -374,10 +372,7 @@ public class VortexPredicateConverterTest {
                 new VortexFileFormatFactory()
                         .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
         FileIO fileIO = new LocalFileIO();
-        Path testFile =
-                new Path(
-                        new Path(tempDir.toUri()),
-                        "predicate_test_" + System.nanoTime());
+        Path testFile = new Path(new Path(tempDir.toUri()), "predicate_test_" + System.nanoTime());
 
         try (FormatWriter writer =
                 ((SupportsDirectWrite) format.createWriterFactory(rowType))
