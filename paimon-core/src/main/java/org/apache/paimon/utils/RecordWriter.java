@@ -35,6 +35,9 @@ public interface RecordWriter<T> {
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
 
+    /** Write an empty data file. */
+    void writeEmptyFile() throws Exception;
+
     /**
      * Compact files related to the writer. Note that compaction process is only submitted and may
      * not be completed when the method returns.

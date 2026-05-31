@@ -39,7 +39,6 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
-import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.RecordWriter;
 
@@ -56,7 +55,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** A {@link RecordWriter} to write records and generate {@link CompactIncrement}. */
-public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner, EmptyFileWriter {
+public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final boolean writeBufferSpillable;
     private final MemorySize maxDiskSize;

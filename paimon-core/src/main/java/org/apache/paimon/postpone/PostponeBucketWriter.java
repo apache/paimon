@@ -38,7 +38,6 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
-import org.apache.paimon.utils.EmptyFileWriter;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SinkWriter;
@@ -53,7 +52,7 @@ import java.util.Collections;
 import java.util.List;
 
 /** {@link RecordWriter} for {@code bucket = -2} tables. */
-public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner, EmptyFileWriter {
+public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final FileIO fileIO;
     private final DataFilePathFactory pathFactory;
