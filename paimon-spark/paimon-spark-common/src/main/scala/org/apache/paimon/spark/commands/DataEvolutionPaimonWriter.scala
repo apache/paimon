@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
@@ -28,6 +27,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.DataType
 import org.apache.paimon.types.DataTypeRoot.BLOB
 import org.apache.paimon.types.VectorType.isVectorStoreFile
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql._
 
@@ -38,21 +38,6 @@ import scala.collection.mutable
 
 case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Seq[DataSplit])
   extends WriteHelper {
-
-  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)] = {
-    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (BinaryRow, Long)]
-    dataSplits.foreach(
-      split =>
-        split
-          .dataFiles()
-          .asScala
-          .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
-          .foreach(
-            file =>
-              firstRowIdToPartitionMap
-                .put(file.firstRowId(), (split.partition(), file.rowCount()))))
-    firstRowIdToPartitionMap
-  }
 
   // File rolling will never be performed
   override val table: FileStoreTable =
@@ -77,14 +62,35 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
           CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key() + "') can be updated.")
     }
 
+    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (Array[Byte], Long)]
+    dataSplits.foreach(
+      split =>
+        split
+          .dataFiles()
+          .asScala
+          .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
+          .foreach(
+            file =>
+              firstRowIdToPartitionMap
+                .put(
+                  file.firstRowId(),
+                  // BinaryRow stores data in transient memory segments and relies on Java
+                  // serialization hooks to restore them. Store bytes in Spark closures and
+                  // broadcasts so Kryo does not serialize BinaryRow internals directly.
+                  (SerializationUtils.serializeBinaryRow(split.partition()), file.rowCount())
+                )))
+    val firstRowIdToPartitionMapBroadcast =
+      sparkSession.sparkContext.broadcast(firstRowIdToPartitionMap)
+    val writeBuilder = table.newBatchWriteBuilder()
+
     val written =
       data.mapPartitions {
         iter =>
           {
             val write = DataEvolutionTableDataWrite(
-              table.newBatchWriteBuilder(),
+              writeBuilder,
               writeType,
-              firstRowIdToPartitionMap,
+              firstRowIdToPartitionMapBroadcast.value,
               catalogContextForBlobDescriptor)
             try {
               iter.foreach(row => write.write(row))
