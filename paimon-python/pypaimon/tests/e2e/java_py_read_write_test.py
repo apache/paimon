@@ -444,6 +444,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_large()
         self._test_read_btree_index_null()
         self._test_index_manifest_inherited_after_write()
+        self._test_partial_append_does_not_trigger_index_action()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -610,6 +611,26 @@ class JavaPyReadWriteTest(unittest.TestCase):
                          e.index_file.global_index_meta.index_field_id) == 'k']
         self.assertEqual(remaining, [],
                          "btree index entries for 'k' should be dropped")
+
+    def _test_partial_append_does_not_trigger_index_action(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+        snap_before = table.snapshot_manager().get_latest_snapshot()
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tw.with_write_type(['k'])
+        tw.write_arrow(pa.table({'k': ['k_new']}))
+        tc = wb.new_commit()
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snap_after.id, snap_before.id)
+        self.assertIsNotNone(
+            snap_after.index_manifest,
+            "partial append should not drop index manifest"
+        )
 
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):
