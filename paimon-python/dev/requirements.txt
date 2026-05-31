@@ -37,3 +37,4 @@ zstandard>=0.19,<1
 backports.zstd>=1.0.0,<1.4.0; python_version >= "3.9" and python_version < "3.14"
 cramjam>=1.3.0,<3; python_version>="3.7"
 pyyaml>=5.4,<7
+requests>=2.21.0,<3
