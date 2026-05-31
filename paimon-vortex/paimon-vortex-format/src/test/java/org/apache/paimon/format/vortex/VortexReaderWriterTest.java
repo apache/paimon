@@ -61,8 +61,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Test read write for Vortex file format. */
 public class VortexReaderWriterTest {
 
-
-
     @Test
     public void testWriteAndRead(@TempDir java.nio.file.Path tempDir) throws Exception {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
