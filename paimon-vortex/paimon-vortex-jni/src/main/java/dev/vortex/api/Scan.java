@@ -18,6 +18,7 @@
 
 package dev.vortex.api;
 
+import dev.vortex.jni.NativePartition;
 import dev.vortex.jni.NativeScan;
 
 import java.util.Iterator;
@@ -63,6 +64,10 @@ public final class Scan implements Iterator<Partition>, AutoCloseable {
 
     @Override
     public void close() {
+        if (nextPartitionPointer != 0) {
+            NativePartition.free(nextPartitionPointer);
+            nextPartitionPointer = 0;
+        }
         if (pointer != 0) {
             NativeScan.free(pointer);
             pointer = 0;

@@ -88,6 +88,11 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
                 try {
                     ImmutableScanOptions.Builder scanBuilder = ImmutableScanOptions.builder();
 
+                    java.util.List<String> columns = physicalReadRowType.getFieldNames();
+                    scanBuilder.projection(
+                            Expression.select(
+                                    columns.toArray(new String[0]), Expression.root()));
+
                     if (rowIndices != null) {
                         scanBuilder.selectionIndices(rowIndices);
                         scanBuilder.selectionMode(ScanOptions.SelectionMode.INCLUDE);

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.vortex;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -27,11 +29,13 @@ import org.apache.paimon.types.RowType;
 import dev.vortex.api.Expression;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link VortexPredicateConverter}. */
 public class VortexPredicateConverterTest {
@@ -45,12 +49,17 @@ public class VortexPredicateConverterTest {
 
     private static final PredicateBuilder BUILDER = new PredicateBuilder(ROW_TYPE);
 
+    private static void assertValidExpression(Expression expr) {
+        assertNotNull(expr, "Expression should not be null");
+        assertTrue(expr.nativePointer() != 0, "Expression native pointer should be non-zero");
+    }
+
     @Test
     public void testEqual() {
         Predicate predicate = BUILDER.equal(0, 42);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -58,7 +67,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.notEqual(1, 100L);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -66,7 +75,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.greaterThan(0, 10);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -74,7 +83,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.greaterOrEqual(0, 10);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -82,7 +91,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.lessThan(1, 50L);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -90,7 +99,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.lessOrEqual(1, 50L);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -98,7 +107,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.isNull(0);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -106,7 +115,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = BUILDER.isNotNull(0);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -116,7 +125,7 @@ public class VortexPredicateConverterTest {
         Predicate and = PredicateBuilder.and(p1, p2);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(and));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -126,7 +135,7 @@ public class VortexPredicateConverterTest {
         Predicate or = PredicateBuilder.or(p1, p2);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(or));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -134,7 +143,7 @@ public class VortexPredicateConverterTest {
         Predicate p1 = BUILDER.greaterThan(0, 5);
         Predicate p2 = BUILDER.lessThan(1, 200L);
         Expression result = VortexPredicateConverter.toVortexExpression(Arrays.asList(p1, p2));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -149,11 +158,22 @@ public class VortexPredicateConverterTest {
 
     @Test
     public void testStringLiteral() {
-        Predicate predicate =
-                BUILDER.equal(2, org.apache.paimon.data.BinaryString.fromString("hello"));
+        Predicate predicate = BUILDER.equal(2, BinaryString.fromString("hello"));
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
+    }
+
+    @Test
+    public void testDecimalLiteral() {
+        RowType decRowType =
+                RowType.builder().field("f_dec", DataTypes.DECIMAL(10, 2)).build();
+        PredicateBuilder decBuilder = new PredicateBuilder(decRowType);
+        Predicate predicate =
+                decBuilder.equal(0, Decimal.fromBigDecimal(new BigDecimal("123.45"), 10, 2));
+        Expression result =
+                VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
+        assertValidExpression(result);
     }
 
     @Test
@@ -164,7 +184,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = tsBuilder.equal(0, ts);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -175,7 +195,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = tsBuilder.equal(0, ts);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -186,7 +206,7 @@ public class VortexPredicateConverterTest {
         Predicate predicate = tsBuilder.equal(0, ts);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 
     @Test
@@ -200,6 +220,6 @@ public class VortexPredicateConverterTest {
         Predicate predicate = tsBuilder.equal(0, ts);
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
-        assertNotNull(result);
+        assertValidExpression(result);
     }
 }

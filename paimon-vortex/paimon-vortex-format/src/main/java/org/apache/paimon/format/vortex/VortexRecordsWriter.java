@@ -61,8 +61,8 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     // Each flush creates a new ArrowFormatCWriter (with its own RootAllocator) so
     // buffers are never reused across batches. The Rust release callback frees most
     // memory; only a small residual (~148 bytes per batch from Arrow 15's incomplete
-    // release) remains in each retained writer until nativeWriter.close().
-    private final List<ArrowFormatCWriter> retainedWriters;
+    // release) remains in each retained resource until nativeWriter.close().
+    private final List<AutoCloseable> retainedResources;
     private ArrowFormatCWriter currentWriter;
 
     private long jniCost = 0;
@@ -75,7 +75,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             throws IOException {
         this.cWriterSupplier = cWriterSupplier;
         this.path = path.toUri().toString();
-        this.retainedWriters = new ArrayList<>();
+        this.retainedResources = new ArrayList<>();
         this.currentWriter = cWriterSupplier.get();
 
         this.session = Session.create();
@@ -134,11 +134,11 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             throwable = addSuppressed(throwable, t);
         }
 
-        // Release all retained writers now that async writes are done.
-        for (ArrowFormatCWriter w : retainedWriters) {
-            closeQuietly(w);
+        // Release all retained resources now that async writes are done.
+        for (AutoCloseable res : retainedResources) {
+            closeQuietly(res);
         }
-        retainedWriters.clear();
+        retainedResources.clear();
         closeQuietly(currentWriter);
 
         try {
@@ -165,7 +165,7 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             jniCost += (System.currentTimeMillis() - t1);
             // Each ArrowFormatCWriter has its own RootAllocator and buffers.
             // Retain it so buffer memory stays alive for async Rust reads.
-            retainedWriters.add(currentWriter);
+            retainedResources.add(currentWriter);
             currentWriter = cWriterSupplier.get();
         }
     }
@@ -187,6 +187,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             long t1 = System.currentTimeMillis();
             nativeWriter.writeBatch(arrowArray.memoryAddress(), arrowSchema.memoryAddress());
             jniCost += (System.currentTimeMillis() - t1);
+            // Retain allocator — Rust holds async zero-copy references to the buffers.
+            // Released in close() after nativeWriter.close() completes all writes.
+            retainedResources.add(bundleAllocator);
         } catch (Exception e) {
             closeQuietly(bundleAllocator);
             throw e instanceof IOException ? (IOException) e : new IOException(e);

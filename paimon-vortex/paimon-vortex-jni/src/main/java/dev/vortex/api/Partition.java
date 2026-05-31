@@ -59,6 +59,9 @@ public final class Partition implements AutoCloseable {
 
     @Override
     public void close() {
+        // Only free unconsumed partitions. scanArrow() transfers the native
+        // partition's ownership to the ArrowArrayStream; the stream's release
+        // callback frees it when the ArrowReader is closed.
         if (pointer != 0 && !consumed) {
             NativePartition.free(pointer);
         }
