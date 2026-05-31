@@ -99,18 +99,6 @@ jobs:
           mkdir -p ${RESOURCE_DIR}
           cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
 
-      - name: Clone and build Vortex native library
-        run: |
-          git clone --depth 1 -b 0.69.0 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
-          cd ${RUNNER_TEMP}/vortex
-          cargo build --package vortex-jni --release
-
-      - name: Copy Vortex native library to resources
-        run: |
-          RESOURCE_DIR=paimon-vortex/paimon-vortex-jni/src/main/resources/native/linux-amd64
-          mkdir -p ${RESOURCE_DIR}
-          cp ${RUNNER_TEMP}/vortex/target/release/libvortex_jni.so ${RESOURCE_DIR}/
-
       - name: Verify Python version
         run: python --version
 
