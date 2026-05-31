@@ -16,14 +16,18 @@
  * limitations under the License.
  */
 
-package dev.vortex.api;
+package dev.vortex.jni;
 
-import java.util.Iterator;
+/** Native methods for Vortex session lifecycle. */
+public final class NativeSession {
 
-/** An iterator over Vortex arrays with type information and resource management. */
-public interface ArrayIterator extends AutoCloseable, Iterator<Array> {
-    DType getDataType();
+    static {
+        NativeLoader.loadJni();
+    }
 
-    @Override
-    void close();
+    private NativeSession() {}
+
+    public static native long newSession();
+
+    public static native void free(long sessionPtr);
 }

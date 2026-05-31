@@ -16,16 +16,14 @@
 # limitations under the License.
 ################################################################################
 
-name: UTCase Rust Native
+name: UTCase Tantivy
 
 on:
   push:
     paths:
-      - 'paimon-vortex/**'
       - 'paimon-tantivy/**'
   pull_request:
     paths:
-      - 'paimon-vortex/**'
       - 'paimon-tantivy/**'
 
 env:
@@ -37,44 +35,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  vortex_test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v5
-        with:
-          java-version: ${{ env.JDK_VERSION }}
-          distribution: 'temurin'
-
-      - name: Install Rust toolchain
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Clone and build Vortex native library
-        run: |
-          git clone --depth 1  -b 0.69.0 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
-          cd ${RUNNER_TEMP}/vortex
-          cargo build --package vortex-jni --release
-
-      - name: Copy native library to resources
-        run: |
-          RESOURCE_DIR=paimon-vortex/paimon-vortex-jni/src/main/resources/native/linux-amd64
-          mkdir -p ${RESOURCE_DIR}
-          cp ${RUNNER_TEMP}/vortex/target/release/libvortex_jni.so ${RESOURCE_DIR}/
-
-      - name: Build and test Vortex modules
-        timeout-minutes: 30
-        run: |
-          mvn -T 2C -B -ntp clean install -DskipTests
-          mvn -B -ntp verify -pl paimon-vortex/paimon-vortex-jni,paimon-vortex/paimon-vortex-format -Dcheckstyle.skip=true -Dspotless.check.skip=true
-        env:
-          MAVEN_OPTS: -Xmx4096m
-
   tantivy_test:
     runs-on: ubuntu-latest
 
