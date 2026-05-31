@@ -80,6 +80,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String NESTED_SEQUENCE_FIELD = "nested-sequence-field";
+
     public static final String COUNT_LIMIT = "count-limit";
 
     public static final String DISTINCT = "distinct";
@@ -2732,6 +2734,18 @@ public class CoreOptions implements Serializable {
         String keyString =
                 options.get(
                         key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY)
+                                .stringType()
+                                .noDefaultValue());
+        if (keyString == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public List<String> fieldNestedUpdateAggNestedSequenceField(String fieldName) {
+        String keyString =
+                options.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_SEQUENCE_FIELD)
                                 .stringType()
                                 .noDefaultValue());
         if (keyString == null) {

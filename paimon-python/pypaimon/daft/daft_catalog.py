@@ -222,6 +222,29 @@ class PaimonTable(Table):
         Table._validate_options("Paimon read", options, set())
         return _read_table(self._inner, catalog_options=self._catalog_options)
 
+    def explain_scan(
+        self,
+        *,
+        filters: Any = None,
+        partition_filters: Any = None,
+        columns: list[str] | None = None,
+        limit: int | None = None,
+        io_config=None,
+        verbose: bool = False,
+    ) -> Any:
+        from pypaimon.daft.daft_paimon import _explain_table
+
+        return _explain_table(
+            self._inner,
+            catalog_options=self._catalog_options,
+            filters=filters,
+            partition_filters=partition_filters,
+            columns=columns,
+            limit=limit,
+            io_config=io_config,
+            verbose=verbose,
+        )
+
     def append(self, df: DataFrame, **options: Any) -> None:
         from pypaimon.daft.daft_paimon import _write_table
 

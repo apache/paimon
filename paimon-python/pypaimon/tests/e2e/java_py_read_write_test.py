@@ -443,7 +443,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
         self._test_read_btree_index_large()
         self._test_read_btree_index_null()
-        self._test_index_manifest_inherited_after_write()
+        self._test_partial_append_does_not_trigger_index_action()
+        if sys.version_info[:2] >= (3, 7):
+            self._test_index_manifest_inherited_after_write()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -563,6 +565,72 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIsNotNone(
             snapshot_after.index_manifest,
             "index_manifest lost after Python data write - indexes become invisible"
+        )
+
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.equal('k', 'k2'))
+        read_builder.with_projection(['k', '_ROW_ID'])
+        splits = read_builder.new_scan().plan().splits()
+        row_ids = read_builder.new_read().to_arrow(splits)['_ROW_ID'].to_pylist()
+        self.assertTrue(len(row_ids) > 0, "k2 should exist before update")
+
+        wb = table.new_batch_write_builder()
+        tu = wb.new_update().with_update_type(['k'])
+        update_data = pa.table({
+            '_ROW_ID': pa.array(row_ids, type=pa.int64()),
+            'k': ['k_updated'] * len(row_ids),
+        })
+        msgs = tu.update_by_arrow_with_row_id(update_data)
+        with self.assertRaises(RuntimeError) as cm:
+            wb.new_commit().commit(msgs)
+        self.assertIn("'k'", str(cm.exception))
+        self.assertIn("Conflicted columns", str(cm.exception))
+
+        table_drop = table.copy(
+            {'global-index.column-update-action': 'DROP_PARTITION_INDEX'}
+        )
+        wb_drop = table_drop.new_batch_write_builder()
+        tu_drop = wb_drop.new_update().with_update_type(['k'])
+        wb_drop.new_commit().commit(tu_drop.update_by_arrow_with_row_id(update_data))
+
+        table_after = self.catalog.get_table('default.test_btree_index_string')
+        rb = table_after.new_read_builder()
+        rb.with_filter(rb.new_predicate_builder().equal('k', 'k_updated'))
+        rows_new = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertGreater(len(rows_new), 0,
+                           "after DROP_PARTITION_INDEX, new value should read")
+
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+        snap = table_after.snapshot_manager().get_latest_snapshot()
+        entries = (IndexManifestFile(table_after).read(snap.index_manifest)
+                   if snap.index_manifest else [])
+        field_by_id = {f.id: f.name for f in table_after.fields}
+        remaining = [e for e in entries
+                     if e.index_file.global_index_meta is not None
+                     and field_by_id.get(
+                         e.index_file.global_index_meta.index_field_id) == 'k']
+        self.assertEqual(remaining, [],
+                         "btree index entries for 'k' should be dropped")
+
+    def _test_partial_append_does_not_trigger_index_action(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+        snap_before = table.snapshot_manager().get_latest_snapshot()
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tw.with_write_type(['k'])
+        tw.write_arrow(pa.table({'k': ['k_new']}))
+        tc = wb.new_commit()
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snap_after.id, snap_before.id)
+        self.assertIsNotNone(
+            snap_after.index_manifest,
+            "partial append should not drop index manifest"
         )
 
     @parameterized.expand([('json',), ('csv',)])
