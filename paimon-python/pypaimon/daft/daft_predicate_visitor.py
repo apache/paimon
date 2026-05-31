@@ -28,6 +28,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from daft.expressions import Expression
 from daft.expressions.visitor import PredicateVisitor
 
 if TYPE_CHECKING:
@@ -36,7 +37,6 @@ if TYPE_CHECKING:
     from pypaimon.table.file_store_table import FileStoreTable
 
     from daft.daft import PyExpr
-    from daft.expressions import Expression
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,43 @@ class _Unsupported:
 
 
 _UNSUPPORTED = _Unsupported()
+
+
+class _AndSplitter(PredicateVisitor[tuple[Expression, Expression] | None]):
+    """Returns the direct children only when the expression root is AND."""
+
+    def visit_and(self, left: Expression, right: Expression) -> tuple[Expression, Expression]:
+        return left, right
+
+    def _not_and(self, *args: Any) -> None:
+        return None
+
+    visit_or = _not_and
+    visit_not = _not_and
+    visit_equal = _not_and
+    visit_not_equal = _not_and
+    visit_less_than = _not_and
+    visit_less_than_or_equal = _not_and
+    visit_greater_than = _not_and
+    visit_greater_than_or_equal = _not_and
+    visit_between = _not_and
+    visit_is_in = _not_and
+    visit_is_null = _not_and
+    visit_not_null = _not_and
+    visit_col = _not_and
+    visit_lit = _not_and
+    visit_alias = _not_and
+    visit_cast = _not_and
+    visit_coalesce = _not_and
+    visit_function = _not_and
+
+
+def _split_conjuncts(expr: Expression) -> list[Expression]:
+    children = _AndSplitter().visit(expr)
+    if children is None:
+        return [expr]
+    left, right = children
+    return _split_conjuncts(left) + _split_conjuncts(right)
 
 
 class PaimonPredicateVisitor(PredicateVisitor[Any]):
@@ -272,14 +309,16 @@ def convert_filters_to_paimon(
 
     for py_expr in py_filters:
         expr = Expression._from_pyexpr(py_expr)
-        predicate = converter.visit(expr)
 
-        if isinstance(predicate, Predicate):
-            pushed_filters.append(py_expr)
-            predicates.append(predicate)
-        else:
-            remaining_filters.append(py_expr)
-            logger.debug("Filter %s cannot be pushed down to Paimon", expr)
+        for conjunct in _split_conjuncts(expr):
+            predicate = converter.visit(conjunct)
+
+            if isinstance(predicate, Predicate):
+                pushed_filters.append(conjunct._expr)
+                predicates.append(predicate)
+            else:
+                remaining_filters.append(conjunct._expr)
+                logger.debug("Filter %s cannot be pushed down to Paimon", conjunct)
 
     combined_predicate: Predicate | None = None
     if predicates:
