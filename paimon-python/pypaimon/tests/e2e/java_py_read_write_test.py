@@ -444,7 +444,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_large()
         self._test_read_btree_index_null()
         self._test_partial_append_does_not_trigger_index_action()
-        self._test_index_manifest_inherited_after_write()
+        if sys.version_info[:2] >= (3, 7):
+            self._test_index_manifest_inherited_after_write()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
