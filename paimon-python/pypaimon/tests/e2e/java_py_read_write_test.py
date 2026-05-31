@@ -579,8 +579,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             '_ROW_ID': pa.array(row_ids, type=pa.int64()),
             'k': ['k_updated'] * len(row_ids),
         })
+        msgs = tu.update_by_arrow_with_row_id(update_data)
         with self.assertRaises(RuntimeError) as cm:
-            tu.update_by_arrow_with_row_id(update_data)
+            wb.new_commit().commit(msgs)
         self.assertIn("'k'", str(cm.exception))
         self.assertIn("Conflicted columns", str(cm.exception))
 
