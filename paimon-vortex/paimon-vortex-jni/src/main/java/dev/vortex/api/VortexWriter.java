@@ -59,8 +59,10 @@ public final class VortexWriter implements AutoCloseable {
         } finally {
             try {
                 schemaAllocator.close();
-            } catch (IllegalStateException ignored) {
-                // Arrow 15's C Data Interface may retain small residual references
+            } catch (IllegalStateException e) {
+                if (e.getMessage() == null || !e.getMessage().contains("Memory was leaked")) {
+                    throw e;
+                }
             }
         }
     }

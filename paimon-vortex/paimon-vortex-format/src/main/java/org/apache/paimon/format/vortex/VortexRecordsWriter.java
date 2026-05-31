@@ -204,7 +204,12 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     private static void closeQuietly(AutoCloseable closeable) {
         try {
             closeable.close();
-        } catch (Exception ignored) {
+        } catch (IllegalStateException e) {
+            if (e.getMessage() == null || !e.getMessage().contains("Memory was leaked")) {
+                throw e;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
