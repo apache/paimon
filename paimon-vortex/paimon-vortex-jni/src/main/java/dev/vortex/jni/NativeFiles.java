@@ -18,24 +18,21 @@
 
 package dev.vortex.jni;
 
-/** Utility class for configuring native logging levels in the Vortex JNI layer. */
-public final class NativeLogging {
+import java.util.List;
+import java.util.Map;
+
+/** Native methods for Vortex file listing and deletion. */
+public final class NativeFiles {
+
     static {
         NativeLoader.loadJni();
     }
 
-    private NativeLogging() {}
+    private NativeFiles() {}
 
-    /** Logging level constant for error messages only */
-    public static final int ERROR = 1;
+    private static native List<String> listFiles(
+            long sessionPtr, String uri, Map<String, String> options);
 
-    public static final int WARN = 2;
-
-    public static final int INFO = 3;
-
-    public static final int DEBUG = 4;
-
-    public static final int TRACE = 5;
-
-    public static native void initLogging(int level);
+    private static native void delete(
+            long sessionPtr, String[] uris, Map<String, String> options);
 }

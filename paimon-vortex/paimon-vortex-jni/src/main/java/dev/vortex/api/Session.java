@@ -16,19 +16,36 @@
  * limitations under the License.
  */
 
-package dev.vortex.jni;
+package dev.vortex.api;
 
-/** Native JNI methods for array iterator operations. */
-public final class NativeArrayIteratorMethods {
-    static {
-        NativeLoader.loadJni();
+import dev.vortex.jni.NativeSession;
+
+/** A Vortex session that manages the native runtime. */
+public final class Session implements AutoCloseable {
+
+    private long pointer;
+
+    private Session(long pointer) {
+        this.pointer = pointer;
     }
 
-    private NativeArrayIteratorMethods() {}
+    public static Session create() {
+        long ptr = NativeSession.newSession();
+        if (ptr == 0) {
+            throw new RuntimeException("Failed to create Vortex session");
+        }
+        return new Session(ptr);
+    }
 
-    public static native void free(long pointer);
+    public long nativePointer() {
+        return pointer;
+    }
 
-    public static native long take(long pointer);
-
-    public static native long getDType(long pointer);
+    @Override
+    public void close() {
+        if (pointer != 0) {
+            NativeSession.free(pointer);
+            pointer = 0;
+        }
+    }
 }

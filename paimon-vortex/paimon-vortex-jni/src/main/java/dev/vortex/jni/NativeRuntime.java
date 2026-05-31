@@ -18,24 +18,18 @@
 
 package dev.vortex.jni;
 
-/** Utility class for configuring native logging levels in the Vortex JNI layer. */
-public final class NativeLogging {
+/** Native methods for Vortex runtime configuration. */
+public final class NativeRuntime {
+
     static {
         NativeLoader.loadJni();
     }
 
-    private NativeLogging() {}
+    private NativeRuntime() {}
 
-    /** Logging level constant for error messages only */
-    public static final int ERROR = 1;
+    public static native void setWorkerThreads(int count);
 
-    public static final int WARN = 2;
+    public static native void setWorkerThreadsToAvailableParallelism();
 
-    public static final int INFO = 3;
-
-    public static final int DEBUG = 4;
-
-    public static final int TRACE = 5;
-
-    public static native void initLogging(int level);
+    public static native int workerCount();
 }

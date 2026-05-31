@@ -16,36 +16,25 @@
  * limitations under the License.
  */
 
-package dev.vortex.api.expressions;
+package dev.vortex.jni;
 
-import dev.vortex.api.Expression;
-import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
-/** Generic expression deserialized from Vortex without a concrete Java type. */
-public final class Unknown implements Expression {
-    private final String id;
-    private final List<Expression> children;
-    private final byte[] metadata;
+/** Native methods for Vortex data source operations. */
+public final class NativeDataSource {
 
-    public Unknown(String id, List<Expression> children, byte[] metadata) {
-        this.id = id;
-        this.children = children;
-        this.metadata = metadata;
+    static {
+        NativeLoader.loadJni();
     }
 
-    @Override
-    public String id() {
-        return id;
-    }
+    private NativeDataSource() {}
 
-    @Override
-    public List<Expression> children() {
-        return children;
-    }
+    public static native long open(long sessionPtr, String[] uris, Map<String, String> options);
 
-    @Override
-    public Optional<byte[]> metadata() {
-        return Optional.of(metadata);
-    }
+    public static native void free(long dataSourcePtr);
+
+    public static native void arrowSchema(long dataSourcePtr, long arrowSchemaOutAddr);
+
+    /** Result: out[0] = row count value, out[1] = type (1=estimate, 2=exact, other=unknown). */
+    public static native void rowCount(long dataSourcePtr, long[] resultOut);
 }

@@ -16,16 +16,24 @@
  * limitations under the License.
  */
 
-package dev.vortex.api;
+package dev.vortex.jni;
 
-/** Interface for reading Vortex format files. */
-public interface File extends AutoCloseable {
-    DType getDType();
+import java.util.Map;
 
-    long rowCount();
+/** Native methods for Vortex writer operations. */
+public final class NativeWriter {
 
-    ArrayIterator newScan(ScanOptions options);
+    static {
+        NativeLoader.loadJni();
+    }
 
-    @Override
-    void close();
+    private NativeWriter() {}
+
+    public static native long create(
+            long sessionPtr, String uri, long arrowSchemaAddr, Map<String, String> options);
+
+    public static native boolean writeBatch(
+            long writerPtr, long arrowArrayAddr, long arrowSchemaAddr);
+
+    public static native void close(long writerPtr);
 }

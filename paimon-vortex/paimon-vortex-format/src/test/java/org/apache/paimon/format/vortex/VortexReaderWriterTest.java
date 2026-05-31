@@ -44,7 +44,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -58,24 +57,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Test read write for Vortex file format. */
 public class VortexReaderWriterTest {
-
-    @BeforeAll
-    static void checkNativeLibrary() {
-        assumeTrue(isNativeAvailable(), "Vortex native library not available, skipping tests");
-    }
-
-    private static boolean isNativeAvailable() {
-        try {
-            dev.vortex.jni.NativeLoader.loadJni();
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
 
     @Test
     public void testWriteAndRead(@TempDir java.nio.file.Path tempDir) throws Exception {
@@ -119,6 +103,56 @@ public class VortexReaderWriterTest {
                 assertEquals(expectedRows.get(i).getInt(0), actualRows.get(i).getInt(0));
                 assertEquals(expectedRows.get(i).getString(1), actualRows.get(i).getString(1));
             }
+        }
+    }
+
+    @Test
+    public void testReadWithColumnProjection(@TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType fullRowType =
+                RowType.builder()
+                        .field("f_int", DataTypes.INT())
+                        .field("f_string", DataTypes.STRING())
+                        .field("f_double", DataTypes.DOUBLE())
+                        .build();
+
+        Options options = new Options();
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile = new Path(new Path(tempDir.toUri()), "test_projection_" + UUID.randomUUID());
+
+        // Write 3 columns
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(fullRowType))
+                        .create(fileIO, testFile, "")) {
+            writer.addElement(GenericRow.of(1, BinaryString.fromString("hello"), 1.5D));
+            writer.addElement(GenericRow.of(2, BinaryString.fromString("world"), 2.5D));
+        }
+
+        InternalRowSerializer serializer;
+
+        // Read only f_string column
+        RowType projectedRowType = RowType.builder().field("f_string", DataTypes.STRING()).build();
+        serializer = new InternalRowSerializer(projectedRowType);
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(fullRowType, projectedRowType, null);
+        try (RecordReader<InternalRow> reader =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+
+            List<InternalRow> actualRows = new ArrayList<>();
+            while (iterator.hasNext()) {
+                actualRows.add(serializer.copy(iterator.next()));
+            }
+
+            assertEquals(2, actualRows.size());
+            assertEquals(1, actualRows.get(0).getFieldCount());
+            assertEquals(BinaryString.fromString("hello"), actualRows.get(0).getString(0));
+            assertEquals(BinaryString.fromString("world"), actualRows.get(1).getString(0));
         }
     }
 

@@ -18,29 +18,20 @@
 
 package dev.vortex.jni;
 
-import java.util.List;
-import java.util.Map;
+/** Native methods for Vortex partition operations. */
+public final class NativePartition {
 
-/** Native JNI methods for file operations. */
-public final class NativeFileMethods {
     static {
         NativeLoader.loadJni();
     }
 
-    private NativeFileMethods() {}
+    private NativePartition() {}
 
-    public static native List<String> listVortexFiles(String uri, Map<String, String> options);
+    public static native void free(long partitionPtr);
 
-    public static native void delete(String[] uris, Map<String, String> options);
+    /** Result: out[0] = row count value, out[1] = has value (0=unknown, nonzero=known). */
+    public static native void rowCount(long partitionPtr, long[] resultOut);
 
-    public static native long open(String uri, Map<String, String> options);
-
-    public static native long rowCount(long pointer);
-
-    public static native long dtype(long pointer);
-
-    public static native void close(long pointer);
-
-    public static native long scan(
-            long pointer, List<String> columns, byte[] predicateProto, long[] rowRange, long[] rowIndices);
+    public static native void scanArrow(
+            long sessionPtr, long partitionPtr, long arrowArrayStreamAddr);
 }

@@ -72,6 +72,14 @@ public final class HiveCatalogOptions {
                     .defaultValue(TimeUnit.MINUTES.toMillis(5))
                     .withDescription("Setting the client's pool cache eviction interval(ms).\n");
 
+    public static final ConfigOption<Boolean> HIVE_SKIP_UPDATE_STATS =
+            ConfigOptions.key("hive.skip-update-stats")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, sets DO_NOT_UPDATE_STATS in the Hive EnvironmentContext "
+                                    + "when altering tables, preventing Hive from updating table statistics.");
+
     public static final ConfigOption<String> CLIENT_POOL_CACHE_KEYS =
             ConfigOptions.key("client-pool-cache.keys")
                     .stringType()

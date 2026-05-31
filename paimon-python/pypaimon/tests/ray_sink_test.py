@@ -225,6 +225,22 @@ class RaySinkTest(unittest.TestCase):
         )
         datasink.on_write_complete(write_result)
 
+        # Empty overwrite must still reach TableCommit so overwrite semantics
+        # can delete the target range.
+        datasink = PaimonDatasink(self.table, overwrite=True)
+        datasink.on_write_start()
+        write_result = WriteResult(
+            num_rows=0,
+            size_bytes=0,
+            write_returns=[[], []]
+        )
+        mock_commit = Mock()
+        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
+        datasink.on_write_complete(write_result)
+
+        mock_commit.commit.assert_called_once_with([])
+        mock_commit.close.assert_called_once()
+
         # Test with messages and filtering empty messages
         datasink = PaimonDatasink(self.table, overwrite=False)
         datasink.on_write_start()
