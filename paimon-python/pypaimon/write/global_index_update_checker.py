@@ -67,10 +67,9 @@ def apply_global_index_update_action(
     ]
     if not affected:
         return []
-    action = (
-        table.options.global_index_column_update_action()
-        or GlobalIndexColumnUpdateAction.THROW_ERROR
-    )
+    action = table.options.global_index_column_update_action()
+    if action is None:
+        action = GlobalIndexColumnUpdateAction.THROW_ERROR
     if action == GlobalIndexColumnUpdateAction.DROP_PARTITION_INDEX:
         return build_index_delete_msgs(affected)
     conflicted = sorted(

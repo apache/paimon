@@ -111,6 +111,11 @@ class IndexManifestWriteTest(unittest.TestCase):
         previous = imf.write([self._entry('idx-a', 1)])
         self.assertEqual(previous, imf.combine_deletes(previous, []))
 
+    def test_combine_all_deleted_returns_none(self):
+        imf = IndexManifestFile(self._table())
+        previous = imf.write([self._entry('idx-a', 1)])
+        self.assertIsNone(imf.combine_deletes(previous, [self._entry('idx-a', 1)]))
+
 
 if __name__ == '__main__':
     unittest.main()

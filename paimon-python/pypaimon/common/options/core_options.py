@@ -57,9 +57,6 @@ class MergeEngine(str, Enum):
 
 
 class GlobalIndexColumnUpdateAction(str, Enum):
-    """
-    Action when an update modifies columns covered by a global index.
-    """
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
 
@@ -507,10 +504,6 @@ class CoreOptions:
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
-        .with_description(
-            "Defines the action to take when an update modifies columns that "
-            "are covered by a global index. THROW_ERROR or DROP_PARTITION_INDEX."
-        )
     )
 
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
