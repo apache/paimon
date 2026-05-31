@@ -39,6 +39,24 @@ from pypaimon.daft.daft_paimon import _read_table
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
 
 
+def _contains_expr(py_expr):
+    from daft.expressions import Expression
+
+    expr_text = str(Expression._from_pyexpr(py_expr))
+    return "contains" in expr_text
+
+
+def _predicate_leaves(predicate):
+    if predicate is None:
+        return []
+    if predicate.method in ("and", "or"):
+        result = []
+        for child in predicate.literals:
+            result.extend(_predicate_leaves(child))
+        return result
+    return [(predicate.method, predicate.field, tuple(predicate.literals or []))]
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -674,6 +692,47 @@ class TestFilterPushdown:
         result = df.to_pydict()
         assert result["id"] == [2, 3, 4]
 
+    def test_filter_pushdown_splits_supported_conjuncts(self, filter_table):
+        unsupported = col("value").contains(col("id"))
+        cases = [
+            ((col("id") == 1) & unsupported, [("equal", "id", (1,))]),
+            (unsupported & (col("id") == 1), [("equal", "id", (1,))]),
+            (
+                (col("id") == 1) & (unsupported & (col("value") == "a")),
+                [("equal", "id", (1,)), ("equal", "value", ("a",))],
+            ),
+        ]
+
+        for expr, expected_leaves in cases:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert len(pushed_filters) == len(expected_leaves)
+            assert len(remaining_filters) == 1
+            assert _contains_expr(remaining_filters[0])
+            assert _predicate_leaves(predicate) == expected_leaves
+
+    def test_filter_pushdown_does_not_split_or_with_unsupported_branch(self, filter_table):
+        expr = (col("id") == 1) | col("value").contains(col("id"))
+
+        pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+        assert pushed_filters == []
+        assert remaining_filters == [expr._expr]
+        assert predicate is None
+
+    def test_filter_pushdown_pushes_supported_or_conjunct(self, filter_table):
+        supported_or = (col("id") == 1) | (col("id") == 2)
+        expr = supported_or & col("value").contains(col("id"))
+
+        pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+        assert len(pushed_filters) == 1
+        assert len(remaining_filters) == 1
+        assert _contains_expr(remaining_filters[0])
+        assert predicate is not None
+        assert predicate.method == "or"
+        assert _predicate_leaves(predicate) == [("equal", "id", (1,)), ("equal", "id", (2,))]
+
     def test_unsupported_expression_remains_in_daft(self, filter_table):
         expressions = [
             col("id") == lit(1).cast("int64"),
@@ -717,6 +776,32 @@ class TestFilterPushdown:
         result = df.sort("id").to_pydict()
 
         assert result["id"] == [1, 3]
+
+    def test_mixed_conjunctive_expression_is_filtered_by_daft(self, local_paimon_catalog):
+        catalog, tmp_path = local_paimon_catalog
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("value", pa.string()),
+            ("pattern", pa.string()),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db.filter_mixed_conjunctive", paimon_schema, ignore_if_exists=True)
+        table = catalog.get_table("test_db.filter_mixed_conjunctive")
+
+        data = pa.table(
+            {
+                "id": [1, 1, 2, 3],
+                "value": ["alpha", "bravo", "alps", "charlie"],
+                "pattern": ["lp", "zz", "lp", "lie"],
+            }
+        )
+        _write_to_paimon(table, data)
+
+        df = _read_table(table).where((col("id") == 1) & col("value").contains(col("pattern")))
+        result = df.sort("value").to_pydict()
+
+        assert result["id"] == [1]
+        assert result["value"] == ["alpha"]
 
 
 # ---------------------------------------------------------------------------

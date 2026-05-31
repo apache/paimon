@@ -197,6 +197,30 @@ def test_explain_scan_keeps_limit_above_remaining_filters(catalog_options):
     assert result.paimon_scan.splits is None
 
 
+def test_explain_scan_partially_pushes_conjuncts_and_keeps_limit(catalog_options):
+    pa_schema = pa.schema([
+        ("id", pa.int64()),
+        ("name", pa.string()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "explain_partial_conjunct",
+        pa_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(table, pa.table({"id": [1, 2], "name": ["alpha", "bravo"]}, schema=pa_schema))
+
+    result = PaimonTable(table, catalog_options=catalog_options).explain_scan(
+        filters=(col("id") == 1) & col("name").contains(col("id")),
+        limit=1,
+    )
+
+    assert any("id" in pushed for pushed in result.pushed_filters)
+    assert any("contains" in remaining for remaining in result.remaining_filters)
+    assert result.source_limit is None
+    assert result.limit_pushed is False
+
+
 def test_explain_scan_applies_partition_filters_to_reader_counts(catalog_options):
     pa_schema = pa.schema([
         ("id", pa.int64()),
