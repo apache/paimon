@@ -888,7 +888,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
       .option("write.merge-schema", "true")
       .save(location)
 
-    // Case 2: colum b and d are absent in the coming data
+    // Case 2: column b and d are absent in the coming data
     val df3 = Seq((4, 45.6d), (5, 56.7d))
       .toDF("a", "c")
     df3.write

@@ -491,7 +491,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "The legacy partition name is using `toString` fpr all types. If false, using "
+                            "The legacy partition name is using `toString` for all types. If false, using "
                                     + "cast to string for all types.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =

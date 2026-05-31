@@ -179,7 +179,7 @@ public final class DataTypeCasts {
 
     /**
      * allowExplicit false : Returns whether the source type can be safely cast to the target type
-     * without loosing information. Implicit casts are used for type widening and type
+     * without losing information. Implicit casts are used for type widening and type
      * generalization (finding a common supertype for a set of types). Implicit casts are similar to
      * the Java semantics (e.g. this is not possible: {@code int x = (String) z}).
      *

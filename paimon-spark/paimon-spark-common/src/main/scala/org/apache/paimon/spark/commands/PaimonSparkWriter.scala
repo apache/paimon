@@ -434,7 +434,7 @@ case class PaimonSparkWriter(
     postCommit(commitMessages)
   }
 
-  /** Boostrap and repartition for cross partition mode. */
+  /** Bootstrap and repartition for cross partition mode. */
   private def bootstrapAndRepartitionByKeyHash(
       data: DataFrame,
       parallelism: Int,
