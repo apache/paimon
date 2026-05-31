@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -32,6 +32,12 @@ from daft.logical.schema import Schema
 from daft.recordbatch import RecordBatch
 
 from pypaimon.daft.daft_compat import require_file_range_reads
+from pypaimon.daft.daft_explain import (
+    PaimonReaderSplitExplain,
+    PaimonScanExplain,
+    READER_MODE_NATIVE_PARQUET,
+    READER_MODE_PYPAIMON_FALLBACK,
+)
 from pypaimon.daft.daft_predicate_visitor import convert_filters_to_paimon
 
 if TYPE_CHECKING:
@@ -39,6 +45,7 @@ if TYPE_CHECKING:
 
     from pypaimon.common.predicate import Predicate
     from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+    from pypaimon.read.explain import ExplainSplitInfo
     from pypaimon.read.table_read import TableRead
     from pypaimon.read.split import Split
     from pypaimon.table.file_store_table import FileStoreTable
@@ -61,6 +68,16 @@ class _ReadPushdownState:
     task_columns: list[str] | None
     read_columns: list[str] | None
     source_limit: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReaderRouting:
+    reader_mode: str
+    fallback_reason: str | None
+
+    @property
+    def use_native_reader(self) -> bool:
+        return self.reader_mode == READER_MODE_NATIVE_PARQUET
 
 
 class _PaimonPKSplitTask(DataSourceTask):
@@ -189,6 +206,7 @@ class PaimonDataSource(DataSource):
             else {}
         )
 
+        self._pushed_filters: list[PyExpr] | None = None
         self._paimon_predicate: Predicate | None = None
         self._remaining_filters: list[PyExpr] | None = None
 
@@ -213,6 +231,7 @@ class PaimonDataSource(DataSource):
         """
         pushed_filters, remaining_filters, paimon_predicate = convert_filters_to_paimon(self._table, filters)
 
+        self._pushed_filters = pushed_filters
         self._paimon_predicate = paimon_predicate
         self._remaining_filters = remaining_filters
 
@@ -225,13 +244,17 @@ class PaimonDataSource(DataSource):
 
         return pushed_filters, remaining_filters
 
-    async def get_tasks(self, pushdowns: Pushdowns) -> AsyncIterator[DataSourceTask]:
-        read_table = self._table
+    def _read_table_for_scan(self) -> FileStoreTable:
         if self._has_blob_columns:
-            read_table = self._table.copy({"blob-as-descriptor": "true"})
+            return self._table.copy({"blob-as-descriptor": "true"})
+        return self._table
 
-        read_builder = read_table.new_read_builder()
-        read_pushdowns = self._read_pushdown_state(read_table, pushdowns)
+    def _scan_read_builder(
+        self,
+        table: FileStoreTable,
+        read_pushdowns: _ReadPushdownState,
+    ) -> Any:
+        read_builder = table.new_read_builder()
 
         if read_pushdowns.requested_columns is not None:
             read_builder = read_builder.with_projection(read_pushdowns.requested_columns)
@@ -246,6 +269,13 @@ class PaimonDataSource(DataSource):
                 read_pushdowns.planning_predicate,
             )
 
+        return read_builder
+
+    async def get_tasks(self, pushdowns: Pushdowns) -> AsyncIterator[DataSourceTask]:
+        read_table = self._read_table_for_scan()
+        read_pushdowns = self._read_pushdown_state(read_table, pushdowns)
+        read_builder = self._scan_read_builder(read_table, read_pushdowns)
+
         if self._table.partition_keys and pushdowns.partition_filters is None:
             logger.warning(
                 "%s has partition keys %s but no partition filter was specified. "
@@ -256,34 +286,21 @@ class PaimonDataSource(DataSource):
 
         plan = read_builder.new_scan().plan()
 
-        pv_cache: dict[tuple[Any, ...], RecordBatch | None] = {}
+        pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None] = {}
 
         for split in plan.splits():
-            if self._table.partition_keys and pushdowns.partition_filters is not None:
-                pv_key = tuple(sorted(split.partition.to_dict().items()))
-                if pv_key not in pv_cache:
-                    pv_cache[pv_key] = self._build_partition_values(split)
-                pv = pv_cache[pv_key]
-                if pv is not None and len(pv.filter(ExpressionsProjection([pushdowns.partition_filters]))) == 0:
-                    continue
+            if self._partition_filter_skips_split(split, pushdowns, pv_cache):
+                continue
 
-            _deletion_files = getattr(split, "data_deletion_files", None)
-            has_deletion_vectors = _deletion_files is not None and any(df is not None for df in _deletion_files)
-
-            can_use_native_reader = (
-                self._is_parquet
-                and not self._has_blob_columns
-                and (not self._table.is_primary_key_table or split.raw_convertible)
-                and not has_deletion_vectors
+            routing = self._reader_routing(
+                raw_convertible=split.raw_convertible,
+                has_deletion_vectors=self._split_has_deletion_vectors(split),
             )
 
-            if can_use_native_reader:
+            if routing.use_native_reader:
                 pv = None
                 if self._table.partition_keys:
-                    pv_key = tuple(sorted(split.partition.to_dict().items()))
-                    if pv_key not in pv_cache:
-                        pv_cache[pv_key] = self._build_partition_values(split)
-                    pv = pv_cache[pv_key]
+                    pv = self._partition_values(split, pv_cache)
 
                 for data_file in split.files:
                     file_uri = self._build_file_uri(self._data_file_path(data_file))
@@ -297,18 +314,10 @@ class PaimonDataSource(DataSource):
                         storage_config=self._storage_config,
                     )
             else:
-                if not self._is_parquet:
-                    reason = "non-parquet format"
-                elif self._has_blob_columns:
-                    reason = "blob columns present"
-                elif has_deletion_vectors:
-                    reason = "deletion vectors present"
-                else:
-                    reason = "LSM merge required"
                 logger.debug(
                     "Split with %d files using pypaimon fallback (%s).",
                     len(split.files),
-                    reason,
+                    routing.fallback_reason,
                 )
                 yield _PaimonPKSplitTask(
                     self._fallback_read_builder(
@@ -322,6 +331,168 @@ class PaimonDataSource(DataSource):
                     read_pushdowns.task_columns,
                     self._blob_column_names,
                 )
+
+    def explain_scan(self, pushdowns: Pushdowns, verbose: bool = False) -> PaimonScanExplain:
+        read_table = self._read_table_for_scan()
+        read_pushdowns = self._read_pushdown_state(read_table, pushdowns)
+        read_builder = self._scan_read_builder(read_table, read_pushdowns)
+
+        paimon_scan = read_builder.explain(verbose=True)
+        split_details = paimon_scan.splits or []
+
+        native_split_count = 0
+        native_file_count = 0
+        fallback_split_count = 0
+        fallback_file_count = 0
+        fallback_reasons: dict[str, int] = {}
+        explained_splits: list[PaimonReaderSplitExplain] | None = [] if verbose else None
+        pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None] = {}
+
+        for split in split_details:
+            if self._partition_filter_skips_explain_split(split, pushdowns, pv_cache):
+                continue
+
+            routing = self._reader_routing(
+                raw_convertible=split.raw_convertible,
+                has_deletion_vectors=split.has_deletion_vectors,
+            )
+            if routing.use_native_reader:
+                native_split_count += 1
+                native_file_count += split.file_count
+            else:
+                fallback_split_count += 1
+                fallback_file_count += split.file_count
+                reason = routing.fallback_reason or "unknown"
+                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
+
+            if explained_splits is not None:
+                explained_splits.append(
+                    PaimonReaderSplitExplain(
+                        partition=split.partition,
+                        bucket=split.bucket,
+                        file_count=split.file_count,
+                        row_count=split.row_count,
+                        file_size=split.file_size,
+                        reader_mode=routing.reader_mode,
+                        fallback_reason=routing.fallback_reason,
+                        file_paths=split.file_paths,
+                    )
+                )
+
+        if not verbose:
+            paimon_scan = replace(paimon_scan, splits=None)
+
+        pushed_filters, remaining_filters = self._filter_pushdown_explain(pushdowns)
+        return PaimonScanExplain(
+            paimon_scan=paimon_scan,
+            native_parquet_split_count=native_split_count,
+            native_parquet_file_count=native_file_count,
+            pypaimon_fallback_split_count=fallback_split_count,
+            pypaimon_fallback_file_count=fallback_file_count,
+            fallback_reasons=fallback_reasons,
+            pushed_filters=pushed_filters,
+            remaining_filters=remaining_filters,
+            partition_filters=self._format_partition_filters(pushdowns),
+            requested_columns=read_pushdowns.requested_columns,
+            task_columns=read_pushdowns.task_columns,
+            fallback_read_columns=read_pushdowns.read_columns,
+            requested_limit=pushdowns.limit,
+            source_limit=read_pushdowns.source_limit,
+            limit_pushed=pushdowns.limit is not None and read_pushdowns.source_limit == pushdowns.limit,
+            splits=explained_splits,
+        )
+
+    def _reader_routing(
+        self,
+        raw_convertible: bool,
+        has_deletion_vectors: bool,
+    ) -> _ReaderRouting:
+        can_use_native_reader = (
+            self._is_parquet
+            and not self._has_blob_columns
+            and (not self._table.is_primary_key_table or raw_convertible)
+            and not has_deletion_vectors
+        )
+        if can_use_native_reader:
+            return _ReaderRouting(READER_MODE_NATIVE_PARQUET, None)
+
+        if not self._is_parquet:
+            reason = "non-parquet format"
+        elif self._has_blob_columns:
+            reason = "blob columns present"
+        elif has_deletion_vectors:
+            reason = "deletion vectors present"
+        else:
+            reason = "LSM merge required"
+        return _ReaderRouting(READER_MODE_PYPAIMON_FALLBACK, reason)
+
+    @staticmethod
+    def _split_has_deletion_vectors(split: Split) -> bool:
+        deletion_files = getattr(split, "data_deletion_files", None)
+        return deletion_files is not None and any(df is not None for df in deletion_files)
+
+    def _partition_filter_skips_split(
+        self,
+        split: Split,
+        pushdowns: Pushdowns,
+        pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None],
+    ) -> bool:
+        if not self._table.partition_keys or pushdowns.partition_filters is None:
+            return False
+        pv = self._partition_values(split, pv_cache)
+        return self._partition_filter_skips_values(pv, pushdowns)
+
+    def _partition_filter_skips_explain_split(
+        self,
+        split: ExplainSplitInfo,
+        pushdowns: Pushdowns,
+        pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None],
+    ) -> bool:
+        if not self._table.partition_keys or pushdowns.partition_filters is None:
+            return False
+        pv = self._partition_values_from_dict(split.partition, pv_cache)
+        return self._partition_filter_skips_values(pv, pushdowns)
+
+    @staticmethod
+    def _partition_filter_skips_values(
+        partition_values: RecordBatch | None,
+        pushdowns: Pushdowns,
+    ) -> bool:
+        return (
+            partition_values is not None
+            and len(partition_values.filter(ExpressionsProjection([pushdowns.partition_filters]))) == 0
+        )
+
+    def _format_partition_filters(self, pushdowns: Pushdowns) -> list[str]:
+        if pushdowns.partition_filters is None:
+            return []
+        return self._format_pyexprs([getattr(pushdowns.partition_filters, "_expr", pushdowns.partition_filters)])
+
+    def _filter_pushdown_explain(self, pushdowns: Pushdowns) -> tuple[list[str], list[str]]:
+        if self._remaining_filters is not None:
+            return (
+                self._format_pyexprs(self._pushed_filters or []),
+                self._format_pyexprs(self._remaining_filters),
+            )
+
+        if pushdowns.filters is None:
+            return [], []
+
+        py_expr = getattr(pushdowns.filters, "_expr", pushdowns.filters)
+        pushed_filters, remaining_filters, _ = convert_filters_to_paimon(self._table, [py_expr])
+        return self._format_pyexprs(pushed_filters), self._format_pyexprs(remaining_filters)
+
+    @staticmethod
+    def _format_pyexprs(py_exprs: list[PyExpr]) -> list[str]:
+        from daft.expressions import Expression
+
+        result = []
+        for py_expr in py_exprs:
+            try:
+                result.append(str(Expression._from_pyexpr(py_expr)))
+            except Exception:
+                result.append(str(py_expr))
+        return result
 
     def _build_file_uri(self, file_path: str) -> str:
         """Reconstruct a full URI from a (potentially scheme-stripped) file_path."""
@@ -337,10 +508,29 @@ class PaimonDataSource(DataSource):
 
     def _build_partition_values(self, split: Split) -> daft.recordbatch.RecordBatch | None:
         """Build a single-row RecordBatch encoding the partition values for a split."""
+        return self._build_partition_values_from_dict(split.partition.to_dict())
+
+    def _partition_values(
+        self,
+        split: Split,
+        pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None],
+    ) -> RecordBatch | None:
+        return self._partition_values_from_dict(split.partition.to_dict(), pv_cache)
+
+    def _partition_values_from_dict(
+        self,
+        partition_dict: dict[str, Any],
+        pv_cache: dict[tuple[tuple[str, Any], ...], RecordBatch | None],
+    ) -> RecordBatch | None:
+        pv_key = tuple(sorted(partition_dict.items()))
+        if pv_key not in pv_cache:
+            pv_cache[pv_key] = self._build_partition_values_from_dict(partition_dict)
+        return pv_cache[pv_key]
+
+    def _build_partition_values_from_dict(self, partition_dict: dict[str, Any]) -> daft.recordbatch.RecordBatch | None:
         if not self._table.partition_keys:
             return None
 
-        partition_dict = split.partition.to_dict()
         arrays: dict[str, daft.Series] = {}
         for pfield in self._table.partition_keys_fields:
             value = partition_dict.get(pfield.name)

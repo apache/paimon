@@ -20,20 +20,22 @@ Top-level API for reading and writing Paimon tables with Daft DataFrames.
 
 Usage::
 
-    from pypaimon.daft import read_paimon, write_paimon
+    from pypaimon.daft import explain_paimon_scan, read_paimon, write_paimon
 
     df = read_paimon("db.table", catalog_options={"warehouse": "/path"})
+    explain = explain_paimon_scan("db.table", catalog_options={"warehouse": "/path"})
     write_paimon(df, "db.table", catalog_options={"warehouse": "/path"})
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     import daft
 
+    from pypaimon.daft.daft_explain import PaimonScanExplain
     from pypaimon.table.file_store_table import FileStoreTable
 
 
@@ -57,26 +59,15 @@ def _enrich_options_with_rest_token(
     return enriched
 
 
-def _read_table(
+def _time_travel_table(
     table: FileStoreTable,
-    catalog_options: Dict[str, str] | None = None,
-    io_config=None,
     snapshot_id: int | None = None,
     tag_name: str | None = None,
-) -> "daft.DataFrame":
-    """Read a Paimon table object into a lazy Daft DataFrame."""
+) -> FileStoreTable:
     if snapshot_id is not None and tag_name is not None:
         raise ValueError(
             "snapshot_id and tag_name cannot be set at the same time"
         )
-
-    from daft import context, runners
-    from daft.daft import StorageConfig
-
-    from pypaimon.daft.daft_datasource import PaimonDataSource
-    from pypaimon.daft.daft_io_config import (
-        _convert_paimon_catalog_options_to_io_config,
-    )
 
     travel_options: dict[str, str] = {}
     if snapshot_id is not None:
@@ -84,7 +75,22 @@ def _read_table(
     if tag_name is not None:
         travel_options["scan.tag-name"] = tag_name
     if travel_options:
-        table = table.copy(travel_options)
+        return table.copy(travel_options)
+    return table
+
+
+def _source_for_table(
+    table: FileStoreTable,
+    catalog_options: Dict[str, str] | None = None,
+    io_config=None,
+):
+    from daft import context, runners
+    from daft.daft import StorageConfig
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+    from pypaimon.daft.daft_io_config import (
+        _convert_paimon_catalog_options_to_io_config,
+    )
 
     if catalog_options is None:
         catalog_options = {}
@@ -97,10 +103,71 @@ def _read_table(
     multithreaded_io = runners.get_or_create_runner().name != "ray"
     storage_config = StorageConfig(multithreaded_io, io_config)
 
-    source = PaimonDataSource(
+    return PaimonDataSource(
         table, storage_config=storage_config, catalog_options=catalog_options
     )
-    return source.read()
+
+
+def _read_table(
+    table: FileStoreTable,
+    catalog_options: Dict[str, str] | None = None,
+    io_config=None,
+    snapshot_id: int | None = None,
+    tag_name: str | None = None,
+) -> "daft.DataFrame":
+    """Read a Paimon table object into a lazy Daft DataFrame."""
+    table = _time_travel_table(table, snapshot_id=snapshot_id, tag_name=tag_name)
+    return _source_for_table(table, catalog_options=catalog_options, io_config=io_config).read()
+
+
+def _normalize_explain_filters(filters: Any) -> tuple[Any, list[Any]]:
+    if filters is None:
+        return None, []
+
+    if isinstance(filters, (list, tuple)):
+        if not filters:
+            return None, []
+        filter_exprs = list(filters)
+        combined = filter_exprs[0]
+        for filter_expr in filter_exprs[1:]:
+            combined = combined & filter_expr
+    else:
+        filter_exprs = [filters]
+        combined = filters
+
+    return combined, [getattr(filter_expr, "_expr", filter_expr) for filter_expr in filter_exprs]
+
+
+def _explain_table(
+    table: FileStoreTable,
+    catalog_options: Dict[str, str] | None = None,
+    io_config=None,
+    snapshot_id: int | None = None,
+    tag_name: str | None = None,
+    filters: Any = None,
+    partition_filters: Any = None,
+    columns: list[str] | None = None,
+    limit: int | None = None,
+    verbose: bool = False,
+) -> "PaimonScanExplain":
+    """Explain a Paimon table object using Daft's datasource pushdown model."""
+    from daft.io.pushdowns import Pushdowns
+
+    table = _time_travel_table(table, snapshot_id=snapshot_id, tag_name=tag_name)
+    source = _source_for_table(table, catalog_options=catalog_options, io_config=io_config)
+    filter_expr, filter_pyexprs = _normalize_explain_filters(filters)
+    partition_filter_expr, _ = _normalize_explain_filters(partition_filters)
+    if filter_pyexprs:
+        source.push_filters(filter_pyexprs)
+    return source.explain_scan(
+        Pushdowns(
+            filters=filter_expr,
+            partition_filters=partition_filter_expr,
+            columns=columns,
+            limit=limit,
+        ),
+        verbose=verbose,
+    )
 
 
 def _write_table(
@@ -156,6 +223,44 @@ def read_paimon(
     return _read_table(
         table, catalog_options=catalog_options,
         io_config=io_config, snapshot_id=snapshot_id, tag_name=tag_name,
+    )
+
+
+def explain_paimon_scan(
+    table_identifier: str,
+    catalog_options: Dict[str, str],
+    *,
+    filters: Any = None,
+    partition_filters: Any = None,
+    columns: list[str] | None = None,
+    limit: int | None = None,
+    snapshot_id: Optional[int] = None,
+    tag_name: Optional[str] = None,
+    io_config=None,
+    verbose: bool = False,
+) -> "PaimonScanExplain":
+    """Explain a Paimon scan through Daft's reader-routing layer.
+
+    The optional ``filters`` argument accepts a Daft expression or a list of
+    Daft expressions. Lists are treated as conjunctions, matching how multiple
+    pushed filters reach Daft datasources.
+    """
+    from pypaimon.catalog.catalog_factory import CatalogFactory
+
+    catalog = CatalogFactory.create(catalog_options)
+    table = catalog.get_table(table_identifier)
+
+    return _explain_table(
+        table,
+        catalog_options=catalog_options,
+        io_config=io_config,
+        snapshot_id=snapshot_id,
+        tag_name=tag_name,
+        filters=filters,
+        partition_filters=partition_filters,
+        columns=columns,
+        limit=limit,
+        verbose=verbose,
     )
 
 
