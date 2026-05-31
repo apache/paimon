@@ -41,14 +41,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Lint + test on 3.6 and 3.10 only (not every Python version).
+  # Lint + test on selected Python versions.
   lint-python:
     runs-on: ubuntu-latest
     container: "python:${{ matrix.python-version }}-slim"
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ '3.6.15', '3.10', '3.11' ]
+        python-version: [ '3.7', '3.10', '3.11' ]
 
     steps:
       - name: Checkout code
@@ -102,19 +102,19 @@ jobs:
       - name: Verify Python version
         run: python --version
 
-      - name: Verify requirements.txt dependencies can be installed
+      - name: Verify project dependencies can be installed
         shell: bash
         run: |
           cd paimon-python
           python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || {
-            echo "ERROR: Failed to resolve dependencies from dev/requirements.txt"
+          python -m pip install . --target "$TEMP_DIR" || {
+            echo "ERROR: Failed to resolve project dependencies from pyproject.toml"
             rm -rf "$TEMP_DIR"
             exit 1
           }
           rm -rf "$TEMP_DIR"
-          echo "✓ dev/requirements.txt can be resolved on this Python"
+          echo "✓ project dependencies can be resolved on this Python"
 
       - name: Build Java
         run: |
@@ -125,10 +125,10 @@ jobs:
         shell: bash
         run: |
           df -h
-          if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
-            python -m pip install --upgrade pip==21.3.1
+          if [[ "${{ matrix.python-version }}" == "3.7" ]]; then
+            python -m pip install --upgrade pip
             python --version
-            python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 2>&1 >/dev/null
+            python -m pip install --no-cache-dir pyroaring==0.4.5 readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==5.3.3' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.3.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 packaging cramjam pyyaml flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 2>&1 >/dev/null
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
           else
             python -m pip install --upgrade pip
@@ -142,7 +142,7 @@ jobs:
           df -h
 
       - name: Build and install tantivy-py from source
-        if: matrix.python-version != '3.6.15'
+        if: matrix.python-version != '3.7'
         shell: bash
         run: |
           pip install maturin[patchelf]
@@ -192,7 +192,7 @@ jobs:
           chmod +x paimon-python/dev/lint-python.sh
           ./paimon-python/dev/lint-python.sh -i pytest_torch
 
-  # One job: check dev/requirements.txt on each Python version in sequence, then Ray version test on 3.10.
+  # One job: check project dependencies on each Python version in sequence, then Ray version test on 3.10.
   requirement_version_compatible_test:
     runs-on: ubuntu-latest
     steps:
@@ -205,7 +205,7 @@ jobs:
             build-essential git curl cmake \
             && sudo rm -rf /var/lib/apt/lists/*
 
-      - name: Verify dev/requirements.txt on Python 3.8
+      - name: Verify project dependencies on Python 3.8
         uses: actions/setup-python@v5
         with:
           python-version: '3.8'
@@ -213,10 +213,10 @@ jobs:
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.8"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ project dependencies OK on Python 3.8"
 
-      - name: Verify dev/requirements.txt on Python 3.9
+      - name: Verify project dependencies on Python 3.9
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
@@ -224,10 +224,10 @@ jobs:
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.9"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ project dependencies OK on Python 3.9"
 
-      - name: Verify dev/requirements.txt on Python 3.10
+      - name: Verify project dependencies on Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -235,10 +235,10 @@ jobs:
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.10"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ project dependencies OK on Python 3.10"
 
-      - name: Verify dev/requirements.txt on Python 3.11
+      - name: Verify project dependencies on Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -246,10 +246,10 @@ jobs:
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.11"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ project dependencies OK on Python 3.11"
 
-      - name: Verify dev/requirements.txt on Python 3.12
+      - name: Verify project dependencies on Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -257,10 +257,10 @@ jobs:
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.12"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ project dependencies OK on Python 3.12"
 
-      - name: Verify dev/requirements.txt on Python 3.13
+      - name: Verify project dependencies on Python 3.13
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -268,8 +268,8 @@ jobs:
         run: |
           cd paimon-python && python -m pip install --upgrade pip
           TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.13"
+          python -m pip install . --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
+          rm -rf "$TEMP_DIR" && echo "✓ project dependencies OK on Python 3.13"
 
       - name: Setup Python 3.10 for Ray test
         uses: actions/setup-python@v5
