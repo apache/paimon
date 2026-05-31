@@ -235,6 +235,8 @@ class IndexManifestFile:
         previous = self.read(previous_name) if previous_name else []
         delete_names = {e.index_file.file_name for e in deletes}
         survivors = [e for e in previous if e.index_file.file_name not in delete_names]
+        if not survivors:
+            return None
         return self.write(survivors)
 
     def write(self, entries: List[IndexManifestEntry]) -> str:

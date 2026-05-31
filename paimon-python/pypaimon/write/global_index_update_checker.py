@@ -79,7 +79,5 @@ def apply_global_index_update_action(
     raise RuntimeError(
         f"Update columns contain globally indexed columns, not supported now.\n"
         f"Updated columns: {sorted(update_set)}\n"
-        f"Conflicted columns: {conflicted}\n"
-        f"Set 'global-index.column-update-action' = 'DROP_PARTITION_INDEX' "
-        f"to drop the affected index instead (rebuild afterwards)."
+        f"Conflicted columns: {conflicted}"
     )

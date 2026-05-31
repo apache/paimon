@@ -582,7 +582,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             tu.update_by_arrow_with_row_id(update_data)
         self.assertIn("'k'", str(cm.exception))
-        self.assertIn("DROP_PARTITION_INDEX", str(cm.exception))
+        self.assertIn("Conflicted columns", str(cm.exception))
 
         table_drop = table.copy(
             {'global-index.column-update-action': 'DROP_PARTITION_INDEX'}
