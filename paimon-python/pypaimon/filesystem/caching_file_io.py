@@ -387,6 +387,10 @@ class CachingFileIO(FileIO):
             return file_io
         return CachingFileIO(file_io, cache, whitelist)
 
+    @property
+    def properties(self):
+        return self._delegate.properties
+
     def new_input_stream(self, path: str):
         file_type = FileType.classify(path)
         if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):

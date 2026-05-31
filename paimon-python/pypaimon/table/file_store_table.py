@@ -81,6 +81,10 @@ class FileStoreTable(Table):
 
         return cls(file_io, identifier, table_path, table_schema)
 
+    def schema(self) -> TableSchema:
+        """Get the table schema."""
+        return self.table_schema
+
     def current_branch(self) -> str:
         """Get the current branch name from the identifier."""
         return self.identifier.get_branch_name_or_default()
