@@ -114,14 +114,17 @@ def write_paimon(
     overwrite: bool = False,
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    hash_fixed_precluster: str = "auto",
 ) -> None:
     """Write a Ray Dataset to a Paimon table.
 
-    For HASH_FIXED tables, rows are automatically clustered by
-    ``(partition_keys..., bucket)`` before writing so that each
-    (partition, bucket) lands in a single Ray task. This avoids the
-    small-file storm that Ray's default round-robin distribution would
-    otherwise produce. No user configuration is required.
+    HASH_FIXED rows are assigned to the correct bucket by the Paimon
+    writer. Optional pre-clustering is only a file-count optimization.
+    The legacy ``map_groups`` pre-clustering mode materializes each
+    ``(partition_keys..., bucket)`` group on one Ray node and should
+    only be used when every group fits in memory. HASH_FIXED primary-key
+    tables require ``map_groups`` until Ray writes have a bounded
+    strategy that preserves per-bucket sequence ordering.
 
     Args:
         dataset: The Ray Dataset to write.
@@ -130,6 +133,11 @@ def write_paimon(
         overwrite: If ``True``, overwrite existing data in the table.
         concurrency: Optional max number of Ray write tasks to run concurrently.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in write tasks.
+        hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
+            and ``"off"`` write append-only HASH_FIXED tables directly
+            and reject HASH_FIXED primary-key tables. ``"map_groups"``
+            preserves the legacy small-file optimization and its single
+            group memory bound.
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.ray.shuffle import maybe_apply_repartition
@@ -138,7 +146,7 @@ def write_paimon(
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(table_identifier)
 
-    dataset = maybe_apply_repartition(dataset, table)
+    dataset = maybe_apply_repartition(dataset, table, hash_fixed_precluster)
 
     datasink = PaimonDatasink(table, overwrite=overwrite)
 

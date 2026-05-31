@@ -205,19 +205,43 @@ write_paimon(
 )
 ```
 
-**Automatic (partition, bucket) clustering for HASH_FIXED tables:**
+**HASH_FIXED pre-clustering:**
 
-For HASH_FIXED tables, `write_paimon` automatically clusters rows by
-`(partition_keys..., bucket)` before writing so each (partition,
-bucket) lands in a single Ray task — one writer, one file group. This
-avoids the small-file storm that Ray's default round-robin
-distribution would otherwise produce (`partitions × buckets ×
-ray_tasks` files instead of `partitions × buckets`).
+HASH_FIXED rows are always assigned to the correct Paimon bucket by
+the writer. Pre-clustering is only a file-count optimization.
 
-Bucket assignment uses the same hash routine the writer uses, so the
-bucket seen by the groupby is byte-equivalent to the one the writer
-would compute. No user configuration is required. For non-HASH_FIXED
-tables the dataset is written as-is.
+By default, `write_paimon` writes append-only HASH_FIXED tables
+without pre-clustering. This avoids Ray `groupby().map_groups()`
+materializing an entire `(partition_keys..., bucket)` group on one Ray
+node.
+
+HASH_FIXED primary-key tables reject the default/off mode. Direct Ray
+writes can send the same bucket to multiple writer tasks, and those
+writers can allocate overlapping sequence numbers. Use the explicit
+`map_groups` mode until a bounded pre-clustering strategy preserves
+per-bucket sequence ordering.
+
+If every `(partition_keys..., bucket)` group fits in memory on a
+single Ray node, you can opt in to the legacy small-file optimization:
+
+```python
+write_paimon(
+    ray_dataset,
+    "database_name.table_name",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    hash_fixed_precluster="map_groups",
+)
+```
+
+`hash_fixed_precluster="map_groups"` groups rows by
+`(partition_keys..., bucket)` before writing so each group lands in a
+single Ray task. This can reduce file count and keeps HASH_FIXED
+primary-key sequence generation per bucket in one writer task, but it
+inherits Ray's `map_groups()` memory bound. Large append-only buckets
+or hot append-only partitions should use the default mode or
+`hash_fixed_precluster="off"`.
+
+For non-HASH_FIXED tables the dataset is written as-is.
 
 **Parameters:**
 - `dataset`: the Ray Dataset to write.
@@ -227,13 +251,20 @@ tables the dataset is written as-is.
 - `concurrency`: optional max number of Ray write tasks to run concurrently.
 - `ray_remote_args`: optional kwargs passed to `ray.remote()` in write tasks
   (e.g. `{"num_cpus": 2}`).
+- `hash_fixed_precluster`: HASH_FIXED pre-clustering mode. `"auto"` and
+  `"off"` write append-only HASH_FIXED tables directly and reject
+  HASH_FIXED primary-key tables. `"map_groups"` enables the legacy
+  small-file optimization and requires each `(partition_keys..., bucket)`
+  group to fit in memory on one Ray node.
 
 ### `TableWrite.write_ray()` (lower-level)
 
 If you have already constructed a `table_write` from a write builder, you can
-hand a Ray Dataset directly to it. `write_ray()` commits through the Ray
-Datasink API, so there is no `prepare_commit` / `commit` step to run for the
-Ray write itself — just close the writer when you are done with it:
+hand a Ray Dataset directly to it. `write_ray()` uses the same HASH_FIXED
+pre-clustering modes and safety checks as the top-level `write_paimon()` API.
+It commits through the Ray Datasink API, so there is no `prepare_commit` /
+`commit` step to run for the Ray write itself — just close the writer when you
+are done with it:
 
 ```python
 import ray
@@ -248,12 +279,18 @@ table_commit = write_builder.new_commit()
 
 # 2. Write Ray Dataset
 ray_dataset = ray.data.read_json("/path/to/data.jsonl")
-table_write.write_ray(ray_dataset, overwrite=False, concurrency=2)
+table_write.write_ray(
+    ray_dataset,
+    overwrite=False,
+    concurrency=2,
+    hash_fixed_precluster="auto",
+)
 # Parameters:
 #   - dataset: Ray Dataset to write
 #   - overwrite: Whether to overwrite existing data (default: False)
 #   - concurrency: Optional max number of concurrent Ray tasks
 #   - ray_remote_args: Optional kwargs passed to ray.remote() (e.g., {"num_cpus": 2})
+#   - hash_fixed_precluster: Same HASH_FIXED modes as write_paimon()
 
 # 3. Commit data (required for write_pandas/write_arrow/write_arrow_batch only)
 commit_messages = table_write.prepare_commit()
