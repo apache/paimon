@@ -187,8 +187,10 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             long t1 = System.currentTimeMillis();
             nativeWriter.writeBatch(arrowArray.memoryAddress(), arrowSchema.memoryAddress());
             jniCost += (System.currentTimeMillis() - t1);
-            // Retain allocator — Rust holds async zero-copy references to the buffers.
-            // Released in close() after nativeWriter.close() completes all writes.
+            // Retain all resources that own the exported C Data buffers and release
+            // callbacks. Rust holds async zero-copy references via Arc<FFI_ArrowArray>.
+            // Order matters: close ipcReader (owns VectorSchemaRoot) before allocator.
+            retainedResources.add(ipcReader);
             retainedResources.add(bundleAllocator);
         } catch (Exception e) {
             closeQuietly(bundleAllocator);
