@@ -196,9 +196,9 @@ function pytest_check() {
     echo "Detected Python version: $PYTHON_VERSION"
 
     # Determine test directory based on Python version
-    if [ "$PYTHON_VERSION" = "3.6" ]; then
+    if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
-        echo "Running tests for Python 3.6: $TEST_DIR"
+        echo "Running tests for Python $PYTHON_VERSION: $TEST_DIR"
     else
         TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
         echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36"
