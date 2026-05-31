@@ -155,7 +155,7 @@ class FileStoreCommit:
             written_partitions = set()
             for msg in commit_messages:
                 for f in msg.new_files:
-                    if f.write_cols:
+                    if f.write_cols and f.first_row_id is not None:
                         updated_cols.update(f.write_cols)
                         written_partitions.add(msg.partition)
             if updated_cols:
