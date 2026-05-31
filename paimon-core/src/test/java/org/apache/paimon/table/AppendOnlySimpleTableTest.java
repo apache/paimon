@@ -77,6 +77,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchMergeHandler;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
@@ -1255,6 +1256,43 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
 
         // avoid unstable failure from `SimpleTableTestBase.after`.
+        Thread.sleep(1_000);
+    }
+
+    @Test
+    public void testLimitWithCloseableIterator() throws Exception {
+        RowType rowType = RowType.builder().field("id", DataTypes.INT()).build();
+        Consumer<Options> configure =
+                options -> {
+                    options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                    options.set(WRITE_ONLY, true);
+                    options.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofMebiBytes(256));
+                };
+        FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
+
+        int rowCount = 5000;
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int i = 0; i < rowCount; i++) {
+            write.write(GenericRow.of(i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        int limit = 10;
+        TableScan.Plan plan = table.newScan().withLimit(limit).plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger count = new AtomicInteger(0);
+        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            while (iterator.hasNext()) {
+                iterator.next();
+                count.incrementAndGet();
+            }
+        }
+        assertThat(count.get()).isEqualTo(limit);
+
         Thread.sleep(1_000);
     }
 
