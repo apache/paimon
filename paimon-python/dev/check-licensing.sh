@@ -37,7 +37,7 @@ if [ -z "${SOURCE_PACKAGE}" ]; then
     cd ${PROJECT_ROOT}
 
     # Sanity check to ensure that resolved paths are valid; a LICENSE file should always exist in project root
-    if [ ! -f ${PROJECT_ROOT}/setup.py ]; then
+    if [ ! -f ${PROJECT_ROOT}/pyproject.toml ]; then
         echo "Project root path ${PROJECT_ROOT} is not valid; script may be in the wrong directory."
         exit 1
     fi

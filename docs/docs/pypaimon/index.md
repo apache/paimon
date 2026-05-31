@@ -40,7 +40,7 @@ pip install pypaimon
 You can build the source package by executing the following command:
 
 ```commandline
-python3 setup.py sdist
+python3 -m build --sdist
 ```
 
 The package is under `dist/`. Then you can install the package by executing the following command:

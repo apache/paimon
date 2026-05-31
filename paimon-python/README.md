@@ -8,19 +8,19 @@ This PyPi package contains the Python APIs for using Paimon.
 
 # Version
 
-Pypaimon requires Python 3.6+.
+Pypaimon requires Python 3.7+.
 
 # Dependencies
 
-The core dependencies are listed in `dev/requirements.txt`.
-The development dependencies are listed in `dev/requirements-dev.txt`.
+The core dependencies are listed in `pyproject.toml`.
+The development dependencies are listed in the `dev` dependency group in `pyproject.toml`.
 
 # Build
 
 You can build the source package by executing the following command:
 
 ```commandline
-python3 setup.py sdist
+python3 -m build --sdist
 ```
 
 The package is under `dist/`. Then you can install the package by executing the following command:
@@ -30,4 +30,3 @@ pip3 install dist/*.tar.gz
 ```
 
 The command will install the package and core dependencies to your local Python environment.
-
