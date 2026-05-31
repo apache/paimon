@@ -66,7 +66,8 @@ case class PaimonMergeInto(spark: SparkSession)
               primaryKeys)
           }
 
-          // Commit schema changes before alignment so the aligned plan sees new columns.
+          // Evolve the target schema in memory before alignment so the aligned plan sees the new
+          // columns; the commit is deferred to execution (the merge command's run).
           val (resolvedMerge, targetOutput) =
             evolveTargetIfNeeded(merge, relation, v2Table, spark, resolveNotMatchedBySourceActions)
               .map { case (m, r, t) => v2Table = t; (m, r.output) }

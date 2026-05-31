@@ -113,6 +113,10 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
   }
 
+  def writeMergeSchemaTypeWideningEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.TYPE_WIDENING).toBoolean
+  }
+
   def v1FunctionEnabled(): Boolean = {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
   }

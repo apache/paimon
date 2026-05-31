@@ -71,6 +71,8 @@ case class MergeIntoPaimonTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Avoid that more than one source rows match the same target row.
     checkMatchRationality(sparkSession)
+    // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
+    SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, relation, sparkSession)
     val commitMessages = if (withPrimaryKeys) {
       performMergeForPkTable(sparkSession)
     } else {

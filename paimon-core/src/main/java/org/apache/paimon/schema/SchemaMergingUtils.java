@@ -45,6 +45,7 @@ public class SchemaMergingUtils {
     public static TableSchema mergeSchemas(
             TableSchema currentTableSchema,
             RowType targetType,
+            boolean typeWidening,
             boolean allowExplicitCast,
             boolean caseSensitive) {
         RowType currentType = currentTableSchema.logicalRowType();
@@ -55,7 +56,12 @@ public class SchemaMergingUtils {
         AtomicInteger highestFieldId = new AtomicInteger(currentTableSchema.highestFieldId());
         RowType newRowType =
                 mergeSchemas(
-                        currentType, targetType, highestFieldId, allowExplicitCast, caseSensitive);
+                        currentType,
+                        targetType,
+                        highestFieldId,
+                        typeWidening,
+                        allowExplicitCast,
+                        caseSensitive);
         if (newRowType.equals(currentType)) {
             // It happens if the `targetType` only changes `nullability` but we always respect the
             // current's.
@@ -76,32 +82,40 @@ public class SchemaMergingUtils {
             RowType tableSchema,
             RowType dataSchema,
             AtomicInteger highestFieldId,
+            boolean typeWidening,
             boolean allowExplicitCast,
             boolean caseSensitive) {
         return (RowType)
-                merge(tableSchema, dataSchema, highestFieldId, allowExplicitCast, caseSensitive);
+                merge(
+                        tableSchema,
+                        dataSchema,
+                        highestFieldId,
+                        typeWidening,
+                        allowExplicitCast,
+                        caseSensitive);
     }
 
     /**
-     * Merge the base data type and the update data type if possible.
+     * Merge the base (target) data type with the update (incoming) data type.
      *
-     * <p>For RowType, find the fields which exists in both the base schema and the update schema,
-     * and try to merge them by calling the method iteratively; remain those fields that are only in
-     * the base schema and append those fields that are only in the update schema.
-     *
-     * <p>For other complex type, try to merge the element types.
-     *
-     * <p>For primitive data type, we treat that's compatible if the original type can be safely
-     * cast to the new type.
+     * <ul>
+     *   <li>RowType: merge existing fields recursively, keep base-only fields, append update-only
+     *       fields as new columns.
+     *   <li>Complex types (Array/Map/Multiset): recursively merge element/value types.
+     *   <li>Leaf types when {@code typeWidening=false} (default): keep the base type unchanged —
+     *       incoming data is cast to it by the alignment layer.
+     *   <li>Leaf types when {@code typeWidening=true}: widen the base type to the update type if
+     *       the cast is safe (or explicit when {@code allowExplicitCast=true}).
+     * </ul>
      */
     public static DataType merge(
             DataType base0,
             DataType update0,
             AtomicInteger highestFieldId,
+            boolean typeWidening,
             boolean allowExplicitCast,
             boolean caseSensitive) {
-        // Here we try to merge the base0 and update0 without regard to the nullability,
-        // and set the base0's nullability to the return's.
+        // Compare ignoring nullability; the base's nullability flows to the result.
         DataType base = base0.copy(true);
         DataType update = update0.copy(true);
 
@@ -120,6 +134,7 @@ public class SchemaMergingUtils {
                                     baseField.type(),
                                     updateField.type(),
                                     highestFieldId,
+                                    typeWidening,
                                     allowExplicitCast,
                                     caseSensitive);
                     updatedFields.add(
@@ -149,12 +164,14 @@ public class SchemaMergingUtils {
                             ((MapType) base).getKeyType(),
                             ((MapType) update).getKeyType(),
                             highestFieldId,
+                            typeWidening,
                             allowExplicitCast,
                             caseSensitive),
                     merge(
                             ((MapType) base).getValueType(),
                             ((MapType) update).getValueType(),
                             highestFieldId,
+                            typeWidening,
                             allowExplicitCast,
                             caseSensitive));
         } else if (base instanceof ArrayType && update instanceof ArrayType) {
@@ -164,6 +181,7 @@ public class SchemaMergingUtils {
                             ((ArrayType) base).getElementType(),
                             ((ArrayType) update).getElementType(),
                             highestFieldId,
+                            typeWidening,
                             allowExplicitCast,
                             caseSensitive));
         } else if (base instanceof MultisetType && update instanceof MultisetType) {
@@ -173,8 +191,13 @@ public class SchemaMergingUtils {
                             ((MultisetType) base).getElementType(),
                             ((MultisetType) update).getElementType(),
                             highestFieldId,
+                            typeWidening,
                             allowExplicitCast,
                             caseSensitive));
+        } else if (!typeWidening) {
+            // Default: keep the existing leaf type — only column additions evolve the schema.
+            // Incoming values are cast to this type by the alignment layer.
+            return base0;
         } else if (base instanceof DecimalType && update instanceof DecimalType) {
             if (((DecimalType) base).getScale() == ((DecimalType) update).getScale()) {
                 return new DecimalType(
