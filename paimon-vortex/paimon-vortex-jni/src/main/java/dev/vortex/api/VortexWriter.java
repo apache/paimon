@@ -44,7 +44,8 @@ public final class VortexWriter implements AutoCloseable {
         // Use a dedicated allocator for schema export to avoid leaking retained
         // references into the caller's allocator (Arrow C Data Interface retain/release
         // semantics don't fully clean up via ArrowSchema.close in Arrow 15).
-        try (RootAllocator schemaAllocator = new RootAllocator(Long.MAX_VALUE)) {
+        RootAllocator schemaAllocator = new RootAllocator(Long.MAX_VALUE);
+        try {
             ArrowSchema cSchema = ArrowSchema.allocateNew(schemaAllocator);
             Data.exportSchema(schemaAllocator, arrowSchema, null, cSchema);
             long ptr =
@@ -55,6 +56,12 @@ public final class VortexWriter implements AutoCloseable {
                 throw new IOException("Failed to create Vortex writer for: " + uri);
             }
             return new VortexWriter(ptr);
+        } finally {
+            try {
+                schemaAllocator.close();
+            } catch (IllegalStateException ignored) {
+                // Arrow 15's C Data Interface may retain small residual references
+            }
         }
     }
 
