@@ -175,70 +175,61 @@ DELETE FROM my_table WHERE id = 1;
 
 Merges a set of updates, insertions and deletions based on a source table into a target table.
 
-Note:
-
 :::info
 
-In update clause, to update primary key columns is not supported when the target table is a primary key table.
+Updating primary key columns is not supported when the target table is a primary key table.
 
 :::
 
-**Example: One**
-
-This is a simple demo that, if a row exists in the target table update it, else insert it.
+### Syntax
 
 ```sql
--- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
-
 MERGE INTO target
 USING source
-ON target.a = source.a
-WHEN MATCHED THEN
-UPDATE SET *
-WHEN NOT MATCHED
-THEN INSERT *
+ON <merge condition>
+WHEN MATCHED [AND <condition>] THEN { UPDATE SET ... | DELETE }
+WHEN NOT MATCHED [AND <condition>] THEN INSERT ...
 ```
 
-**Example: Two**
+Each `WHEN` clause can be repeated; clauses are evaluated in order, and the first matching one wins for a given row.
 
-This is a demo with multiple, conditional clauses.
+### Examples
+
+The examples below assume both source and target have schema `(a INT, b INT, c STRING)`, with `a` as the primary key.
+
+Simple upsert — update existing rows, insert new ones:
 
 ```sql
--- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
-
 MERGE INTO target
 USING source
 ON target.a = source.a
-WHEN MATCHED AND target.a = 5 THEN
-   UPDATE SET b = source.b + target.b      -- when matched and meet the condition 1, then update b;
-WHEN MATCHED AND source.c > 'c2' THEN
-   UPDATE SET *    -- when matched and meet the condition 2, then update all the columns;
-WHEN MATCHED THEN
-   DELETE      -- when matched, delete this row in target table;
-WHEN NOT MATCHED AND c > 'c9' THEN
-   INSERT (a, b, c) VALUES (a, b * 1.1, c)      -- when not matched but meet the condition 3, then transform and insert this row;
-WHEN NOT MATCHED THEN
-INSERT *      -- when not matched, insert this row without any transformation;
+WHEN MATCHED THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *
+```
+
+Multiple conditional clauses:
+
+```sql
+MERGE INTO target
+USING source
+ON target.a = source.a
+WHEN MATCHED AND target.a = 5 THEN UPDATE SET b = source.b + target.b
+WHEN MATCHED AND source.c > 'c2' THEN UPDATE SET *
+WHEN MATCHED THEN DELETE
+WHEN NOT MATCHED AND c > 'c9' THEN INSERT (a, b, c) VALUES (a, b * 1.1, c)
+WHEN NOT MATCHED THEN INSERT *
 ```
 
 ### Column Alignment
 
 Assignments are aligned to the target table by **column name**.
 
-For explicit clauses (`UPDATE SET col = expr` / `INSERT (col list) VALUES ...`), only the mentioned columns are written. Unmentioned target columns preserve their current value for `UPDATE`, or are filled with NULL / `CURRENT_DEFAULT` for `INSERT`.
-
-For star clauses (`UPDATE SET *` / `INSERT *`), `*` expands against the **target** columns. The behavior when source and target columns don't match exactly depends on `spark.paimon.write.merge-schema` (see [Write Merge Schema](#write-merge-schema)):
-
-| Scenario | `merge-schema=false` (default) | `merge-schema=true` |
-|----------|-------------------------------|---------------------|
-| Top-level source-extra columns | Silently dropped (`*` only covers target columns) | Evolved into the target schema |
-| Top-level target columns missing from source | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
-| Nested struct source-extra fields | Throws | Evolved into the target schema |
-| Nested struct target-missing fields | Throws | `UPDATE *` preserves current value; `INSERT *` fills NULL |
-
-The key difference between top-level and nested: under strict mode (`merge-schema=false`), top-level source-extras are silently dropped because `*` never references them, while nested source-extras inside a struct value throw an error to avoid silent data loss.
+- **Explicit clauses** (`UPDATE SET col = expr` / `INSERT (col list) VALUES ...`) — only the mentioned columns are written. Unmentioned target columns preserve their current value for `UPDATE`, or get NULL / `CURRENT_DEFAULT` for `INSERT`.
+- **Star clauses** (`UPDATE SET *` / `INSERT *`) — `*` expands against the **target** columns. When source and target columns don't match exactly, the behavior depends on `spark.paimon.write.merge-schema`; see [Column Alignment by Write Path](#column-alignment-by-write-path) under Write Merge Schema for the full table covering both `MERGE INTO *` and byName `INSERT` paths.
 
 ## Write Merge Schema
+
+When `write.merge-schema` is enabled, Paimon automatically evolves the table schema during write to accommodate new columns in the incoming data, while preserving data integrity.
 
 :::info
 
@@ -246,25 +237,57 @@ Since the table schema may be updated during writing, catalog caching needs to b
 
 :::
 
-Write merge schema is a feature that allows users to easily modify the current schema of a table to adapt to existing data, or new data that changes over time, while maintaining data integrity and consistency.
+### How It Evolves the Schema
 
-Paimon supports automatic schema merging of source data and current table data while data is being written, and uses the merged schema as the latest schema of the table, and it only requires configuring `write.merge-schema`.
+Three options control how aggressively the schema evolves; each only takes effect when the previous one is enabled:
+
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 30%">Option</th>
+            <th class="text-left" style="width: 70%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>write.merge-schema</h5></td>
+            <td>If true, evolve the table schema to accept new columns from the incoming data. Existing column types are preserved and incoming values are cast to them; to also widen existing types, enable <code>write.merge-schema.type-widening</code>.</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.type-widening</h5></td>
+            <td>Only effective when <code>write.merge-schema</code> is true. If true, widen an existing column type when the incoming data has a wider compatible type (e.g. INT -> BIGINT, DECIMAL precision increase). Lossy changes are still rejected unless <code>write.merge-schema.explicit-cast</code> is also true.</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.explicit-cast</h5></td>
+            <td>Only effective when <code>write.merge-schema.type-widening</code> is true. If true, also allow lossy type changes between compatible types (e.g. BIGINT -> INT, STRING -> DATE).</td>
+        </tr>
+    </tbody>
+</table>
+
+### Examples
+
+DataFrame batch write:
 
 ```scala
 data.write
   .format("paimon")
   .mode("append")
   .option("write.merge-schema", "true")
-  .save(location)
+  .saveAsTable("t")
 ```
 
-When enable `write.merge-schema`, Paimon can allow users to perform the following actions on table schema by default:
-- Adding columns
-- Up-casting the type of column(e.g. Int -> Long)
+Spark SQL (requires Spark 3.5+ for `BY NAME`):
 
-Paimon also supports explicit type conversions between certain types (e.g. String -> Date, Long -> Int), it requires an explicit configuration `write.merge-schema.explicit-cast`.
+```sql
+SET `spark.paimon.write.merge-schema` = true;
 
-Write merge schema can be used in streaming mode at the same time.
+CREATE TABLE t (a INT, b STRING);
+INSERT INTO t VALUES (1, '1'), (2, '2');
+
+INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
+```
+
+Streaming write:
 
 ```scala
 val inputData = MemoryStream[(Int, String)]
@@ -275,48 +298,34 @@ inputData
   .format("paimon")
   .option("checkpointLocation", "/path/to/checkpoint")
   .option("write.merge-schema", "true")
-  .option("write.merge-schema.explicit-cast", "true")
-  .start(location)
+  .toTable("t")
 ```
 
-Here list the configurations.
+### Column Alignment by Write Path
 
-<table class="configuration table table-bordered">
-    <thead>
-        <tr>
-            <th class="text-left" style="width: 20%">Scan Mode</th>
-            <th class="text-left" style="width: 60%">Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><h5>write.merge-schema</h5></td>
-            <td>If true, merge the data schema and the table schema automatically before write data.</td>
-        </tr>
-        <tr>
-            <td><h5>write.merge-schema.explicit-cast</h5></td>
-            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
-        </tr>
-    </tbody>
-</table>
+When the source schema doesn't match the target schema exactly, the behavior depends on both `write.merge-schema` and the write path. For nested struct fields, all byName paths behave the same; at the top level, `MERGE INTO *` differs from regular byName `INSERT` because `*` expansion only references target columns.
 
-This mode also supports Spark SQL. Here is an example:
+| Write path | Scenario | `merge-schema=false` (default) | `merge-schema=true` |
+|------------|----------|-------------------------------|---------------------|
+| **byName `INSERT`** (`INSERT INTO ... BY NAME` / `saveAsTable` / `writeTo`) | Top-level source-extra columns | Throws | Evolved into the target schema |
+| | Top-level target columns missing from source | NULL-filled | NULL-filled |
+| | Nested struct source-extra fields | Throws | Evolved into the target schema |
+| | Nested struct target-missing fields | Throws | NULL-filled |
+| **`MERGE INTO *`** (`UPDATE *` / `INSERT *`) | Top-level source-extra columns | Silently dropped (`*` only covers target columns) | Evolved into the target schema |
+| | Top-level target columns missing from source | Throws | `UPDATE *` preserves current value; `INSERT *` fills `CURRENT_DEFAULT` (or NULL when no default) |
+| | Nested struct source-extra fields | Throws | Evolved into the target schema |
+| | Nested struct target-missing fields | Throws | `UPDATE *` preserves current value; `INSERT *` fills `CURRENT_DEFAULT` (or NULL when no default) |
 
-```sql
-SET `spark.paimon.write.merge-schema` = true;
-
-CREATE TABLE t (a INT, b STRING);
-INSERT INTO t VALUES (1, '1'), (2, '2');
-
--- Need using `BY NAME` statement (requires Spark 3.5+)
-INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
-```
+Notes:
+- Position-based writes (e.g. `INSERT INTO t VALUES (...)` without `BY NAME`) require an exact column count match and don't engage schema evolution; only byName writes are covered above.
+- Top-level target-missing under `merge-schema=false` for byName `INSERT` mirrors Spark's `INSERT FILL` semantics — only nested missing fields throw.
+- Under strict mode (`merge-schema=false`), nested source-extra fields throw to avoid silent data loss; for `MERGE INTO *` at the top level, source-extras are silently dropped because `*` never references them.
 
 ## COPY INTO
 
 `COPY INTO` provides a SQL command for bulk loading data files into Paimon tables and exporting table data to files. Supported formats: **CSV**, **JSON**, and **Parquet**.
 
-### CSV Import
+#### CSV Import
 
 ```sql
 COPY INTO table_name [(col1, col2, ...)]
@@ -354,7 +363,7 @@ PATTERN = '.*\.csv'
 FORCE = FALSE;
 ```
 
-### JSON Import
+#### JSON Import
 
 ```sql
 COPY INTO table_name [(col1, col2, ...)]
@@ -383,7 +392,7 @@ FILE_FORMAT = (TYPE = JSON, MULTI_LINE = TRUE);
 
 JSON columns are matched **by column name** (not by position), so source field order does not matter.
 
-### Parquet Import
+#### Parquet Import
 
 ```sql
 COPY INTO table_name [(col1, col2, ...)]
@@ -414,7 +423,7 @@ FORCE = FALSE;
 
 Parquet columns are matched **by column name** (not by position). Extra columns in the source files are ignored; missing columns become NULL.
 
-### Write CSV Files
+#### Write CSV Files
 
 ```sql
 COPY INTO 'target_path'
@@ -432,7 +441,7 @@ FILE_FORMAT = (TYPE = CSV, HEADER = TRUE, FIELD_DELIMITER = ',')
 OVERWRITE = TRUE;
 ```
 
-### Write JSON Files
+#### Write JSON Files
 
 ```sql
 COPY INTO 'target_path'
@@ -450,7 +459,7 @@ FILE_FORMAT = (TYPE = JSON)
 OVERWRITE = TRUE;
 ```
 
-### Write Parquet Files
+#### Write Parquet Files
 
 ```sql
 COPY INTO 'target_path'
@@ -477,7 +486,7 @@ FILE_FORMAT = (TYPE = PARQUET, COMPRESSION = GZIP)
 OVERWRITE = TRUE;
 ```
 
-### FILE_FORMAT Options
+#### FILE_FORMAT Options
 
 `FILE_FORMAT` is required and must include `TYPE = CSV`, `TYPE = JSON`, or `TYPE = PARQUET`.
 
@@ -538,7 +547,7 @@ OVERWRITE = TRUE;
 | TYPE | File format type. `CSV`, `JSON`, or `PARQUET`. | (required) |
 | COMPRESSION | Compression codec (`SNAPPY`, `GZIP`, `NONE`, etc.). | `SNAPPY` |
 
-### Import Options
+#### Import Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -546,13 +555,13 @@ OVERWRITE = TRUE;
 | FORCE | `FALSE`: skip files already loaded (idempotent). `TRUE`: reload all files. | `FALSE` |
 | ON_ERROR | Error handling strategy. Only `ABORT_STATEMENT` is supported. | `ABORT_STATEMENT` |
 
-### File Write Options
+#### File Write Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | OVERWRITE | `FALSE`: fail if target path exists. `TRUE`: overwrite existing files. | `FALSE` |
 
-### Column Mapping
+#### Column Mapping
 
 When an explicit column list is provided (e.g., `COPY INTO t (col1, col2) FROM ...`):
 
@@ -568,7 +577,7 @@ When no column list is provided:
 - **CSV**: Columns are mapped positionally to all writable columns in the target table. The number of CSV columns must match the number of writable columns.
 - **JSON**: Columns are matched by name to the writable columns. Missing fields in JSON become NULL.
 
-### Repeated Imports
+#### Repeated Imports
 
 By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfully loaded. A file is identified by its path, size, and last-modified timestamp.
 
@@ -576,7 +585,7 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 - If a source file is modified (size or timestamp changes), it becomes eligible for re-loading.
 - `FORCE = TRUE` bypasses load history and always re-imports all matching files.
 
-### Result Output
+#### Result Output
 
 **Import** returns one row per source file:
 
@@ -595,7 +604,7 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 | file_count | INT | Number of files written |
 | rows_written | BIGINT | Total rows written |
 
-### Limitations
+#### Limitations
 
 - Only **CSV**, **JSON**, and **Parquet** formats are supported.
 - Writing files only supports `FROM table_name`; `FROM (SELECT ...)` is not supported.

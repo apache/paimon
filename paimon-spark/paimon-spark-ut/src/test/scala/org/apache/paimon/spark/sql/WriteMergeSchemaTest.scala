@@ -482,7 +482,7 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     withTable("t") {
       withSparkSQLConf(
         "spark.paimon.write.merge-schema" -> "true",
-        "spark.paimon.write.merge-schema.explicit-cast" -> "true") {
+        "spark.paimon.write.merge-schema.type-widening" -> "true") {
         sql("CREATE TABLE t (id INT, info STRUCT<f1 INT, f2 STRING>)")
         sql("INSERT INTO t VALUES (1, struct(10, 'a'))")
 
@@ -641,6 +641,28 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Merge into with merge-schema: append-only target evolves schema") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, name STRING) USING paimon")
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      spark
+        .sql("SELECT 1 AS id, 'a2' AS name, 100 AS value UNION ALL SELECT 3 AS id, 'c' AS name, 30 AS value")
+        .createOrReplaceTempView("s")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.id
+              | WHEN MATCHED THEN UPDATE SET *
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      assert(spark.table("t").schema.fieldNames.toSeq == Seq("id", "name", "value"))
+      checkAnswer(
+        sql("SELECT id, name, value FROM t ORDER BY id"),
+        Seq(Row(1, "a2", 100), Row(2, "b", null), Row(3, "c", 30)))
+    }
+  }
+
   test("Merge into with merge-schema: extra column with case-mismatched existing columns") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT, name STRING)
@@ -775,6 +797,46 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Merge into without merge-schema: ARRAY<INT> target with ARRAY<BIGINT> source") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, ports ARRAY<INT>)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, array(80, 443))")
+
+      spark
+        .sql("SELECT 1 AS id, array(cast(8080 as bigint), cast(9090 as bigint)) AS ports")
+        .createOrReplaceTempView("s")
+
+      sql("""MERGE INTO t USING s ON t.id = s.id
+            | WHEN MATCHED THEN UPDATE SET *
+            | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+
+      val portsType = spark.table("t").schema("ports").dataType
+      assert(
+        portsType.simpleString == "array<int>",
+        s"Expected array<int> but got ${portsType.simpleString}")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, Seq(8080, 9090))))
+    }
+  }
+
+  test("Write merge schema: INT to BIGINT keeps target type") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, value INT)")
+      sql("INSERT INTO t VALUES (1, 100)")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("INSERT INTO t BY NAME SELECT 2 AS id, cast(200 as bigint) AS value")
+      }
+
+      val valueType = spark.table("t").schema("value").dataType
+      assert(valueType.simpleString == "int", s"Expected int but got ${valueType.simpleString}")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 100), Row(2, 200)))
+    }
+  }
+
   test("Merge into with merge-schema: case-sensitive mode treats different case as new columns") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT, name STRING)
@@ -849,6 +911,32 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Merge into with merge-schema: ARRAY<INT> to ARRAY<BIGINT> keeps target type") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, ports ARRAY<INT>)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, array(80, 443))")
+
+      spark
+        .sql("SELECT 1 AS id, array(cast(8080 as bigint), cast(9090 as bigint)) AS ports")
+        .createOrReplaceTempView("s")
+
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.id
+              | WHEN MATCHED THEN UPDATE SET *
+              | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+      }
+
+      val portsType = spark.table("t").schema("ports").dataType
+      assert(
+        portsType.simpleString == "array<int>",
+        s"Expected array<int> but got ${portsType.simpleString}")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, Seq(8080, 9090))))
+    }
+  }
+
   test("Write merge schema: case-sensitive mode treats different case as new columns") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, name STRING)")
@@ -864,6 +952,53 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
       assert(
         columnNames.length == 5,
         s"Expected 5 columns (id, name, ID, NAME, extra) but got ${columnNames.length}: ${columnNames.mkString(", ")}")
+    }
+  }
+
+  test("Merge into with type-widening=true: INT to BIGINT widens existing column") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, v INT)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 10)")
+
+      spark.sql("SELECT 1 AS id, cast(200 AS bigint) AS v").createOrReplaceTempView("s")
+
+      withSparkSQLConf(
+        "spark.paimon.write.merge-schema" -> "true",
+        "spark.paimon.write.merge-schema.type-widening" -> "true") {
+        sql("""MERGE INTO t USING s ON t.id = s.id
+              | WHEN MATCHED THEN UPDATE SET *""".stripMargin)
+      }
+
+      assert(spark.table("t").schema("v").dataType.simpleString == "bigint")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 200L)))
+    }
+  }
+
+  test("Merge into with type-widening=true: ARRAY element widening throws (known limitation)") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, ports ARRAY<INT>)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, array(80))")
+
+      spark
+        .sql("SELECT 2 AS id, array(cast(9090 AS bigint)) AS ports")
+        .createOrReplaceTempView("s")
+
+      // KNOWN LIMITATION: widening the element type of ARRAY/MAP is not yet supported by
+      // SchemaManager.generateTableSchema (CastExecutors has no ARRAY<INT> -> ARRAY<BIGINT>
+      // rule). Tracked as a follow-up; until then type-widening on complex element types throws.
+      withSparkSQLConf(
+        "spark.paimon.write.merge-schema" -> "true",
+        "spark.paimon.write.merge-schema.type-widening" -> "true") {
+        intercept[Exception] {
+          sql("""MERGE INTO t USING s ON t.id = s.id
+                | WHEN MATCHED THEN UPDATE SET *
+                | WHEN NOT MATCHED THEN INSERT *""".stripMargin)
+        }
+      }
     }
   }
 }

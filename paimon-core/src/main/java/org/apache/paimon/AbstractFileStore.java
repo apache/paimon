@@ -271,9 +271,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast, boolean caseSensitive) {
+    public boolean mergeSchema(
+            RowType rowType,
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive) {
         return schemaManager.mergeSchema(
-                rowType, allowExplicitCast, caseSensitive, catalogEnvironment.schemaModification());
+                rowType,
+                typeWidening,
+                allowExplicitCast,
+                caseSensitive,
+                catalogEnvironment.schemaModification());
     }
 
     @Override
