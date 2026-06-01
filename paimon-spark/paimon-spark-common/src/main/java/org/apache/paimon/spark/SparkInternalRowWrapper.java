@@ -259,7 +259,20 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public InternalVector getVector(int pos) {
-        throw new UnsupportedOperationException("Not support VectorType yet.");
+        int actualPos = getActualFieldPosition(pos);
+        if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
+            return null;
+        }
+        DataType dataType = tableSchema.fields()[pos].dataType();
+        return toSparkInternalVector(dataType, internalRow.getArray(actualPos));
+    }
+
+    private static InternalVector toSparkInternalVector(DataType dataType, ArrayData arrayData) {
+        if (!(dataType instanceof ArrayType)) {
+            throw new UnsupportedOperationException("Not a vector type: " + dataType);
+        }
+        ArrayType arrayType = (ArrayType) dataType;
+        return new SparkInternalVector(arrayData, arrayType.elementType());
     }
 
     @Override
@@ -435,7 +448,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public InternalVector getVector(int pos) {
-            throw new UnsupportedOperationException("Not support VectorType yet.");
+            return toSparkInternalVector(elementType, arrayData.getArray(pos));
         }
 
         @Override
@@ -449,6 +462,13 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         public InternalRow getRow(int pos, int numFields) {
             return new SparkInternalRowWrapper((StructType) elementType, numFields)
                     .replace(arrayData.getStruct(pos, numFields));
+        }
+    }
+
+    /** adapt to spark internal vector. */
+    public static class SparkInternalVector extends SparkInternalArray implements InternalVector {
+        public SparkInternalVector(ArrayData arrayData, DataType elementType) {
+            super(arrayData, elementType);
         }
     }
 

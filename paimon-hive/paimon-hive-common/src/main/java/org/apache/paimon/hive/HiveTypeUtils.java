@@ -45,6 +45,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.common.type.HiveVarchar;
@@ -233,6 +234,11 @@ public class HiveTypeUtils {
         @Override
         public TypeInfo visit(BlobType blobType) {
             return TypeInfoFactory.binaryTypeInfo;
+        }
+
+        @Override
+        public TypeInfo visit(VectorType vectorType) {
+            return TypeInfoFactory.getListTypeInfo(vectorType.getElementType().accept(this));
         }
 
         @Override

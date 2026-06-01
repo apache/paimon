@@ -44,7 +44,9 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.ExceptionUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
@@ -73,6 +75,7 @@ import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.execution.datasources.DataSource;
 import org.apache.spark.sql.execution.datasources.FileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2;
+import org.apache.spark.sql.types.ArrayType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -563,6 +566,7 @@ public class SparkCatalog extends SparkBaseCatalog
         List<String> blobFields = CoreOptions.blobField(properties);
         Set<String> blobDescriptorFields = new CoreOptions(properties).blobDescriptorField();
         List<String> blobViewFields = CoreOptions.blobViewField(properties);
+        Set<String> vectorFields = CoreOptions.fromMap(properties).vectorField();
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -609,6 +613,22 @@ public class SparkCatalog extends SparkBaseCatalog
                         field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                         "The type of blob field must be binary");
                 type = new BlobType();
+            } else if (vectorFields.contains(field.name())) {
+                Preconditions.checkArgument(
+                        field.dataType() instanceof ArrayType,
+                        "The type of blob field must be array");
+                ArrayType arrayType = (ArrayType) field.dataType();
+                String dimKey = String.format("field.%s.vector-dim", field.name());
+                Preconditions.checkArgument(
+                        properties.containsKey(dimKey),
+                        "When setting '"
+                                + CoreOptions.VECTOR_FIELD.key()
+                                + "', you must also set 'field.%s.vector-dim',"
+                                + " where %s is the name of the vector field.");
+                type =
+                        DataTypes.VECTOR(
+                                Integer.parseInt(properties.get(dimKey)),
+                                toPaimonType(arrayType.elementType()));
             } else {
                 type = toPaimonType(field.dataType()).copy(field.nullable());
             }
