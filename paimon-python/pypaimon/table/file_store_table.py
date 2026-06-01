@@ -63,6 +63,9 @@ class FileStoreTable(Table):
         current_branch = self.options.branch()
         self.schema_manager = SchemaManager(file_io, table_path, branch=current_branch)
 
+        self._query_auth_fn = self.catalog_environment.table_query_auth(
+            self.options, self.identifier)
+
     @classmethod
     def from_path(cls, table_path: str) -> 'FileStoreTable':
         """
@@ -408,10 +411,10 @@ class FileStoreTable(Table):
                 return BucketMode.HASH_FIXED
 
     def new_read_builder(self) -> 'ReadBuilder':
-        return ReadBuilder(self)
+        return ReadBuilder(self, query_auth=self._query_auth_fn)
 
     def new_stream_read_builder(self) -> 'StreamReadBuilder':
-        return StreamReadBuilder(self)
+        return StreamReadBuilder(self, query_auth=self._query_auth_fn)
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)

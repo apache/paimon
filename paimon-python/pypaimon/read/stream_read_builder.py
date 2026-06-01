@@ -48,7 +48,7 @@ class StreamReadBuilder:
             process(arrow_table)
     """
 
-    def __init__(self, table):
+    def __init__(self, table, query_auth=None):
         """Initialize the StreamReadBuilder."""
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -59,6 +59,7 @@ class StreamReadBuilder:
         self._include_row_kind: bool = False
         self._bucket_filter: Optional[Callable[[int], bool]] = None
         self._consumer_id: Optional[str] = None
+        self._query_auth = query_auth
 
     def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
         """Set a filter predicate for the streaming read."""

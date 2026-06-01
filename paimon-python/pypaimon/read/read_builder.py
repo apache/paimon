@@ -33,7 +33,7 @@ from pypaimon.utils.projection import Projection, is_row_type
 class ReadBuilder:
     """Implementation of ReadBuilder for native Python reading."""
 
-    def __init__(self, table):
+    def __init__(self, table, query_auth=None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -45,6 +45,7 @@ class ReadBuilder:
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[List[int]]] = None
         self._limit: Optional[int] = None
+        self._query_auth = query_auth
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
@@ -77,7 +78,9 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            query_auth=self._query_auth,
+            read_type=self.read_type()
         )
 
     def new_read(self) -> TableRead:

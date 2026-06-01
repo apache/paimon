@@ -107,7 +107,7 @@ class TableRead:
             for split in splits:
                 if limit is not None and count >= limit:
                     return
-                reader = self._create_split_read(split).create_reader()
+                reader = self._create_reader_for_split(split)
                 try:
                     for batch in iter(reader.read_batch, None):
                         for row in iter(batch.next, None):
@@ -198,7 +198,7 @@ class TableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = self._create_split_read(split).create_reader()
+            reader = self._create_reader_for_split(split)
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -645,6 +645,61 @@ class TableRead:
                     "table schema" % (top_name,))
             widened.append(field)
         return widened
+
+    def _create_reader_for_split(self, split):
+        from pypaimon.read.query_auth_split import QueryAuthSplit
+
+        auth_result = None
+        if isinstance(split, QueryAuthSplit):
+            auth_result = split.auth_result
+            split = split.split
+
+        if auth_result is not None:
+            return self._authed_reader(split, auth_result)
+        else:
+            return self._create_split_read(split).create_reader()
+
+    def _authed_reader(self, split, auth_result):
+        from pypaimon.read.reader.auth_masking_reader import (
+            AuthFilterReader, AuthMaskingReader, ColumnProjectReader)
+
+        table_fields = self.table.fields
+        read_fields = self.read_type
+
+        extra_fields = auth_result.get_extra_fields_for_filter(read_fields, table_fields)
+        effective_read_type = read_fields
+        if extra_fields:
+            effective_read_type = read_fields + extra_fields
+
+        reader = self._create_split_read_with_read_type(split, effective_read_type).create_reader()
+
+        filter_fn = auth_result.extract_row_filter()
+        if filter_fn:
+            reader = AuthFilterReader(reader, filter_fn)
+
+        if auth_result.column_masking:
+            reader = AuthMaskingReader(reader, auth_result.column_masking, effective_read_type)
+
+        if extra_fields:
+            original_columns = [f.name for f in read_fields]
+            reader = ColumnProjectReader(reader, original_columns)
+
+        return reader
+
+    def _create_split_read_with_read_type(self, split, read_type):
+        if self.table.is_primary_key_table and not split.raw_convertible:
+            return MergeFileSplitRead(
+                table=self.table, predicate=self.predicate,
+                read_type=read_type, split=split, row_tracking_enabled=False)
+        elif self.table.options.data_evolution_enabled():
+            return DataEvolutionSplitRead(
+                table=self.table, predicate=self.predicate,
+                read_type=read_type, split=split, row_tracking_enabled=True)
+        else:
+            return RawFileSplitRead(
+                table=self.table, predicate=self.predicate,
+                read_type=read_type, split=split,
+                row_tracking_enabled=self.table.options.row_tracking_enabled())
 
     @staticmethod
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:
