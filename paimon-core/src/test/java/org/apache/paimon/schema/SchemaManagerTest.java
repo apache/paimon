@@ -169,6 +169,47 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testResetSequenceGroupForAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.f2.aggregate-function", "sum");
+        options.put("fields.f1.sequence-group", "f2");
+        Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.removeOption(
+                                                                "fields.f1.sequence-group"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Must use sequence group for aggregation functions but not found for field f2.");
+    }
+
+    @Test
+    public void testResetSequenceGroupForLastNonNullAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.f2.aggregate-function", "last_non_null_value");
+        options.put("fields.f1.sequence-group", "f2");
+        Schema schema = new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.removeOption("fields.f1.sequence-group")));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest.isPresent()).isTrue();
+        assertThat(latest.get().options()).doesNotContainKey("fields.f1.sequence-group");
+    }
+
+    @Test
     public void testConcurrentCommit() throws Exception {
         retryArtificialException(
                 () ->
