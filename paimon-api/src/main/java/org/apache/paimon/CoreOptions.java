@@ -2236,6 +2236,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_SKIP_FILE_PRUNING =
+            key("data-evolution.merge-into.skip-file-pruning")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, skips the file-level pruning step for MergeInto partial column "
+                                    + "update on data-evolution tables. "
+                                    + "Use this when most files in the target partition are expected to be "
+                                    + "updated, so that the overhead of collecting touched file IDs outweighs "
+                                    + "the benefit of pruning untouched files.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -3728,6 +3739,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionMergeIntoSkipFilePruning() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_SKIP_FILE_PRUNING);
     }
 
     public boolean blobCompactionEnabled() {
