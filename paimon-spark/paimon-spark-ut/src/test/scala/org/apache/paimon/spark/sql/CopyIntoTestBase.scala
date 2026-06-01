@@ -27,7 +27,7 @@ import java.nio.file.Files
 
 class CopyIntoTestBase extends PaimonSparkTestBase {
 
-  private def createCsvFile(dir: File, name: String, content: String): File = {
+  protected def createCsvFile(dir: File, name: String, content: String): File = {
     val file = new File(dir, name)
     val writer = new PrintWriter(file)
     try writer.write(content)
@@ -35,13 +35,13 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     file
   }
 
-  private def withCsvDir(testBody: File => Unit): Unit = {
+  protected def withCsvDir(testBody: File => Unit): Unit = {
     val dir = Files.createTempDirectory("copy_into_test").toFile
     try testBody(dir)
     finally deleteRecursively(dir)
   }
 
-  private def deleteRecursively(file: File): Unit = {
+  protected def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
       file.listFiles().foreach(deleteRecursively)
     }
@@ -648,7 +648,7 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_dup_col")
   }
 
-  private def createJsonFile(dir: File, name: String, content: String): File = {
+  protected def createJsonFile(dir: File, name: String, content: String): File = {
     val file = new File(dir, name)
     val writer = new PrintWriter(file)
     try writer.write(content)
@@ -656,7 +656,7 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     file
   }
 
-  private def withJsonDir(testBody: File => Unit): Unit = {
+  protected def withJsonDir(testBody: File => Unit): Unit = {
     val dir = Files.createTempDirectory("copy_into_json_test").toFile
     try testBody(dir)
     finally deleteRecursively(dir)
@@ -1086,7 +1086,7 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
 
   // ========== Parquet Tests ==========
 
-  private def withParquetDir(testBody: File => Unit): Unit = {
+  protected def withParquetDir(testBody: File => Unit): Unit = {
     val dir = Files.createTempDirectory("copy_into_parquet_test").toFile
     try testBody(dir)
     finally deleteRecursively(dir)
@@ -1101,7 +1101,7 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     df.coalesce(1).write.parquet(new File(dir, name).getAbsolutePath)
   }
 
-  private def createParquetSingleFile(
+  protected def createParquetSingleFile(
       dir: File,
       fileName: String,
       data: Seq[Row],
