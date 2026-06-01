@@ -843,6 +843,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 null);
     }
 
+    /**
+     * Validates that no concurrent data was written to the overwritten partition(s) between {@code
+     * baseSnapshotId} and {@code latestSnapshot}.
+     *
+     * <p>Checks are partition-level: any new file in an overwritten partition is treated as a
+     * conflict. For non-partitioned tables the table is treated as a single logical partition
+     * ({@link org.apache.paimon.data.BinaryRow#EMPTY_ROW}).
+     */
     private Snapshot validateOverwriteBaseSnapshot(
             long baseSnapshotId,
             Snapshot latestSnapshot,

@@ -57,7 +57,8 @@ public interface FileStoreCommit extends AutoCloseable {
      *     key-values. This is just the partition to be cleaned up.
      * @param baseSnapshotId If non-null, the DELETE list is built from this snapshot instead of the
      *     latest, and concurrent writes between this snapshot and the latest are detected as
-     *     conflicts. Used by sort compact to prevent data loss.
+     *     conflicts at partition granularity (any new file in an overwritten partition fails the
+     *     commit). For non-partitioned tables the whole table is one logical partition.
      */
     int overwritePartition(
             Map<String, String> partition,
