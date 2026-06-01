@@ -54,6 +54,8 @@ from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
+from pypaimon.read.reader.aggregation_merge_function import (
+    AggregateMergeFunction, build_field_aggregators)
 from pypaimon.read.reader.partial_update_merge_function import \
     PartialUpdateMergeFunction
 from pypaimon.read.reader.first_row_merge_function import \
@@ -694,6 +696,23 @@ class MergeFileSplitRead(SplitRead):
         if engine == MergeEngine.FIRST_ROW:
             return FirstRowMergeFunction(
                 ignore_delete=self.table.options.ignore_delete(),
+            )
+        if engine == MergeEngine.AGGREGATE:
+            # Use the full primary-key list, not ``trimmed_primary_key``:
+            # ``value_fields`` still carries partition columns, so any PK
+            # column that is also a partition column must be recognised
+            # as PK here. Otherwise a table with
+            # ``fields.default-aggregate-function`` would apply the
+            # default aggregator to that partition-PK column.
+            field_aggregators = build_field_aggregators(
+                self.value_fields,
+                self.table.primary_keys,
+                self.table.options,
+            )
+            return AggregateMergeFunction(
+                key_arity=len(self.trimmed_primary_key),
+                value_arity=self.value_arity,
+                field_aggregators=field_aggregators,
             )
         # check_supported() rejects everything else at TableRead.__init__.
         raise AssertionError(
