@@ -27,6 +27,9 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
@@ -94,7 +97,9 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -1960,40 +1965,85 @@ public class FileStoreCommitTest {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Reproduces the sort-compact data-loss scenario from the PR: read at S0 (A,B,C), concurrent
+     * append D at S1, then overwrite with base S0 must fail instead of deleting D silently.
+     */
     @Test
-    public void testOverwriteWithBaseSnapshotPinsDeleteList() throws Exception {
+    public void testSortCompactConcurrentWriteFailsOnPartitionedTable() throws Exception {
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
         BinaryRow partition = gen.getPartition(gen.next());
 
-        // Commit snapshot 1: files A, B
-        CommitMessageImpl msg1 =
-                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
-        store.commit(msg1);
-        long baseSnapshotId = store.snapshotManager().latestSnapshotId();
+        long baseSnapshotId =
+                commitFiles(store, partition, Arrays.asList("A.parquet", "B.parquet", "C.parquet"));
+        commitFiles(store, partition, Collections.singletonList("D.parquet"));
 
-        // Concurrent write: commit snapshot 2 with file C (simulates write after sort compact read)
-        CommitMessageImpl msg2 =
-                store.writeDataFiles(partition, 0, Collections.singletonList("C.parquet"));
-        store.commit(msg2);
-        long latestSnapshotId = store.snapshotManager().latestSnapshotId();
-        assertThat(latestSnapshotId).isEqualTo(baseSnapshotId + 1);
+        List<String> filesBeforeOverwrite = visibleFileNames(store);
+        assertThat(filesBeforeOverwrite)
+                .containsExactlyInAnyOrder("A.parquet", "B.parquet", "C.parquet", "D.parquet");
 
-        // Overwrite with baseSnapshotId should detect conflict (file C added after base)
+        assertSortCompactConflict(
+                store,
+                partition,
+                Collections.emptyMap(),
+                baseSnapshotId,
+                Arrays.asList("X.parquet", "Y.parquet"));
+
+        assertThat(visibleFileNames(store))
+                .containsExactlyInAnyOrder("A.parquet", "B.parquet", "C.parquet", "D.parquet");
+    }
+
+    @Test
+    public void testSortCompactConcurrentWriteFailsOnNonPartitionedTable() throws Exception {
+        TestAppendFileStore store =
+                TestAppendFileStore.createNonPartitionedAppendStore(tempDir, new HashMap<>());
+
+        long baseSnapshotId =
+                commitFiles(store, EMPTY_ROW, Arrays.asList("A.parquet", "B.parquet", "C.parquet"));
+        commitFiles(store, EMPTY_ROW, Collections.singletonList("D.parquet"));
+
+        assertSortCompactConflict(
+                store,
+                EMPTY_ROW,
+                Collections.emptyMap(),
+                baseSnapshotId,
+                Arrays.asList("X.parquet", "Y.parquet"));
+
+        assertThat(visibleFileNames(store))
+                .containsExactlyInAnyOrder("A.parquet", "B.parquet", "C.parquet", "D.parquet");
+    }
+
+    @Test
+    public void testSortCompactConcurrentWriteToOtherPartitionDoesNotConflict() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partitionToOverwrite = partitionRow("2024-01-01", 1);
+        BinaryRow otherPartition = partitionRow("2024-01-02", 2);
+
+        long baseSnapshotId =
+                commitFiles(
+                        store, partitionToOverwrite, Arrays.asList("A.parquet", "B.parquet"));
+        commitFiles(store, otherPartition, Collections.singletonList("E.parquet"));
+
+        long baseSnapshotIdBeforeConcurrent = store.snapshotManager().latestSnapshotId();
+        assertThat(baseSnapshotIdBeforeConcurrent).isEqualTo(baseSnapshotId + 1);
+
+        commitFiles(store, otherPartition, Collections.singletonList("F.parquet"));
+
         FileStoreCommitImpl commit = store.newCommit();
-        ManifestCommittable committable = new ManifestCommittable(100L);
-        CommitMessageImpl sortedFiles =
-                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
-        committable.addFileCommittable(sortedFiles);
+        ManifestCommittable committable =
+                overwriteCommittable(
+                        store, partitionToOverwrite, Arrays.asList("X.parquet", "Y.parquet"));
+        Map<String, String> partitionSpec =
+                TestKeyValueGenerator.toPartitionMap(partitionToOverwrite, MULTI_PARTITIONED);
 
-        assertThatThrownBy(
-                        () ->
-                                commit.overwritePartition(
-                                        Collections.emptyMap(),
-                                        committable,
-                                        Collections.emptyMap(),
-                                        baseSnapshotId))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Sort compact conflict detected");
+        int snapshots =
+                commit.overwritePartition(
+                        partitionSpec, committable, Collections.emptyMap(), baseSnapshotId);
+        assertThat(snapshots).isGreaterThan(0);
+        assertThat(visibleFileNames(store, partitionToOverwrite))
+                .containsExactlyInAnyOrder("X.parquet", "Y.parquet");
+        assertThat(visibleFileNames(store, otherPartition))
+                .containsExactlyInAnyOrder("E.parquet", "F.parquet");
         commit.close();
     }
 
@@ -2002,18 +2052,12 @@ public class FileStoreCommitTest {
         TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
         BinaryRow partition = gen.getPartition(gen.next());
 
-        // Commit snapshot 1: files A, B
-        CommitMessageImpl msg1 =
-                store.writeDataFiles(partition, 0, Arrays.asList("A.parquet", "B.parquet"));
-        store.commit(msg1);
-        long baseSnapshotId = store.snapshotManager().latestSnapshotId();
+        long baseSnapshotId =
+                commitFiles(store, partition, Arrays.asList("A.parquet", "B.parquet"));
 
-        // No concurrent write happens; overwrite with baseSnapshotId should succeed
         FileStoreCommitImpl commit = store.newCommit();
-        ManifestCommittable committable = new ManifestCommittable(100L);
-        CommitMessageImpl sortedFiles =
-                store.writeDataFiles(partition, 0, Arrays.asList("X.parquet", "Y.parquet"));
-        committable.addFileCommittable(sortedFiles);
+        ManifestCommittable committable =
+                overwriteCommittable(store, partition, Arrays.asList("X.parquet", "Y.parquet"));
 
         int snapshots =
                 commit.overwritePartition(
@@ -2025,6 +2069,10 @@ public class FileStoreCommitTest {
 
         Snapshot latest = store.snapshotManager().latestSnapshot();
         assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(deltaDeletes(latest, store))
+                .containsExactlyInAnyOrder("A.parquet", "B.parquet");
+        assertThat(visibleFileNames(store))
+                .containsExactlyInAnyOrder("X.parquet", "Y.parquet");
         commit.close();
     }
 
@@ -2191,6 +2239,81 @@ public class FileStoreCommitTest {
                         .collect(Collectors.toList());
         assertThat(visibleFiles).containsExactlyInAnyOrder("C.parquet", "X.parquet", "Y.parquet");
         commit.close();
+    }
+
+    private static BinaryRow partitionRow(String dt, int hr) {
+        InternalRowSerializer partitionSerializer =
+                new InternalRowSerializer(TestKeyValueGenerator.DEFAULT_PART_TYPE);
+        return partitionSerializer
+                .toBinaryRow(GenericRow.of(BinaryString.fromString(dt), hr))
+                .copy();
+    }
+
+    private static long commitFiles(
+            TestAppendFileStore store, BinaryRow partition, List<String> fileNames)
+            throws Exception {
+        store.commit(store.writeDataFiles(partition, 0, fileNames));
+        return store.snapshotManager().latestSnapshotId();
+    }
+
+    private static ManifestCommittable overwriteCommittable(
+            TestAppendFileStore store, BinaryRow partition, List<String> sortedFileNames)
+            throws Exception {
+        ManifestCommittable committable = new ManifestCommittable(100L);
+        committable.addFileCommittable(store.writeDataFiles(partition, 0, sortedFileNames));
+        return committable;
+    }
+
+    private static void assertSortCompactConflict(
+            TestAppendFileStore store,
+            BinaryRow partition,
+            Map<String, String> partitionSpec,
+            long baseSnapshotId,
+            List<String> sortedFileNames)
+            throws Exception {
+        FileStoreCommitImpl commit = store.newCommit();
+        try {
+            ManifestCommittable committable =
+                    overwriteCommittable(store, partition, sortedFileNames);
+            assertThatThrownBy(
+                            () ->
+                                    commit.overwritePartition(
+                                            partitionSpec,
+                                            committable,
+                                            Collections.emptyMap(),
+                                            baseSnapshotId))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("Sort compact conflict detected");
+        } finally {
+            commit.close();
+        }
+    }
+
+    private static List<String> visibleFileNames(TestAppendFileStore store) {
+        return store.newScan().plan().files().stream()
+                .map(e -> e.file().fileName())
+                .collect(Collectors.toList());
+    }
+
+    private static List<String> visibleFileNames(TestAppendFileStore store, BinaryRow partition) {
+        return store.newScan()
+                .withPartitionFilter(Collections.singletonList(partition))
+                .plan()
+                .files()
+                .stream()
+                .map(e -> e.file().fileName())
+                .collect(Collectors.toList());
+    }
+
+    private static List<String> deltaDeletes(Snapshot snapshot, TestAppendFileStore store)
+            throws Exception {
+        ManifestList manifestList = store.manifestListFactory().create();
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+        return manifestList.readDeltaManifests(snapshot).stream()
+                .flatMap(meta -> manifestFile.read(meta.fileName()).stream())
+                .filter(e -> e.kind() == FileKind.DELETE)
+                .map(e -> e.file().fileName())
+                .collect(Collectors.toList());
     }
 
     private void logData(Supplier<List<KeyValue>> supplier, String name) {
