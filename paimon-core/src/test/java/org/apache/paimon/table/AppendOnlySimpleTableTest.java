@@ -320,7 +320,12 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     public void testDiscardDuplicateFilesMultiThread() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
-                        options -> options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true));
+                        options -> {
+                            options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true);
+                            // Keep all snapshots so concurrent expiry does not race readers.
+                            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1000);
+                            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1000);
+                        });
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         List<List<CommitMessage>> messages = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
