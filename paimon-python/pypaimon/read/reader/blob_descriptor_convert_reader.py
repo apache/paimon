@@ -25,7 +25,7 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.table.row.blob import Blob, BlobViewStruct
 
 
-class BlobDescriptorConvertReader(RecordBatchReader):
+class BlobInlineConvertReader(RecordBatchReader):
     """Resolves BlobView and BlobDescriptor fields in record batches.
 
     Processing is split into two clear stages:
@@ -103,6 +103,11 @@ class BlobDescriptorConvertReader(RecordBatchReader):
                         value = self._normalize_blob_to_bytes(value)
                         if isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value):
                             all_view_structs.append(BlobViewStruct.deserialize(value))
+                        else:
+                            raise ValueError(
+                                f"Expected BlobViewStruct bytes in view field '{field_name}', "
+                                f"but got non-BlobViewStruct bytes (length={len(value)})"
+                            )
         finally:
             prescan_reader.close()
 
@@ -185,22 +190,3 @@ class BlobDescriptorConvertReader(RecordBatchReader):
 
     def close(self):
         self._inner.close()
-
-
-class _CachedBatchReader(RecordBatchReader):
-    """A simple reader that replays pre-cached RecordBatches.
-    Used as fallback when no prescan_reader_factory is provided."""
-
-    def __init__(self, batches):
-        self._batches = batches
-        self._index = 0
-
-    def read_arrow_batch(self) -> Optional[RecordBatch]:
-        if self._index >= len(self._batches):
-            return None
-        batch = self._batches[self._index]
-        self._index += 1
-        return batch
-
-    def close(self):
-        self._batches = None

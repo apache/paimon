@@ -47,10 +47,10 @@ class TableReadPlan:
     """A plan for reading blob descriptors from one upstream table."""
 
     def __init__(self, identifier: Identifier, upstream_table,
-                 fields: List, row_ranges: List[Range]):
+                 read_fields: List, row_ranges: List[Range]):
         self.identifier: Identifier = identifier
         self.upstream_table = upstream_table
-        self.fields: List = fields
+        self.read_fields: List = read_fields
         self.row_ranges: List[Range] = row_ranges
 
 
@@ -120,20 +120,22 @@ class BlobViewLookup:
         for field_id in table_refs.references_by_field:
             fields.append(self._field_by_id(upstream_table, field_id))
 
-        return TableReadPlan(table_refs.identifier, upstream_table, fields, Range.to_ranges(table_refs.row_ids))
+        read_fields = SpecialFields.row_type_with_row_id(fields)
+        return TableReadPlan(
+            table_refs.identifier, upstream_table, read_fields,
+            Range.to_ranges(table_refs.row_ids))
 
     def _load_descriptor_chunk(
             self, plan: TableReadPlan, row_ranges: List[Range]
     ) -> Dict[BlobViewStruct, BlobDescriptor]:
         identifier: Identifier = plan.identifier
         upstream_table = plan.upstream_table
-        fields: List = plan.fields
+        read_fields = plan.read_fields
 
-        field_names: List[str] = [f.name for f in fields]
-        projection: List[str] = field_names + [SpecialFields.ROW_ID.name]
+        projection_field_names: List[str] = [f.name for f in read_fields]
 
         descriptor_table = upstream_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
-        read_builder = descriptor_table.new_read_builder().with_projection(projection)
+        read_builder = descriptor_table.new_read_builder().with_projection(projection_field_names)
 
         if SpecialFields.ROW_ID.name not in [
             data_field.name for data_field in read_builder.read_type()
@@ -167,14 +169,16 @@ class BlobViewLookup:
 
         row_id_values: List = result.column(SpecialFields.ROW_ID.name).to_pylist()
         resolved: Dict[BlobViewStruct, BlobDescriptor] = {}
-        for field in fields:
+        for field in read_fields:
+            if field.name == SpecialFields.ROW_ID.name:
+                continue
             if field.name not in result.schema.names:
                 continue
             values = result.column(field.name).to_pylist()
             for row_id, value in zip(row_id_values, values):
                 if value is None:
                     continue
-                descriptor = self._to_descriptor(value)
+                descriptor = BlobDescriptor.deserialize(value)
                 view_struct = BlobViewStruct(
                     identifier.get_full_name(), field.id, int(row_id))
                 resolved[view_struct] = descriptor
@@ -246,18 +250,3 @@ class BlobViewLookup:
             "Cannot find blob fieldId {} in upstream table {}."
             .format(field_id, table.identifier.get_full_name())
         )
-
-    def _to_descriptor(self, value) -> BlobDescriptor:
-        if hasattr(value, "as_py"):
-            value = value.as_py()
-        if isinstance(value, str):
-            value = value.encode("utf-8")
-        if isinstance(value, bytearray):
-            value = bytes(value)
-        if not isinstance(value, bytes):
-            raise ValueError("Blob view upstream value must be serialized blob bytes.")
-        if BlobViewStruct.is_blob_view_struct(value):
-            return self.resolve_descriptor(BlobViewStruct.deserialize(value))
-        if not BlobDescriptor.is_blob_descriptor(value):
-            raise ValueError("Blob view upstream value is not a serialized BlobDescriptor.")
-        return BlobDescriptor.deserialize(value)

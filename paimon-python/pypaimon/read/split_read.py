@@ -40,7 +40,7 @@ from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch, VectorBunch
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
-from pypaimon.read.reader.blob_descriptor_convert_reader import BlobDescriptorConvertReader
+from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader, LimitedRecordReader
 from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
@@ -813,7 +813,7 @@ class DataEvolutionSplitRead(SplitRead):
         if (CoreOptions.blob_view_fields(self.table.options)
                 or (not CoreOptions.blob_as_descriptor(self.table.options)
                     and CoreOptions.blob_descriptor_fields(self.table.options))):
-            reader = BlobDescriptorConvertReader(
+            reader = BlobInlineConvertReader(
                 reader, self.table,
                 prescan_reader_factory=lambda names: self._create_prescan_reader(names))
 
