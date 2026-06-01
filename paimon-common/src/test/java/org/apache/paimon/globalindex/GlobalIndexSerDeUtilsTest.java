@@ -36,7 +36,7 @@ public class GlobalIndexSerDeUtilsTest {
     @Test
     public void testSerializeAndDeserializeGlobalIndexResult() throws IOException {
         RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 5, 10, 100, 1000);
-        GlobalIndexResult original = GlobalIndexResult.create(() -> bitmap);
+        GlobalIndexResult original = GlobalIndexResult.create(bitmap);
 
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);
@@ -65,8 +65,7 @@ public class GlobalIndexSerDeUtilsTest {
         scoreMap.put(10L, 0.7f);
         scoreMap.put(100L, 0.6f);
 
-        ScoredGlobalIndexResult original =
-                ScoredGlobalIndexResult.create(() -> bitmap, scoreMap::get);
+        ScoredGlobalIndexResult original = ScoredGlobalIndexResult.create(bitmap, scoreMap::get);
 
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);
@@ -92,8 +91,7 @@ public class GlobalIndexSerDeUtilsTest {
         scoreMap.put(Integer.MAX_VALUE + 100L, 0.3f);
         scoreMap.put(Long.MAX_VALUE - 1, 0.1f);
 
-        ScoredGlobalIndexResult original =
-                ScoredGlobalIndexResult.create(() -> bitmap, scoreMap::get);
+        ScoredGlobalIndexResult original = ScoredGlobalIndexResult.create(bitmap, scoreMap::get);
 
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);

@@ -562,6 +562,7 @@ class HdfsFileIOTest(unittest.TestCase):
             self.assertIn('HADOOP_CONF_DIR', str(ctx.exception))
 
 
+@unittest.skipUnless(hasattr(pafs, 'GcsFileSystem'), "PyArrow GCS support not available")
 class GCSFileIOPathTest(unittest.TestCase):
     """Unit tests for PyArrowFileIO.to_filesystem_path with GCS (no credentials required)."""
 

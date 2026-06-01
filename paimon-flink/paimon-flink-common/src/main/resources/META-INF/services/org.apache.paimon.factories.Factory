@@ -50,6 +50,7 @@ org.apache.paimon.flink.action.ClearConsumerActionFactory
 org.apache.paimon.flink.action.RescaleActionFactory
 org.apache.paimon.flink.action.CloneActionFactory
 org.apache.paimon.flink.action.DataEvolutionMergeIntoActionFactory
+org.apache.paimon.flink.action.ReassignRowIdActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
@@ -102,6 +103,7 @@ org.apache.paimon.flink.procedure.AlterColumnDefaultValueProcedure
 org.apache.paimon.flink.procedure.TriggerTagAutomaticCreationProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingManifestsProcedure
 org.apache.paimon.flink.procedure.DataEvolutionMergeIntoProcedure
+org.apache.paimon.flink.procedure.ReassignRowIdProcedure
 org.apache.paimon.flink.procedure.CreateGlobalIndexProcedure
 org.apache.paimon.flink.procedure.VectorSearchProcedure
 org.apache.paimon.flink.procedure.DropGlobalIndexProcedure

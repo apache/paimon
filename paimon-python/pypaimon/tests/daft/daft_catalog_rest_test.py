@@ -16,11 +16,11 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for PaimonCatalog REST catalog path (using mocks, no real server needed)."""
+"""Tests for the daft + REST catalog code path."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,6 +34,7 @@ from pypaimon.catalog.catalog_exception import (
 )
 
 from pypaimon.daft.daft_catalog import PaimonCatalog
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 # ---------------------------------------------------------------------------
 # Helpers: build a mock inner catalog that mimics RESTCatalog's interface
@@ -231,3 +232,80 @@ def test_create_namespace_single_part():
     cat.create_namespace("new_db")
 
     inner.create_database.assert_called_once_with("new_db", ignore_if_exists=False)
+
+
+class DaftRestReadTest(RESTBaseTest):
+
+    def test_read_table_forwards_full_catalog_options_to_datasource(self):
+        from pypaimon.daft.daft_datasource import PaimonDataSource
+        from pypaimon.daft.daft_paimon import _read_table
+
+        captured = {}
+        original_init = PaimonDataSource.__init__
+
+        def spy_init(_self, table, storage_config, catalog_options):
+            captured["catalog_options"] = dict(catalog_options)
+            return original_init(
+                _self, table,
+                storage_config=storage_config,
+                catalog_options=catalog_options,
+            )
+
+        with patch.object(PaimonDataSource, "__init__", spy_init):
+            _read_table(self.table, catalog_options=self.options)
+
+        received = captured["catalog_options"]
+        self.assertEqual(received.get("metastore"), "rest", received)
+        self.assertIn("uri", received, received)
+        self.assertIn("token", received, received)
+
+    def test_read_table_enriches_io_config_with_rest_token(self):
+        from pypaimon.daft import daft_io_config
+        from pypaimon.daft.daft_paimon import _read_table
+
+        token_payload = {
+            "fs.oss.accessKeyId": "ak-from-dlf",
+            "fs.oss.accessKeySecret": "sk-from-dlf",
+            "fs.oss.securityToken": "sts-from-dlf",
+        }
+        fake_token = MagicMock()
+        fake_token.token = token_payload
+        fake_file_io = MagicMock()
+        fake_file_io.token = fake_token
+
+        captured = {}
+        original_builder = daft_io_config._convert_paimon_catalog_options_to_io_config
+
+        def spy_builder(opts):
+            captured["opts"] = dict(opts)
+            return original_builder(opts)
+
+        oss_options = {**self.options, "warehouse": "morax_test"}
+        oss_table_path = "oss://my-bucket/db.db/tbl-abc"
+
+        with patch.object(self.table, "file_io", fake_file_io), \
+             patch.object(self.table, "table_path", oss_table_path), \
+             patch.object(daft_io_config, "_convert_paimon_catalog_options_to_io_config", spy_builder):
+            _read_table(self.table, catalog_options=oss_options)
+
+        for k, v in token_payload.items():
+            self.assertEqual(captured["opts"].get(k), v, captured["opts"])
+        self.assertEqual(captured["opts"].get("warehouse"), "oss://my-bucket", captured["opts"])
+        fake_file_io.try_to_refresh_token.assert_called()
+
+    def test_enrich_is_noop_when_not_rest_metastore(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+        opts = {"warehouse": "/tmp/x", "metastore": "filesystem"}
+        self.assertIs(_enrich_options_with_rest_token(opts, self.table), opts)
+
+    def test_enrich_is_noop_when_file_io_has_no_refresh(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+        with patch.object(self.table, "file_io", MagicMock(spec=[])):
+            self.assertIs(_enrich_options_with_rest_token(self.options, self.table), self.options)
+
+    def test_enrich_is_noop_when_token_is_none(self):
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
+        fake_file_io = MagicMock()
+        fake_file_io.token = None
+        with patch.object(self.table, "file_io", fake_file_io):
+            self.assertIs(_enrich_options_with_rest_token(self.options, self.table), self.options)

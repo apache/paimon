@@ -26,6 +26,7 @@ from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -136,15 +137,12 @@ class TableUpdate:
     def _update_by_arrow_with_row_id(
             self, table: pa.Table, commit_identifier: int
     ) -> List[CommitMessage]:
-        """Shared implementation for ``update_by_arrow_with_row_id``.
-
-        The public method lives on the concrete subclasses so each can
-        expose the signature appropriate to its mode (batch vs stream).
-        Produced commit messages are tagged with ``commit_identifier``.
-        """
+        cols = self.update_cols if self.update_cols is not None else [
+            c for c in table.column_names if c != SpecialFields.ROW_ID.name
+        ]
         return TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
-        ).update_columns(table, self.update_cols)
+        ).update_columns(table, cols)
 
     def _upsert_by_arrow_with_key(
             self,

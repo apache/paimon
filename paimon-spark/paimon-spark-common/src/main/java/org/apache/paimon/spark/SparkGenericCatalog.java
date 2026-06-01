@@ -43,6 +43,7 @@ import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.PaimonCatalogUtils;
+import org.apache.spark.sql.connector.catalog.SparkV1PartitionManagement;
 import org.apache.spark.sql.connector.catalog.StagedTable;
 import org.apache.spark.sql.connector.catalog.StagingTableCatalog;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
@@ -170,8 +171,15 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         try {
             return sparkCatalog.loadTable(ident);
         } catch (NoSuchTableException e) {
-            return throwsOldIfExceptionHappens(() -> asTableCatalog().loadTable(ident), e);
+            return throwsOldIfExceptionHappens(() -> loadFallbackTable(ident), e);
         }
+    }
+
+    private Table loadFallbackTable(Identifier ident) throws NoSuchTableException {
+        Table table = asTableCatalog().loadTable(ident);
+        return "spark_catalog".equals(catalogName)
+                ? table
+                : SparkV1PartitionManagement.wrap(table, getDelegateCatalog());
     }
 
     @Override

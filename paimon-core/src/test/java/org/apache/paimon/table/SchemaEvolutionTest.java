@@ -41,8 +41,10 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LazyField;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -189,6 +191,352 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testAddBlobColumnViaCommentDirective() throws Exception {
+        // create table with one pre-existing BLOB column registered in blob-field, so we can
+        // also verify that ADD COLUMN appends to (rather than overwrites) the existing value.
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "existing_col");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1, "existing_col", DataTypes.BLOB().copy(true))
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // bare directive — no user comment, appended to existing blob-field value.
+        // directive + user comment, SDK caller passes a BlobType directly (allowed when
+        // accompanied by a directive so the storage mode is explicit).
+        schemaManager.commitChanges(
+                ImmutableList.of(
+                        SchemaChange.addColumn("picture", DataTypes.BYTES(), "__BLOB_FIELD", null),
+                        SchemaChange.addColumn(
+                                "desc_col",
+                                DataTypes.BLOB(),
+                                "__BLOB_DESCRIPTOR_FIELD; descriptor comment",
+                                null)));
+
+        TableSchema latest = schemaManager.latest().get();
+
+        DataField picture =
+                latest.fields().stream().filter(f -> f.name().equals("picture")).findFirst().get();
+        assertThat(picture.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(picture.description()).isNull();
+
+        DataField desc =
+                latest.fields().stream().filter(f -> f.name().equals("desc_col")).findFirst().get();
+        assertThat(desc.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(desc.description()).isEqualTo("descriptor comment");
+
+        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key()))
+                .isEqualTo("existing_col,picture");
+        assertThat(latest.options().get(CoreOptions.BLOB_DESCRIPTOR_FIELD.key()))
+                .isEqualTo("desc_col");
+    }
+
+    @Test
+    public void testAddBlobColumnErrors() throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1,
+                                                    "nested",
+                                                    DataTypes.ROW(
+                                                            new DataField(2, "a", DataTypes.INT())))
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        ""));
+
+        // non-BYTES/BINARY type rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "bad",
+                                                        DataTypes.INT(),
+                                                        "__BLOB_FIELD",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
+
+        // nested column rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        new String[] {"nested", "blob"},
+                                                        DataTypes.BYTES(),
+                                                        "__BLOB_FIELD",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nested column");
+
+        // SET OPTION on blob-field is rejected (the option is @Immutable).
+        TableSchema oldSchema = schemaManager.latest().get();
+        LazyField<Boolean> hasSnapshots = new LazyField<>(() -> true);
+        LazyField<Identifier> lazyId = new LazyField<>(() -> identifier);
+        assertThatThrownBy(
+                        () ->
+                                SchemaManager.generateTableSchema(
+                                        oldSchema,
+                                        Collections.singletonList(
+                                                SchemaChange.setOption(
+                                                        CoreOptions.BLOB_FIELD.key(), "k")),
+                                        hasSnapshots,
+                                        lazyId))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.BLOB_FIELD.key());
+    }
+
+    @Test
+    public void testDropColumnCleansOptions() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1, "pic", DataTypes.BYTES(), "__BLOB_FIELD"),
+                                            new DataField(
+                                                    2,
+                                                    "emb",
+                                                    DataTypes.ARRAY(DataTypes.FLOAT()),
+                                                    "__VECTOR_FIELD;64")
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        TableSchema before = schemaManager.latest().get();
+        assertThat(before.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
+        assertThat(before.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("emb");
+
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("pic")));
+        TableSchema afterPic = schemaManager.latest().get();
+        assertThat(afterPic.options()).doesNotContainKey(CoreOptions.BLOB_FIELD.key());
+        assertThat(afterPic.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("emb");
+
+        schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("emb")));
+        TableSchema afterEmb = schemaManager.latest().get();
+        assertThat(afterEmb.options()).doesNotContainKey(CoreOptions.VECTOR_FIELD.key());
+    }
+
+    @Test
+    public void testUpdateColumnTypeOnBlobIsRejected() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(1, "pic", DataTypes.BLOB().copy(true)),
+                                            new DataField(2, "raw", DataTypes.BYTES())
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        // BLOB -> BYTES rejected.
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "pic", DataTypes.BYTES()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("BLOB");
+
+        // BYTES -> BLOB rejected (must be added via ADD COLUMN directive instead).
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnType(
+                                                        "raw", DataTypes.BLOB()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("BLOB");
+    }
+
+    @Test
+    public void testAddBlobViewColumnViaCommentDirective() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "view_col",
+                                DataTypes.BYTES(),
+                                "__BLOB_VIEW_FIELD; view comment",
+                                null)));
+
+        TableSchema latest = schemaManager.latest().get();
+        DataField viewCol =
+                latest.fields().stream().filter(f -> f.name().equals("view_col")).findFirst().get();
+        assertThat(viewCol.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(viewCol.description()).isEqualTo("view comment");
+        assertThat(latest.options().get(CoreOptions.BLOB_VIEW_FIELD.key())).isEqualTo("view_col");
+    }
+
+    @Test
+    public void testAddVectorColumnViaCommentDirective() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.addColumn(
+                                "embedding",
+                                DataTypes.ARRAY(DataTypes.FLOAT()),
+                                "__VECTOR_FIELD;128; embedding vector",
+                                null)));
+
+        TableSchema latest = schemaManager.latest().get();
+        DataField embedding =
+                latest.fields().stream()
+                        .filter(f -> f.name().equals("embedding"))
+                        .findFirst()
+                        .get();
+        assertThat(embedding.type().getTypeRoot()).isEqualTo(DataTypeRoot.VECTOR);
+        assertThat(embedding.description()).isEqualTo("embedding vector");
+        assertThat(latest.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("embedding");
+    }
+
+    @Test
+    public void testAddVectorColumnErrors() throws Exception {
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        ""));
+
+        // non-ARRAY type rejected for vector directive
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        "bad",
+                                                        DataTypes.INT(),
+                                                        "__VECTOR_FIELD;128",
+                                                        null))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be of ARRAY type");
+    }
+
+    @Test
+    public void testCreateTableWithCommentDirectives() throws Exception {
+        Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField[] {
+                                            new DataField(0, "k", DataTypes.INT()),
+                                            new DataField(
+                                                    1,
+                                                    "pic",
+                                                    DataTypes.BYTES(),
+                                                    "__BLOB_FIELD; picture"),
+                                            new DataField(
+                                                    2,
+                                                    "view_col",
+                                                    DataTypes.BYTES(),
+                                                    "__BLOB_VIEW_FIELD; view field"),
+                                            new DataField(
+                                                    3,
+                                                    "embedding",
+                                                    DataTypes.ARRAY(DataTypes.FLOAT()),
+                                                    "__VECTOR_FIELD;64; my embedding")
+                                        })
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        TableSchema latest = schemaManager.latest().get();
+
+        DataField pic =
+                latest.fields().stream().filter(f -> f.name().equals("pic")).findFirst().get();
+        assertThat(pic.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(pic.description()).isEqualTo("picture");
+
+        DataField viewCol =
+                latest.fields().stream().filter(f -> f.name().equals("view_col")).findFirst().get();
+        assertThat(viewCol.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
+        assertThat(viewCol.description()).isEqualTo("view field");
+
+        DataField embedding =
+                latest.fields().stream()
+                        .filter(f -> f.name().equals("embedding"))
+                        .findFirst()
+                        .get();
+        assertThat(embedding.type().getTypeRoot()).isEqualTo(DataTypeRoot.VECTOR);
+        assertThat(embedding.description()).isEqualTo("my embedding");
+
+        assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
+        assertThat(latest.options().get(CoreOptions.BLOB_VIEW_FIELD.key())).isEqualTo("view_col");
+        assertThat(latest.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("embedding");
+    }
+
+    private static Map<String, String> blobEnabledOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        return options;
+    }
+
+    @Test
     public void testUpdateFieldType() throws Exception {
         Schema schema =
                 Schema.newBuilder()
@@ -241,6 +589,178 @@ public class SchemaEvolutionTest {
                 Collections.singletonList(SchemaChange.updateColumnType("k", DataTypes.STRING()));
         assertThatThrownBy(() -> schemaManager.commitChanges(changes))
                 .hasMessageContaining("Cannot update primary key");
+    }
+
+    @Test
+    public void testUpdateColumnNullability() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.BIGINT())
+                        .build();
+        schemaManager.createTable(schema);
+
+        // nullable -> NOT NULL (disabled by default)
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.updateColumnNullability("f0", false))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("nullable to non nullable");
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")));
+
+        // nullable -> NOT NULL
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability("f0", false)));
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isFalse();
+
+        // NOT NULL -> nullable
+        tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability("f0", true)));
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isTrue();
+    }
+
+    @Test
+    public void testUpdatePrimaryKeyNullability() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.BIGINT())
+                        .primaryKey("k")
+                        .build();
+        schemaManager.createTable(schema);
+
+        List<SchemaChange> changes =
+                Collections.singletonList(SchemaChange.updateColumnNullability("k", true));
+        assertThatThrownBy(() -> schemaManager.commitChanges(changes))
+                .hasMessageContaining("Cannot change nullability of primary key");
+    }
+
+    @Test
+    public void testUpdateFieldTypeWithNullabilityChange() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.BIGINT())
+                        .build();
+        schemaManager.createTable(schema);
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")));
+
+        // updateColumnType with keepNullability=true should preserve nullability
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType(
+                                        "f0", DataTypes.BIGINT().notNull(), true)));
+        assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isTrue();
+
+        // updateColumnType with keepNullability=false should update nullability
+        tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType(
+                                        "f0", DataTypes.DOUBLE().notNull(), false)));
+        assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.DOUBLE().notNull());
+        assertThat(tableSchema.fields().get(0).type().isNullable()).isFalse();
+    }
+
+    @Test
+    public void testUpdateNestedColumnNullability() throws Exception {
+        RowType innerType =
+                RowType.of(
+                        new DataField(2, "f1", DataTypes.INT()),
+                        new DataField(3, "f2", DataTypes.BIGINT()));
+        RowType outerType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "v", innerType));
+
+        Schema schema =
+                new Schema(
+                        outerType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.createTable(schema);
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                Collections.singletonList(
+                        SchemaChange.setOption(
+                                CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false")));
+
+        // update nested field nullability
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnNullability(
+                                        new String[] {"v", "f1"}, false)));
+        RowType resultType = tableSchema.logicalRowType();
+        RowType nestedType = (RowType) resultType.getFields().get(1).type();
+        assertThat(nestedType.getFields().get(0).type().isNullable()).isFalse();
+        assertThat(nestedType.getFields().get(1).type().isNullable()).isTrue();
+    }
+
+    @Test
+    public void testUpdateColumnNullabilityWithData() throws Exception {
+        Schema schema =
+                new Schema(
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        schemaManager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(GenericRow.of(1, 1L));
+        write.write(GenericRow.of(2, null));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // enable null-to-not-null
+        schemaManager.commitChanges(
+                SchemaChange.setOption(
+                        CoreOptions.DISABLE_ALTER_COLUMN_NULL_TO_NOT_NULL.key(), "false"));
+        // change f0 to NOT NULL
+        schemaManager.commitChanges(SchemaChange.updateColumnNullability("f0", false));
+
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        // data written before nullability change should still be readable
+        List<String> rows = readRecords(table, null);
+        assertThat(rows).containsExactlyInAnyOrder("1, 1", "2, NULL");
+
+        // write new data after nullability change
+        write = table.newWrite(commitUser);
+        write.write(GenericRow.of(3, 3L));
+        commit = table.newCommit(commitUser);
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        rows = readRecords(table, null);
+        assertThat(rows).containsExactlyInAnyOrder("1, 1", "2, NULL", "3, 3");
     }
 
     @Test

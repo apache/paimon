@@ -25,7 +25,7 @@ under the License.
 
 # Data Evolution
 
-PyPaimon for Data Evolution mode. See [Data Evolution](../append-table/data-evolution).
+PyPaimon for Data Evolution mode. See [Data Evolution](../multimodal-table/data-evolution).
 
 ## Prerequisites
 

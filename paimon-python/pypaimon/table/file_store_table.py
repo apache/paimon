@@ -81,6 +81,10 @@ class FileStoreTable(Table):
 
         return cls(file_io, identifier, table_path, table_schema)
 
+    def schema(self) -> TableSchema:
+        """Get the table schema."""
+        return self.table_schema
+
     def current_branch(self) -> str:
         """Get the current branch name from the identifier."""
         return self.identifier.get_branch_name_or_default()
@@ -297,6 +301,23 @@ class FileStoreTable(Table):
         from pypaimon.table.rollback_helper import RollbackHelper
         return RollbackHelper(
             self.snapshot_manager(), self.tag_manager(), self.file_io)
+
+    def rollback_to_timestamp(self, timestamp_millis: int) -> None:
+        """Rollback table to the latest snapshot with commit time <= the given timestamp.
+
+        Args:
+            timestamp_millis: The timestamp in milliseconds to rollback to.
+
+        Raises:
+            ValueError: If no snapshot exists at or before the given timestamp.
+        """
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
+        if snapshot is None:
+            raise ValueError(
+                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+            )
+        self.rollback_to(snapshot.id)
 
     def rename_tag(self, old_name: str, new_name: str) -> None:
         """

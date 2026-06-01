@@ -80,6 +80,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String NESTED_SEQUENCE_FIELD = "nested-sequence-field";
+
     public static final String COUNT_LIMIT = "count-limit";
 
     public static final String DISTINCT = "distinct";
@@ -1427,6 +1429,7 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    @Immutable
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
             key("dynamic-bucket.initial-buckets")
                     .intType()
@@ -1878,6 +1881,17 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(2))
                     .withDescription("The target size of deletion vector index file.");
 
+    public static final ConfigOption<Boolean> DELETION_VECTORS_MERGE_ON_READ =
+            key("deletion-vectors.merge-on-read")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When deletion vectors are enabled, uncompacted files are not visible by default. "
+                                    + "Set this to true to enable merge-on-read, which makes uncompacted data "
+                                    + "visible at the cost of read performance. "
+                                    + "This option only affects batch scan visibility of DV level-0 files, "
+                                    + "it does not change streaming scan or changelog behavior.");
+
     public static final ConfigOption<Boolean> DELETION_VECTOR_BITMAP64 =
             key("deletion-vectors.bitmap64")
                     .booleanType()
@@ -2296,6 +2310,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Format table commit hive sync uri.");
 
+    @Immutable
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
                     .stringType()
@@ -2325,6 +2340,15 @@ public class CoreOptions implements Serializable {
                             "Comma-separated field names to treat as BLOB fields and store "
                                     + "as serialized BlobViewStruct bytes inline in data files and "
                                     + "resolve from upstream tables at read time.");
+
+    public static final ConfigOption<Boolean> BLOB_VIEW_RESOLVE_ENABLED =
+            key("blob-view.resolve.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to resolve blob-view-field values from upstream tables at "
+                                    + "read time. Set to false to preserve BlobViewStruct references "
+                                    + "when forwarding blob view values to another blob-view table.");
 
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
@@ -2424,10 +2448,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(32)
                     .withDescription(
-                            "The maximum number of concurrent scanner for global index."
-                                    + "By default is the number of processors available to the Java virtual machine.");
+                            "The maximum number of concurrent threads for global index I/O.");
 
     public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
             key("overwrite-upgrade")
@@ -2482,7 +2505,7 @@ public class CoreOptions implements Serializable {
                             Description.builder()
                                     .text(
                                             "Target size of a vector-store file."
-                                                    + " Default is 10 * TARGET_FILE_SIZE.")
+                                                    + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
     @Immutable
@@ -2711,6 +2734,18 @@ public class CoreOptions implements Serializable {
         String keyString =
                 options.get(
                         key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY)
+                                .stringType()
+                                .noDefaultValue());
+        if (keyString == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public List<String> fieldNestedUpdateAggNestedSequenceField(String fieldName) {
+        String keyString =
+                options.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_SEQUENCE_FIELD)
                                 .stringType()
                                 .noDefaultValue());
         if (keyString == null) {
@@ -2997,6 +3032,11 @@ public class CoreOptions implements Serializable {
      */
     public Set<String> blobViewField() {
         return parseCommaSeparatedSet(BLOB_VIEW_FIELD);
+    }
+
+    /** Whether to resolve blob view references at read time. */
+    public boolean blobViewResolveEnabled() {
+        return options.get(BLOB_VIEW_RESOLVE_ENABLED);
     }
 
     /** Resolve blob fields that are stored inline in normal data files. */
@@ -3647,8 +3687,15 @@ public class CoreOptions implements Serializable {
         return options.get(FORCE_LOOKUP);
     }
 
+    public boolean deletionVectorsMergeOnRead() {
+        return options.get(DELETION_VECTORS_MERGE_ON_READ);
+    }
+
     public boolean batchScanSkipLevel0() {
-        return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
+        if (deletionVectorsEnabled()) {
+            return !deletionVectorsMergeOnRead();
+        }
+        return mergeEngine() == FIRST_ROW;
     }
 
     public MemorySize dvIndexFileTargetSize() {
@@ -3911,10 +3958,9 @@ public class CoreOptions implements Serializable {
     }
 
     public long vectorTargetFileSize() {
-        // Since vectors are large, it would be better to set a larger target size for vectors.
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
-                .orElse(10 * targetFileSize(false));
+                .orElse(targetFileSize(false));
     }
 
     /** Specifies the merge engine for table with primary key. */

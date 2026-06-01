@@ -39,4 +39,10 @@ public class OrderSorter extends TableSorter {
         Column[] sortColumns = orderColNames.stream().map(input::col).toArray(Column[]::new);
         return input.repartitionByRange(sortColumns).sortWithinPartitions(sortColumns);
     }
+
+    @Override
+    public Dataset<Row> sortLocal(Dataset<Row> input) {
+        Column[] sortColumns = orderColNames.stream().map(input::col).toArray(Column[]::new);
+        return input.sortWithinPartitions(sortColumns);
+    }
 }

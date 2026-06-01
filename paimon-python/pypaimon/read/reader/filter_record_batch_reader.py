@@ -46,6 +46,8 @@ class FilterRecordBatchReader(RecordBatchReader):
         self.predicate = predicate
         self.field_names = field_names
         self.schema_fields = schema_fields
+        self.file_io = reader.file_io
+        self.blob_field_indices = reader.blob_field_indices
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
         while True:

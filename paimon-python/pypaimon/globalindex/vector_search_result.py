@@ -111,15 +111,15 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
 
     @staticmethod
     def create(
-        supplier: Callable[[], RoaringBitmap64],
+        bitmap: RoaringBitmap64,
         score_getter: ScoreGetter
     ) -> 'ScoredGlobalIndexResult':
-        """Creates a new VectorSearchGlobalIndexResult from supplier."""
-        return LazyScoredGlobalIndexResult(supplier, score_getter)
+        """Creates a new ScoredGlobalIndexResult wrapping the given bitmap."""
+        return SimpleScoredGlobalIndexResult(bitmap, score_getter)
 
 
 class SimpleScoredGlobalIndexResult(ScoredGlobalIndexResult):
-    """Simple implementation of VectorSearchGlobalIndexResult."""
+    """Simple implementation of ScoredGlobalIndexResult."""
 
     def __init__(self, bitmap: RoaringBitmap64, score_getter_fn: ScoreGetter):
         self._bitmap = bitmap
@@ -127,23 +127,6 @@ class SimpleScoredGlobalIndexResult(ScoredGlobalIndexResult):
 
     def results(self) -> RoaringBitmap64:
         return self._bitmap
-
-    def score_getter(self) -> ScoreGetter:
-        return self._score_getter_fn
-
-
-class LazyScoredGlobalIndexResult(ScoredGlobalIndexResult):
-    """Lazy implementation of VectorSearchGlobalIndexResult."""
-
-    def __init__(self, supplier: Callable[[], RoaringBitmap64], score_getter_fn: ScoreGetter):
-        self._supplier = supplier
-        self._score_getter_fn = score_getter_fn
-        self._cached: Optional[RoaringBitmap64] = None
-
-    def results(self) -> RoaringBitmap64:
-        if self._cached is None:
-            self._cached = self._supplier()
-        return self._cached
 
     def score_getter(self) -> ScoreGetter:
         return self._score_getter_fn

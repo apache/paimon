@@ -78,6 +78,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
@@ -281,6 +282,10 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
+        } else {
+            checkArgument(
+                    !options.deletionVectorsMergeOnRead(),
+                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
         // vector field names must point to vector type
@@ -677,7 +682,9 @@ public class SchemaValidation {
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
-            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+            if (schema.primaryKeys().isEmpty()
+                    && schema.bucketKeys().isEmpty()
+                    && (bucket != 1 || schema.version() != PAIMON_07_VERSION)) {
                 throw new RuntimeException(
                         "You should define a 'bucket-key' for bucketed append mode.");
             }
@@ -782,6 +789,9 @@ public class SchemaValidation {
         FileFormat vectorFileFormat = vectorFileFormat(options);
         if (vectorFileFormat != null) {
             Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
+            checkArgument(
+                    fields.size() > vectorStoreNames.size(),
+                    "Table with VECTOR type column must have other normal columns.");
             checkArgument(
                     schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
                     "The vector-store columns can not be part of partition keys.");
@@ -939,6 +949,14 @@ public class SchemaValidation {
             Preconditions.checkArgument(
                     options.partitionTimestampFormatter() != null,
                     "Partition timestamp formatter is required for chain table.");
+
+            if (options.partitionExpireTime() != null) {
+                Preconditions.checkArgument(
+                        "values-time".equals(options.partitionExpireStrategy()),
+                        "Chain table only supports 'values-time' partition expiration strategy, "
+                                + "but found '%s'.",
+                        options.partitionExpireStrategy());
+            }
 
             // validate chain-table.chain-partition-keys
             List<String> chainPartKeys = options.chainTableChainPartitionKeys();

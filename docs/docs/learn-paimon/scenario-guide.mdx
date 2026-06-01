@@ -43,7 +43,7 @@ configurations that are suited for different scenarios.
 | High-frequency point queries on key | Append Table | `bucket = N, bucket-key = col` |
 | Queue-like ordered streaming | Append Table | `bucket = N, bucket-key = col` |
 | Large-scale OLAP with ad-hoc queries | Append Table | Incremental Clustering |
-| Store images / videos / documents | Append Table (Blob) | `blob-field`, Data Evolution enabled |
+| Store images / videos / documents | Append Table (Blob) | `__BLOB_FIELD` comment, Data Evolution enabled |
 | AI vector search / RAG | Append Table (Vector) | `VECTOR` type, Global Index (DiskANN) |
 | AI feature engineering & column evolution | Append Table | `data-evolution.enabled = true` |
 | Python AI pipeline (Ray / PyTorch) | Append Table | PyPaimon SDK |
@@ -338,7 +338,7 @@ See [Bucketed Streaming](../append-table/bucketed#bucketed-streaming).
 
 Paimon is a multimodal lakehouse for AI. You can keep multimodal data, metadata, and embeddings in the same table and
 query them via vector search, full-text search, or SQL. All multimodal features are built on top of Append Tables with
-[Data Evolution](../append-table/data-evolution) mode enabled.
+[Data Evolution](../multimodal-table/data-evolution) mode enabled.
 
 ### Scenario 8: Storing Multimodal Data (Blob Table)
 
@@ -356,11 +356,10 @@ CREATE TABLE image_table (
     id INT,
     name STRING,
     label STRING,
-    image BYTES
+    image BYTES COMMENT '__BLOB_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
 );
 ```
 
@@ -373,11 +372,10 @@ CREATE TABLE image_table (
     id INT,
     name STRING,
     label STRING,
-    image BINARY
+    image BINARY COMMENT '__BLOB_FIELD'
 ) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
 );
 ```
 
@@ -385,7 +383,7 @@ CREATE TABLE image_table (
 
 </Tabs>
 
-**Why:** The [Blob Storage](../append-table/blob) separates large binary data into dedicated `.blob` files
+**Why:** The [Blob Storage](../multimodal-table/blob) separates large binary data into dedicated `.blob` files
 while metadata stays in standard columnar files (Parquet/ORC). This means:
 
 - `SELECT id, name, label FROM image_table` does **not** load any blob data — very fast.
@@ -398,12 +396,10 @@ while metadata stays in standard columnar files (Parquet/ORC). This means:
 CREATE TABLE video_table (
     id INT,
     title STRING,
-    video BYTES
+    video BYTES COMMENT '__BLOB_EXTERNAL_STORAGE_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
-    'blob-descriptor-field' = 'video',
-    'blob-external-storage-field' = 'video',
     'blob-external-storage-path' = 's3://my-bucket/paimon-blobs/'
 );
 ```
@@ -426,13 +422,11 @@ CREATE TABLE doc_embeddings (
     doc_id INT,
     title STRING,
     content STRING,
-    embedding ARRAY<FLOAT>
+    embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768'
 ) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'global-index.enabled' = 'true',
-    'vector-field' = 'embedding',
-    'field.embedding.vector-dim' = '768',
     'vector.file.format' = 'lance'
 );
 ```
@@ -476,7 +470,7 @@ SELECT * FROM vector_search('doc_embeddings', 'embedding', array(0.1f, 0.2f, ...
 
 The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
 
-**Why:** The [Global Index](../append-table/global-index) with DiskANN provides high-performance ANN search.
+**Why:** The [Global Index](../multimodal-table/global-index) with DiskANN provides high-performance ANN search.
 Vector data is stored in dedicated `.vector.lance` files optimized for dense vectors, while scalar columns stay in
 Parquet. You can also build a **BTree Index** on scalar columns for efficient filtering:
 
@@ -524,7 +518,7 @@ ON t.user_id = s.user_id
 WHEN MATCHED THEN UPDATE SET t.embedding = s.embedding;
 ```
 
-**Why:** [Data Evolution](../append-table/data-evolution) mode writes only the updated columns to new files
+**Why:** [Data Evolution](../multimodal-table/data-evolution) mode writes only the updated columns to new files
 and merges them at read time. This is ideal for:
 
 - Adding new feature columns and backfilling data without rewriting the entire table.
@@ -610,7 +604,7 @@ Do you need upsert / update / delete?
     │   → bucket = N, bucket-key = col (Bucketed Append)
     │
     └── AI / Multimodal scenarios? → Enable Data Evolution
-        ├── Store images / videos / docs? → Blob Table (blob-field)
+        ├── Store images / videos / docs? → Blob Table (__BLOB_FIELD comment)
         ├── Vector search / RAG? → VECTOR type + Global Index (DiskANN)
         ├── Feature engineering? → Data Evolution (MERGE INTO partial columns)
         └── Python pipeline? → PyPaimon (Ray / PyTorch / Pandas)

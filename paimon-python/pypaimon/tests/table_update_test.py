@@ -123,6 +123,45 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['city'].to_pylist(),
         )
 
+    def test_update_columns_fall_back_to_data_when_unset(self):
+        table = self._create_seeded_table()
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 2, 3, 4],
+            'id': [1, 2, 3, 4, 5],
+            'name': ['A', 'B', 'C', 'D', 'E'],
+            'age': [1, 2, 3, 4, 5],
+            'city': ['c0', 'c1', 'c2', 'c3', 'c4'],
+        }), ['id', 'name', 'age', 'city'])
+        result = self._read_all(table)
+        self.assertEqual(['A', 'B', 'C', 'D', 'E'], result['name'].to_pylist())
+        self.assertEqual([1, 2, 3, 4, 5], result['age'].to_pylist())
+        self.assertEqual(['c0', 'c1', 'c2', 'c3', 'c4'], result['city'].to_pylist())
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_update(tu, pa.Table.from_pydict({
+            '_ROW_ID': [0, 1],
+            'age': [99, 98],
+        }), cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        result = self._read_all(table)
+        self.assertEqual([99, 98, 3, 4, 5], result['age'].to_pylist())
+        self.assertEqual(['A', 'B', 'C', 'D', 'E'], result['name'].to_pylist())
+
+    def test_update_with_only_row_id_raises(self):
+        table = self._create_seeded_table()
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        with self.assertRaises(ValueError):
+            self._apply_update(tu, pa.Table.from_pydict({
+                '_ROW_ID': [0, 1],
+            }), cid)
+
     def test_partitioned_table_update(self):
         """Updates work on a partitioned table the same as a flat one."""
         table = self._create_table(partition_keys=['city'])

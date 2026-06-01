@@ -16,15 +16,15 @@
 # under the License.
 
 import sys
+from datetime import timedelta
 from enum import Enum
 from typing import Dict, Optional
 
-from datetime import timedelta
-
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
-from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.config_option import ConfigOption
+from pypaimon.common.options.options_utils import OptionsUtils
+from pypaimon.common.options.config_options import ConfigOptions
 
 
 class ExternalPathStrategy(str, Enum):
@@ -56,6 +56,11 @@ class MergeEngine(str, Enum):
     FIRST_ROW = "first-row"
 
 
+class GlobalIndexColumnUpdateAction(str, Enum):
+    THROW_ERROR = "THROW_ERROR"
+    DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -65,6 +70,7 @@ class CoreOptions:
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
+    FILE_FORMAT_ROW: str = "row"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -210,6 +216,13 @@ class CoreOptions:
         .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
     )
 
+    BLOB_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated column names that should be stored as blob type.")
+    )
+
     BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-descriptor-field")
         .string_type()
@@ -218,6 +231,42 @@ class CoreOptions:
             "Comma-separated BLOB field names that should be stored as serialized BlobDescriptor bytes "
             "inline in normal data files."
         )
+    )
+
+    BLOB_EXTERNAL_STORAGE_PATH: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "The external storage path where raw BLOB data from fields configured "
+            "by 'blob-external-storage-field' is written at write time. "
+            "Orphan file cleanup is not applied to this path."
+        )
+    )
+
+    BLOB_EXTERNAL_STORAGE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') "
+            "whose raw data will be written to external storage at write time. "
+            "The external storage path is configured via 'blob-external-storage-path'."
+        )
+    )
+
+    BLOB_VIEW_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-view-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated field names to treat as BLOB view fields.")
+    )
+
+    VECTOR_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("vector-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated column names that should be stored as vector type.")
     )
 
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
@@ -233,6 +282,21 @@ class CoreOptions:
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description("The target file size for blob files.")
     )
+
+    VECTOR_FILE_FORMAT: ConfigOption[str] = (
+        ConfigOptions.key("vector.file.format")
+        .string_type()
+        .no_default_value()
+        .with_description("Store VECTOR type columns separately in the specified file format.")
+    )
+
+    VECTOR_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("vector.target-file-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Target file size for vector data. Default is the same as target-file-size.")
+    )
+
     DATA_FILE_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("data-file.prefix")
         .string_type()
@@ -339,6 +403,14 @@ class CoreOptions:
         .with_description("Specify the merge engine for table with primary key. "
                           "Options: deduplicate, partial-update, aggregation, first-row.")
     )
+
+    IGNORE_DELETE: ConfigOption[bool] = (
+        ConfigOptions.key("ignore-delete")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to ignore delete records.")
+    )
+
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
@@ -421,11 +493,17 @@ class CoreOptions:
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
-        .no_default_value()
+        .default_value(32)
         .with_description(
-            "The maximum number of concurrent scanner for global index. "
-            "By default is the number of processors available."
+            "The maximum number of concurrent threads for global index I/O. "
+            "Defaults to 32 for optimal I/O parallelism."
         )
+    )
+
+    GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
+        ConfigOptions.key("global-index.column-update-action")
+        .enum_type(GlobalIndexColumnUpdateAction)
+        .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
     )
 
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
@@ -633,6 +711,19 @@ class CoreOptions:
             return {str(field).strip() for field in value if str(field).strip()}
         return set()
 
+    def blob_external_storage_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
+
+    def blob_external_storage_path(self, default=None):
+        return self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, default)
+
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
                                 MemorySize.of_mebi_bytes(
@@ -647,6 +738,20 @@ class CoreOptions:
         """
         if self.options.contains(CoreOptions.BLOB_TARGET_FILE_SIZE):
             return self.options.get(CoreOptions.BLOB_TARGET_FILE_SIZE, None).get_bytes()
+        elif default is not None:
+            return MemorySize.parse(default).get_bytes()
+        else:
+            return self.target_file_size(has_primary_key=False)
+
+    def vector_file_format(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
+
+    def with_vector_format(self) -> bool:
+        return self.options.contains(CoreOptions.VECTOR_FILE_FORMAT)
+
+    def vector_target_file_size(self, default=None):
+        if self.options.contains(CoreOptions.VECTOR_TARGET_FILE_SIZE):
+            return self.options.get(CoreOptions.VECTOR_TARGET_FILE_SIZE, None).get_bytes()
         elif default is not None:
             return MemorySize.parse(default).get_bytes()
         else:
@@ -691,6 +796,9 @@ class CoreOptions:
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
 
+    def global_index_column_update_action(self, default=None):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION, default)
+
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
 
@@ -699,6 +807,19 @@ class CoreOptions:
 
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
+
+    def ignore_delete(self) -> bool:
+        raw = self.options.to_map()
+        fallback_keys = (
+            "ignore-delete", "first-row.ignore-delete",
+            "deduplicate.ignore-delete",
+            "partial-update.ignore-delete",
+        )
+        for key in fallback_keys:
+            val = raw.get(key)
+            if val is not None:
+                return OptionsUtils.convert_to_boolean(val)
+        return False
 
     def data_file_external_paths(self, default=None):
         external_paths_str = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS, default)

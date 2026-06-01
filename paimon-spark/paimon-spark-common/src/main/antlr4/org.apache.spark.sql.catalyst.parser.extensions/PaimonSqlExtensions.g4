@@ -84,6 +84,8 @@ statement
       FROM multipartIdentifier
       fileFormatClause
       overwriteClause?                                                                      #copyIntoLocation
+    | CREATE TABLE (IF NOT EXISTS)? target=multipartIdentifier
+        LIKE source=multipartIdentifier ( . )*?                                             #createTableLike
   ;
 
 callArgument
@@ -197,12 +199,14 @@ quotedIdentifier
     ;
 
 nonReserved
-    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | OR | TABLE
-    | REPLACE | RETAIN | VERSION | TAG
+    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | LIKE
+    | NOT | OF | OR | TABLE | REPLACE | RETAIN | VERSION | TAG
     | TRUE | FALSE
     | MAP
     | COPY | INTO | FROM | FILE_FORMAT | PATTERN | FORCE | ON_ERROR | ABORT_STATEMENT | OVERWRITE
     | CSV
+    | JSON
+    | PARQUET
     ;
 
 ALTER: 'ALTER';
@@ -214,6 +218,7 @@ DELETE: 'DELETE';
 EXISTS: 'EXISTS';
 HOURS: 'HOURS';
 IF : 'IF';
+LIKE: 'LIKE';
 MINUTES: 'MINUTES';
 NOT: 'NOT';
 OF: 'OF';
@@ -243,6 +248,8 @@ ON_ERROR: 'ON_ERROR';
 ABORT_STATEMENT: 'ABORT_STATEMENT';
 OVERWRITE: 'OVERWRITE';
 CSV: 'CSV';
+JSON: 'JSON';
+PARQUET: 'PARQUET';
 
 PLUS: '+';
 MINUS: '-';

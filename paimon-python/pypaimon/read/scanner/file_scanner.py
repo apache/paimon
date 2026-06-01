@@ -285,18 +285,20 @@ class FileScanner:
     def _create_data_evolution_split_generator(self):
         row_ranges = None
         score_getter = None
+        # Fetch snapshot once and share with global index evaluation to avoid
+        # a duplicate /snapshot REST round-trip (#7513).
+        manifest_files, snapshot = self.manifest_scanner()
+        self._scanned_snapshot = snapshot
+        self._scanned_snapshot_id = snapshot.id if snapshot else None
+
         global_index_result = self._global_index_result if self._global_index_result is not None \
-            else self._eval_global_index()
+            else self._eval_global_index(snapshot)
         if global_index_result is not None:
             row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
                 score_getter = global_index_result.score_getter()
         if row_ranges is None and self.predicate is not None:
             row_ranges = _row_ranges_from_predicate(self.predicate)
-
-        manifest_files, snapshot = self.manifest_scanner()
-        self._scanned_snapshot = snapshot
-        self._scanned_snapshot_id = snapshot.id if snapshot else None
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
@@ -324,7 +326,7 @@ class FileScanner:
             return []
         return self.read_manifest_entries(manifest_files)
 
-    def _eval_global_index(self):
+    def _eval_global_index(self, snapshot=None):
         # No filter - nothing to evaluate
         if self.predicate is None:
             return None
@@ -339,7 +341,8 @@ class FileScanner:
             scanner = GlobalIndexScanner.create(
                 self.table,
                 partition_filter=self.partition_key_predicate,
-                predicate=self.predicate
+                predicate=self.predicate,
+                snapshot=snapshot,
             )
             if scanner is None:
                 return None

@@ -422,7 +422,8 @@ public class MultipleBlobTableTest extends TableTestBase {
         // Add new blob column f3
         catalog.alterTable(
                 identifier(),
-                Collections.singletonList(SchemaChange.addColumn("f3", DataTypes.BLOB())),
+                Collections.singletonList(
+                        SchemaChange.addColumn("f3", DataTypes.BLOB(), "__BLOB_FIELD", null)),
                 false);
 
         // Write more data with both f2 and f3

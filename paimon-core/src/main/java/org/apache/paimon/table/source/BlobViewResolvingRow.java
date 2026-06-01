@@ -66,6 +66,15 @@ class BlobViewResolvingRow implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
+        if (wrapped.isNullAt(pos)) {
+            return true;
+        }
+        if (blobViewFields.contains(pos)) {
+            Blob blob = wrapped.getBlob(pos);
+            if (blob instanceof BlobView) {
+                return resolver.resolvesToNull((BlobView) blob);
+            }
+        }
         return wrapped.isNullAt(pos);
     }
 
@@ -134,6 +143,9 @@ class BlobViewResolvingRow implements InternalRow {
         Blob blob = wrapped.getBlob(pos);
         if (blobViewFields.contains(pos) && blob instanceof BlobView) {
             BlobView blobView = (BlobView) blob;
+            if (resolver.resolvesToNull(blobView)) {
+                return null;
+            }
             if (!blobView.isResolved()) {
                 resolver.resolve(blobView);
             }

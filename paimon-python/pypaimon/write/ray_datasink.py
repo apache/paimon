@@ -163,7 +163,7 @@ class PaimonDatasink(_DatasinkBase):
 
             self._pending_commit_messages = non_empty_messages
 
-            if not non_empty_messages:
+            if not non_empty_messages and not self.overwrite:
                 logger.info("No data to commit (all commit messages are empty)")
                 self._pending_commit_messages = []
                 return

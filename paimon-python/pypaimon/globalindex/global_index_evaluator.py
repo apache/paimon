@@ -17,6 +17,9 @@
 
 """Global index evaluator for filtering data using global indexes."""
 
+import threading
+from collections import deque
+from concurrent.futures import Future
 from typing import Callable, Collection, Dict, List, Optional
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
@@ -26,14 +29,16 @@ from pypaimon.schema.data_types import DataField
 
 
 class GlobalIndexEvaluator:
-    """
-    Predicate evaluator for filtering data using global indexes.
+    """Predicate evaluator for filtering data using global indexes.
+
+    Reader visit methods return Future internally — the evaluator no longer
+    dispatches to an executor.
     """
 
     def __init__(
         self,
         fields: List[DataField],
-        readers_function: Callable[[DataField], Collection[GlobalIndexReader]]
+        readers_function: Callable[[DataField], Collection[GlobalIndexReader]],
     ):
         self._fields = fields
         self._field_by_name = {f.name: f for f in fields}
@@ -44,89 +49,149 @@ class GlobalIndexEvaluator:
         self,
         predicate: Optional[Predicate]
     ) -> Optional[GlobalIndexResult]:
-        compound_result: Optional[GlobalIndexResult] = None
-        
-        # Evaluate predicate first
-        if predicate is not None:
-            compound_result = self._visit_predicate(predicate)
-        
-        return compound_result
+        if predicate is None:
+            return None
+        future = self._visit_async(predicate)
+        return future.result()
 
-    def _visit_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
-        """Visit a predicate and return the index result."""
-        if predicate.method == 'and':
-            compound_result: Optional[GlobalIndexResult] = None
-            for child in predicate.literals:
-                child_result = self._visit_predicate(child)
-                
-                if child_result is not None:
-                    if compound_result is not None:
-                        compound_result = compound_result.and_(child_result)
-                    else:
-                        compound_result = child_result
-                
-                if compound_result is not None and compound_result.is_empty():
-                    return compound_result
-            
-            return compound_result
-        
-        elif predicate.method == 'or':
-            compound_result = GlobalIndexResult.create_empty()
-            for child in predicate.literals:
-                child_result = self._visit_predicate(child)
-                
-                if child_result is None:
-                    return None
-                
-                compound_result = compound_result.or_(child_result)
-            
-            return compound_result
-        
-        else:
-            # Leaf predicate
-            return self._visit_leaf_predicate(predicate)
+    def _visit_async(self, predicate) -> Future:
+        if isinstance(predicate, Predicate) and predicate.method in ('and', 'or'):
+            return self._visit_compound_async(predicate)
+        return self._visit_leaf_async(predicate)
 
-    def _visit_leaf_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
-        """Visit a leaf predicate and return the index result."""
+    def _visit_leaf_async(self, predicate: Predicate) -> Future:
         field = self._field_by_name.get(predicate.field)
         if field is None:
-            return None
-        
+            f = Future()
+            f.set_result(None)
+            return f
+
         field_id = field.id
         readers = self._index_readers_cache.get(field_id)
         if readers is None:
             readers = self._readers_function(field)
             self._index_readers_cache[field_id] = readers
-        
+
         field_ref = FieldRef(predicate.index, predicate.field, str(field.type))
-        
-        compound_result: Optional[GlobalIndexResult] = None
-        
+
+        reader_futures = []
         for reader in readers:
-            child_result = self._visit_function(reader, predicate, field_ref)
+            reader_futures.append(
+                self._visit_function(reader, predicate, field_ref)
+            )
+
+        all_done = Future()
+        if not reader_futures:
+            all_done.set_result(None)
+            return all_done
+
+        remaining = [len(reader_futures)]
+        count_lock = threading.Lock()
+
+        def on_done(_):
+            with count_lock:
+                remaining[0] -= 1
+                if remaining[0] == 0:
+                    try:
+                        all_done.set_result(
+                            self._combine_reader_results(reader_futures)
+                        )
+                    except Exception as e:
+                        all_done.set_exception(e)
+
+        for rf in reader_futures:
+            rf.add_done_callback(on_done)
+
+        return all_done
+
+    def _combine_reader_results(
+        self, reader_futures: List[Future]
+    ) -> Optional[GlobalIndexResult]:
+        compound_result: Optional[GlobalIndexResult] = None
+        for f in reader_futures:
+            child_result = f.result()
             if child_result is None:
                 continue
-            
             if compound_result is not None:
-                compound_result = compound_result.or_(child_result)
+                compound_result = compound_result.and_(child_result)
             else:
                 compound_result = child_result
-            
             if compound_result.is_empty():
                 return compound_result
-        
         return compound_result
+
+    def _visit_compound_async(self, predicate: Predicate) -> Future:
+        children = self._flatten_children(predicate.method, predicate.literals)
+        child_futures = [self._visit_async(child) for child in children]
+
+        all_done = Future()
+        if not child_futures:
+            all_done.set_result(None)
+            return all_done
+
+        remaining = [len(child_futures)]
+        lock = threading.Lock()
+
+        def on_done(_):
+            with lock:
+                remaining[0] -= 1
+                if remaining[0] == 0:
+                    try:
+                        results = [f.result() for f in child_futures]
+                        all_done.set_result(
+                            self._combine_results(results, predicate.method)
+                        )
+                    except Exception as e:
+                        all_done.set_exception(e)
+
+        for cf in child_futures:
+            cf.add_done_callback(on_done)
+
+        return all_done
+
+    def _combine_results(
+        self, results: List[Optional[GlobalIndexResult]], method: str
+    ) -> Optional[GlobalIndexResult]:
+        if method == 'or':
+            compound_result = GlobalIndexResult.create_empty()
+            for child_result in results:
+                if child_result is None:
+                    return None
+                compound_result = compound_result.or_(child_result)
+            return compound_result
+        else:
+            compound_result: Optional[GlobalIndexResult] = None
+            for child_result in results:
+                if child_result is not None:
+                    if compound_result is not None:
+                        compound_result = compound_result.and_(child_result)
+                    else:
+                        compound_result = child_result
+                if compound_result is not None and compound_result.is_empty():
+                    return compound_result
+            return compound_result
+
+    def _flatten_children(self, method: str, children) -> list:
+        result = []
+        stack = deque(children)
+        while stack:
+            child = stack.popleft()
+            if isinstance(child, Predicate) and child.method == method:
+                for grandchild in reversed(child.literals):
+                    stack.appendleft(grandchild)
+            else:
+                result.append(child)
+        return result
 
     def _visit_function(
         self,
         reader: GlobalIndexReader,
         predicate: Predicate,
         field_ref: FieldRef
-    ) -> Optional[GlobalIndexResult]:
-        """Visit a predicate function with the given reader."""
+    ) -> 'Future[Optional[GlobalIndexResult]]':
         method = predicate.method
         literals = predicate.literals
-        
+
         if method == 'equal':
             return reader.visit_equal(field_ref, literals[0])
         elif method == 'notEqual':
@@ -158,10 +223,10 @@ class GlobalIndexEvaluator:
         elif method == 'between':
             return reader.visit_between(field_ref, literals[0], literals[1])
 
-        return None
+        from pypaimon.globalindex.global_index_reader import _completed_future
+        return _completed_future(None)
 
     def close(self) -> None:
-        """Close the evaluator and release resources."""
         for readers in self._index_readers_cache.values():
             for reader in readers:
                 try:

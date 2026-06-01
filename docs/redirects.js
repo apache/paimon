@@ -2,7 +2,11 @@
 module.exports = [
   {
     "from": "/append-table/blob-storage.html",
-    "to": "/append-table/blob"
+    "to": "/multimodal-table/blob"
+  },
+  {
+    "from": "/append-table/blob",
+    "to": "/multimodal-table/blob"
   },
   {
     "from": "/append-table/bucketed.html",
@@ -10,11 +14,19 @@ module.exports = [
   },
   {
     "from": "/append-table/data-evolution.html",
-    "to": "/append-table/data-evolution"
+    "to": "/multimodal-table/data-evolution"
+  },
+  {
+    "from": "/append-table/data-evolution",
+    "to": "/multimodal-table/data-evolution"
   },
   {
     "from": "/append-table/global-index.html",
-    "to": "/append-table/global-index"
+    "to": "/multimodal-table/global-index"
+  },
+  {
+    "from": "/append-table/global-index",
+    "to": "/multimodal-table/global-index"
   },
   {
     "from": "/append-table/incremental-clustering.html",
@@ -26,7 +38,11 @@ module.exports = [
   },
   {
     "from": "/append-table/vector-storage.html",
-    "to": "/append-table/vector"
+    "to": "/multimodal-table/vector"
+  },
+  {
+    "from": "/append-table/vector",
+    "to": "/multimodal-table/vector"
   },
   {
     "from": "/cdc-ingestion/flink-cdc.html",

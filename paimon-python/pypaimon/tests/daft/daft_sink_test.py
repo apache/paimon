@@ -33,6 +33,7 @@ daft = pytest.importorskip("daft")
 
 from pypaimon.daft.daft_compat import has_file_range_reads
 from pypaimon.daft.daft_catalog import PaimonTable
+from pypaimon.daft.daft_datasink import PaimonDataSink
 from pypaimon.daft.daft_paimon import _read_table, _write_table
 
 requires_blob = pytest.mark.skipif(not has_file_range_reads(), reason="BLOB support requires daft >= 0.7.11")
@@ -56,6 +57,18 @@ def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None
     finally:
         table_write.close()
         table_commit.close()
+
+
+def _create_id_dt_table(catalog, table_name: str):
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("dt", pa.string()),
+        ]),
+        options={"bucket": "1", "file.format": "parquet", "bucket-key": "id"},
+    )
+    catalog.create_table(table_name, schema, ignore_if_exists=False)
+    return catalog.get_table(table_name)
 
 
 @pytest.fixture(scope="function")
@@ -200,6 +213,39 @@ def test_write_paimon_roundtrip_native_verify(append_only_table):
     assert ids == [7, 8, 9]
 
 
+def test_write_paimon_aligns_columns_by_name(local_paimon_catalog):
+    """Input column order should not affect the values written to Paimon."""
+    catalog, _ = local_paimon_catalog
+    table = _create_id_dt_table(catalog, "test_db.column_order")
+
+    df = daft.from_pydict(
+        {
+            "dt": ["101", "202"],
+            "id": [1, 2],
+        }
+    )
+    _write_table(df, table)
+
+    result = _read_table(table).sort("id").to_pydict()
+    assert result == {
+        "id": [1, 2],
+        "dt": ["101", "202"],
+    }
+
+    read_builder = table.new_read_builder()
+    table_scan = read_builder.new_scan()
+    table_read = read_builder.new_read()
+    splits = table_scan.plan().splits()
+    arrow_table = table_read.to_arrow(splits)
+    native_rows = sorted(
+        zip(
+            arrow_table.column("id").to_pylist(),
+            arrow_table.column("dt").to_pylist(),
+        )
+    )
+    assert native_rows == [(1, "101"), (2, "202")]
+
+
 # ---------------------------------------------------------------------------
 # Overwrite
 # ---------------------------------------------------------------------------
@@ -257,6 +303,40 @@ def test_write_paimon_invalid_mode(append_only_table):
         _write_table(df, table, mode="upsert")
 
 
+def test_write_paimon_sink_serializes_without_file_io(append_only_table):
+    """PaimonDataSink should not pickle table FileIO objects."""
+    from daft.pickle import dumps, loads
+
+    class Unpicklable:
+        def __reduce__(self):
+            raise TypeError("file io marker should not be serialized")
+
+    table, _ = append_only_table
+    table.file_io._unpicklable_marker = Unpicklable()
+    sink = PaimonDataSink(table, mode="overwrite")
+    commit_user = sink._write_builder.commit_user
+
+    restored = loads(dumps(sink))
+
+    assert restored.name() == sink.name()
+    assert restored._mode == "overwrite"
+    assert restored._write_builder.commit_user == commit_user
+    assert restored._write_builder.static_partition == {}
+    assert restored._table.identifier.get_full_name() == table.identifier.get_full_name()
+
+
+def test_write_paimon_rejects_extra_columns(local_paimon_catalog):
+    """Extra input columns should fail instead of being silently dropped."""
+    catalog, _ = local_paimon_catalog
+    table = _create_id_dt_table(catalog, "test_db.extra_columns")
+    df = daft.from_pydict(
+        {"id": [1], "dt": ["2024-01-01"], "extra": ["unused"]}
+    )
+
+    with pytest.raises(RuntimeError, match="Paimon write schema mismatch"):
+        _write_table(df, table)
+
+
 def test_write_paimon_pk_table(pk_table):
     """Writing to a PK table should work and be readable back."""
     table, _ = pk_table
@@ -281,6 +361,39 @@ def test_write_paimon_pk_table(pk_table):
 
 class TestSchemaConversion:
     """Tests for schema conversion utilities."""
+
+    def test_align_batch_to_target_schema_by_name(self):
+        """Record batches should be reordered by field name before casting."""
+        sink = PaimonDataSink.__new__(PaimonDataSink)
+        sink._target_schema = pa.schema([("id", pa.int64()), ("dt", pa.string())])
+        batch = pa.record_batch(
+            [
+                pa.array(["101", "202"], type=pa.large_string()),
+                pa.array([1, 2], type=pa.int64()),
+            ],
+            names=["dt", "id"],
+        )
+
+        sink._validate_input_schema(batch.schema)
+        aligned = sink._align_batch_to_target_schema(batch)
+
+        assert aligned.schema == sink._target_schema
+        assert aligned.to_pydict() == {
+            "id": [1, 2],
+            "dt": ["101", "202"],
+        }
+
+    def test_validate_input_schema_rejects_mismatch(self):
+        """Schema validation should fail fast on missing or extra fields."""
+        sink = PaimonDataSink.__new__(PaimonDataSink)
+        sink._target_schema = pa.schema([("id", pa.int64()), ("dt", pa.string())])
+        input_schema = pa.schema([("id", pa.int64()), ("extra", pa.string())])
+
+        with pytest.raises(
+            ValueError,
+            match="missing fields: \\['dt'\\]; extra fields: \\['extra'\\]",
+        ):
+            sink._validate_input_schema(input_schema)
 
     def test_write_large_string_conversion(self, local_paimon_catalog):
         """Test that large_string columns are converted to string for pypaimon."""

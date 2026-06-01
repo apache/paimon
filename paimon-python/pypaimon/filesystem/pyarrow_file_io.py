@@ -304,6 +304,12 @@ class PyArrowFileIO(FileIO):
             )
 
     def _initialize_gcs_fs(self) -> FileSystem:
+        if not hasattr(pafs, 'GcsFileSystem'):
+            raise ImportError(
+                "GCS filesystem support requires PyArrow built with GCS support. "
+                "Please upgrade PyArrow or install a version with GCS enabled."
+            )
+
         access_token = self._get_property("gcs.access-token")
         token_expiry = self._get_property("gcs.access-token.expiration")
         project_id = self._get_property("gcs.project-id")
@@ -319,8 +325,6 @@ class PyArrowFileIO(FileIO):
         if project_id:
             kwargs["project_id"] = project_id
 
-        # With no kwargs, GcsFileSystem uses ADC automatically
-        # (GOOGLE_APPLICATION_CREDENTIALS or GCP metadata server / Workload Identity)
         return pafs.GcsFileSystem(**kwargs)
 
     @staticmethod
@@ -669,6 +673,21 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
 
+    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
+        try:
+            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+
+            if fields is None:
+                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
+
+            with self.new_output_stream(path) as output_stream:
+                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+                writer.write_table(data)
+                writer.close()
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
+
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:
@@ -728,8 +747,11 @@ class PyArrowFileIO(FileIO):
             else:
                 return str(path)
 
-        from pyarrow.fs import GcsFileSystem
-        if isinstance(self.filesystem, GcsFileSystem):
+        try:
+            from pyarrow.fs import GcsFileSystem
+        except ImportError:
+            GcsFileSystem = None
+        if GcsFileSystem is not None and isinstance(self.filesystem, GcsFileSystem):
             if parsed.scheme and parsed.netloc:
                 path_part = normalized_path.lstrip('/')
                 return f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc

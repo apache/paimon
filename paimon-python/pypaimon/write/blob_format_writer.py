@@ -26,6 +26,8 @@ from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 class BlobFormatWriter:
     VERSION = 1
     MAGIC_NUMBER = 1481511375
+    NULL_LENGTH = -1
+    PLACE_HOLDER_LENGTH = -2
     BUFFER_SIZE = 4096
     METADATA_SIZE = 12  # 8-byte length + 4-byte CRC
 
@@ -40,11 +42,15 @@ class BlobFormatWriter:
 
         blob_value = row.values[0]
         if blob_value is None:
-            self.lengths.append(-1)
+            self.lengths.append(self.NULL_LENGTH)
             return
 
         if not isinstance(blob_value, Blob):
             raise ValueError("Field must be Blob/BlobData instance")
+
+        if blob_value is Blob.PLACE_HOLDER:
+            self.lengths.append(self.PLACE_HOLDER_LENGTH)
+            return
 
         previous_pos = self.position
         crc32 = 0  # Initialize CRC32
@@ -97,7 +103,7 @@ class BlobFormatWriter:
         if col_data is None:
             if not is_blob:
                 raise RuntimeError("Null values are only supported for BLOB type fields")
-            self.lengths.append(-1)
+            self.lengths.append(self.NULL_LENGTH)
             return
 
         if is_blob:

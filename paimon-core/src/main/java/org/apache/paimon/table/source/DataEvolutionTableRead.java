@@ -80,7 +80,12 @@ public class DataEvolutionTableRead extends AppendTableRead {
     }
 
     private int[] blobViewFields(RowType rowType) {
-        Set<String> blobViewFieldNames = CoreOptions.fromMap(schema().options()).blobViewField();
+        CoreOptions options = CoreOptions.fromMap(schema().options());
+        if (!options.blobViewResolveEnabled()) {
+            return new int[0];
+        }
+
+        Set<String> blobViewFieldNames = options.blobViewField();
         if (blobViewFieldNames.isEmpty()) {
             return new int[0];
         }

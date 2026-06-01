@@ -60,7 +60,7 @@ under the License.
 
         <!--
           `paimon-spark4-common` transitively pulls in `spark-sql-api` at the version set by
-          `paimon-spark-common.spark.version` (4.1.1 under the `spark4` profile). Spark 4.1's
+          `paimon-spark-common.spark.version` (4.1.2 under the `spark4` profile). Spark 4.1's
           `SqlApiConf` added abstract `manageParserCaches()`, which Spark 4.0's concrete
           anonymous subclasses (e.g. `WithTestConf$$anon$4`) don't implement. Mixing those
           jars produces `AbstractMethodError` at parser configuration time. Pin

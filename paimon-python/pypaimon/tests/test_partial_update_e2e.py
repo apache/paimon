@@ -21,9 +21,10 @@
 Each test creates a PK table with ``merge-engine`` set to a particular
 value, writes one or more batches, and reads back. Partial-update reads
 must merge non-null fields across batches; ``deduplicate`` must keep
-the latest row only; ``aggregation`` and ``first-row`` must raise
-``NotImplementedError`` (until they are ported), since silently
-treating them as deduplicate would corrupt the user's data.
+the latest row only; ``first-row`` must keep the earliest row;
+``aggregation`` must raise ``NotImplementedError`` (until it is
+ported), since silently treating it as deduplicate would corrupt the
+user's data.
 """
 
 import os
@@ -289,18 +290,23 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             rb.new_read().to_arrow(splits)
         self.assertIn('aggregation', str(cm.exception))
 
-    def test_first_row_engine_raises_not_implemented(self):
-        """Same as the aggregation case above for ``first-row``."""
-        table = self._create_pk_table('first_row_unsupported',
-                                      merge_engine='first-row')
-        self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
-        self._write(table, [{'id': 1, 'a': 'y', 'b': None, 'c': None}])
+    def test_first_row_engine_keeps_first(self):
+        """The ``first-row`` engine must keep the earliest row per PK.
 
-        rb = table.new_read_builder()
-        splits = rb.new_scan().plan().splits()
-        with self.assertRaises(NotImplementedError) as cm:
-            rb.new_read().to_arrow(splits)
-        self.assertIn('first-row', str(cm.exception))
+        Both the writer-side merge buffer and the reader-side merge
+        function go through ``merge_engine_dispatch``, so first-row is
+        a real supported engine (no dedupe fallback / no NotImplemented
+        raise) on both sides.
+        """
+        table = self._create_pk_table('first_row_supported',
+                                      merge_engine='first-row')
+        self._write(table, [{'id': 1, 'a': 'first', 'b': None, 'c': None}])
+        self._write(table, [{'id': 1, 'a': 'second', 'b': 'B', 'c': 'C'}])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'first', 'b': None, 'c': None}],
+        )
 
     def test_aggregation_engine_write_logs_fallback_warning(self):
         """The write-side fallback to deduplicate for unsupported engines

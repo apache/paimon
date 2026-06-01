@@ -44,4 +44,7 @@ object MinorVersionShim {
       notMatchedActions,
       notMatchedBySourceActions)
   }
+
+  def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] =
+    merge.notMatchedBySourceActions
 }

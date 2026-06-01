@@ -135,12 +135,13 @@ class CoerceLargeStringTypesTest(unittest.TestCase):
 
 
 class BucketModeDispatchTest(unittest.TestCase):
-    """``maybe_apply_repartition`` clusters HASH_FIXED tables and
-    returns other bucket modes unchanged."""
+    """``maybe_apply_repartition`` only clusters HASH_FIXED tables when
+    the legacy ``map_groups`` mode is explicitly selected."""
 
     def _make_table(self, bucket_mode):
         table = MagicMock()
         table.bucket_mode.return_value = bucket_mode
+        table.is_primary_key_table = False
         return table
 
     def test_bucket_unaware_returns_dataset_unchanged(self):
@@ -161,7 +162,48 @@ class BucketModeDispatchTest(unittest.TestCase):
 
         self.assertIs(maybe_apply_repartition(dataset, table), dataset)
 
-    def test_hash_fixed_runs_map_batches_groupby_chain(self):
+    def test_hash_fixed_default_returns_dataset_unchanged(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = False
+
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_off_returns_dataset_unchanged(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = False
+
+        self.assertIs(
+            maybe_apply_repartition(dataset, table, "off"),
+            dataset,
+        )
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_primary_key_default_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = True
+
+        with self.assertRaises(ValueError):
+            maybe_apply_repartition(dataset, table)
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_primary_key_off_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = True
+
+        with self.assertRaises(ValueError):
+            maybe_apply_repartition(dataset, table, "off")
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_map_groups_runs_map_batches_groupby_chain(self):
         dataset = MagicMock(name="dataset")
         dataset.map_batches.return_value.groupby.return_value \
             .map_groups.return_value.drop_columns.return_value = "clustered"
@@ -173,7 +215,7 @@ class BucketModeDispatchTest(unittest.TestCase):
             type("F", (), {"name": "value"})(),
         ]
 
-        out = maybe_apply_repartition(dataset, table)
+        out = maybe_apply_repartition(dataset, table, "map_groups")
 
         self.assertEqual(out, "clustered")
         # The helper appends a transient bucket column, groups by it,
@@ -199,11 +241,18 @@ class BucketModeDispatchTest(unittest.TestCase):
             type("F", (), {"name": "dt"})(),
         ]
 
-        maybe_apply_repartition(dataset, table)
+        maybe_apply_repartition(dataset, table, "map_groups")
 
         group_call = dataset.map_batches.return_value.groupby.call_args
         passed_keys = group_call.args[0]
         self.assertEqual(passed_keys, ["dt", BUCKET_KEY_COL])
+
+    def test_invalid_precluster_mode_raises_value_error(self):
+        dataset = object()
+        table = self._make_table(BucketMode.HASH_FIXED)
+
+        with self.assertRaises(ValueError):
+            maybe_apply_repartition(dataset, table, "hash_shuffle")
 
 
 if __name__ == "__main__":

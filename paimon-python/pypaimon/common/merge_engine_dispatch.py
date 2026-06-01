@@ -29,6 +29,8 @@ from typing import List, Optional
 from pypaimon.common.options.core_options import MergeEngine
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
+from pypaimon.read.reader.first_row_merge_function import \
+    FirstRowMergeFunction
 from pypaimon.read.reader.partial_update_merge_function import \
     PartialUpdateMergeFunction
 
@@ -49,6 +51,17 @@ _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
 _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
+
+# Mirror ``CoreOptions.ignore_delete()``: any of these keys, if set to
+# ``"true"``, opts the engine into silently dropping
+# DELETE/UPDATE_BEFORE records. Kept as a raw-option lookup here so the
+# dispatch stays table-agnostic.
+_IGNORE_DELETE_KEYS = (
+    "ignore-delete",
+    "first-row.ignore-delete",
+    "deduplicate.ignore-delete",
+    "partial-update.ignore-delete",
+)
 
 
 def build_merge_function(
@@ -98,11 +111,23 @@ def build_merge_function(
                 list(value_field_names)
                 if value_field_names is not None else None),
         )
+    if engine == MergeEngine.FIRST_ROW:
+        return FirstRowMergeFunction(
+            ignore_delete=_ignore_delete_from_options(raw_options),
+        )
     raise NotImplementedError(
         "merge-engine '{}' is not implemented in pypaimon yet "
-        "(supported: deduplicate, partial-update). Open an issue to "
-        "track support.".format(engine.value)
+        "(supported: deduplicate, first-row, partial-update). Open an "
+        "issue to track support.".format(engine.value)
     )
+
+
+def _ignore_delete_from_options(raw_options: dict) -> bool:
+    for key in _IGNORE_DELETE_KEYS:
+        val = raw_options.get(key)
+        if val is not None:
+            return _option_is_truthy(val)
+    return False
 
 
 def partial_update_unsupported_options(raw_options: dict):

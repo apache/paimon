@@ -17,6 +17,7 @@
 
 """Scanner for shard-based global indexes."""
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Collection, Optional
 
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
@@ -37,9 +38,15 @@ class GlobalIndexScanner:
         fields: list,
         file_io,
         index_path: str,
-        index_files: Collection['IndexFileMeta']
+        index_files: Collection['IndexFileMeta'],
+        thread_num: Optional[int] = None,
     ):
-        self._evaluator = self._create_evaluator(fields, file_io, index_path, index_files)
+        self._executor = ThreadPoolExecutor(
+            max_workers=thread_num or 32
+        )
+        self._evaluator = self._create_evaluator(
+            fields, file_io, index_path, index_files
+        )
 
     def _create_evaluator(self, fields, file_io, index_path, index_files):
         index_metas = {}
@@ -68,18 +75,24 @@ class GlobalIndexScanner:
             )
             index_metas[field_id][index_type][range_key].append(io_meta)
 
+        executor = self._executor
+
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
-            return _create_readers(file_io, index_path, index_metas.get(field.id), field)
+            return _create_readers(file_io, index_path, index_metas.get(field.id), field, executor)
 
         return GlobalIndexEvaluator(fields, readers_function)
 
     @staticmethod
-    def create(table, index_files=None, partition_filter=None, predicate=None) -> Optional['GlobalIndexScanner']:
+    def create(table, index_files=None, partition_filter=None, predicate=None,
+               snapshot=None) -> Optional['GlobalIndexScanner']:
         """Create a GlobalIndexScanner.
 
         Can be called in two ways:
         1. create(table, index_files) - with explicit index files
-        2. create(table, partition_filter=..., predicate=...) - scan index files from snapshot
+        2. create(table, partition_filter=..., predicate=..., snapshot=...) -
+           scan index files from snapshot. ``snapshot`` may be passed in by the
+           caller to avoid a duplicate ``get_latest_snapshot`` REST round-trip
+           (the caller usually already fetched it for manifest scanning).
         """
         from pypaimon.index.index_file_handler import IndexFileHandler
 
@@ -90,7 +103,8 @@ class GlobalIndexScanner:
                 fields=table.fields,
                 file_io=table.file_io,
                 index_path=table.path_factory().global_index_path_factory().index_path(),
-                index_files=index_files
+                index_files=index_files,
+                thread_num=table.options.global_index_thread_num(),
             )
 
         # Scan index files from snapshot using partition_filter and predicate
@@ -110,7 +124,8 @@ class GlobalIndexScanner:
                 return False
             return global_index_meta.index_field_id in filter_field_ids
 
-        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if snapshot is None:
+            snapshot = table.snapshot_manager().get_latest_snapshot()
         index_file_handler = IndexFileHandler(table=table)
         entries = index_file_handler.scan(snapshot, index_file_filter)
         scanned_index_files = [entry.index_file for entry in entries]
@@ -121,7 +136,8 @@ class GlobalIndexScanner:
             fields=table.fields,
             file_io=table.file_io,
             index_path=table.path_factory().global_index_path_factory().index_path(),
-            index_files=scanned_index_files
+            index_files=scanned_index_files,
+            thread_num=table.options.global_index_thread_num(),
         )
 
     def scan(self, predicate: Optional[Predicate]) -> Optional[GlobalIndexResult]:
@@ -131,6 +147,7 @@ class GlobalIndexScanner:
     def close(self):
         """Close the scanner and release resources."""
         self._evaluator.close()
+        self._executor.shutdown(wait=False)
 
     def __enter__(self) -> 'GlobalIndexScanner':
         return self
@@ -139,7 +156,7 @@ class GlobalIndexScanner:
         self.close()
 
 
-def _create_readers(file_io, index_path, index_type_metas, field):
+def _create_readers(file_io, index_path, index_type_metas, field, executor=None):
     """Create readers for a specific field, dispatched by index_type.
 
     Unknown indexTypes raise — a silent skip would make
@@ -161,7 +178,7 @@ def _create_readers(file_io, index_path, index_type_metas, field):
         offset_readers = []
         for range_key, io_metas in range_metas.items():
             inner_readers = _create_inner_readers(
-                index_type, file_io, index_path, field, io_metas)
+                index_type, file_io, index_path, field, io_metas, executor)
             for inner in inner_readers:
                 offset_readers.append(
                     OffsetGlobalIndexReader(
@@ -171,28 +188,25 @@ def _create_readers(file_io, index_path, index_type_metas, field):
     return readers
 
 
-def _create_inner_readers(index_type, file_io, index_path, field, io_metas):
+def _create_inner_readers(index_type, file_io, index_path, field, io_metas, executor=None):
     """Build per-file (or per-shard) readers for a single indexType/range."""
     if index_type == 'btree':
-        from pypaimon.globalindex.btree import BTreeIndexReader
+        from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
         from pypaimon.globalindex.btree.key_serializer import create_serializer
         key_serializer = create_serializer(field.type)
-        return [
-            BTreeIndexReader(
-                key_serializer=key_serializer,
-                file_io=file_io,
-                index_path=index_path,
-                io_meta=io_meta,
-            )
-            for io_meta in io_metas
-        ]
+        return [LazyFilteredBTreeReader(
+            key_serializer=key_serializer,
+            file_io=file_io,
+            index_path=index_path,
+            io_metas=io_metas,
+            executor=executor,
+        )]
 
     from pypaimon.globalindex.tantivy import (
         TANTIVY_FULLTEXT_IDENTIFIER,
         TantivyFullTextGlobalIndexReader,
     )
     if index_type == TANTIVY_FULLTEXT_IDENTIFIER:
-        # Tantivy expects one file per shard; create one reader per io_meta.
         return [
             TantivyFullTextGlobalIndexReader(file_io, index_path, [io_meta])
             for io_meta in io_metas

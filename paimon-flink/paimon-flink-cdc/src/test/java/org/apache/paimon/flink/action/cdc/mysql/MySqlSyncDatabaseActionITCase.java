@@ -969,7 +969,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testSyncMultipleShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 

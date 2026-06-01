@@ -18,6 +18,7 @@
 """Vector search read to read index files."""
 
 from abc import ABC, abstractmethod
+from concurrent.futures import wait
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -56,12 +57,19 @@ class VectorSearchReadImpl(VectorSearchRead):
 
         pre_filter = self._pre_filter(splits)
 
-        merged_scores = {}
-        for split in splits:
-            split_result = self._eval(
+        futures = [
+            self._eval(
                 split.row_range_start, split.row_range_end,
                 split.vector_index_files, pre_filter
             )
+            for split in splits
+        ]
+
+        wait(futures)
+
+        merged_scores = {}
+        for future in futures:
+            split_result = future.result()
             if split_result is not None:
                 score_getter = split_result.score_getter()
                 for row_id in split_result.results():
@@ -103,9 +111,10 @@ class VectorSearchReadImpl(VectorSearchRead):
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
               include_row_ids):
-        # type: (int, int, list, Optional[RoaringBitmap64]) -> Optional[ScoredGlobalIndexResult]
+        from pypaimon.globalindex.global_index_reader import _completed_future
+
         if not vector_index_files:
-            return None
+            return _completed_future(None)
         index_io_meta_list = []
         for index_file in vector_index_files:
             meta = index_file.global_index_meta
@@ -132,12 +141,14 @@ class VectorSearchReadImpl(VectorSearchRead):
         if include_row_ids is not None:
             vector_search = vector_search.with_include_row_ids(include_row_ids)
 
-        with _create_vector_reader(
+        reader = _create_vector_reader(
             index_type, file_io, index_path,
             index_io_meta_list, options
-        ) as reader:
-            offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-            return offset_reader.visit_vector_search(vector_search)
+        )
+        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        future = offset_reader.visit_vector_search(vector_search)
+        future.add_done_callback(lambda _: reader.close())
+        return future
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):

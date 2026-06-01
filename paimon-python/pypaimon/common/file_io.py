@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -25,6 +26,26 @@ import pyarrow  # noqa: F401
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
+
+
+def supports_pread(stream) -> bool:
+    """Check if the stream supports position-based reads (thread-safe I/O)."""
+    if hasattr(stream, 'read_at'):
+        return True
+    if hasattr(stream, 'fileno'):
+        try:
+            stream.fileno()
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def pread(stream, length: int, offset: int) -> bytes:
+    """Position-based read without changing the stream cursor. Thread-safe."""
+    if hasattr(stream, 'read_at'):
+        return stream.read_at(length, offset)
+    return os.pread(stream.fileno(), length, offset)
 
 
 class FileIO(ABC):
@@ -256,6 +277,9 @@ class FileIO(ABC):
 
     def write_vortex(self, path: str, data, **kwargs):
         raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
+
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_row must be implemented by FileIO subclasses")
 
     def close(self):
         pass

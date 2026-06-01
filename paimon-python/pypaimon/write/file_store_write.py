@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
-from pypaimon.write.writer.data_blob_writer import DataBlobWriter
+from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.write.writer.data_vector_writer import DataVectorWriter
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 from pypaimon.table.bucket_mode import BucketMode
@@ -68,7 +69,16 @@ class FileStoreWrite:
 
         # Check if table has blob columns
         if self._has_blob_columns():
-            return DataBlobWriter(
+            return DedicatedFormatWriter(
+                table=self.table,
+                partition=partition,
+                bucket=bucket,
+                max_seq_number=0,
+                options=options,
+                write_cols=self.write_cols,
+            )
+        elif self._has_vector_columns() and options.with_vector_format():
+            return DataVectorWriter(
                 table=self.table,
                 partition=partition,
                 bucket=bucket,
@@ -99,18 +109,18 @@ class FileStoreWrite:
         """Build the merge function for the in-memory write buffer.
 
         Shares ``merge_engine_dispatch.build_merge_function`` with the
-        read path so the supported engines (deduplicate, partial-update
-        with no out-of-scope options) cannot drift between sides.
+        read path so the supported engines (deduplicate, first-row,
+        partial-update with no out-of-scope options) cannot drift
+        between sides.
 
-        For wholly unsupported engines (``aggregation`` / ``first-row``)
-        the writer falls back to ``DeduplicateMergeFunction`` so the
-        flushed file still maintains the LSM "PK unique within a file"
-        invariant. The read path's dispatch still raises
-        ``NotImplementedError``, so the user gets an explicit error
-        before they observe wrong-engine data; the fallback only
-        narrows the damage to "file is deduped, not aggregated"
-        rather than the silent multi-row-per-PK corruption that
-        existed pre-PR.
+        For wholly unsupported engines (``aggregation``) the writer
+        falls back to ``DeduplicateMergeFunction`` so the flushed file
+        still maintains the LSM "PK unique within a file" invariant.
+        The read path's dispatch still raises ``NotImplementedError``,
+        so the user gets an explicit error before they observe
+        wrong-engine data; the fallback only narrows the damage to
+        "file is deduped, not aggregated" rather than the silent
+        multi-row-per-PK corruption that existed pre-PR.
 
         Partial-update with out-of-scope options (sequence-group,
         per-field aggregator, ignore-delete, remove-record-on-*) does
@@ -173,7 +183,7 @@ class FileStoreWrite:
         # Catch the dispatch's "wholly unsupported engine" raise only
         # for the engines we know are out of scope today; any other
         # NotImplementedError is a bug we want to surface, not swallow.
-        if engine in (MergeEngine.AGGREGATE, MergeEngine.FIRST_ROW):
+        if engine == MergeEngine.AGGREGATE:
             # Surface the silent semantic mismatch in logs: the file
             # will be PK-unique (better than the pre-PR multi-row
             # corruption), but any reader that honours the declared
@@ -203,13 +213,15 @@ class FileStoreWrite:
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""
         for field in self.table.table_schema.fields:
-            # Check if field type is blob
             if hasattr(field.type, 'type') and field.type.type == 'BLOB':
                 return True
-            # Alternative: check for specific blob type class
             elif hasattr(field.type, '__class__') and 'blob' in field.type.__class__.__name__.lower():
                 return True
         return False
+
+    def _has_vector_columns(self) -> bool:
+        from pypaimon.schema.data_types import VectorType
+        return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         self.commit_identifier = commit_identifier
