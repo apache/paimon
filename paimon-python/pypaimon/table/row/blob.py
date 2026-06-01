@@ -276,6 +276,41 @@ class Blob(ABC):
     def from_descriptor(uri_reader: UriReader, descriptor: BlobDescriptor) -> 'Blob':
         return BlobRef(uri_reader, descriptor)
 
+    @staticmethod
+    def from_bytes(data: Optional[bytes], file_io=None, allow_blob_data: bool = True) -> Optional['Blob']:
+        if data is None:
+            return None
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError(f"Blob.from_bytes expects bytes, got {type(data)}")
+        data = bytes(data)
+        is_descriptor = BlobDescriptor.is_blob_descriptor(data)
+        if not allow_blob_data and not is_descriptor:
+            raise ValueError(
+                "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
+            )
+        if is_descriptor:
+            if file_io is None:
+                raise ValueError("file_io is required to resolve BlobDescriptor bytes")
+            descriptor = BlobDescriptor.deserialize(data)
+            uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
+            return BlobRef(uri_reader, descriptor)
+        return BlobData(data)
+
+
+class _PlaceholderBlob(Blob):
+
+    def to_data(self) -> bytes:
+        raise RuntimeError("Should never call this method for placeholder blob.")
+
+    def to_descriptor(self) -> BlobDescriptor:
+        raise RuntimeError("Should never call this method for placeholder blob.")
+
+    def new_input_stream(self) -> BinaryIO:
+        raise RuntimeError("Should never call this method for placeholder blob.")
+
+
+Blob.PLACE_HOLDER = _PlaceholderBlob()
+
 
 class BlobData(Blob):
 

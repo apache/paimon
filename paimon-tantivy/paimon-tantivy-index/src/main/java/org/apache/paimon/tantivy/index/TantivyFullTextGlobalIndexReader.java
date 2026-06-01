@@ -38,6 +38,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -57,6 +59,7 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     private final Map<String, ArchiveLayout> layoutCache;
     private final TantivySearcherPool searcherPool;
     private final String poolKey;
+    private final ExecutorService executor;
 
     private volatile TantivySearcherPool.PooledEntry borrowed;
 
@@ -64,8 +67,10 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             Map<String, ArchiveLayout> layoutCache,
-            TantivySearcherPool searcherPool) {
+            TantivySearcherPool searcherPool,
+            ExecutorService executor) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
+        this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.layoutCache = layoutCache;
@@ -74,15 +79,21 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
-        try {
-            ensureLoaded();
-            SearchResult result =
-                    borrowed.searcher.search(fullTextSearch.queryText(), fullTextSearch.limit());
-            return Optional.of(toScoredResult(result));
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to search Tantivy full-text index", e);
-        }
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
+            FullTextSearch fullTextSearch) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        ensureLoaded();
+                        SearchResult result =
+                                borrowed.searcher.search(
+                                        fullTextSearch.queryText(), fullTextSearch.limit());
+                        return Optional.of(toScoredResult(result));
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to search Tantivy full-text index", e);
+                    }
+                },
+                executor);
     }
 
     private ScoredGlobalIndexResult toScoredResult(SearchResult result) {
@@ -101,7 +112,7 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
             synchronized (this) {
                 if (borrowed == null) {
                     TantivySearcherPool.PooledEntry entry = searcherPool.borrow(poolKey);
-                    if (entry == null) {
+                    if (entry == null || entry.searcher.isClosed()) {
                         entry = createEntry();
                     }
                     borrowed = entry;
@@ -200,73 +211,85 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     // =================== unsupported =====================
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     /**

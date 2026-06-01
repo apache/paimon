@@ -30,7 +30,7 @@ PyPaimon supports querying global indexes built on Data Evolution (append) table
 - **Vector Index (Lumina)**: Approximate nearest neighbor (ANN) index for vector similarity search.
 - **Full-Text Index (Tantivy)**: Full-text search index for text retrieval with relevance scoring.
 
-> Global indexes must be built beforehand (e.g., via Spark or Flink). See [Global Index](../append-table/global-index) for how to create indexes.
+> Global indexes must be built beforehand (e.g., via Spark or Flink). See [Global Index](../multimodal-table/global-index) for how to create indexes.
 
 ## BTree Index
 

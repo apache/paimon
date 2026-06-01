@@ -18,29 +18,133 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
+
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.plans.logical.{MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, SubqueryExpression}
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
+
+import scala.collection.JavaConverters._
 
 /** A post-hoc resolution rule for MergeInto. */
-case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
+case class PaimonMergeInto(spark: SparkSession)
+  extends Rule[LogicalPlan]
+  with RowLevelHelper
+  with ExpressionHelper
+  with MergeSchemaEvolutionHelper {
 
-  /**
-   * Align all MergeActions in a MergeIntoTable based on the target table's output attributes.
-   * Returns a new MergeIntoTable with aligned matchedActions, notMatchedActions, and
-   * notMatchedBySourceActions.
-   */
-  override def alignMergeIntoTable(
-      m: MergeIntoTable,
-      targetOutput: Seq[Attribute]): MergeIntoTable = {
-    m.copy(
-      matchedActions = m.matchedActions.map(alignMergeAction(_, targetOutput)),
-      notMatchedActions = m.notMatchedActions.map(alignMergeAction(_, targetOutput)),
-      notMatchedBySourceActions = m.notMatchedBySourceActions.map(alignMergeAction(_, targetOutput))
-    )
+  override val operation: RowLevelOp = MergeInto
+
+  def apply(plan: LogicalPlan): LogicalPlan = {
+    // Spark 4.1 marks the plan analyzed before postHoc runs, bypassing `resolveOperators`. Pure
+    // append-only tables on 4.1+ are handled earlier by `Spark41MergeIntoRewrite`.
+    AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown {
+        case merge: MergeIntoTable
+            if merge.resolved && PaimonRelation.isPaimonTable(merge.targetTable) &&
+              !PaimonMergeActionTags.isAligned(merge) =>
+          val relation = PaimonRelation.getPaimonRelation(merge.targetTable)
+          var v2Table = relation.table.asInstanceOf[SparkTable]
+
+          checkPaimonTable(v2Table.getTable)
+          checkCondition(merge.mergeCondition)
+          (merge.matchedActions ++ merge.notMatchedActions)
+            .flatMap(_.condition)
+            .foreach(checkCondition)
+
+          val primaryKeys = v2Table.getTable.primaryKeys().asScala.toSeq
+          if (primaryKeys.nonEmpty) {
+            val updateActions = merge.matchedActions.collect { case a: UpdateAction => a }
+            checkUpdateActionValidity(
+              AttributeSet(relation.output),
+              merge.mergeCondition,
+              updateActions,
+              primaryKeys)
+          }
+
+          // Evolve the target schema in memory before alignment so the aligned plan sees the new
+          // columns; the commit is deferred to execution (the merge command's run).
+          val (resolvedMerge, targetOutput) =
+            evolveTargetIfNeeded(merge, relation, v2Table, spark, resolveNotMatchedBySourceActions)
+              .map { case (m, r, t) => v2Table = t; (m, r.output) }
+              .getOrElse((merge, relation.output))
+
+          val aligned = alignAllMergeActions(resolvedMerge, targetOutput)
+
+          if (!shouldFallbackToV1MergeInto(aligned)) {
+            // Tag so the analyzer's idempotence re-run skips this node (V1 fallback is a different
+            // node type and doesn't need the tag).
+            PaimonMergeActionTags.markAligned(aligned)
+          } else {
+            buildV1Command(v2Table, resolvedMerge, aligned)
+          }
+      }
+    }
   }
 
-  override def resolveNotMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] = {
-    merge.notMatchedBySourceActions
+  private def buildV1Command(
+      v2Table: SparkTable,
+      resolvedMerge: MergeIntoTable,
+      aligned: MergeIntoTable): LogicalPlan = {
+    val notMatchedBySource = resolveNotMatchedBySourceActions(aligned)
+    if (v2Table.coreOptions.dataEvolutionEnabled()) {
+      MergeIntoPaimonDataEvolutionTable(
+        v2Table,
+        resolvedMerge.targetTable,
+        resolvedMerge.sourceTable,
+        resolvedMerge.mergeCondition,
+        aligned.matchedActions,
+        aligned.notMatchedActions,
+        notMatchedBySource
+      )
+    } else {
+      MergeIntoPaimonTable(
+        v2Table,
+        resolvedMerge.targetTable,
+        resolvedMerge.sourceTable,
+        resolvedMerge.mergeCondition,
+        aligned.matchedActions,
+        aligned.notMatchedActions,
+        notMatchedBySource
+      )
+    }
   }
+
+  private def checkCondition(condition: Expression): Unit = {
+    if (!condition.resolved) {
+      throw new RuntimeException(s"Condition $condition should have been resolved.")
+    }
+    if (SubqueryExpression.hasSubquery(condition)) {
+      throw new RuntimeException(s"Condition $condition with subquery can't be supported.")
+    }
+  }
+
+  private def checkUpdateActionValidity(
+      targetOutput: AttributeSet,
+      mergeCondition: Expression,
+      actions: Seq[UpdateAction],
+      primaryKeys: Seq[String]): Unit = {
+    lazy val isMergeConditionValid = {
+      val mergeExpressions = splitConjunctivePredicates(mergeCondition)
+      primaryKeys.forall {
+        primaryKey => isUpdateExpressionToPrimaryKey(targetOutput, mergeExpressions, primaryKey)
+      }
+    }
+
+    def isUpdateActionValid(action: UpdateAction): Boolean = {
+      validUpdateAssignment(targetOutput, primaryKeys, action.assignments)
+    }
+
+    val valid = isMergeConditionValid || actions.forall(isUpdateActionValid)
+    if (!valid) {
+      throw new RuntimeException("Can't update the primary key column in update clause.")
+    }
+  }
+
+  private def resolveNotMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] =
+    SparkShimLoader.shim.notMatchedBySourceActions(merge)
 }

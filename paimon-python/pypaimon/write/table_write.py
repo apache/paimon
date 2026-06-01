@@ -77,6 +77,7 @@ class TableWrite:
         overwrite: bool = False,
         concurrency: Optional[int] = None,
         ray_remote_args: Optional[Dict[str, Any]] = None,
+        hash_fixed_precluster: str = "auto",
     ) -> None:
         """
         Write a Ray Dataset to Paimon table.
@@ -89,8 +90,18 @@ class TableWrite:
                 By default, dynamically decided based on available resources.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
+            hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
+                and ``"off"`` write append-only HASH_FIXED tables directly
+                and reject HASH_FIXED primary-key tables. ``"map_groups"``
+                preserves the legacy small-file optimization and its single
+                group memory bound.
         """
+        from pypaimon.ray.shuffle import maybe_apply_repartition
         from pypaimon.write.ray_datasink import PaimonDatasink
+
+        dataset = maybe_apply_repartition(
+            dataset, self.table, hash_fixed_precluster)
+
         datasink = PaimonDatasink(self.table, overwrite=overwrite)
         dataset.write_datasink(
             datasink,

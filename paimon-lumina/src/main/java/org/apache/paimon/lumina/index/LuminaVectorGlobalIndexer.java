@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /** Lumina vector global indexer. */
 public class LuminaVectorGlobalIndexer implements GlobalIndexer {
@@ -47,7 +48,9 @@ public class LuminaVectorGlobalIndexer implements GlobalIndexer {
 
     @Override
     public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) {
-        return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options);
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            ExecutorService executor) {
+        return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
     }
 }

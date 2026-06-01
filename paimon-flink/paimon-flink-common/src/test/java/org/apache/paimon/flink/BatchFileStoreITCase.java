@@ -1416,6 +1416,38 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDedicatedPathLimitTenOnManyRows() {
+        sql("CREATE TABLE limit_many_rows (a INT, b INT, c INT)");
+        StringBuilder insertValues = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            if (i > 1) {
+                insertValues.append(", ");
+            }
+            insertValues.append(String.format("(%d, %d, %d)", i, i * 10, i * 100));
+        }
+        batchSql("INSERT INTO limit_many_rows VALUES " + insertValues);
+
+        List<Row> result =
+                batchSql(
+                        "SELECT * FROM limit_many_rows "
+                                + "/*+ OPTIONS('scan.dedicated-split-generation'='true') */ "
+                                + "LIMIT 10");
+        assertThat(result).hasSize(10);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 10, 100),
+                        Row.of(2, 20, 200),
+                        Row.of(3, 30, 300),
+                        Row.of(4, 40, 400),
+                        Row.of(5, 50, 500),
+                        Row.of(6, 60, 600),
+                        Row.of(7, 70, 700),
+                        Row.of(8, 80, 800),
+                        Row.of(9, 90, 900),
+                        Row.of(10, 100, 1000));
+    }
+
+    @Test
     public void testBatchReadSourceWithoutSnapshot() {
         assertThat(
                         batchSql(

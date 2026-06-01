@@ -461,7 +461,7 @@ Output:
   4  Data lake platforms like Paimon handle large-...
 ```
 
-**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index](../append-table/global-index) for how to create full-text indexes.
+**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index](../multimodal-table/global-index) for how to create full-text indexes.
 
 ### Table Drop
 

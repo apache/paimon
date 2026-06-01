@@ -1,0 +1,325 @@
+---
+title: "Vector Storage"
+sidebar_position: 7
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Vector Storage
+
+## Overview
+
+With the explosive growth of AI scenarios, vector storage has become increasingly important. Paimon provides optimized storage solutions specifically designed for vector data.
+
+Paimon stores vector columns in dedicated files using the [Vortex](https://github.com/spiraldb/vortex) columnar format, which is optimized for vector workloads with high compression ratio and fast scan performance.
+
+## Vector Data Type
+
+Paimon supports defining columns of type `VECTOR<t, n>`, which represents a fixed-length, dense vector column, where:
+ - **`t`**: The element type. Supports: `BOOLEAN`, `TINYINT`, `SMALLINT`, `INT`, `BIGINT`, `FLOAT`, `DOUBLE`;
+ - **`n`**: The vector dimension, must be a positive integer not exceeding `2,147,483,647`.
+
+Compared to variable-length arrays, dense vectors provide:
+ - More natural semantic constraints, preventing mismatched lengths and `null` elements at the storage layer;
+ - Better point-lookup performance, eliminating offset array storage and access;
+ - Closer alignment with type representations in specialized vector engines, avoiding memory copies and type conversions.
+
+**Notes**:
+ - Columns of `VECTOR` type cannot be used as primary key columns, partition columns, or for sorting.
+ - If a `VECTOR` value itself is not `null`, its elements are not allowed to be `null`.
+
+## Dedicated Vector File Storage
+
+Paimon stores vector columns in separate `.vector.vortex` files within Data Evolution tables, keeping scalar and vector data independently optimized.
+
+File layout:
+```
+table/
+├── bucket-0/
+│   ├── data-uuid-0.parquet       # Scalar columns (id, name, ...)
+│   ├── data-uuid-1.blob          # Blob data
+│   ├── data-uuid-2.vector.vortex # Vector columns in Vortex format
+│   └── ...
+├── manifest/
+├── schema/
+└── snapshot/
+```
+
+| Option | Description |
+|--------|-------------|
+| `vector.file.format` | File format for dedicated vector files. Set to `vortex` to enable dedicated vector storage. |
+| `vector.target-file-size` | Target file size for vector files. Defaults to `10 * 'target-file-size'`. |
+| `row-tracking.enabled` | Must be `true` for dedicated vector storage. |
+| `data-evolution.enabled` | Must be `true` for dedicated vector storage. |
+
+## Create Table
+
+The recommended way to create a vector table in SQL is to use the **comment directive** `__VECTOR_FIELD;dim` on the column. Paimon automatically converts the `ARRAY` type to `VECTOR` and registers the field in the `vector-field` option.
+
+<Tabs groupId="vector-create-table">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+-- Comment directive: __VECTOR_FIELD;{dim}; optional comment
+CREATE TABLE vector_table (
+    id BIGINT,
+    embed ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;128; product embedding'
+) WITH (
+    'vector.file.format' = 'vortex',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+-- Multiple vector columns
+CREATE TABLE multi_vector_table (
+    id BIGINT,
+    embed1 ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;128',
+    embed2 ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768'
+) WITH (
+    'vector.file.format' = 'vortex',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+CREATE TABLE vector_table (
+    id BIGINT,
+    embed ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;128; product embedding'
+) TBLPROPERTIES (
+    'vector.file.format' = 'vortex',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+// Java API uses VectorType directly — no comment directive needed
+Schema schema = Schema.newBuilder()
+        .column("id", DataTypes.BIGINT())
+        .column("embed", DataTypes.VECTOR(128, DataTypes.FLOAT()))
+        .option("vector.file.format", "vortex")
+        .option("row-tracking.enabled", "true")
+        .option("data-evolution.enabled", "true")
+        .option("bucket", "-1")
+        .build();
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+import pyarrow as pa
+from pypaimon import Schema
+
+# Fixed-size list is automatically recognized as VECTOR type
+pa_schema = pa.schema([
+    ('id', pa.int64()),
+    ('embed', pa.list_(pa.float32(), 128)),
+])
+
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={
+        'vector.file.format': 'vortex',
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'bucket': '-1',
+    }
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Adding a Vector Column
+
+<Tabs groupId="vector-add-column">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+ALTER TABLE vector_table
+    ADD embed2 ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768; text embedding';
+```
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+ALTER TABLE vector_table
+    ADD COLUMN embed2 ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768; text embedding';
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+// Java API: add column with VectorType directly
+schemaManager.commitChanges(
+    SchemaChange.addColumn("embed2", DataTypes.VECTOR(768, DataTypes.FLOAT())));
+
+// Or use comment directive like SQL
+schemaManager.commitChanges(
+    SchemaChange.addColumn("embed2", DataTypes.ARRAY(DataTypes.FLOAT()),
+        "__VECTOR_FIELD;768; text embedding", null));
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+catalog.alter_table(
+    'default.vector_table',
+    [('add', 'embed2', pa.list_(pa.float32(), 768))]
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Write Data
+
+<Tabs groupId="vector-write-data">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+INSERT INTO vector_table VALUES (1, ARRAY[1.0, 2.0, 3.0, ...]);
+```
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+INSERT INTO vector_table VALUES (1, ARRAY(1.0, 2.0, 3.0, ...));
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+BatchWriteBuilder builder = table.newBatchWriteBuilder();
+try (BatchTableWrite write = builder.newWrite();
+        BatchTableCommit commit = builder.newCommit()) {
+    InternalVector vector = BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f});
+    write.write(GenericRow.of(1L, vector));
+    commit.commit(write.prepareCommit());
+}
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+import pyarrow as pa
+
+data = pa.table({
+    'id': pa.array([1, 2, 3], type=pa.int64()),
+    'embed': pa.FixedSizeListArray.from_arrays(
+        pa.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], type=pa.float32()),
+        3  # dimension
+    ),
+})
+
+write_builder = table.new_batch_write_builder()
+writer = write_builder.new_write()
+writer.write_arrow(data)
+commit_messages = writer.prepare_commit()
+write_builder.new_commit().commit(commit_messages)
+writer.close()
+```
+
+</TabItem>
+
+</Tabs>
+
+## Read Data
+
+<Tabs groupId="vector-read-data">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+SELECT id, embed FROM vector_table;
+```
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+SELECT id, embed FROM vector_table;
+```
+
+</TabItem>
+
+<TabItem value="java" label="Java API">
+
+```java
+ReadBuilder readBuilder = table.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> {
+        long id = row.getLong(0);
+        float[] vector = row.getVector(1).toFloatArray();
+        System.out.println(id + ": " + Arrays.toString(vector));
+    });
+}
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+read_builder = table.new_read_builder()
+splits = read_builder.new_scan().plan().splits()
+result = read_builder.new_read().to_arrow(splits)
+
+print(result.column('embed').to_pylist())
+# [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+```
+
+</TabItem>
+
+</Tabs>

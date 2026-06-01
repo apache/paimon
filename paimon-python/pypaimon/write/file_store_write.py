@@ -23,7 +23,8 @@ import pyarrow as pa
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
-from pypaimon.write.writer.data_blob_writer import DataBlobWriter
+from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.write.writer.data_vector_writer import DataVectorWriter
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 from pypaimon.table.bucket_mode import BucketMode
@@ -64,7 +65,16 @@ class FileStoreWrite:
 
         # Check if table has blob columns
         if self._has_blob_columns():
-            return DataBlobWriter(
+            return DedicatedFormatWriter(
+                table=self.table,
+                partition=partition,
+                bucket=bucket,
+                max_seq_number=0,
+                options=options,
+                write_cols=self.write_cols,
+            )
+        elif self._has_vector_columns() and options.with_vector_format():
+            return DataVectorWriter(
                 table=self.table,
                 partition=partition,
                 bucket=bucket,
@@ -93,13 +103,15 @@ class FileStoreWrite:
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""
         for field in self.table.table_schema.fields:
-            # Check if field type is blob
             if hasattr(field.type, 'type') and field.type.type == 'BLOB':
                 return True
-            # Alternative: check for specific blob type class
             elif hasattr(field.type, '__class__') and 'blob' in field.type.__class__.__name__.lower():
                 return True
         return False
+
+    def _has_vector_columns(self) -> bool:
+        from pypaimon.schema.data_types import VectorType
+        return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         self.commit_identifier = commit_identifier

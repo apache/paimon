@@ -28,6 +28,8 @@ class BlobDescriptorConvertReader(RecordBatchReader):
         self._inner = inner
         self._table = table
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
+        self.file_io = inner.file_io
+        self.blob_field_indices = inner.blob_field_indices
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         import pyarrow

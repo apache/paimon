@@ -24,7 +24,7 @@ new module.
 The following short names are intentionally not registered here yet:
 
   audit_log, binlog, read_optimized, consumers, statistics,
-  aggregation_fields, buckets, file_key_ranges, table_indexes,
+  aggregation_fields, file_key_ranges, table_indexes,
   row_tracking, all_tables, all_partitions, all_table_options,
   catalog_options
 """
@@ -44,6 +44,7 @@ SYSTEM_TABLES: Tuple[str, ...] = (
     "manifests",
     "files",
     "partitions",
+    "buckets",
     "tags",
     "branches",
 )
@@ -66,6 +67,7 @@ SYSTEM_TABLE_LOADERS: Dict[str, Callable[..., "SystemTable"]] = {
     "manifests": _lazy("pypaimon.table.system.manifests_table", "ManifestsTable"),
     "files": _lazy("pypaimon.table.system.files_table", "FilesTable"),
     "partitions": _lazy("pypaimon.table.system.partitions_table", "PartitionsTable"),
+    "buckets": _lazy("pypaimon.table.system.buckets_table", "BucketsTable"),
     "tags": _lazy("pypaimon.table.system.tags_table", "TagsTable"),
     "branches": _lazy("pypaimon.table.system.branches_table", "BranchesTable"),
 }

@@ -15,10 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, TYPE_CHECKING
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+if TYPE_CHECKING:
+    from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 
 
 @dataclass
@@ -27,6 +30,7 @@ class CommitMessage:
     bucket: int
     new_files: List[DataFileMeta]
     check_from_snapshot: Optional[int] = -1
+    index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
 
     def is_empty(self):
-        return not self.new_files
+        return not self.new_files and not self.index_deletes

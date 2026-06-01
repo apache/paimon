@@ -19,17 +19,45 @@
 package org.apache.paimon.flink.btree;
 
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder.BTreeBuildTask;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link BTreeIndexTopoBuilder}. */
 public class BTreeIndexTopoBuilderTest {
+
+    @Test
+    public void testBuildIndexReturnsFalseWhenNoBuildTask() throws Exception {
+        BTreeGlobalIndexBuilder indexBuilder = mock(BTreeGlobalIndexBuilder.class);
+        when(indexBuilder.withIndexField("id")).thenReturn(indexBuilder);
+        when(indexBuilder.scan()).thenReturn(Optional.empty());
+        StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
+
+        assertThat(
+                        BTreeIndexTopoBuilder.buildIndex(
+                                env,
+                                () -> indexBuilder,
+                                mock(FileStoreTable.class),
+                                Collections.singletonList("id"),
+                                null,
+                                new Options()))
+                .isFalse();
+        verifyNoInteractions(env);
+    }
 
     @Test
     public void testCalculateParallelismByTotalRowsInsteadOfRangeCount() {

@@ -94,7 +94,7 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
         int scoreSize = dataInput.readInt();
 
         if (scoreSize == 0) {
-            return GlobalIndexResult.create(() -> roaringNavigableMap64);
+            return GlobalIndexResult.create(roaringNavigableMap64);
         }
         checkArgument(
                 scoreSize == roaringNavigableMap64.getIntCardinality(),
@@ -114,6 +114,6 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
             scoreMap.put(rowId, scores[i++]);
         }
 
-        return ScoredGlobalIndexResult.create(() -> roaringNavigableMap64, scoreMap::get);
+        return ScoredGlobalIndexResult.create(roaringNavigableMap64, scoreMap::get);
     }
 }

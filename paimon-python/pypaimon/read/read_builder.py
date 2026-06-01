@@ -58,6 +58,9 @@ class ReadBuilder:
         only callers see the same observable behaviour as before — the
         dotted form is opt-in. Unknown names are silently skipped to
         preserve the pre-existing contract.
+
+        Precedence: if a dotted name matches an actual top-level field, the
+        top-level match wins and the name is not walked as a struct path.
         """
         self._projection = projection
         if projection and any('.' in name for name in projection):
@@ -164,12 +167,12 @@ class ReadBuilder:
 
         paths: List[List[int]] = []
         for name in names:
-            if '.' not in name:
-                if name not in top_index:
-                    # Silently skip unknown names — preserves the
-                    # pre-existing contract from the plain top-level path.
-                    continue
+            # Dot can be part of a top-level field name, not only a struct path
+            # separator. Top-level match takes precedence over struct walk.
+            if name in top_index:
                 paths.append([top_index[name]])
+                continue
+            if '.' not in name:
                 continue
             parts = name.split('.')
             top = parts[0]

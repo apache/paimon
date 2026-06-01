@@ -136,6 +136,8 @@ case class MergeIntoPaimonDataEvolutionTable(
   lazy val tableSchema: StructType = v2Table.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
+    SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, targetRelation, sparkSession)
     invokeMergeInto(sparkSession)
     Seq.empty[Row]
   }

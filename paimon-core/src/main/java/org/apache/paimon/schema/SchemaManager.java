@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
 import org.apache.paimon.schema.SchemaChange.RemoveOption;
@@ -101,6 +102,8 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -196,6 +199,7 @@ public class SchemaManager implements Serializable {
                 }
             }
 
+            schema = applyDirectives(schema);
             TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
@@ -342,8 +346,27 @@ public class SchemaManager implements Serializable {
                         "Column %s cannot specify NOT NULL in the %s table.",
                         String.join(".", addColumn.fieldNames()),
                         lazyIdentifier.get().getFullName());
+
+                ConvertedColumn converted =
+                        applyAddColumnDirective(
+                                addColumn.description(),
+                                addColumn.fieldNames()[0],
+                                addColumn.dataType(),
+                                newOptions);
+                DataType requestedDataType = addColumn.dataType();
+                String effectiveComment = addColumn.description();
+                if (converted != null) {
+                    Preconditions.checkArgument(
+                            addColumn.fieldNames().length == 1,
+                            "Comment directive cannot be used on a nested column %s.",
+                            String.join(".", addColumn.fieldNames()));
+                    requestedDataType = converted.type();
+                    effectiveComment = converted.comment();
+                }
+
                 int id = highestFieldId.incrementAndGet();
-                DataType dataType = ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
+                DataType dataType = ReassignFieldId.reassign(requestedDataType, highestFieldId);
+                String storedComment = effectiveComment;
                 new NestedColumnModifier(addColumn.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -352,8 +375,7 @@ public class SchemaManager implements Serializable {
                                     Catalog.ColumnNotExistException {
                         assertColumnNotExists(newFields, fieldName, lazyIdentifier);
 
-                        DataField dataField =
-                                new DataField(id, fieldName, dataType, addColumn.description());
+                        DataField dataField = new DataField(id, fieldName, dataType, storedComment);
 
                         // key: name ; value : index
                         Map<String, Integer> map = new HashMap<>();
@@ -435,6 +457,16 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof DropColumn) {
                 DropColumn drop = (DropColumn) change;
                 dropColumnValidation(oldTableSchema, drop);
+                if (drop.fieldNames().length == 1) {
+                    String dropName = drop.fieldNames()[0];
+                    newFields.stream()
+                            .filter(f -> f.name().equals(dropName))
+                            .findFirst()
+                            .ifPresent(
+                                    f ->
+                                            ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                                                    dropName, f.type().getTypeRoot(), newOptions));
+                }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -451,6 +483,8 @@ public class SchemaManager implements Serializable {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                assertNotChangingBlobColumnType(
+                        newFields, update.fieldNames(), update.newDataType());
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -716,22 +750,33 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /**
+     * Merge {@code rowType} into the current schema (via {@link SchemaMergingUtils#mergeSchemas})
+     * and persist the result. Returns {@code true} if the schema changed and was committed, {@code
+     * false} if the merge was a no-op. See {@code SchemaMergingUtils} for how {@code typeWidening}
+     * / {@code allowExplicitCast} drive existing-column type evolution.
+     */
     public boolean mergeSchema(
             RowType rowType,
+            boolean typeWidening,
             boolean allowExplicitCast,
+            boolean caseSensitive,
             @Nullable SchemaModification schemaModification) {
         TableSchema current =
                 latest().orElseThrow(
                                 () ->
                                         new RuntimeException(
                                                 "It requires that the current schema to exist when calling 'mergeSchema'"));
-        TableSchema update = SchemaMergingUtils.mergeSchemas(current, rowType, allowExplicitCast);
+        TableSchema update =
+                SchemaMergingUtils.mergeSchemas(
+                        current, rowType, typeWidening, allowExplicitCast, caseSensitive);
         if (current.equals(update)) {
             return false;
         }
         try {
             if (schemaModification != null) {
-                List<SchemaChange> changes = SchemaMergingUtils.diffSchemaChanges(current, update);
+                List<SchemaChange> changes =
+                        SchemaMergingUtils.diffSchemaChanges(current, update, caseSensitive);
                 schemaModification.alterSchema(changes);
                 return true;
             } else {
@@ -920,6 +965,28 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotChangingBlobColumnType(
+            List<DataField> fields, String[] fieldNames, DataType newType) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        for (DataField field : fields) {
+            if (!field.name().equals(fieldName)) {
+                continue;
+            }
+            boolean wasBlob = field.type().is(DataTypeRoot.BLOB);
+            boolean willBeBlob = newType.is(DataTypeRoot.BLOB);
+            if (wasBlob || willBeBlob) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change column type involving BLOB: [%s] %s -> %s",
+                                fieldName, field.type(), newType));
+            }
+            return;
         }
     }
 

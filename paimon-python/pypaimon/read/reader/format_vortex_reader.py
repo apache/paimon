@@ -86,29 +86,23 @@ class FormatVortexReader(RecordBatchReader):
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
 
-        # Collect predicate-referenced fields for targeted view type casting
-        self._cast_fields = predicate_fields if predicate_fields and vortex_expr is not None else set()
-
     @staticmethod
-    def _cast_view_types(batch: RecordBatch, target_fields: Set[str]) -> RecordBatch:
-        """Cast string_view/binary_view columns to string/binary, only for target fields."""
-        if not target_fields:
-            return batch
+    def _cast_view_types(batch: RecordBatch) -> RecordBatch:
+        """Cast all string_view/binary_view columns to string/binary."""
         columns = []
         fields = []
         changed = False
         for i in range(batch.num_columns):
             col = batch.column(i)
             field = batch.schema.field(i)
-            if field.name in target_fields:
-                if col.type == pa.string_view():
-                    col = col.cast(pa.utf8())
-                    field = field.with_type(pa.utf8())
-                    changed = True
-                elif col.type == pa.binary_view():
-                    col = col.cast(pa.binary())
-                    field = field.with_type(pa.binary())
-                    changed = True
+            if col.type == pa.string_view():
+                col = col.cast(pa.utf8())
+                field = field.with_type(pa.utf8())
+                changed = True
+            elif col.type == pa.binary_view():
+                col = col.cast(pa.binary())
+                field = field.with_type(pa.binary())
+                changed = True
             columns.append(col)
             fields.append(field)
         if changed:
@@ -118,7 +112,7 @@ class FormatVortexReader(RecordBatchReader):
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
             batch = next(self.record_batch_reader)
-            batch = self._cast_view_types(batch, self._cast_fields)
+            batch = self._cast_view_types(batch)
 
             if not self.missing_fields:
                 return batch

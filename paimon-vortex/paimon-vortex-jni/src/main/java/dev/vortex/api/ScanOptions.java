@@ -18,25 +18,51 @@
 
 package dev.vortex.api;
 
-import java.util.List;
-import java.util.Optional;
 import org.immutables.value.Value;
 
+import java.util.Optional;
+import java.util.OptionalLong;
+
+/** Options for configuring a Vortex scan. */
 @Value.Immutable
 public interface ScanOptions {
-    List<String> columns();
 
-    Optional<Expression> predicate();
+    Optional<Expression> projection();
 
-    Optional<long[]> rowRange();
+    Optional<Expression> filter();
 
-    Optional<long[]> rowIndices();
+    OptionalLong rowRangeBegin();
 
-    static ScanOptions of() {
-        return ImmutableScanOptions.builder().build();
+    OptionalLong rowRangeEnd();
+
+    Optional<long[]> selectionIndices();
+
+    @Value.Default
+    default SelectionMode selectionMode() {
+        return SelectionMode.INCLUDE_ALL;
     }
 
-    static ImmutableScanOptions.Builder builder() {
-        return ImmutableScanOptions.builder();
+    OptionalLong limit();
+
+    @Value.Default
+    default boolean ordered() {
+        return false;
+    }
+
+    /** Selection mode for row indices. */
+    enum SelectionMode {
+        INCLUDE_ALL((byte) 0),
+        INCLUDE((byte) 1),
+        EXCLUDE((byte) 2);
+
+        private final byte code;
+
+        SelectionMode(byte code) {
+            this.code = code;
+        }
+
+        public byte code() {
+            return code;
+        }
     }
 }

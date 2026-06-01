@@ -27,7 +27,9 @@ from unittest import mock
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
+from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -210,7 +212,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         for rid in range(5, 10):
             bitmap.add(rid)
         scanner = mock.MagicMock()
-        scanner.scan.return_value = GlobalIndexResult.create(lambda: bitmap)
+        scanner.scan.return_value = GlobalIndexResult.create(bitmap)
 
         captured_searches = []
         captured_io_metas = []
@@ -222,7 +224,7 @@ class VectorSearchFilterTest(unittest.TestCase):
             class _FakeReader:
                 def visit_vector_search(self_inner, vs):
                     captured_searches.append(vs)
-                    return ScoredGlobalIndexResult.create_empty()
+                    return _completed_future(ScoredGlobalIndexResult.create_empty())
 
                 def close(self_inner):
                     pass
@@ -266,33 +268,34 @@ class VectorSearchFilterTest(unittest.TestCase):
         from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 
         scalar_file = self.entries[2].index_file
-        scanner = GlobalIndexScanner(
-            fields=self.table.fields,
-            file_io=self.table.file_io,
-            index_path="/unused/index-path",
-            index_files=[scalar_file],
-        )
-        captured = []
 
-        class _FakeBTreeReader:
+        captured_io_metas = []
+
+        class _FakeLazyReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
-                         io_meta):
-                captured.append(io_meta)
+                         io_metas, executor=None):
+                captured_io_metas.append(list(io_metas))
 
             def close(self_inner):
                 pass
 
-        try:
-            with mock.patch(
-                    "pypaimon.globalindex.btree.BTreeIndexReader",
-                    _FakeBTreeReader):
+        with mock.patch(
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.LazyFilteredBTreeReader",
+                _FakeLazyReader):
+            scanner = GlobalIndexScanner(
+                fields=self.table.fields,
+                file_io=self.table.file_io,
+                index_path="/unused/index-path",
+                index_files=[scalar_file],
+            )
+            try:
                 list(scanner._evaluator._readers_function(self.id_field))
-        finally:
-            scanner.close()
+            finally:
+                scanner.close()
 
-        self.assertEqual(1, len(captured))
+        self.assertEqual(1, len(captured_io_metas))
         self.assertEqual("oss://bucket/id-btree-0.index",
-                         captured[0].external_path)
+                         captured_io_metas[0][0].external_path)
 
 
 class VectorSearchMultiShardScalarTest(unittest.TestCase):
@@ -306,7 +309,6 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
     """
 
     def test_hit_only_in_later_shard_returns_global_row_id(self):
-        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         from pypaimon.globalindex.global_index_scanner import (
             GlobalIndexScanner,
@@ -327,34 +329,44 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         # Stub BTreeIndexReader: shard_a returns empty, shard_b returns {2}
         # (local row id). After Offset wrapping the scanner should emit {7}.
-        class _StubBTreeReader(GlobalIndexReader):
+        class _StubBTreeReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
                          io_meta):
                 self_inner._file = io_meta.file_name
 
-            def visit_equal(self_inner, field_ref, literal):
+            def visit_equal(self_inner, literal):
                 bm = RoaringBitmap64()
                 if self_inner._file == "id-1.index":
                     bm.add(2)  # local offset inside [5,9]
-                return GlobalIndexResult.create(lambda b=bm: b)
+                return GlobalIndexResult.create(bm)
 
             def close(self_inner):
                 pass
 
-        with mock.patch("pypaimon.globalindex.btree.BTreeIndexReader",
-                        _StubBTreeReader):
-            scanner = GlobalIndexScanner(
-                fields=table.fields,
-                file_io=table.file_io,
-                index_path="/unused",
-                index_files=[shard_a, shard_b],
-            )
-            try:
-                result = scanner.scan(
-                    Predicate(method="equal", index=0, field="id",
-                              literals=[7]))
-            finally:
-                scanner.close()
+        import struct
+        wide_meta = BTreeIndexMeta(
+            first_key=struct.pack('<i', 0),
+            last_key=struct.pack('<i', 9),
+            has_nulls=False)
+
+        with mock.patch(
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
+                _StubBTreeReader):
+            with mock.patch(
+                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
+                    return_value=wide_meta):
+                scanner = GlobalIndexScanner(
+                    fields=table.fields,
+                    file_io=table.file_io,
+                    index_path="/unused",
+                    index_files=[shard_a, shard_b],
+                )
+                try:
+                    result = scanner.scan(
+                        Predicate(method="equal", index=0, field="id",
+                                  literals=[7]))
+                finally:
+                    scanner.close()
 
         self.assertIsNotNone(result)
         hits = sorted(list(result.results()))
@@ -384,6 +396,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         captured_ctor_args = []
         visit_calls = []
 
+        from pypaimon.globalindex.global_index_reader import _completed_future as _cf
+
         class _StubTantivyReader:
             def __init__(self_inner, file_io, index_path, io_metas):
                 captured_ctor_args.append(
@@ -393,7 +407,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 visit_calls.append(("equal", literal))
                 bm = RoaringBitmap64()
                 bm.add(4)
-                return GlobalIndexResult.create(lambda b=bm: b)
+                return _cf(GlobalIndexResult.create(bm))
 
             def close(self_inner):
                 pass
@@ -429,7 +443,6 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         """Evaluator must dispatch ``like`` to reader.visit_like — otherwise
         the pre-filter is silently skipped and vector search returns rows
         that violate the predicate."""
-        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         from pypaimon.globalindex.global_index_scanner import (
             GlobalIndexScanner,
@@ -444,34 +457,38 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         observed_calls = []
 
-        class _StubBTreeReader(GlobalIndexReader):
+        class _StubBTreeReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
                          io_meta):
                 pass
 
-            def visit_like(self_inner, field_ref, literal):
+            def visit_like(self_inner, literal):
                 observed_calls.append(("like", literal))
                 bm = RoaringBitmap64()
                 bm.add(3)  # local, will be offset-rebased to 3 (range starts at 0)
-                return GlobalIndexResult.create(lambda b=bm: b)
+                return GlobalIndexResult.create(bm)
 
             def close(self_inner):
                 pass
 
-        with mock.patch("pypaimon.globalindex.btree.BTreeIndexReader",
-                        _StubBTreeReader):
-            scanner = GlobalIndexScanner(
-                fields=table.fields,
-                file_io=table.file_io,
-                index_path="/unused",
-                index_files=[shard],
-            )
-            try:
-                result = scanner.scan(
-                    Predicate(method="like", index=0, field="name",
-                              literals=["abc%"]))
-            finally:
-                scanner.close()
+        with mock.patch(
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
+                _StubBTreeReader):
+            with mock.patch(
+                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
+                    return_value=BTreeIndexMeta(first_key=None, last_key=None, has_nulls=False)):
+                scanner = GlobalIndexScanner(
+                    fields=table.fields,
+                    file_io=table.file_io,
+                    index_path="/unused",
+                    index_files=[shard],
+                )
+                try:
+                    result = scanner.scan(
+                        Predicate(method="like", index=0, field="name",
+                                  literals=["abc%"]))
+                finally:
+                    scanner.close()
 
         self.assertEqual([("like", "abc%")], observed_calls)
         self.assertIsNotNone(result)
@@ -567,7 +584,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 
             class _FakeReader:
                 def visit_vector_search(self_inner, vs):
-                    return DictBasedScoredIndexResult({row_id: float(row_id)})
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: float(row_id)}))
 
                 def close(self_inner):
                     pass
@@ -632,7 +650,8 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
 
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
-                    return DictBasedScoredIndexResult({row_id: float(row_id)})
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: float(row_id)}))
 
                 def close(self_inner):
                     pass

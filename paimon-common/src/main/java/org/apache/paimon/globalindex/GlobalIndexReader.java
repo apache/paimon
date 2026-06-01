@@ -26,30 +26,37 @@ import org.apache.paimon.predicate.VectorSearch;
 import java.io.Closeable;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 /** Index reader for global index, return {@link GlobalIndexResult}. */
-public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexResult>>, Closeable {
+public interface GlobalIndexReader
+        extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
 
     @Override
-    default Optional<GlobalIndexResult> visitAnd(List<Optional<GlobalIndexResult>> children) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default Optional<GlobalIndexResult> visitOr(List<Optional<GlobalIndexResult>> children) {
+    default CompletableFuture<Optional<GlobalIndexResult>> visitAnd(
+            List<CompletableFuture<Optional<GlobalIndexResult>>> children) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    default Optional<GlobalIndexResult> visitNonFieldLeaf(LeafPredicate predicate) {
+    default CompletableFuture<Optional<GlobalIndexResult>> visitOr(
+            List<CompletableFuture<Optional<GlobalIndexResult>>> children) {
         throw new UnsupportedOperationException();
     }
 
-    default Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNonFieldLeaf(
+            LeafPredicate predicate) {
         throw new UnsupportedOperationException();
     }
 
-    default Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
+    default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch) {
+        throw new UnsupportedOperationException();
+    }
+
+    default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
+            FullTextSearch fullTextSearch) {
         throw new UnsupportedOperationException();
     }
 }

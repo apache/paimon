@@ -40,6 +40,8 @@ import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
+import static org.apache.paimon.schema.TableSchema.CURRENT_VERSION;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -507,5 +509,113 @@ class SchemaValidationTest {
 
         validateTableSchema(
                 new TableSchema(1, fields, 10, emptyList(), singletonList("k"), options, ""));
+    }
+
+    @Test
+    public void testMergeOnReadCoexistsWithVisibilityCallback() {
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.enabled", "true");
+        options.put("deletion-vectors.merge-on-read", "true");
+        options.put("visibility-callback.enabled", "true");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testMergeOnReadCoexistsWithVisibilityCallbackAndPostponeBucket() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.enabled", "true");
+        options.put("deletion-vectors.merge-on-read", "true");
+        options.put("visibility-callback.enabled", "true");
+        options.put(BUCKET.key(), String.valueOf(-2));
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                singletonList("f1"),
+                                                options,
+                                                "")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testBucketAppendBackwardCompatibility() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.STRING()));
+
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(BUCKET.key(), "1");
+
+        TableSchema legacySchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyOptions,
+                        "",
+                        0L);
+
+        assertThatCode(() -> validateTableSchema(legacySchema)).doesNotThrowAnyException();
+
+        Map<String, String> currentOptions = new HashMap<>();
+        currentOptions.put(BUCKET.key(), "1");
+
+        TableSchema currentSchema =
+                new TableSchema(
+                        CURRENT_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        currentOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(currentSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
+
+        Map<String, String> legacyMultiBucketOptions = new HashMap<>();
+        legacyMultiBucketOptions.put(BUCKET.key(), "2");
+
+        TableSchema legacyMultiBucketSchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyMultiBucketOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(legacyMultiBucketSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
+    }
+
+    @Test
+    public void testMergeOnReadRequiresDvEnabled() {
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.merge-on-read", "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true");
     }
 }

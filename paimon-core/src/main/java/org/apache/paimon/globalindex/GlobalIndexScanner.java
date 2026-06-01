@@ -32,7 +32,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Range;
 
 import java.io.Closeable;
@@ -46,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -71,7 +71,7 @@ public class GlobalIndexScanner implements Closeable {
             Collection<IndexFileMeta> indexFiles) {
         this.options = options;
         this.executor =
-                ManifestReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
+                GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
@@ -151,35 +151,37 @@ public class GlobalIndexScanner implements Closeable {
         }
 
         Set<GlobalIndexReader> readers = new HashSet<>();
-        try {
-            for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : indexMetas.entrySet()) {
-                String indexType = entry.getKey();
-                Map<Range, List<IndexFileMeta>> metas = entry.getValue();
-                GlobalIndexerFactory globalIndexerFactory =
-                        GlobalIndexerFactoryUtils.load(indexType);
-                GlobalIndexer globalIndexer = globalIndexerFactory.create(dataField, options);
+        for (Map.Entry<String, Map<Range, List<IndexFileMeta>>> entry : indexMetas.entrySet()) {
+            String indexType = entry.getKey();
+            Map<Range, List<IndexFileMeta>> metas = entry.getValue();
+            GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(indexType);
+            GlobalIndexer globalIndexer = globalIndexerFactory.create(dataField, options);
 
-                List<GlobalIndexReader> unionReader = new ArrayList<>();
-                for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
-                    Range range = rangeMetas.getKey();
-                    List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
-
-                    List<GlobalIndexIOMeta> globalMetas =
-                            indexFileMetas.stream()
-                                    .map(this::toGlobalMeta)
-                                    .collect(Collectors.toList());
-                    GlobalIndexReader innerReader =
-                            new OffsetGlobalIndexReader(
-                                    globalIndexer.createReader(indexFileReadWrite, globalMetas),
-                                    range.from,
-                                    range.to);
-                    unionReader.add(innerReader);
-                }
-
-                readers.add(new UnionGlobalIndexReader(unionReader, executor));
+            List<CompletableFuture<GlobalIndexReader>> futures = new ArrayList<>(metas.size());
+            for (Map.Entry<Range, List<IndexFileMeta>> rangeMetas : metas.entrySet()) {
+                Range range = rangeMetas.getKey();
+                List<IndexFileMeta> indexFileMetas = rangeMetas.getValue();
+                List<GlobalIndexIOMeta> globalMetas =
+                        indexFileMetas.stream()
+                                .map(this::toGlobalMeta)
+                                .collect(Collectors.toList());
+                futures.add(
+                        CompletableFuture.supplyAsync(
+                                () ->
+                                        new OffsetGlobalIndexReader(
+                                                globalIndexer.createReader(
+                                                        indexFileReadWrite, globalMetas, executor),
+                                                range.from,
+                                                range.to),
+                                executor));
             }
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create global index reader", e);
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            List<GlobalIndexReader> unionReader = new ArrayList<>(futures.size());
+            for (CompletableFuture<GlobalIndexReader> future : futures) {
+                unionReader.add(future.join());
+            }
+            readers.add(new UnionGlobalIndexReader(unionReader));
         }
 
         return readers;

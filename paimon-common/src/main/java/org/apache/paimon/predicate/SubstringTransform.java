@@ -56,7 +56,8 @@ public class SubstringTransform implements Transform {
         if (source instanceof FieldRef) {
             FieldRef sourceFieldRef = (FieldRef) source;
             checkArgument(sourceFieldRef.type().is(CHARACTER_STRING));
-            sourceString = row.isNullAt(0) ? null : row.getString(sourceFieldRef.index());
+            int sourceIndex = sourceFieldRef.index();
+            sourceString = row.isNullAt(sourceIndex) ? null : row.getString(sourceIndex);
         } else {
             sourceString = (BinaryString) inputs.get(0);
         }

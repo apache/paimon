@@ -26,11 +26,13 @@ import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParserUtils.withOrigin
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser._
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.execution.command.{CreateTableLikeCommand => SparkCreateTableLikeCommand}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -97,6 +99,13 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   /** Create a SHOW TAGS logical command. */
   override def visitShowTags(ctx: ShowTagsContext): ShowTagsCommand = withOrigin(ctx) {
     ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
+  }
+
+  /** Create a CREATE TABLE LIKE logical command. */
+  override def visitCreateTableLike(ctx: CreateTableLikeContext): LogicalPlan = withOrigin(ctx) {
+    sparkCreateTableLikeCommand(ctx).copy(
+      targetTable = toTableIdentifier(typedVisit[Seq[String]](ctx.target)),
+      sourceTable = toTableIdentifier(typedVisit[Seq[String]](ctx.source)))
   }
 
   /** Create a CREATE OR REPLACE TAG logical command. */
@@ -252,6 +261,50 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
   private def toSeq[T](list: java.util.List[T]) = toBuffer(list)
+
+  private def toTableIdentifier(identifier: Seq[String]): TableIdentifier = {
+    identifier match {
+      case Seq(table) =>
+        TableIdentifier(table)
+      case Seq(database, table) =>
+        TableIdentifier(table, Some(database))
+      case parts =>
+        TableIdentifier(
+          parts.last,
+          Some(parts.slice(1, parts.length - 1).mkString(".")),
+          Some(parts.head))
+    }
+  }
+
+  private def sparkCreateTableLikeCommand(
+      ctx: CreateTableLikeContext): SparkCreateTableLikeCommand = {
+    delegate.parsePlan(createSparkCreateTableLikeSql(ctx)) match {
+      case command: SparkCreateTableLikeCommand => command
+      case plan =>
+        throw new UnsupportedOperationException(
+          s"Expected Spark CREATE TABLE LIKE command, but got ${plan.nodeName}.")
+    }
+  }
+
+  private def createSparkCreateTableLikeSql(ctx: CreateTableLikeContext): String = {
+    val stream = ctx.getStart.getInputStream
+    val baseStart = ctx.getStart.getStartIndex
+    val baseStop = ctx.getStop.getStopIndex
+    val targetStart = ctx.target.getStart.getStartIndex
+    val targetStop = ctx.target.getStop.getStopIndex
+    val sourceStart = ctx.source.getStart.getStartIndex
+    val sourceStop = ctx.source.getStop.getStopIndex
+
+    val prefix = stream.getText(Interval.of(baseStart, targetStart - 1))
+    val middle = stream.getText(Interval.of(targetStop + 1, sourceStart - 1))
+    val suffix = if (sourceStop < baseStop) {
+      stream.getText(Interval.of(sourceStop + 1, baseStop))
+    } else {
+      ""
+    }
+
+    prefix + "__paimon_create_like_target" + middle + "__paimon_create_like_source" + suffix
+  }
 
   private def reconstructSqlString(ctx: ParserRuleContext): String = {
     toBuffer(ctx.children)

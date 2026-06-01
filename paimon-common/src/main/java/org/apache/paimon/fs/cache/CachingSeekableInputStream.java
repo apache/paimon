@@ -21,13 +21,14 @@ package org.apache.paimon.fs.cache;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 
 /** A {@link SeekableInputStream} that caches reads at block granularity on local disk. */
-public class CachingSeekableInputStream extends SeekableInputStream {
+public class CachingSeekableInputStream extends SeekableInputStream implements VectoredReadable {
 
     private final FileIO fileIO;
     private final Path path;
@@ -110,6 +111,36 @@ public class CachingSeekableInputStream extends SeekableInputStream {
         return totalRead;
     }
 
+    @Override
+    public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
+        if (length == 0) {
+            return 0;
+        }
+        long end = Math.min(position + length, fileSize());
+        if (position >= end) {
+            return -1;
+        }
+
+        int blockSize = cache.blockSize();
+        int totalRead = 0;
+
+        while (position < end) {
+            int blockIndex = (int) (position / blockSize);
+            byte[] blockData = readBlock(blockIndex);
+
+            long blockStart = (long) blockIndex * blockSize;
+            int startInBlock = (int) (position - blockStart);
+            int endInBlock = (int) Math.min(end - blockStart, blockData.length);
+            int bytesToCopy = endInBlock - startInBlock;
+
+            System.arraycopy(blockData, startInBlock, buffer, offset + totalRead, bytesToCopy);
+            totalRead += bytesToCopy;
+            position += bytesToCopy;
+        }
+
+        return totalRead;
+    }
+
     private byte[] readBlock(int blockIndex) throws IOException {
         byte[] cached = cache.getBlock(path.toString(), blockIndex);
         if (cached != null) {
@@ -120,12 +151,23 @@ public class CachingSeekableInputStream extends SeekableInputStream {
         long offset = (long) blockIndex * blockSize;
         int readSize = (int) Math.min(blockSize, fileSize() - offset);
 
-        SeekableInputStream stream = getRemoteStream();
-        stream.seek(offset);
-        byte[] data = readFully(stream, readSize);
+        byte[] data = readRemote(offset, readSize);
 
         cache.putBlock(path.toString(), blockIndex, data);
         return data;
+    }
+
+    private byte[] readRemote(long offset, int size) throws IOException {
+        SeekableInputStream stream = getRemoteStream();
+        if (stream instanceof VectoredReadable) {
+            byte[] buf = new byte[size];
+            ((VectoredReadable) stream).preadFully(offset, buf, 0, size);
+            return buf;
+        }
+        synchronized (stream) {
+            stream.seek(offset);
+            return readFully(stream, size);
+        }
     }
 
     private SeekableInputStream getRemoteStream() throws IOException {
