@@ -458,6 +458,34 @@ def test_read_paimon_fallback_plans_pushdown_filter_without_push_filters(local_p
     assert batches == [{"id": [999], "name": ["match"]}]
 
 
+def test_read_paimon_fallback_not_in_filter_excludes_nulls_before_limit(local_paimon_catalog):
+    """Fallback datasource tasks must satisfy pushed NOT IN filters before limit."""
+    catalog, _ = local_paimon_catalog
+    pa_schema = pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("name", pa.string()),
+    ])
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa_schema,
+        options={"file.format": "row"},
+    )
+    catalog.create_table("test_db.row_not_in_filter_limit", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.row_not_in_filter_limit")
+    _write_to_paimon(table, pa.table({"id": [None], "name": ["null-row"]}, schema=pa_schema))
+    _write_to_paimon(table, pa.table({"id": [3], "name": ["match"]}, schema=pa_schema))
+
+    batches = asyncio.run(
+        _read_paimon_source_batches(
+            table,
+            filter_expr=~col("id").is_in([1, 2]),
+            limit=1,
+            call_push_filters=False,
+        )
+    )
+
+    assert batches == [{"id": [3], "name": ["match"]}]
+
+
 def test_read_paimon_fallback_keeps_limit_above_remaining_filter(local_paimon_catalog):
     """Fallback reads must not apply limit before Daft evaluates remaining filters."""
     catalog, _ = local_paimon_catalog
@@ -732,6 +760,67 @@ class TestFilterPushdown:
         assert predicate is not None
         assert predicate.method == "or"
         assert _predicate_leaves(predicate) == [("equal", "id", (1,)), ("equal", "id", (2,))]
+
+    def test_filter_pushdown_rewrites_supported_not_predicates(self, filter_table):
+        cases = [
+            (~(col("id") == 1), [("notEqual", "id", (1,))]),
+            (~col("id").is_in([1, 2]), [("notIn", "id", (1, 2))]),
+            (~col("id").between(1, 3), [("notBetween", "id", (1, 3))]),
+            (~col("value").is_null(), [("isNotNull", "value", ())]),
+            (~col("value").not_null(), [("isNull", "value", ())]),
+        ]
+
+        for expr, expected_leaves in cases:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert len(pushed_filters) == 1
+            assert remaining_filters == []
+            assert _predicate_leaves(predicate) == expected_leaves
+
+    def test_filter_pushdown_supported_not_predicates_read_path(self, local_paimon_catalog):
+        catalog, tmp_path = local_paimon_catalog
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("value", pa.string()),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table("test_db.filter_not_read", paimon_schema, ignore_if_exists=True)
+        table = catalog.get_table("test_db.filter_not_read")
+
+        data = pa.table(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "value": ["a", "b", None, "d", None],
+            },
+            schema=pa_schema,
+        )
+        _write_to_paimon(table, data)
+
+        cases = [
+            (~(col("id") == 1), [2, 3, 4, 5]),
+            (~col("id").is_in([1, 3]), [2, 4, 5]),
+            (~col("id").between(2, 4), [1, 5]),
+            (~col("value").is_null(), [1, 2, 4]),
+            (~col("value").not_null(), [3, 5]),
+        ]
+
+        for expr, expected_ids in cases:
+            result = _read_table(table).where(expr).select("id").sort("id").to_pydict()
+
+            assert result["id"] == expected_ids
+
+    def test_filter_pushdown_does_not_demorgan_not_compound_predicates(self, filter_table):
+        expressions = [
+            ~((col("id") == 1) & (col("value") == "a")),
+            ~((col("id") == 1) | (col("value") == "a")),
+        ]
+
+        for expr in expressions:
+            pushed_filters, remaining_filters, predicate = convert_filters_to_paimon(filter_table, expr._expr)
+
+            assert pushed_filters == []
+            assert remaining_filters == [expr._expr]
+            assert predicate is None
 
     def test_unsupported_expression_remains_in_daft(self, filter_table):
         expressions = [
