@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -98,6 +99,39 @@ public class DVMetaCacheTest {
         // Should return empty map, not null
         Map<String, DeletionFile> result = cache.read(path, partition, 1);
         assertThat(result).isNotNull().isEmpty();
+    }
+
+    @Test
+    public void testLazyValue() {
+        DVMetaCache cache = new DVMetaCache(100);
+        Path path = new Path("manifest/index-manifest-00003");
+        BinaryRow partition = partition("year=2023/month=10");
+        AtomicInteger invoked = new AtomicInteger();
+
+        cache.putLazy(
+                path,
+                partition,
+                1,
+                1,
+                () -> {
+                    invoked.incrementAndGet();
+                    Map<String, DeletionFile> dvFiles = new HashMap<>();
+                    dvFiles.put(
+                            "data-d4e5f6g7-h8i9-0123-defg-456789012345-1.parquet",
+                            new DeletionFile(
+                                    "index-d4e5f6g7-h8i9-0123-defg-456789012345-1", 0L, 100L, 1L));
+                    return dvFiles;
+                });
+
+        assertThat(invoked).hasValue(0);
+
+        Map<String, DeletionFile> result1 = cache.read(path, partition, 1);
+        assertThat(result1).isNotNull().hasSize(1);
+        assertThat(invoked).hasValue(1);
+
+        Map<String, DeletionFile> result2 = cache.read(path, partition, 1);
+        assertThat(result2).isSameAs(result1);
+        assertThat(invoked).hasValue(1);
     }
 
     @Test

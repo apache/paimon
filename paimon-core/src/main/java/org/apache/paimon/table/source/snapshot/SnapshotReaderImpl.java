@@ -664,23 +664,47 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         // 2. read from file system
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
-                indexFileHandler.scanBuckets(snapshot, DELETION_VECTORS_INDEX, buckets);
+                dvMetaCache == null
+                        ? indexFileHandler.scanBuckets(snapshot, DELETION_VECTORS_INDEX, buckets)
+                        : indexFileHandler.scan(
+                                snapshot,
+                                DELETION_VECTORS_INDEX,
+                                buckets.stream().map(Pair::getLeft).collect(Collectors.toSet()));
         partitionFileMetas.forEach(
                 (entry, indexFileMetas) -> {
-                    Map<String, DeletionFile> deletionFiles =
-                            toDeletionFiles(entry, indexFileMetas);
-                    if (dvMetaCache != null) {
-                        dvMetaCache.put(
-                                indexManifestPath,
-                                entry.getLeft(),
-                                entry.getRight(),
-                                deletionFiles);
-                    }
+                    Pair<BinaryRow, Integer> partitionBucket = entry;
                     if (buckets.contains(entry)) {
-                        result.put(entry, deletionFiles);
+                        Map<String, DeletionFile> deletionFiles =
+                                toDeletionFiles(partitionBucket, indexFileMetas);
+                        result.put(partitionBucket, deletionFiles);
+                        if (dvMetaCache != null) {
+                            dvMetaCache.put(
+                                    indexManifestPath,
+                                    partitionBucket.getLeft(),
+                                    partitionBucket.getRight(),
+                                    deletionFiles);
+                        }
+                    } else if (dvMetaCache != null) {
+                        dvMetaCache.putLazy(
+                                indexManifestPath,
+                                partitionBucket.getLeft(),
+                                partitionBucket.getRight(),
+                                deletionFileNumber(indexFileMetas),
+                                () -> toDeletionFiles(partitionBucket, indexFileMetas));
                     }
                 });
         return result;
+    }
+
+    private int deletionFileNumber(List<IndexFileMeta> fileMetas) {
+        int count = 0;
+        for (IndexFileMeta indexFile : fileMetas) {
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+            if (dvRanges != null) {
+                count += dvRanges.size();
+            }
+        }
+        return count;
     }
 
     private Map<String, DeletionFile> toDeletionFiles(
