@@ -62,6 +62,18 @@ def _predicate_leaves(predicate):
 # ---------------------------------------------------------------------------
 
 
+class _UnserializableFileIoMarker:
+    def __reduce__(self):
+        raise TypeError("file io marker should not be serialized")
+
+
+class _UnserializableStorageConfig:
+    multithreaded_io = False
+
+    def __reduce__(self):
+        raise TypeError("storage config marker should not be serialized")
+
+
 def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None):
     write_builder = table.new_batch_write_builder()
     if mode == "overwrite":
@@ -207,6 +219,104 @@ def test_read_paimon_schema_matches(append_only_table):
     assert "name" in schema.column_names()
     assert "value" in schema.column_names()
     assert "dt" in schema.column_names()
+
+
+def test_read_paimon_source_is_serializable(append_only_table):
+    """The Daft source must not serialize live table/file_io/storage objects."""
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    table.file_io._unserializable_marker = _UnserializableFileIoMarker()
+
+    source = PaimonDataSource(
+        table,
+        storage_config=_UnserializableStorageConfig(),
+        catalog_options={},
+    )
+
+    restored = loads(dumps(source))
+
+    assert restored is not source
+    assert restored.schema.column_names() == source.schema.column_names()
+    assert restored._table is not table
+    assert restored._table.identifier.get_full_name() == table.identifier.get_full_name()
+    assert restored._storage_config.multithreaded_io is False
+
+
+def test_read_paimon_remote_ray_task_is_serializable(pk_table, monkeypatch):
+    """A fallback PK split task must reopen the table from metadata on Ray workers.
+
+    Splits that need an LSM merge (here, overlapping primary-key writes) are read
+    by the pypaimon reader task. Under the Ray runner that task is pickled to
+    remote workers, so it must serialize only rebuildable metadata -- never the
+    live table / file_io / storage objects.
+    """
+    from daft import runners
+    from daft.io.pushdowns import Pushdowns
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    class _RayRunner:
+        name = "ray"
+
+    table, _ = pk_table
+    # Two overlapping writes on id=1 create non-raw-convertible splits that
+    # require the pypaimon merge reader (the fallback _PaimonPKSplitTask).
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": pa.array([1, 2], pa.int64()),
+                "name": pa.array(["old_a", "old_b"], pa.string()),
+                "dt": pa.array(["2024-01-01", "2024-01-01"], pa.string()),
+            }
+        ),
+    )
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": pa.array([1], pa.int64()),
+                "name": pa.array(["new_a"], pa.string()),
+                "dt": pa.array(["2024-01-01"], pa.string()),
+            }
+        ),
+    )
+    table.file_io._unserializable_marker = _UnserializableFileIoMarker()
+
+    source = PaimonDataSource(
+        table,
+        storage_config=_UnserializableStorageConfig(),
+        catalog_options={},
+    )
+    monkeypatch.setattr(runners, "get_or_create_runner", lambda: _RayRunner())
+
+    async def first_task():
+        async for task in source.get_tasks(Pushdowns()):
+            return task
+        raise AssertionError("Expected at least one task")
+
+    async def read_task(task):
+        rows = []
+        async for batch in task.read():
+            rows.append(batch.to_pydict())
+        return rows
+
+    task = asyncio.run(first_task())
+    assert type(task).__name__ == "_PaimonPKSplitTask"
+
+    restored_task = loads(dumps(task))
+    batches = asyncio.run(read_task(restored_task))
+
+    merged = {
+        _id: name
+        for batch in batches
+        for _id, name in zip(batch["id"], batch["name"])
+    }
+    assert merged == {1: "new_a", 2: "old_b"}
 
 
 # ---------------------------------------------------------------------------
