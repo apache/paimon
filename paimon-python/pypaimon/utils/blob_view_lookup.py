@@ -59,7 +59,6 @@ class BlobViewLookup:
 
     def __init__(self, table):
         self._table = table
-        self._uri_reader_cache: Dict[str, UriReader] = {}
         self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
 
     def preload(self, view_structs: List[BlobViewStruct]):

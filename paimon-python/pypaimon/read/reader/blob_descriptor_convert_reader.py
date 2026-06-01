@@ -54,7 +54,6 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._inner = inner
         self._table = table
         self._prescan_reader_factory = prescan_reader_factory
-        self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self.file_io = inner.file_io
         self.blob_field_indices = inner.blob_field_indices
         self._view_fields = CoreOptions.blob_view_fields(table.options)
@@ -101,12 +100,14 @@ class BlobInlineConvertReader(RecordBatchReader):
                         continue
                     for value in batch.column(field_name).to_pylist():
                         value = self._normalize_blob_to_bytes(value)
+                        if value is None:
+                            continue
                         if isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value):
                             all_view_structs.append(BlobViewStruct.deserialize(value))
                         else:
                             raise ValueError(
                                 f"Expected BlobViewStruct bytes in view field '{field_name}', "
-                                f"but got non-BlobViewStruct bytes (length={len(value)})"
+                                f"but got non-BlobViewStruct bytes."
                             )
         finally:
             prescan_reader.close()
