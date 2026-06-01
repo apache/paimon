@@ -89,6 +89,18 @@ def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None
         table_commit.close()
 
 
+async def _collect_paimon_source_batches(source, pushdowns):
+    batches = []
+    fallback_task_count = 0
+    async for task in source.get_tasks(pushdowns):
+        if type(task).__name__ == "_PaimonPKSplitTask":
+            fallback_task_count += 1
+        async for batch in task.read():
+            batches.append(batch.to_pydict())
+    assert fallback_task_count > 0
+    return batches
+
+
 async def _read_paimon_source_batches(
     table,
     filter_expr=None,
@@ -111,16 +123,8 @@ async def _read_paimon_source_batches(
         assert pushed_filters
         assert not remaining_filters
 
-    batches = []
-    fallback_task_count = 0
     pushdowns = Pushdowns(filters=filter_expr, columns=columns, limit=limit)
-    async for task in source.get_tasks(pushdowns):
-        if type(task).__name__ == "_PaimonPKSplitTask":
-            fallback_task_count += 1
-        async for batch in task.read():
-            batches.append(batch.to_pydict())
-    assert fallback_task_count > 0
-    return batches
+    return await _collect_paimon_source_batches(source, pushdowns)
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +247,50 @@ def test_read_paimon_source_is_serializable(append_only_table):
     assert restored._table is not table
     assert restored._table.identifier.get_full_name() == table.identifier.get_full_name()
     assert restored._storage_config.multithreaded_io is False
+
+
+def test_read_paimon_source_serialization_preserves_pushed_filter_for_fallback(local_paimon_catalog):
+    """A serialized source must keep filters accepted by SupportsPushdownFilters."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    catalog, _ = local_paimon_catalog
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.string()),
+        ]),
+        options={
+            "file.format": "avro",
+            "source.split.target-size": "800b",
+            "source.split.open-file-cost": "600b",
+        },
+    )
+    catalog.create_table("test_db.avro_serialized_pushdown_filter", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.avro_serialized_pushdown_filter")
+    _write_to_paimon(table, pa.table({"id": [1], "name": ["first"]}))
+    _write_to_paimon(table, pa.table({"id": [999], "name": ["match"]}))
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+    pushed_filters, remaining_filters = source.push_filters([(col("id") == 999)._expr])
+    assert pushed_filters
+    assert not remaining_filters
+
+    restored = loads(dumps(source))
+    batches = asyncio.run(
+        _collect_paimon_source_batches(
+            restored,
+            Pushdowns(filters=None, limit=1),
+        )
+    )
+
+    assert batches == [{"id": [999], "name": ["match"]}]
 
 
 def test_read_paimon_remote_ray_task_is_serializable(pk_table, monkeypatch):
