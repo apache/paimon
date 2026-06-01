@@ -283,6 +283,7 @@ class PaimonDataSource(DataSource):
         table_path = getattr(table, "table_path", None)
         self._table_path = str(table_path) if table_path is not None else None
         self._table_options = _extract_table_options(table)
+        self._pushed_filters: list[PyExpr] | None = None
         self._paimon_predicate: Predicate | None = None
         self._remaining_filters: list[PyExpr] | None = None
         self._init_table(table)
@@ -295,6 +296,7 @@ class PaimonDataSource(DataSource):
             "_table_identifier": self._table_identifier,
             "_table_path": self._table_path,
             "_table_options": self._table_options,
+            "_pushed_filters": self._pushed_filters,
             "_paimon_predicate": self._paimon_predicate,
             "_remaining_filters": self._remaining_filters,
         }
@@ -305,6 +307,7 @@ class PaimonDataSource(DataSource):
         self._table_identifier = state["_table_identifier"]
         self._table_path = state["_table_path"]
         self._table_options = state["_table_options"]
+        self._pushed_filters = state.get("_pushed_filters")
         self._paimon_predicate = state["_paimon_predicate"]
         self._remaining_filters = state["_remaining_filters"]
         self._storage_config = _build_storage_config(
@@ -360,10 +363,6 @@ class PaimonDataSource(DataSource):
             if table.partition_keys
             else {}
         )
-
-        self._pushed_filters: list[PyExpr] | None = None
-        self._paimon_predicate: Predicate | None = None
-        self._remaining_filters: list[PyExpr] | None = None
 
     @property
     def name(self) -> str:
