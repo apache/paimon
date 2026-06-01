@@ -750,12 +750,6 @@ class CoreOptions:
         value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
-    def blob_inline_fields(self, default=None):
-        fields = set()
-        fields.update(self.blob_descriptor_fields(default))
-        fields.update(self.blob_view_fields(default))
-        return fields
-
     @staticmethod
     def _parse_field_set(value):
         if value is None:
