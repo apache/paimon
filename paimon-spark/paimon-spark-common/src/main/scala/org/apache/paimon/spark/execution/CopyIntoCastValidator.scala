@@ -18,11 +18,13 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.types.DataField
 
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{Column, DataFrame}
 import org.apache.spark.sql.functions.col
-import org.apache.spark.sql.types.StringType
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.types.{DataType, StringType}
 
 /**
  * Handles cast validation for COPY INTO operations. Validates that source data can be safely cast
@@ -58,7 +60,8 @@ private[execution] class CopyIntoCastValidator(spark: org.apache.spark.sql.Spark
                 org.apache.paimon.spark.SparkTypeUtils.fromPaimonType(field.`type`())
               val castColName = safeTempCol("__pq_cv_" + colName, usedCols)
               usedCols += castColName
-              validationDf = validationDf.withColumn(castColName, col(srcColName).cast(sparkType))
+              validationDf =
+                validationDf.withColumn(castColName, nonAnsiCast(col(srcColName), sparkType))
               castColMapping(srcColName) = castColName
           }
         }
@@ -95,7 +98,7 @@ private[execution] class CopyIntoCastValidator(spark: org.apache.spark.sql.Spark
           val tempName = safeTempCol("__cv_" + colName, usedCols)
           usedCols += tempName
           castColMapping(colName) = tempName
-          validationDf = validationDf.withColumn(tempName, col(colName).cast(sparkType))
+          validationDf = validationDf.withColumn(tempName, nonAnsiCast(col(colName), sparkType))
         }
     }
 
@@ -171,13 +174,18 @@ private[execution] class CopyIntoCastValidator(spark: org.apache.spark.sql.Spark
     }
   }
 
-  private def safeTempCol(baseName: String, existingColumns: Set[String]): String = {
-    val resolver = spark.sessionState.conf.resolver
-    var candidate = baseName
-    while (existingColumns.exists(c => resolver(c, candidate))) {
-      candidate = "_" + candidate
-    }
-    candidate
+  private def safeTempCol(baseName: String, existingColumns: Set[String]): String =
+    CopyIntoHelper.safeTempCol(spark, baseName, existingColumns)
+
+  /**
+   * Cast a column with ANSI disabled so a failed cast yields NULL instead of throwing. This is the
+   * basis for bad-row detection: a source value that is non-null but becomes null after casting
+   * could not be converted to the target type. Under Spark's default ANSI mode a plain `.cast`
+   * would raise `CAST_INVALID_INPUT` before any filtering could run.
+   */
+  private def nonAnsiCast(column: Column, dataType: DataType): Column = {
+    val expr = SparkShimLoader.shim.classicApi.expression(spark, column)
+    SparkShimLoader.shim.classicApi.column(Compatibility.cast(expr, dataType, ansiEnabled = false))
   }
 }
 

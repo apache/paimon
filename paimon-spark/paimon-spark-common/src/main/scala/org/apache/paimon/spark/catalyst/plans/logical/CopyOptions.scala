@@ -18,6 +18,14 @@
 
 package org.apache.paimon.spark.catalyst.plans.logical
 
+sealed trait OnErrorMode
+
+object OnErrorMode {
+  case object AbortStatement extends OnErrorMode
+  case object Continue extends OnErrorMode
+  case object SkipFile extends OnErrorMode
+}
+
 sealed trait FileFormatType
 
 object FileFormatType {

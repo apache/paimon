@@ -21,6 +21,7 @@ package org.apache.paimon.spark.execution
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyFileFormat, FileFormatType}
 import org.apache.paimon.types.DataField
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Column, DataFrame, SparkSession}
 import org.apache.spark.sql.functions.{col, lit, when}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -34,7 +35,8 @@ import org.apache.spark.sql.types.{StringType, StructField, StructType}
 private[execution] class CopyIntoDataFrameBuilder(
     spark: SparkSession,
     fileFormat: CopyFileFormat,
-    columns: Option[Seq[String]]) {
+    columns: Option[Seq[String]])
+  extends Logging {
 
   /**
    * Build the projection DataFrame for Parquet import. Maps source columns to target table columns
@@ -173,7 +175,9 @@ private[execution] class CopyIntoDataFrameBuilder(
         SparkShimLoader.shim.classicApi.column(parsed).cast(sparkType).as(colName)
       } catch {
         case e: Exception =>
-          // Log warning but continue with null
+          logWarning(
+            s"Failed to parse default value '$defaultVal' for column '$colName'; using NULL instead.",
+            e)
           lit(null).cast(sparkType).as(colName)
       }
     } else {
