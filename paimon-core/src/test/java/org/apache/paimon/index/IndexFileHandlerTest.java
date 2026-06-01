@@ -19,25 +19,39 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -109,5 +123,53 @@ public class IndexFileHandlerTest {
         handler.deleteIndexFile(entry);
 
         assertThat(handler.existsIndexFile(entry)).isFalse();
+    }
+
+    @Test
+    void testScanBucketsOnlyReturnsRequestedBuckets() throws Exception {
+        TestAppendFileStore store =
+                TestAppendFileStore.createAppendStore(tempPath, new HashMap<>());
+        Map<String, List<Integer>> bucket0Dvs = new HashMap<>();
+        bucket0Dvs.put("f0", Arrays.asList(1, 2));
+        Map<String, List<Integer>> bucket1Dvs = new HashMap<>();
+        bucket1Dvs.put("f1", Collections.singletonList(3));
+        IndexFileMeta hashIndex =
+                store.newIndexFileHandler()
+                        .hashIndex(BinaryRow.EMPTY_ROW, 1)
+                        .write(new int[] {1, 2, 3});
+        store.commit(
+                store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, bucket0Dvs),
+                store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 1, bucket1Dvs),
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        1,
+                        1,
+                        DataIncrement.indexIncrement(Collections.singletonList(hashIndex)),
+                        CompactIncrement.emptyIncrement()));
+
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+        IndexFileHandler indexFileHandler = store.newIndexFileHandler();
+        assertThat(
+                        indexFileHandler.scanBuckets(
+                                snapshot, DELETION_VECTORS_INDEX, Collections.emptySet()))
+                .isEmpty();
+
+        Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> scanned =
+                indexFileHandler.scanBuckets(
+                        snapshot,
+                        DELETION_VECTORS_INDEX,
+                        Collections.singleton(Pair.of(BinaryRow.EMPTY_ROW, 1)));
+
+        assertThat(scanned).containsOnlyKeys(Pair.of(BinaryRow.EMPTY_ROW, 1));
+        assertThat(scanned.get(Pair.of(BinaryRow.EMPTY_ROW, 1)))
+                .extracting(IndexFileMeta::dvRanges)
+                .allSatisfy(dvRanges -> assertThat(dvRanges).containsOnlyKeys("f1"));
+
+        assertThat(
+                        indexFileHandler.scanBuckets(
+                                snapshot,
+                                HASH_INDEX,
+                                Collections.singleton(Pair.of(BinaryRow.EMPTY_ROW, 1))))
+                .containsOnlyKeys(Pair.of(BinaryRow.EMPTY_ROW, 1));
     }
 }

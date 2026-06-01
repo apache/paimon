@@ -630,7 +630,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> scanDvIndex(
             @Nullable Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
-        if (snapshot == null || snapshot.indexManifest() == null) {
+        if (snapshot == null || snapshot.indexManifest() == null || buckets.isEmpty()) {
             return Collections.emptyMap();
         }
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> result = new HashMap<>();
@@ -658,13 +658,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 }
             }
         }
+        if (buckets.isEmpty()) {
+            return result;
+        }
 
         // 2. read from file system
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
-                indexFileHandler.scan(
-                        snapshot,
-                        DELETION_VECTORS_INDEX,
-                        buckets.stream().map(Pair::getLeft).collect(Collectors.toSet()));
+                indexFileHandler.scanBuckets(snapshot, DELETION_VECTORS_INDEX, buckets);
         partitionFileMetas.forEach(
                 (entry, indexFileMetas) -> {
                     Map<String, DeletionFile> deletionFiles =
