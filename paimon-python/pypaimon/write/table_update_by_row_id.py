@@ -16,6 +16,7 @@
 # under the License.
 
 import bisect
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
@@ -32,6 +33,21 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
 
+@dataclass(frozen=True)
+class _FilesInfo:
+    """Snapshot view of target data files keyed by first_row_id.
+
+    Built once per merge by the driver and broadcast to workers so each task
+    avoids re-scanning the manifest.
+    """
+    snapshot_id: int
+    first_row_ids: List[int]
+    first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
+        field(default_factory=dict)
+    )
+    total_row_count: int = 0
+
+
 class TableUpdateByRowId:
     """
     Table update for partial column updates (data evolution).
@@ -42,32 +58,40 @@ class TableUpdateByRowId:
 
     FIRST_ROW_ID_COLUMN = '_FIRST_ROW_ID'
 
-    def __init__(self, table, commit_user: str, commit_identifier: int):
+    def __init__(
+            self, table, commit_user: str, commit_identifier: int,
+            _precomputed_files_info: Optional[_FilesInfo] = None,
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.commit_user = commit_user
         self.commit_identifier = commit_identifier
 
-        # Snapshot the current state once: a single ``first_row_id -> (split, files)``
-        # map is enough to drive every downstream lookup (partition, row-count, read).
-        (self.snapshot_id,
-         self.first_row_ids,
-         self._first_row_id_index,
-         self.total_row_count) = self._load_existing_files_info()
+        info = _precomputed_files_info or self._load_existing_files_info()
+        self.snapshot_id = info.snapshot_id
+        self.first_row_ids = info.first_row_ids
+        self._first_row_id_index = info.first_row_id_index
+        self.total_row_count = info.total_row_count
 
         self.commit_messages: List[CommitMessage] = []
 
-    def _load_existing_files_info(
-            self,
-    ) -> Tuple[int, List[int], Dict[int, Tuple[DataSplit, List[DataFileMeta]]], int]:
+    def _snapshot_files_info(self) -> _FilesInfo:
+        """Internal: return the current snapshot's file index for broadcast."""
+        return _FilesInfo(
+            snapshot_id=self.snapshot_id,
+            first_row_ids=self.first_row_ids,
+            first_row_id_index=self._first_row_id_index,
+            total_row_count=self.total_row_count,
+        )
+
+    def _load_existing_files_info(self) -> _FilesInfo:
         """Scan the latest snapshot once and index files by ``first_row_id``.
 
-        Returns:
-            A 4-tuple of ``(snapshot_id, sorted_unique_first_row_ids, index, total_row_count)``
-            where ``index`` maps each ``first_row_id`` to the owning split and
-            the list of files with that id (a single id may belong to multiple
-            files when data evolution has split a logical row range).
+        Returns a :class:`_FilesInfo` whose ``first_row_id_index`` maps each
+        ``first_row_id`` to the owning split and the list of files with that
+        id (a single id may belong to multiple files when data evolution has
+        split a logical row range).
         """
         plan = self.table.new_read_builder().new_scan().plan()
         splits = plan.splits()
@@ -95,7 +119,12 @@ class TableUpdateByRowId:
             total_row_count = 0
 
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
-        return snapshot_id, sorted(index.keys()), index, total_row_count
+        return _FilesInfo(
+            snapshot_id=snapshot_id,
+            first_row_ids=sorted(index.keys()),
+            first_row_id_index=index,
+            total_row_count=total_row_count,
+        )
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """

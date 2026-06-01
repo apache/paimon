@@ -314,3 +314,52 @@ write_builder = table.new_batch_write_builder().overwrite()
 # overwrite partition 'dt=2024-01-01'
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
+
+## Merge Into
+
+`merge_into` updates (and optionally inserts) rows of a **data-evolution** table
+from a source, like SQL `MERGE INTO`. Matched rows are updated in place by
+`_ROW_ID`; only the touched columns are rewritten. Requires `ray >= 2.50` and a
+target table with `'data-evolution.enabled'` and `'row-tracking.enabled'` set.
+
+```python
+from pypaimon.ray import merge_into, WhenMatched, WhenNotMatched
+
+metrics = merge_into(
+    target="database_name.table_name",
+    source=ray_dataset,          # ray.data.Dataset / pa.Table / pandas / table-name str
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    on=["id"],                   # or {"target_col": "source_col"} for renamed keys
+    when_matched=[WhenMatched(update="*")],
+    when_not_matched=[WhenNotMatched(insert="*")],             # optional
+)
+print(metrics)   # {"num_matched": 3, "num_inserted": 2, "num_unchanged": 0}
+```
+
+- `update` / `insert`: only `"*"` is supported in this PR. A future follow-up
+  will add mapping-based SET (e.g. `{"col": "s.col"}`) where values are
+  analyzable string expressions (`"s.<col>"`, `"t.<col>"`, or literals),
+  not Python callables.
+- `condition`: reserved for a future follow-up; passing a non-None value
+  currently raises `NotImplementedError`.
+
+**Parameters:**
+- `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or a
+  Paimon table identifier string. When a string is passed, it reads the table
+  from the same `catalog_options` at the latest snapshot.
+- `on`: key columns, or `{target_col: source_col}` for renamed keys.
+- `num_partitions`: shuffle parallelism for the join and the write; defaults to
+  `max(1, cluster_cpus * 2)`. Raise it for large merges on big clusters.
+- `ray_remote_args`: Ray remote options applied to the merge's map/group
+  tasks (update transform, group write, insert transform).
+- `concurrency`: scheduling for the insert sink.
+
+**Returns:** `{"num_matched", "num_inserted", "num_unchanged"}`. In this PR
+every matched row is updated, so `num_matched` always equals `num_updated`
+and `num_unchanged` is always `0`; conditional clauses (added later) can
+make `num_unchanged > 0`.
+
+**Notes:**
+- Blob columns are not written by `merge_into`: update leaves the existing
+  `.blob` files untouched, and insert fills blob columns with `NULL`. The
+  source data does not need to (and should not) carry blob columns.
