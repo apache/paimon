@@ -650,6 +650,7 @@
                         <configuration>
                             <artifactSet>
                                 <includes>
+                                    <include>org.apache.paimon:paimon-hadoop-shaded</include>
                                     <include>com.google.guava:*</include>
                                     <include>com.google.protobuf:*</include>
                                     <include>com.google.code.findbugs:*</include>
