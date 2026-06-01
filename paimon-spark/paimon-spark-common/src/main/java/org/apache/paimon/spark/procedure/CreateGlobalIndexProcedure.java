@@ -122,6 +122,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         return modifySparkTable(
                 tableIdent,
                 sparkTable -> {
+                    List<String> indexColumns =
+                            Arrays.stream(column.split(","))
+                                    .map(String::trim)
+                                    .filter(s -> !s.isEmpty())
+                                    .collect(Collectors.toList());
                     try {
                         org.apache.paimon.table.Table t = sparkTable.getTable();
                         checkArgument(
@@ -134,11 +139,6 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 tableIdent);
 
                         RowType rowType = table.rowType();
-                        List<String> indexColumns =
-                                Arrays.stream(column.split(","))
-                                        .map(String::trim)
-                                        .filter(s -> !s.isEmpty())
-                                        .collect(Collectors.toList());
                         checkArgument(!indexColumns.isEmpty(), "At least one column required.");
                         checkArgument(
                                 indexColumns.size() == new HashSet<>(indexColumns).size(),
