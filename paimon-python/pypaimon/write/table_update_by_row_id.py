@@ -109,12 +109,9 @@ class TableUpdateByRowId:
                 else:
                     entry[1].append(file)
 
-        # Multiple physical files may share the same first_row_id (data evolution);
-        # summing row_count per file would over-count logical rows and widen
-        # the _ROW_ID validation range incorrectly.
         if row_id_ranges:
             merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
-            total_row_count = sum(r.count() for r in merged)
+            total_row_count = max(r.to for r in merged) + 1
         else:
             total_row_count = 0
 
