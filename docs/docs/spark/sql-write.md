@@ -325,6 +325,10 @@ Notes:
 
 `COPY INTO` provides a SQL command for bulk loading data files into Paimon tables and exporting table data to files. Supported formats: **CSV**, **JSON**, and **Parquet**.
 
+:::info
+**SQL dialect:** Paimon's `COPY INTO` is a Snowflake-style extension (`FILE_FORMAT = (TYPE = ...)`, `PATTERN`, `FORCE`, `ON_ERROR`), not the Databricks `COPY INTO` form (`FILEFORMAT` + `FORMAT_OPTIONS (...)` / `COPY_OPTIONS (...)`). It implements only a subset of the Snowflake syntax. In particular, `ON_ERROR` supports `ABORT_STATEMENT` (default), `CONTINUE`, and `SKIP_FILE`; the Snowflake variants `SKIP_FILE_<num>` and `SKIP_FILE_<num>%` are **not** supported.
+:::
+
 #### CSV Import
 
 ```sql
