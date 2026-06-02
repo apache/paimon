@@ -98,7 +98,6 @@ class DedicatedFormatWriter(DataWriter):
                 col for col in write_cols if col not in dedicated_set
             ]
         else:
-            self.blob_file_column_names = list(self.blob_file_column_names)
             self.vector_write_columns = list(full_vector_column_names) if has_dedicated_vector else []
             self.normal_column_names = [
                 col for col in all_column_names if col not in dedicated_set

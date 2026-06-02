@@ -86,7 +86,6 @@ class BlobInlineConvertReader(RecordBatchReader):
         from pypaimon.table.row.blob import BlobViewStruct
         from pypaimon.utils.blob_view_lookup import BlobViewLookup
 
-        self._prescan_done = True
         all_view_structs = []
 
         prescan_reader = self._prescan_reader_factory(self._view_fields)
@@ -116,6 +115,7 @@ class BlobInlineConvertReader(RecordBatchReader):
         if all_view_structs:
             self._blob_view_lookup = BlobViewLookup(self._table)
             self._blob_view_lookup.preload(all_view_structs)
+        self._prescan_done = True
 
     def _resolve_view_fields(self, batch, blob_view_lookup):
         """Replace BlobViewStruct bytes in view fields with the corresponding
