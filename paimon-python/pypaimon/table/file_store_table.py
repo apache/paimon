@@ -117,9 +117,8 @@ class FileStoreTable(Table):
         """Get the branch manager for this table."""
         # If catalog environment has a catalog loader, use CatalogBranchManager
         catalog_loader = self.catalog_environment.catalog_loader
-        if catalog_loader is not None:
-            from pypaimon.branch.catalog_branch_manager import \
-                CatalogBranchManager
+        if catalog_loader is not None and self.catalog_environment.supports_version_management:
+            from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
             return CatalogBranchManager(
                 catalog_loader,
                 self.identifier
