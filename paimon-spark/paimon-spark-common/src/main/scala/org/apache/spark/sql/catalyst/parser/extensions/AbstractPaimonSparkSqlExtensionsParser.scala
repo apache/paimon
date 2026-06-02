@@ -78,6 +78,8 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     PaimonSqlExtensionsParser.FORCE,
     PaimonSqlExtensionsParser.ON_ERROR,
     PaimonSqlExtensionsParser.ABORT_STATEMENT,
+    PaimonSqlExtensionsParser.CONTINUE,
+    PaimonSqlExtensionsParser.SKIP_FILE,
     PaimonSqlExtensionsParser.OVERWRITE,
     PaimonSqlExtensionsParser.CSV
   )
