@@ -450,7 +450,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         self.assertEqual(self._snapshot_id(target), before)
 
-    def test_partitioned_update_rejects_partition_key_change(self):
+    def test_partitioned_matched_update_rejected(self):
         pt_schema = pa.schema([
             ('pt', pa.string()),
             ('id', pa.int32()),
@@ -480,7 +480,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 when_matched=[WhenMatched(update='*')],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
-        self.assertIn('partition key', str(ctx.exception))
+        self.assertIn('partitioned', str(ctx.exception))
 
     def test_partitioned_insert_allowed(self):
         pt_schema = pa.schema([

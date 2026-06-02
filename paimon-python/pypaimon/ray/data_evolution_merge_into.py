@@ -126,15 +126,11 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         c for c in full_target_field_names if c not in blob_cols
     ]
     on_map = dict(zip(target_on_cols, source_on_cols))
-    partition_keys = set(table.partition_keys)
-    if when_matched and partition_keys:
-        updated_partition_keys = partition_keys & set(settable_field_names)
-        if updated_partition_keys:
-            raise ValueError(
-                f"merge_into does not support updating partition key "
-                f"columns {sorted(updated_partition_keys)}; "
-                f"cross-partition row movement is not implemented."
-            )
+    if when_matched and table.partition_keys:
+        raise ValueError(
+            "merge_into does not support matched clauses on partitioned "
+            "tables; cross-partition row movement is not implemented."
+        )
     matched_specs = [
         _NormalizedClause(
             spec=_normalize_set_spec(
