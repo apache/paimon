@@ -168,6 +168,43 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             [{'id': 1, 'ts': 50, 'ts2': 0, 'val': 'low'}],
         )
 
+    def test_descending_sort_order_null_sequence_sorts_first(self):
+        """Null ordering must stay independent of sort order: Java builds
+        the sequence comparator with ``nullIsLast=false`` and applies
+        descending only to non-null value comparisons, so a null
+        ``sequence.field`` value always sorts first (loses) -- even under
+        descending order. A non-null row must therefore beat a null-seq
+        row regardless of write order.
+        """
+        table = self._create_pk_table(
+            'seq_desc_null',
+            extra_options={'sequence.field': 'ts',
+                           'sequence.field.sort-order': 'descending'})
+        # null-seq row written second (higher file sequence number). With
+        # nulls-first ordering it still loses to the earlier non-null row.
+        self._write(table, [{'id': 1, 'ts': 50, 'ts2': 0, 'val': 'real'}])
+        self._write(table, [{'id': 1, 'ts': None, 'ts2': 0, 'val': 'null'}])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'ts': 50, 'ts2': 0, 'val': 'real'}],
+        )
+
+    def test_ascending_sort_order_null_sequence_sorts_first(self):
+        """Mirror of the descending case under the default ascending order:
+        a null ``sequence.field`` value sorts first (loses) to a non-null
+        row written earlier.
+        """
+        table = self._create_pk_table(
+            'seq_asc_null', extra_options={'sequence.field': 'ts'})
+        self._write(table, [{'id': 1, 'ts': 50, 'ts2': 0, 'val': 'real'}])
+        self._write(table, [{'id': 1, 'ts': None, 'ts2': 0, 'val': 'null'}])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'ts': 50, 'ts2': 0, 'val': 'real'}],
+        )
+
     # -- projection drops the sequence field -----------------------------
 
     def test_projection_dropping_sequence_field(self):
@@ -280,6 +317,21 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
             table.new_read_builder().new_read()
         self.assertIn('ts', str(ctx.exception))
 
+    def test_empty_segment_sequence_field_rejected(self):
+        """A malformed ``sequence.field`` with an empty segment (e.g.
+        ``'ts,,ts2'``) leaves an empty field name after trimming -- matching
+        Java ``CoreOptions.sequenceField()``, which trims but does not drop
+        empty segments -- and must be rejected by validation rather than
+        silently accepted as ``['ts', 'ts2']``.
+        """
+        table = self._create_pk_table(
+            'seq_empty_seg', extra_options={'sequence.field': 'ts,,ts2'})
+        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
+        with self.assertRaises(ValueError) as ctx:
+            table.new_read_builder().new_read()
+        # The empty field name is the one that can't be found in the schema.
+        self.assertIn('can not be found', str(ctx.exception))
+
     def test_cross_partition_update_with_sequence_field_rejected(self):
         """sequence.field is invalid under cross-partition update (the PK
         does not include all partition fields), matching Java
@@ -332,6 +384,37 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(NotImplementedError):
             self._read(table)
+
+    def test_complex_type_sequence_field_rejected(self):
+        """A complex (non-atomic) sequence field is valid in Java (handled
+        via RecordComparator) but unimplemented in pypaimon's atomic-only
+        comparator. It must be rejected with a clear NotImplementedError
+        rather than failing later with an obscure attribute error.
+        """
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('seq', pa.list_(pa.int64())),
+            ('val', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['id'],
+            options={'bucket': '1', 'merge-engine': 'deduplicate',
+                     'sequence.field': 'seq'})
+        self.catalog.create_table('default.seq_complex', schema, False)
+        table = self.catalog.get_table('default.seq_complex')
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        c = wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist(
+                [{'id': 1, 'seq': [1, 2], 'val': 'x'}], schema=pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+        with self.assertRaises(NotImplementedError) as ctx:
+            table.new_read_builder().new_read()
+        self.assertIn('seq', str(ctx.exception))
 
 
 class SequenceFieldParameterizedTypeTest(unittest.TestCase):

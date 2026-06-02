@@ -20,7 +20,7 @@ from typing import Any, Callable, List, Optional
 
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
-from pypaimon.schema.data_types import DataField, Keyword
+from pypaimon.schema.data_types import AtomicType, DataField, Keyword
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.row.key_value import KeyValue
@@ -216,9 +216,13 @@ def _row_field_comparator(
 
     Shared by :func:`builtin_key_comparator` (all key fields, ascending) and
     :func:`builtin_seq_comparator` (the configured sequence fields, with
-    sort-order). Comparability is precomputed once; ``ascending=False``
-    reverses the overall result. ``None`` rows/values sort first under
-    ascending order (and the reversal flips that consistently).
+    sort-order). Comparability is precomputed once. ``None`` rows/values
+    always sort first, independent of ``ascending`` -- only the comparison
+    of two non-null values is reversed when ``ascending=False``. This
+    mirrors Java ``GenerateUtils.generateRowCompare`` built with
+    ``nullIsLast=false`` (see ``CodeGeneratorImpl#getSortSpec``), where
+    descending order flips only the non-null value comparison and leaves
+    nulls sorting first.
     """
     comparable_types = {member.value for member in Keyword if member is not Keyword.VARIANT}
     comparable_flags = [_base_type_name(fields[idx]) in comparable_types for idx in indices]
@@ -228,9 +232,9 @@ def _row_field_comparator(
         if row1 is None and row2 is None:
             return 0
         if row1 is None:
-            return -sign
+            return -1
         if row2 is None:
-            return sign
+            return 1
         for pos, idx in enumerate(indices):
             val1 = row1.get_field(idx)
             val2 = row2.get_field(idx)
@@ -238,9 +242,9 @@ def _row_field_comparator(
             if val1 is None and val2 is None:
                 continue
             if val1 is None:
-                return -sign
+                return -1
             if val2 is None:
-                return sign
+                return 1
 
             if not comparable_flags[pos]:
                 raise ValueError(f"Unsupported {fields[idx].type} comparison")
@@ -281,6 +285,12 @@ def builtin_seq_comparator(
     A name that does not resolve raises ``ValueError`` -- the read path
     injects missing sequence fields into the projection before this runs,
     so a miss indicates a wiring bug rather than user error.
+
+    A complex (non-atomic) sequence field raises ``NotImplementedError``.
+    Java ``UserDefinedSeqComparator`` delegates to ``RecordComparator`` and
+    supports ARRAY / VECTOR / MAP / MULTISET / ROW, but pypaimon only
+    implements atomic-type comparison here, so reject complex types
+    explicitly rather than failing later with an obscure error.
     """
     if not sequence_field_names:
         return None
@@ -292,6 +302,13 @@ def builtin_seq_comparator(
             raise ValueError(
                 f"sequence.field '{name}' not found in value fields "
                 f"{[f.name for f in value_fields]}")
-        indices.append(name_to_index[name])
+        idx = name_to_index[name]
+        if not isinstance(value_fields[idx].type, AtomicType):
+            raise NotImplementedError(
+                f"sequence.field '{name}' has complex type "
+                f"{value_fields[idx].type}; pypaimon only supports atomic "
+                f"sequence-field types. Java supports ARRAY / MAP / ROW etc. "
+                f"via RecordComparator -- open an issue to track support.")
+        indices.append(idx)
 
     return _row_field_comparator(value_fields, indices, ascending)

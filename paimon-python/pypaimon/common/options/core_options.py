@@ -841,7 +841,13 @@ class CoreOptions:
         raw = self.options.get(CoreOptions.SEQUENCE_FIELD)
         if not raw:
             return []
-        return [name.strip() for name in raw.split(",") if name.strip()]
+        # Trim each segment but keep empty ones, matching Java
+        # ``CoreOptions.sequenceField()``
+        # (``Arrays.stream(s.split(',')).map(String::trim)``). A malformed
+        # value like ``'ts,,ts2'`` thus yields an empty field name that
+        # ``check_sequence_field_valid`` rejects, instead of being silently
+        # accepted as ``['ts', 'ts2']``.
+        return [name.strip() for name in raw.split(",")]
 
     def sequence_field_sort_order_is_ascending(self) -> bool:
         """Whether ``sequence.field.sort-order`` is ascending (the default).
