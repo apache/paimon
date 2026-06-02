@@ -1005,12 +1005,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         jieba_phrase_builder = jieba_table.new_full_text_search_builder()
         jieba_phrase_builder.with_text_column('content')
-        jieba_phrase_builder.with_query_text('中文分词')
+        jieba_phrase_builder.with_query_text('自然')
         jieba_phrase_builder.with_limit(10)
 
         jieba_phrase_result = jieba_phrase_builder.execute_local()
         jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
-        print(f"Tantivy jieba search for '中文分词': row_ids={jieba_phrase_row_ids}")
+        print(f"Tantivy jieba search for '自然': row_ids={jieba_phrase_row_ids}")
         self.assertEqual(jieba_phrase_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
