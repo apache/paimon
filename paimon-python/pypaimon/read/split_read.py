@@ -803,7 +803,8 @@ class DataEvolutionSplitRead(SplitRead):
     def create_reader(self) -> RecordReader:
         reader = self._create_raw_reader()
 
-        if (CoreOptions.blob_view_fields(self.table.options)
+        if ((CoreOptions.blob_view_fields(self.table.options) and CoreOptions.blob_view_resolve_enabled(
+                self.table.options))
                 or (not CoreOptions.blob_as_descriptor(self.table.options)
                     and CoreOptions.blob_descriptor_fields(self.table.options))):
             reader = BlobInlineConvertReader(
