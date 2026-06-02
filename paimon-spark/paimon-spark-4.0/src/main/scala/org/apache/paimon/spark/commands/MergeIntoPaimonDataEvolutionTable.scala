@@ -27,16 +27,20 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.types.RowType
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, EqualTo, Expression, ExprId, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -60,7 +64,9 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with WithFileStoreTable {
+  with WithFileStoreTable
+  with ExpressionHelper
+  with Logging {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -143,7 +149,9 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
-    val plan = table.newSnapshotReader().read()
+    val snapshotReader = table.newSnapshotReader()
+    pushDownMergePartitionFilter(snapshotReader)
+    val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
@@ -202,6 +210,41 @@ case class MergeIntoPaimonDataEvolutionTable(
     writer.commit(updateCommit ++ insertCommit)
   }
 
+  private def pushDownMergePartitionFilter(snapshotReader: SnapshotReader): Unit = {
+    val partitionRowType = table.schema().logicalPartitionType()
+    if (partitionRowType.getFieldCount == 0) {
+      return
+    }
+
+    // matchedCondition comes from MergeIntoTable.mergeCondition, which is the MERGE ON condition.
+    val partitionPredicates = getExpressionOnlyRelated(matchedCondition, targetTable)
+      .map(splitConjunctivePredicates)
+      .map(extractMergePartitionFilters(_, partitionRowType))
+      .getOrElse(Seq.empty)
+
+    if (partitionPredicates.nonEmpty) {
+      val filter = convertConditionToPaimonPredicate(
+        partitionPredicates.reduce(And),
+        targetRelation.output,
+        rowType,
+        ignorePartialFailure = true)
+      filter.foreach(snapshotReader.withFilter)
+    }
+  }
+
+  private def extractMergePartitionFilters(
+      filters: Seq[Expression],
+      partitionRowType: RowType): Seq[Expression] = {
+    val partitionColumns = partitionRowType.getFieldNames.asScala.toSet
+    filters.filter {
+      f =>
+        f.deterministic &&
+        f.references.forall(attr => partitionColumns.exists(_.equalsIgnoreCase(attr.name))) &&
+        !SubqueryExpression.hasSubquery(f) &&
+        f.collect { case _: PythonUDF => true }.isEmpty
+    }
+  }
+
   private def targetRelatedSplits(
       sparkSession: SparkSession,
       tableSplits: Seq[DataSplit],
@@ -210,6 +253,13 @@ case class MergeIntoPaimonDataEvolutionTable(
     // Self-Merge shortcut:
     // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
     if (isSelfMergeOnRowId) {
+      return tableSplits
+    }
+
+    if (!table.coreOptions().dataEvolutionMergeIntoFilePruning()) {
+      logInfo(
+        "Skip file-level pruning for MergeInto partial column update on data-evolution table " +
+          s"${table.name()}.")
       return tableSplits
     }
 
