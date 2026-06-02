@@ -949,6 +949,70 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn(1, ids3)
         self.assertIn(3, ids3)
 
+        ngram_table = self.catalog.get_table('default.test_tantivy_fulltext_ngram')
+
+        # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
+        ngram_builder = ngram_table.new_full_text_search_builder()
+        ngram_builder.with_text_column('content')
+        ngram_builder.with_query_text('中文')
+        ngram_builder.with_limit(10)
+
+        ngram_result = ngram_builder.execute_local()
+        ngram_row_ids = sorted(list(ngram_result.results()))
+        print(f"Tantivy ngram search for '中文': row_ids={ngram_row_ids}")
+        self.assertEqual(ngram_row_ids, [0, 4])
+
+        ngram_read_builder = ngram_table.new_read_builder()
+        ngram_scan = ngram_read_builder.new_scan().with_global_index_result(ngram_result)
+        ngram_pa_table = ngram_read_builder.new_read().to_arrow(ngram_scan.plan().splits())
+        ngram_pa_table = table_sort_by(ngram_pa_table, 'id')
+        self.assertEqual(ngram_pa_table.column('id').to_pylist(), [0, 4])
+        self.assertEqual(
+            ngram_pa_table.column('content').to_pylist(),
+            ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
+
+        fragment_builder = ngram_table.new_full_text_search_builder()
+        fragment_builder.with_text_column('content')
+        fragment_builder.with_query_text('片段')
+        fragment_builder.with_limit(10)
+
+        fragment_result = fragment_builder.execute_local()
+        fragment_row_ids = sorted(list(fragment_result.results()))
+        print(f"Tantivy ngram search for '片段': row_ids={fragment_row_ids}")
+        self.assertEqual(fragment_row_ids, [4])
+
+        jieba_table = self.catalog.get_table('default.test_tantivy_fulltext_jieba')
+
+        # Search for Chinese words using the jieba tokenizer metadata written by Java.
+        jieba_builder = jieba_table.new_full_text_search_builder()
+        jieba_builder.with_text_column('content')
+        jieba_builder.with_query_text('售货员')
+        jieba_builder.with_limit(10)
+
+        jieba_result = jieba_builder.execute_local()
+        jieba_row_ids = sorted(list(jieba_result.results()))
+        print(f"Tantivy jieba search for '售货员': row_ids={jieba_row_ids}")
+        self.assertEqual(jieba_row_ids, [0])
+
+        jieba_read_builder = jieba_table.new_read_builder()
+        jieba_scan = jieba_read_builder.new_scan().with_global_index_result(jieba_result)
+        jieba_pa_table = jieba_read_builder.new_read().to_arrow(jieba_scan.plan().splits())
+        jieba_pa_table = table_sort_by(jieba_pa_table, 'id')
+        self.assertEqual(jieba_pa_table.column('id').to_pylist(), [0])
+        self.assertEqual(
+            jieba_pa_table.column('content').to_pylist(),
+            ['张华在百货公司当售货员'])
+
+        jieba_phrase_builder = jieba_table.new_full_text_search_builder()
+        jieba_phrase_builder.with_text_column('content')
+        jieba_phrase_builder.with_query_text('中文分词')
+        jieba_phrase_builder.with_limit(10)
+
+        jieba_phrase_result = jieba_phrase_builder.execute_local()
+        jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
+        print(f"Tantivy jieba search for '中文分词': row_ids={jieba_phrase_row_ids}")
+        self.assertEqual(jieba_phrase_row_ids, [3])
+
     def test_read_lumina_vector_index(self):
         """Test reading a Lumina vector index built by Java (orc and lance formats)."""
         test_cases = [('default.test_lumina_vector', 'orc')]

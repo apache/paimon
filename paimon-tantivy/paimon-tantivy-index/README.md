@@ -113,6 +113,46 @@ CALL sys.create_global_index(
 );
 ```
 
+### Tokenizers
+
+By default, Tantivy uses its built-in tokenizer. For Chinese or other languages where users often
+search by short character fragments, build the index with the `ngram` tokenizer:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext',
+    options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2'
+);
+```
+
+For Chinese word segmentation, build the index with the `jieba` tokenizer:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext',
+    options => 'tantivy.tokenizer=jieba'
+);
+```
+
+Available tokenizer options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `tantivy.tokenizer` | `default` | Tokenizer used by the full-text index. Supported values: `default`, `ngram`, `jieba`. |
+| `tantivy.ngram.min-gram` | `2` | Minimum gram length for the `ngram` tokenizer. |
+| `tantivy.ngram.max-gram` | `2` | Maximum gram length for the `ngram` tokenizer. |
+| `tantivy.ngram.prefix-only` | `false` | Whether the `ngram` tokenizer only emits prefix ngrams. |
+| `tantivy.lower-case` | `true` | Whether configurable tokenizers lowercase emitted tokens. |
+
+Tokenizer settings are persisted in each global index file's metadata. Readers use that metadata
+when reopening an index, so changing table/procedure options later does not make existing index
+files use a different analyzer.
+PyPaimon can query `jieba` indexes when the Python `jieba` package is installed.
+
 ### Search
 
 ```sql

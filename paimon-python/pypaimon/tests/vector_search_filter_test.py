@@ -21,6 +21,10 @@ Each test protects a distinct behavior introduced by this feature; no
 redundancy.
 """
 
+import io
+import struct
+import sys
+import types
 import unittest
 from typing import List
 from unittest import mock
@@ -119,6 +123,153 @@ def _patch_snapshot(testcase, entries):
     testcase._travel_patch.start()
 
 
+def _java_tantivy_meta(tokenizer="ngram", min_gram=2, max_gram=2,
+                       prefix_only=False, lower_case=True):
+    tokenizer_bytes = tokenizer.encode("utf-8")
+    return (
+        struct.pack(">iH", 1, len(tokenizer_bytes)) +
+        tokenizer_bytes +
+        struct.pack(">ii??", min_gram, max_gram, prefix_only, lower_case)
+    )
+
+
+class _FakeFileIO:
+    def new_input_stream(self, path):
+        buf = io.BytesIO()
+        buf.write(struct.pack(">i", 1))
+        name = b"meta.json"
+        buf.write(struct.pack(">i", len(name)))
+        buf.write(name)
+        data = b"{}"
+        buf.write(struct.pack(">q", len(data)))
+        buf.write(data)
+        buf.seek(0)
+        return buf
+
+
+class _FakeSchemaBuilder:
+    def __init__(self):
+        self.fields = {}
+
+    def add_unsigned_field(self, name, stored=False, indexed=True, fast=False):
+        self.fields[name] = {"fast": fast}
+
+    def add_text_field(self, name, stored=False, tokenizer_name=None):
+        self.fields[name] = {
+            "stored": stored,
+            "tokenizer_name": tokenizer_name or "default",
+        }
+
+    def build(self):
+        return types.SimpleNamespace(fields=self.fields)
+
+
+class _FakeTokenizer:
+    @staticmethod
+    def ngram(min_gram=2, max_gram=3, prefix_only=False):
+        return ("ngram", min_gram, max_gram, prefix_only)
+
+
+class _FakeFilter:
+    @staticmethod
+    def lowercase():
+        return "lowercase"
+
+
+class _FakeTextAnalyzerBuilder:
+    def __init__(self, tokenizer):
+        self._tokenizer = tokenizer
+        self._filters = []
+
+    def filter(self, filter_):
+        result = _FakeTextAnalyzerBuilder(self._tokenizer)
+        result._filters = self._filters + [filter_]
+        return result
+
+    def build(self):
+        return self._tokenizer + (tuple(self._filters),)
+
+
+class _FakeQuery:
+    @staticmethod
+    def empty_query():
+        return ("empty",)
+
+    @staticmethod
+    def term_query(schema, field_name, field_value, index_option="position"):
+        return ("term", schema, field_name, field_value, index_option)
+
+    @staticmethod
+    def boolean_query(subqueries, minimum_number_should_match=None):
+        return ("boolean", tuple(subqueries), minimum_number_should_match)
+
+
+class _FakeOccur:
+    Should = "should"
+
+
+class _FakeSearchResults:
+    hits = [(2.0, "addr")]
+
+
+class _FakeSearcher:
+    def __init__(self):
+        self.query = None
+
+    def search(self, query, limit):
+        self.query = query
+        return _FakeSearchResults()
+
+    def fast_field_values(self, name, addresses):
+        return [7]
+
+
+class _FakeIndex:
+    def __init__(self, schema, directory=None):
+        self.schema = schema
+        self.directory = directory
+        self.registered_tokenizer = None
+
+    def register_tokenizer(self, name, analyzer):
+        self.registered_tokenizer = (name, analyzer)
+
+    def reload(self):
+        pass
+
+    def searcher(self):
+        self.searcher_instance = _FakeSearcher()
+        return self.searcher_instance
+
+    def parse_query(self, query_text, fields):
+        return (query_text, tuple(fields))
+
+
+class _FakeTantivy(types.SimpleNamespace):
+    def __init__(self):
+        super().__init__()
+        self.Tokenizer = _FakeTokenizer
+        self.Filter = _FakeFilter
+        self.TextAnalyzerBuilder = _FakeTextAnalyzerBuilder
+        self.Query = _FakeQuery
+        self.Occur = _FakeOccur
+        self.last_schema = None
+        self.last_index = None
+        parent = self
+
+        class SchemaBuilder(_FakeSchemaBuilder):
+            def build(self_inner):
+                parent.last_schema = super().build()
+                return parent.last_schema
+
+        class Index(_FakeIndex):
+            def __init__(self_inner, schema, directory=None):
+                super().__init__(schema, directory=directory)
+                parent.last_index = self_inner
+
+        self.SchemaBuilder = SchemaBuilder
+        self.Index = Index
+
+
 # ----------------------------- tests ---------------------------------------
 
 
@@ -140,6 +291,214 @@ class VectorReaderFactoryTest(unittest.TestCase):
                 self.assertIsInstance(reader, LuminaVectorGlobalIndexReader)
             finally:
                 reader.close()
+
+
+class TantivyFullTextIndexOptionsTest(unittest.TestCase):
+    """Tantivy full-text tokenizer metadata compatibility."""
+
+    def test_empty_metadata_uses_default_tokenizer(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(b"")
+
+        self.assertEqual("default", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(2, options.ngram_max_gram)
+        self.assertFalse(options.ngram_prefix_only)
+        self.assertTrue(options.lower_case)
+        self.assertEqual("default", options.tokenizer_name())
+
+    def test_deserializes_java_ngram_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_NGRAM_TOKENIZER,
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(
+                tokenizer=" NGRAM ", min_gram=2, max_gram=3,
+                prefix_only=True, lower_case=False))
+
+        self.assertEqual("ngram", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(3, options.ngram_max_gram)
+        self.assertTrue(options.ngram_prefix_only)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(TANTIVY_NGRAM_TOKENIZER, options.tokenizer_name())
+
+    def test_deserializes_java_jieba_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_JIEBA_TOKENIZER,
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(tokenizer=" JIEBA "))
+
+        self.assertEqual("jieba", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(2, options.ngram_max_gram)
+        self.assertFalse(options.ngram_prefix_only)
+        self.assertTrue(options.lower_case)
+        self.assertEqual(TANTIVY_JIEBA_TOKENIZER, options.tokenizer_name())
+
+    def test_ngram_reader_registers_matching_tantivy_analyzer(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_NGRAM_TOKENIZER,
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(
+                        min_gram=2, max_gram=3,
+                        prefix_only=True, lower_case=True))])
+            try:
+                result = reader.visit_full_text_search(
+                    FullTextSearch("中文", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual({"row_id": {"fast": True},
+                          "text": {"stored": False,
+                                   "tokenizer_name": TANTIVY_NGRAM_TOKENIZER}},
+                         tantivy.last_schema.fields)
+        self.assertEqual(
+            (TANTIVY_NGRAM_TOKENIZER,
+             ("ngram", 2, 3, True, ("lowercase",))),
+            tantivy.last_index.registered_tokenizer)
+        self.assertEqual([7], sorted(list(result.results())))
+
+    def test_ngram_reader_requires_custom_tokenizer_api(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = types.SimpleNamespace(SchemaBuilder=object)
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta())])
+            with self.assertRaisesRegex(
+                    RuntimeError, "ngram tokenizer support"):
+                reader.visit_full_text_search(
+                    FullTextSearch("中文", 10, "content")).result()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+    def test_jieba_reader_builds_token_query(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_JIEBA_TOKENIZER,
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        jieba = types.SimpleNamespace(
+            tokenize=lambda text, mode, HMM: [
+                ("售货", 0, 2),
+                ("货员", 1, 3),
+                ("售货员", 0, 3),
+                ("售货员", 0, 3)])
+        old_tantivy = sys.modules.get("tantivy")
+        old_jieba = sys.modules.get("jieba")
+        sys.modules["tantivy"] = tantivy
+        sys.modules["jieba"] = jieba
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(tokenizer="jieba"))])
+            try:
+                result = reader.visit_full_text_search(
+                    FullTextSearch("售货员", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+            if old_jieba is None:
+                sys.modules.pop("jieba", None)
+            else:
+                sys.modules["jieba"] = old_jieba
+
+        self.assertEqual({"row_id": {"fast": True},
+                          "text": {"stored": False,
+                                   "tokenizer_name": TANTIVY_JIEBA_TOKENIZER}},
+                         tantivy.last_schema.fields)
+        self.assertIsNone(tantivy.last_index.registered_tokenizer)
+        self.assertEqual([7], sorted(list(result.results())))
+
+        query = tantivy.last_index.searcher_instance.query
+        self.assertEqual("boolean", query[0])
+        self.assertEqual(
+            ("售货", "货员", "售货员"),
+            tuple(sub_query[1][3] for sub_query in query[1]))
+
+    def test_jieba_reader_requires_jieba_package(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        old_jieba = sys.modules.get("jieba")
+        sys.modules["tantivy"] = tantivy
+        sys.modules["jieba"] = None
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(tokenizer="jieba"))])
+            try:
+                with self.assertRaisesRegex(RuntimeError, "pip install jieba"):
+                    reader.visit_full_text_search(
+                        FullTextSearch("售货员", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+            if old_jieba is None:
+                sys.modules.pop("jieba", None)
+            else:
+                sys.modules["jieba"] = old_jieba
 
 
 class VectorSearchFilterTest(unittest.TestCase):

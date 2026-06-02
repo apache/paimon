@@ -45,6 +45,7 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
                 }
             }
         }
-        return new TantivyFullTextGlobalIndexer(searcherPool);
+        return new TantivyFullTextGlobalIndexer(
+                searcherPool, TantivyFullTextIndexOptions.from(options));
     }
 }

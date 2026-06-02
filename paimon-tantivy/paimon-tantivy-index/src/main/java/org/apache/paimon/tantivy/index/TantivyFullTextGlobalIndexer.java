@@ -35,14 +35,21 @@ public class TantivyFullTextGlobalIndexer implements GlobalIndexer {
 
     private final Map<String, ArchiveLayout> layoutCache = new ConcurrentHashMap<>();
     private final TantivySearcherPool searcherPool;
+    private final TantivyFullTextIndexOptions indexOptions;
+
+    public TantivyFullTextGlobalIndexer(
+            TantivySearcherPool searcherPool, TantivyFullTextIndexOptions indexOptions) {
+        this.searcherPool = searcherPool;
+        this.indexOptions = indexOptions;
+    }
 
     public TantivyFullTextGlobalIndexer(TantivySearcherPool searcherPool) {
-        this.searcherPool = searcherPool;
+        this(searcherPool, TantivyFullTextIndexOptions.defaults());
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
-        return new TantivyFullTextGlobalIndexWriter(fileWriter);
+        return new TantivyFullTextGlobalIndexWriter(fileWriter, indexOptions);
     }
 
     @Override

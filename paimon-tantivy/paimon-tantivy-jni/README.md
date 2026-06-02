@@ -69,3 +69,38 @@ try (TantivySearcher searcher = new TantivySearcher("/tmp/my_index")) {
     }
 }
 ```
+
+### Tokenizers
+
+Use the tokenizer-aware constructors when indexing Chinese text or other content that should match
+short character fragments:
+
+```java
+try (TantivyIndexWriter writer =
+        new TantivyIndexWriter("/tmp/my_index", "ngram", 2, 2, false, true)) {
+    writer.addDocument(1L, "Apache Paimon 支持中文全文检索");
+    writer.commit();
+}
+
+try (TantivySearcher searcher =
+        new TantivySearcher("/tmp/my_index", "ngram", 2, 2, false, true)) {
+    SearchResult result = searcher.search("中文", 10);
+    System.out.println(result.size());
+}
+```
+
+Use `jieba` for Chinese word segmentation:
+
+```java
+try (TantivyIndexWriter writer =
+        new TantivyIndexWriter("/tmp/my_index", "jieba", 2, 2, false, true)) {
+    writer.addDocument(1L, "张华在百货公司当售货员");
+    writer.commit();
+}
+
+try (TantivySearcher searcher =
+        new TantivySearcher("/tmp/my_index", "jieba", 2, 2, false, true)) {
+    SearchResult result = searcher.search("售货员", 10);
+    System.out.println(result.size());
+}
+```

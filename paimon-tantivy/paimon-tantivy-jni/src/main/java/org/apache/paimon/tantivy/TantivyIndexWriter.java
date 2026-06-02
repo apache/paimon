@@ -33,6 +33,19 @@ public class TantivyIndexWriter implements AutoCloseable {
         this.closed = false;
     }
 
+    public TantivyIndexWriter(
+            String indexPath,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase) {
+        this.indexPtr =
+                createIndexWithTokenizer(
+                        indexPath, tokenizerName, minGram, maxGram, prefixOnly, lowerCase);
+        this.closed = false;
+    }
+
     public void addDocument(long rowId, String text) {
         checkNotClosed();
         writeDocument(indexPtr, rowId, text);
@@ -61,6 +74,14 @@ public class TantivyIndexWriter implements AutoCloseable {
     // ---- native methods ----
 
     static native long createIndex(String indexPath);
+
+    static native long createIndexWithTokenizer(
+            String indexPath,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase);
 
     static native void writeDocument(long indexPtr, long rowId, String text);
 

@@ -34,6 +34,19 @@ public class TantivySearcher implements AutoCloseable {
         this.closed = false;
     }
 
+    public TantivySearcher(
+            String indexPath,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase) {
+        this.searcherPtr =
+                openIndexWithTokenizer(
+                        indexPath, tokenizerName, minGram, maxGram, prefixOnly, lowerCase);
+        this.closed = false;
+    }
+
     /**
      * Open a searcher from a stream-backed archive.
      *
@@ -48,6 +61,30 @@ public class TantivySearcher implements AutoCloseable {
             long[] fileLengths,
             StreamFileInput streamInput) {
         this.searcherPtr = openFromStream(fileNames, fileOffsets, fileLengths, streamInput);
+        this.closed = false;
+    }
+
+    public TantivySearcher(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase) {
+        this.searcherPtr =
+                openFromStreamWithTokenizer(
+                        fileNames,
+                        fileOffsets,
+                        fileLengths,
+                        streamInput,
+                        tokenizerName,
+                        minGram,
+                        maxGram,
+                        prefixOnly,
+                        lowerCase);
         this.closed = false;
     }
 
@@ -86,8 +123,27 @@ public class TantivySearcher implements AutoCloseable {
 
     static native long openIndex(String indexPath);
 
+    static native long openIndexWithTokenizer(
+            String indexPath,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase);
+
     static native long openFromStream(
             String[] fileNames, long[] fileOffsets, long[] fileLengths, StreamFileInput streamInput);
+
+    static native long openFromStreamWithTokenizer(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase);
 
     static native SearchResult searchIndex(long searcherPtr, String queryString, int limit);
 
