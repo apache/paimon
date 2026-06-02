@@ -38,9 +38,6 @@ import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collections;
@@ -52,7 +49,6 @@ import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileM
 /** Default global index builder. */
 public class DefaultGlobalIndexBuilder implements Serializable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(DefaultGlobalIndexBuilder.class);
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
@@ -133,31 +129,17 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                 GlobalIndexMultiColumnWriter multiWriter =
                         (GlobalIndexMultiColumnWriter) indexWriter;
                 int[] projection = new int[indexFields.size()];
-                InternalRow.FieldGetter[] getters = new InternalRow.FieldGetter[indexFields.size()];
                 for (int i = 0; i < indexFields.size(); i++) {
                     DataField field = indexFields.get(i);
                     projection[i] = readType.getFieldIndex(field.name());
-                    getters[i] =
-                            InternalRow.createFieldGetter(
-                                    field.type(), readType.getFieldIndex(field.name()));
                 }
                 ProjectedRow projectedRow = ProjectedRow.from(projection);
                 while (rows.hasNext()) {
                     InternalRow row = rows.next();
-                    boolean hasNull = false;
-                    for (InternalRow.FieldGetter getter : getters) {
-                        if (getter.getFieldOrNull(row) == null) {
-                            hasNull = true;
-                            break;
-                        }
-                    }
-                    if (hasNull) {
-                        LOG.info(
-                                "Null value in indexed columns, stopping shard [{}, {}].",
-                                rowRange.from,
-                                rowRange.to);
-                        break;
-                    }
+                    // Pass the row through, including null fields; each index type decides how to
+                    // handle nulls. A null field advances the logical row id without indexing a
+                    // value, so it must not end the shard: later non-null rows still need to be
+                    // indexed and row-id alignment must be preserved.
                     multiWriter.write(projectedRow.replaceRow(row));
                     rowCounter.add(1);
                 }
