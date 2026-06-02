@@ -36,12 +36,26 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
     private final FileRecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
+    private final boolean overrideSequenceWithSnapshotId;
+    private final long snapshotId;
 
     public KeyValueDataFileRecordReader(
             FileRecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
+        this(reader, keyType, valueType, level, false, KeyValue.UNKNOWN_SEQUENCE);
+    }
+
+    public KeyValueDataFileRecordReader(
+            FileRecordReader<InternalRow> reader,
+            RowType keyType,
+            RowType valueType,
+            int level,
+            boolean overrideSequenceWithSnapshotId,
+            long snapshotId) {
         this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
+        this.overrideSequenceWithSnapshotId = overrideSequenceWithSnapshotId;
+        this.snapshotId = snapshotId;
     }
 
     @Nullable
@@ -53,10 +67,29 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
         }
 
         return iterator.transform(
-                internalRow ->
-                        internalRow == null
-                                ? null
-                                : serializer.fromRow(internalRow).setLevel(level));
+                internalRow -> {
+                    if (internalRow == null) {
+                        return null;
+                    }
+                    KeyValue kv = serializer.fromRow(internalRow).setLevel(level);
+                    // When snapshot-ordering is enabled, an APPEND file's per-record sequence
+                    // numbers are replaced with the commit snapshot id so that later snapshots
+                    // always win during merge. COMPACT files are left untouched: their records
+                    // already carry the snapshot id in the per-record _SEQUENCE_NUMBER column.
+                    //
+                    // CAUTION: in this mode the per-record sequence number physically stored in
+                    // an APPEND file is NOT trustworthy and must not be relied upon. The writer
+                    // seeds its sequence counter from the file-level maxSequenceNumber (which has
+                    // been stamped to the snapshot id), so the on-disk per-record values can be
+                    // small and non-monotonic across snapshots. Correct ordering is established
+                    // here, by this override; any future read path that bypasses this override
+                    // would order APPEND records by the stale on-disk values and break snapshot
+                    // ordering.
+                    if (overrideSequenceWithSnapshotId) {
+                        kv.setSequenceNumber(snapshotId);
+                    }
+                    return kv;
+                });
     }
 
     @Override

@@ -30,6 +30,7 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
@@ -42,6 +43,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FormatReaderMapping;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -68,6 +70,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final long asyncThreshold;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
+    private final boolean snapshotSequenceOrdering;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
@@ -93,6 +96,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.asyncThreshold = coreOptions.fileReaderAsyncThreshold().getBytes();
         this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
+        this.snapshotSequenceOrdering = coreOptions.snapshotSequenceOrdering();
         this.partition = partition;
         this.formatReaderMappings = new HashMap<>();
         this.dvFactory = dvFactory;
@@ -168,7 +172,28 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
 
-        return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, file.level());
+        // When snapshot-ordering is enabled, FileStoreCommitImpl stamps the commit snapshot id
+        // into minSequenceNumber for APPEND files. We override each record's sequence number with
+        // that snapshot id so that records from later snapshots always win during merge. COMPACT
+        // files are left untouched: their per-record _SEQUENCE_NUMBER already carries the snapshot
+        // id (transitively, the input records were read through this same override path), so the
+        // file-level minSequenceNumber already reflects the correct snapshot id range.
+        boolean overrideSequenceWithSnapshotId = false;
+        if (snapshotSequenceOrdering) {
+            Preconditions.checkState(
+                    file.fileSource().isPresent(),
+                    "sequence.snapshot-ordering requires data files with fileSource metadata. "
+                            + "This option is only safe for newly-created tables or empty tables. "
+                            + "Legacy files without fileSource cannot be ordered by commit snapshot id.");
+            overrideSequenceWithSnapshotId = file.fileSource().get() == FileSource.APPEND;
+        }
+        return new KeyValueDataFileRecordReader(
+                fileRecordReader,
+                keyType,
+                valueType,
+                file.level(),
+                overrideSequenceWithSnapshotId,
+                file.minSequenceNumber());
     }
 
     public static Builder builder(
