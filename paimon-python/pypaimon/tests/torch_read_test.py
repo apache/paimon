@@ -645,6 +645,199 @@ class TorchReadTest(unittest.TestCase):
         print("✓ All predicate test cases passed!")
         print(f"{'=' * 60}\n")
 
+    def test_torch_streaming_shuffle_single_worker(self):
+        table = self._create_shuffle_append_table('default.test_torch_shuffle_single')
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        expected = list(range(80))
+        for max_buffer_input_splits in [1, 3]:
+            with self.subTest(max_buffer_input_splits=max_buffer_input_splits):
+                dataset = table_read.to_torch(
+                    splits,
+                    streaming=True,
+                    shuffle=True,
+                    seed=17,
+                    buffer_size=7,
+                    max_buffer_input_splits=max_buffer_input_splits,
+                )
+                ids = self._collect_torch_user_ids(dataset, num_workers=0)
+                self.assertEqual(sorted(ids), expected)
+                self.assertNotEqual(ids, expected)
+
+    def test_torch_streaming_shuffle_seed_and_epoch(self):
+        table = self._create_shuffle_append_table('default.test_torch_shuffle_epoch')
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        dataset = table_read.to_torch(
+            splits,
+            streaming=True,
+            shuffle=True,
+            seed=23,
+            buffer_size=11,
+            max_buffer_input_splits=4,
+        )
+        epoch0 = self._collect_torch_user_ids(dataset, num_workers=0)
+        epoch0_again = self._collect_torch_user_ids(dataset, num_workers=0)
+        self.assertEqual(epoch0, epoch0_again)
+
+        dataset.set_epoch(1)
+        epoch1 = self._collect_torch_user_ids(dataset, num_workers=0)
+        self.assertEqual(sorted(epoch1), list(range(80)))
+        self.assertNotEqual(epoch0, epoch1)
+
+        dataset.set_epoch(0)
+        self.assertEqual(epoch0, self._collect_torch_user_ids(dataset, num_workers=0))
+
+        other_seed_dataset = table_read.to_torch(
+            splits,
+            streaming=True,
+            shuffle=True,
+            seed=24,
+            buffer_size=11,
+            max_buffer_input_splits=4,
+        )
+        self.assertNotEqual(
+            epoch0,
+            self._collect_torch_user_ids(other_seed_dataset, num_workers=0),
+        )
+
+    def test_torch_streaming_shuffle_multi_worker(self):
+        table = self._create_shuffle_append_table('default.test_torch_shuffle_multi')
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan() \
+            .with_chunk_shuffle(seed=31, chunk_size=5) \
+            .plan() \
+            .splits()
+
+        dataset = table_read.to_torch(
+            splits,
+            streaming=True,
+            shuffle=True,
+            seed=31,
+            buffer_size=13,
+            max_buffer_input_splits=4,
+        )
+        ids = self._collect_torch_user_ids(dataset, num_workers=2)
+
+        expected = list(range(80))
+        self.assertEqual(len(ids), len(expected))
+        self.assertEqual(sorted(ids), expected)
+
+    def test_torch_streaming_shuffle_rejects_non_streaming(self):
+        table = self._create_shuffle_append_table('default.test_torch_shuffle_non_streaming')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        with self.assertRaisesRegex(ValueError, "streaming=True"):
+            table_read.to_torch(splits, streaming=False, shuffle=True)
+
+    def test_torch_streaming_shuffle_accepts_pk_table_splits(self):
+        pa_schema = pa.schema([
+            pa.field('user_id', pa.int32(), nullable=False),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            ('dt', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['user_id'],
+            options={'bucket': '1'},
+        )
+        self.catalog.create_table('default.test_torch_shuffle_pk', schema, False)
+        table = self.catalog.get_table('default.test_torch_shuffle_pk')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            shuffle=True,
+            seed=7,
+            buffer_size=3,
+        )
+        ids = self._collect_torch_user_ids(dataset, num_workers=0)
+
+        self.assertEqual(sorted(ids), [1, 2, 3, 4, 5, 6, 7, 8])
+
+    def test_torch_streaming_shuffle_rejects_invalid_dataset_options(self):
+        table = self._create_shuffle_append_table('default.test_torch_shuffle_invalid_options')
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        with self.assertRaisesRegex(ValueError, "prefetch_concurrency"):
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                shuffle=True,
+                prefetch_concurrency=2,
+            )
+        with self.assertRaisesRegex(ValueError, "buffer_size"):
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                shuffle=True,
+                buffer_size=0,
+            )
+        with self.assertRaisesRegex(ValueError, "max_buffer_input_splits"):
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                shuffle=True,
+                max_buffer_input_splits=0,
+            )
+
+    def _create_shuffle_append_table(
+        self,
+        identifier,
+        total_rows=80,
+        rows_per_commit=10,
+        partition_keys=None,
+    ):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=partition_keys or [],
+        )
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+
+        write_builder = table.new_batch_write_builder()
+        for start in range(0, total_rows, rows_per_commit):
+            end = min(start + rows_per_commit, total_rows)
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            pa_table = pa.Table.from_pydict({
+                'user_id': list(range(start, end)),
+                'item_id': [1000 + i for i in range(start, end)],
+                'behavior': [chr(ord('a') + (i % 26)) for i in range(start, end)],
+                'dt': [f'p{i % 4}' for i in range(start, end)],
+            }, schema=self.pa_schema)
+            table_write.write_arrow(pa_table)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+        return table
+
+    @staticmethod
+    def _collect_torch_user_ids(dataset, num_workers=0):
+        dataloader = DataLoader(
+            dataset,
+            batch_size=8,
+            num_workers=num_workers,
+            shuffle=False,
+        )
+        all_user_ids = []
+        for batch_data in dataloader:
+            all_user_ids.extend(batch_data['user_id'].tolist())
+        return all_user_ids
+
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
         table_pa_schema = self.pk_pa_schema if table.primary_keys else self.pa_schema
