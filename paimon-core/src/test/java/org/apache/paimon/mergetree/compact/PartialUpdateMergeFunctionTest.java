@@ -928,9 +928,9 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testMultiPrimaryKeyCannotBeInSequenceGroup() {
-        // Issue #7052: With composite primary keys, none of them can be in sequence-group
-        // f2 is a PK and appears in the value part of the sequence-group
+    public void testPrimaryKeyCannotBeInSequenceGroupValue() {
+        // Issue #7052: A primary key column appearing in the value part of sequence-group
+        // is forbidden — f2 is the PK and appears in the sequence-group's value list
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f2");
         RowType rowType =

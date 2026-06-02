@@ -65,6 +65,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     public static final String SEQUENCE_GROUP = "sequence-group";
+    private static final String SEQUENCE_GROUP_PK_ERROR =
+            "The sequence-group '%s' contains primary key field '%s', "
+                    + "which is not allowed. Primary key columns cannot be put in sequence-group.";
 
     private final InternalRow.FieldGetter[] getters;
     private final boolean ignoreDelete;
@@ -432,9 +435,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                         if (primaryKeys.contains(protectedFieldName)) {
                                             throw new IllegalArgumentException(
                                                     String.format(
-                                                            "The sequence-group '%s' contains primary key field '%s', "
-                                                                    + "which is not allowed. Primary key columns cannot be put in sequence-group.",
-                                                            k, protectedFieldName));
+                                                            SEQUENCE_GROUP_PK_ERROR,
+                                                            k,
+                                                            protectedFieldName));
                                         }
                                         if (fieldSeqComparators.containsKey(field)) {
                                             throw new IllegalArgumentException(
@@ -451,10 +454,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         String fieldName = fieldNames.get(index);
                         if (primaryKeys.contains(fieldName)) {
                             throw new IllegalArgumentException(
-                                    String.format(
-                                            "The sequence-group '%s' contains primary key field '%s', "
-                                                    + "which is not allowed. Primary key columns cannot be put in sequence-group.",
-                                            k, fieldName));
+                                    String.format(SEQUENCE_GROUP_PK_ERROR, k, fieldName));
                         }
                         allSequenceFields.add(fieldName);
                         fieldSeqComparators.put(index, userDefinedSeqComparator);
