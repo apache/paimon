@@ -279,11 +279,8 @@ import ray
 
 table = catalog.get_table('database_name.table_name')
 
-# 1. Create table write and commit (commit is only needed for non-Ray writes
-#    on the same table_write instance — see below).
-write_builder = table.new_batch_write_builder()
-table_write = write_builder.new_write()
-table_commit = write_builder.new_commit()
+# 1. Create table write.
+table_write = table.new_batch_write_builder().new_write()
 
 # 2. Write Ray Dataset
 ray_dataset = ray.data.read_json("/path/to/data.jsonl")
@@ -292,6 +289,7 @@ table_write.write_ray(
     overwrite=False,
     concurrency=2,
     hash_fixed_precluster="auto",
+    static_partition=None,
 )
 # Parameters:
 #   - dataset: Ray Dataset to write
@@ -300,28 +298,42 @@ table_write.write_ray(
 #   - ray_remote_args: Optional kwargs passed to ray.remote() (e.g., {"num_cpus": 2})
 #   - hash_fixed_precluster: Same HASH_FIXED modes and primary-key safety
 #     checks as write_paimon()
+#   - static_partition: Optional partition spec to overwrite. When set,
+#     write_ray() runs in overwrite mode for this partition.
 
-# 3. Commit data (required for write_pandas/write_arrow/write_arrow_batch only)
-commit_messages = table_write.prepare_commit()
-table_commit.commit(commit_messages)
-
-# 4. Close resources
+# 3. Close resources
 table_write.close()
-table_commit.close()
 ```
 
-### Overwrite at builder level
+### Overwrite
 
-The recommended way to overwrite via `write_paimon` is the `overwrite=True`
-flag above. When using the lower-level builder API, you can also configure
-overwrite mode on the write builder itself:
+The top-level `write_paimon()` API supports whole-table overwrite with the
+`overwrite=True` flag above. With the lower-level `write_ray()` API, you can
+use `overwrite=True` for whole-table overwrite and `static_partition={...}` for
+partition overwrite:
+
+```python
+table_write.write_ray(ray_dataset, overwrite=True)
+table_write.write_ray(ray_dataset, static_partition={'dt': '2024-01-01'})
+```
+
+When using the lower-level builder API, you can also configure overwrite mode
+on the write builder itself. The resulting `table_write` carries the overwrite
+partition into `write_ray()`. A `static_partition` argument passed directly to
+`write_ray()` overrides the builder-level partition:
 
 ```python
 # overwrite whole table
-write_builder = table.new_batch_write_builder().overwrite()
+table_write = table.new_batch_write_builder().overwrite().new_write()
+table_write.write_ray(ray_dataset)
 
 # overwrite partition 'dt=2024-01-01'
-write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
+table_write = (
+    table.new_batch_write_builder()
+    .overwrite({'dt': '2024-01-01'})
+    .new_write()
+)
+table_write.write_ray(ray_dataset)
 ```
 
 ## Merge Into
