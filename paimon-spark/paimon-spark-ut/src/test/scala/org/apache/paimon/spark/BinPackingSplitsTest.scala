@@ -35,7 +35,7 @@ import scala.collection.mutable
 class BinPackingSplitsTest extends PaimonSparkTestBase {
 
   test("Paimon: reshuffle splits") {
-    withSparkSQLConf(("spark.sql.leafNodeDefaultParallelism", "20")) {
+    withSparkSQLConf("spark.sql.files.minPartitionNum" -> "20") {
       val splitNum = 5
       val fileNum = 100
 
@@ -69,7 +69,7 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
   }
 
   test("Paimon: pack data evolution splits by split granularity") {
-    withSparkSQLConf(("spark.sql.leafNodeDefaultParallelism", "1")) {
+    withSparkSQLConf("spark.sql.files.minPartitionNum" -> "1") {
       val split1 = newDataSplit("split1", Seq(40L, 40L), deletionFileLength = Some(5L))
       val split2 = newDataSplit("split2", Seq(40L, 40L), deletionFileLength = Some(5L))
       val split3 = newDataSplit("split3", Seq(40L, 40L), deletionFileLength = Some(5L))
@@ -100,7 +100,7 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
   }
 
   test("Paimon: data evolution split packing keeps oversized split whole") {
-    withSparkSQLConf(("spark.sql.leafNodeDefaultParallelism", "1")) {
+    withSparkSQLConf("spark.sql.files.minPartitionNum" -> "1") {
       val split = newDataSplit("oversized", Seq(40L, 40L))
 
       val binPacking = BinPackingSplits(
@@ -130,21 +130,21 @@ class BinPackingSplitsTest extends PaimonSparkTestBase {
       def paimonScan() = getPaimonScan("SELECT * FROM t")
 
       // default openCostInBytes is 4m, so we will get 400 / 128 = 4 partitions
-      withSparkSQLConf("spark.sql.leafNodeDefaultParallelism" -> "1") {
+      withSparkSQLConf("spark.sql.files.minPartitionNum" -> "1") {
         assert(paimonScan().inputPartitions.length == 4)
       }
 
       withSparkSQLConf(
-        "spark.sql.files.openCostInBytes" -> "0",
-        "spark.sql.leafNodeDefaultParallelism" -> "1") {
+        "spark.sql.files.minPartitionNum" -> "1",
+        "spark.sql.files.openCostInBytes" -> "0") {
         assert(paimonScan().inputPartitions.length == 1)
       }
 
       // Paimon's conf takes precedence over Spark's
       withSparkSQLConf(
+        "spark.sql.files.minPartitionNum" -> "1",
         "spark.sql.files.openCostInBytes" -> "4194304",
-        "spark.paimon.source.split.open-file-cost" -> "0",
-        "spark.sql.leafNodeDefaultParallelism" -> "1") {
+        "spark.paimon.source.split.open-file-cost" -> "0") {
         assert(paimonScan().inputPartitions.length == 1)
       }
     }
