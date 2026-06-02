@@ -31,7 +31,7 @@ from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct
+from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -179,6 +179,11 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(restored.identifier.get_full_name(), "test_db.source_table")
         self.assertEqual(restored.field_id, 7)
         self.assertEqual(restored.row_id, 42)
+
+        blob = Blob.from_bytes(view_struct.serialize())
+        self.assertIsInstance(blob, BlobView)
+        self.assertFalse(blob.is_resolved())
+        self.assertEqual(blob.view_struct, view_struct)
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
