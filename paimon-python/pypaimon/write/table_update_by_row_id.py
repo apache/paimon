@@ -109,6 +109,7 @@ class TableUpdateByRowId:
                 else:
                     entry[1].append(file)
 
+        # Use max row_id + 1 as upper bound; row_id ranges may have holes.
         if row_id_ranges:
             merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
             total_row_count = max(r.to for r in merged) + 1
