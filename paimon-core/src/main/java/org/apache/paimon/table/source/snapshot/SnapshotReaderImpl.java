@@ -635,10 +635,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> result = new HashMap<>();
         Path indexManifestPath = indexFileHandler.indexManifestFilePath(snapshot.indexManifest());
+        Set<Pair<BinaryRow, Integer>> remainingBuckets = new HashSet<>(buckets);
 
         // 1. read from cache
         if (dvMetaCache != null) {
-            Iterator<Pair<BinaryRow, Integer>> iterator = buckets.iterator();
+            Iterator<Pair<BinaryRow, Integer>> iterator = remainingBuckets.iterator();
             while (iterator.hasNext()) {
                 Pair<BinaryRow, Integer> next = iterator.next();
                 BinaryRow partition = next.getLeft();
@@ -658,22 +659,25 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 }
             }
         }
-        if (buckets.isEmpty()) {
+        if (remainingBuckets.isEmpty()) {
             return result;
         }
 
         // 2. read from file system
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
                 dvMetaCache == null
-                        ? indexFileHandler.scanBuckets(snapshot, DELETION_VECTORS_INDEX, buckets)
+                        ? indexFileHandler.scanBuckets(
+                                snapshot, DELETION_VECTORS_INDEX, remainingBuckets)
                         : indexFileHandler.scan(
                                 snapshot,
                                 DELETION_VECTORS_INDEX,
-                                buckets.stream().map(Pair::getLeft).collect(Collectors.toSet()));
+                                remainingBuckets.stream()
+                                        .map(Pair::getLeft)
+                                        .collect(Collectors.toSet()));
         partitionFileMetas.forEach(
                 (entry, indexFileMetas) -> {
                     Pair<BinaryRow, Integer> partitionBucket = entry;
-                    if (buckets.contains(entry)) {
+                    if (remainingBuckets.contains(entry)) {
                         Map<String, DeletionFile> deletionFiles =
                                 toDeletionFiles(partitionBucket, indexFileMetas);
                         result.put(partitionBucket, deletionFiles);

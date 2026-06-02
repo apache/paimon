@@ -132,7 +132,7 @@ public class DVMetaCache {
         }
 
         @Override
-        public Map<String, DeletionFile> get() {
+        public synchronized Map<String, DeletionFile> get() {
             return deletionFiles.get();
         }
     }

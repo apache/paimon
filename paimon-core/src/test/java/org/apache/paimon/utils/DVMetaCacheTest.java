@@ -31,6 +31,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -135,10 +140,59 @@ public class DVMetaCacheTest {
     }
 
     @Test
-    public void testCacheEviction() {
-        DVMetaCache cache = new DVMetaCache(5);
+    public void testLazyValueInitializedOnceConcurrently() throws Exception {
+        DVMetaCache cache = new DVMetaCache(100);
         Path path = new Path("manifest/index-manifest-00004");
         BinaryRow partition = partition("year=2023/month=09");
+        AtomicInteger invoked = new AtomicInteger();
+        CountDownLatch supplierEntered = new CountDownLatch(1);
+        CountDownLatch releaseSupplier = new CountDownLatch(1);
+        Map<String, DeletionFile> dvFiles = new HashMap<>();
+        dvFiles.put(
+                "data-d4e5f6g7-h8i9-0123-defg-456789012345-1.parquet",
+                new DeletionFile("index-d4e5f6g7-h8i9-0123-defg-456789012345-1", 0L, 100L, 1L));
+
+        cache.putLazy(
+                path,
+                partition,
+                1,
+                1,
+                () -> {
+                    invoked.incrementAndGet();
+                    supplierEntered.countDown();
+                    try {
+                        assertThat(releaseSupplier.await(5, TimeUnit.SECONDS)).isTrue();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(e);
+                    }
+                    return dvFiles;
+                });
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Map<String, DeletionFile>> first =
+                    executor.submit(() -> cache.read(path, partition, 1));
+            assertThat(supplierEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<Map<String, DeletionFile>> second =
+                    executor.submit(() -> cache.read(path, partition, 1));
+            releaseSupplier.countDown();
+
+            assertThat(first.get(5, TimeUnit.SECONDS)).isSameAs(dvFiles);
+            assertThat(second.get(5, TimeUnit.SECONDS)).isSameAs(dvFiles);
+            assertThat(invoked).hasValue(1);
+        } finally {
+            releaseSupplier.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testCacheEviction() {
+        DVMetaCache cache = new DVMetaCache(5);
+        Path path = new Path("manifest/index-manifest-00005");
+        BinaryRow partition = partition("year=2023/month=08");
 
         // Fill cache to capacity
         Map<String, DeletionFile> dvFiles1 = new HashMap<>();
