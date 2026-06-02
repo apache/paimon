@@ -52,8 +52,17 @@ class BlobFileWriter:
 
         blob_data = self._to_blob(col_data)
 
-        # Create GenericRow
-        fields = [DataField(0, field_name, PyarrowFieldParser.to_paimon_type(row_data.schema[0].type, False))]
+        self.write_blob(field_name, row_data.schema[0].type, blob_data)
+
+    def write_blob(self, field_name: str, arrow_type, blob_data):
+        blob_data = self._to_blob(blob_data)
+        fields = [
+            DataField(
+                0,
+                field_name,
+                PyarrowFieldParser.to_paimon_type(arrow_type, False),
+            )
+        ]
         row = GenericRow([blob_data], fields, RowKind.INSERT)
 
         # Write to blob format writer
@@ -61,6 +70,8 @@ class BlobFileWriter:
         self.row_count += 1
 
     def _to_blob(self, col_data) -> Optional[Blob]:
+        if col_data is Blob.PLACE_HOLDER:
+            return Blob.PLACE_HOLDER
         if hasattr(col_data, 'as_py'):
             col_data = col_data.as_py()
         if col_data is None:
