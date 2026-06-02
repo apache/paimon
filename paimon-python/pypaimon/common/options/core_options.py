@@ -841,13 +841,17 @@ class CoreOptions:
         raw = self.options.get(CoreOptions.SEQUENCE_FIELD)
         if not raw:
             return []
-        # Trim each segment but keep empty ones, matching Java
-        # ``CoreOptions.sequenceField()``
-        # (``Arrays.stream(s.split(',')).map(String::trim)``). A malformed
-        # value like ``'ts,,ts2'`` thus yields an empty field name that
-        # ``check_sequence_field_valid`` rejects, instead of being silently
-        # accepted as ``['ts', 'ts2']``.
-        return [name.strip() for name in raw.split(",")]
+        # Mirror Java ``CoreOptions.sequenceField()``
+        # (``Arrays.stream(s.split(',')).map(String::trim)``): Java's
+        # ``String.split(",")`` drops *trailing* empty segments (so ``'ts,'``
+        # yields ``['ts']``) but keeps interior ones, and each segment is
+        # then trimmed. So an interior empty segment (``'ts,,ts2'``) survives
+        # as an empty field name that ``check_sequence_field_valid`` rejects,
+        # while a trailing comma is tolerated.
+        segments = raw.split(",")
+        while segments and segments[-1] == "":
+            segments.pop()
+        return [name.strip() for name in segments]
 
     def sequence_field_sort_order_is_ascending(self) -> bool:
         """Whether ``sequence.field.sort-order`` is ascending (the default).

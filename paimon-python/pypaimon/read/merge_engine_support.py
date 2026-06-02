@@ -34,7 +34,6 @@ results when the table configures, e.g.,
 from typing import Set
 
 from pypaimon.common.options.core_options import MergeEngine
-from pypaimon.schema.data_types import AtomicType
 
 # Boolean-valued options that, when truthy, opt the table into behaviour
 # the Python ``PartialUpdateMergeFunction`` does not implement.
@@ -88,18 +87,20 @@ def _nested_sequence_field_options(table) -> Set[str]:
     return flagged
 
 
-def _complex_sequence_fields(table) -> Set[str]:
-    """Configured ``sequence.field`` names whose type is complex
-    (non-atomic). Java's ``UserDefinedSeqComparator`` delegates to
-    ``RecordComparator`` and supports ARRAY / VECTOR / MAP / MULTISET / ROW,
-    but pypaimon's ``builtin_seq_comparator`` only compares atomic types.
-    Reject these explicitly so a raw-convertible split (which skips the
-    merge reader) can't silently bypass the limitation.
+def _unsupported_sequence_fields(table) -> Set[str]:
+    """Configured ``sequence.field`` names whose type pypaimon cannot order.
+    Java's ``UserDefinedSeqComparator`` delegates to ``RecordComparator``
+    and supports ARRAY / VECTOR / MAP / MULTISET / ROW, but pypaimon's
+    ``builtin_seq_comparator`` only compares orderable atomic types. This
+    flags both complex (non-atomic) types and the atomic-but-unorderable
+    VARIANT, so a raw-convertible split (which skips the merge reader) can't
+    silently bypass the limitation.
     """
+    from pypaimon.read.reader.sort_merge_reader import is_comparable_seq_field
     flagged: Set[str] = set()
     for field in table.options.sequence_field():
         data_field = table.field_dict.get(field)
-        if data_field is not None and not isinstance(data_field.type, AtomicType):
+        if data_field is not None and not is_comparable_seq_field(data_field):
             flagged.add(field)
     return flagged
 
@@ -189,18 +190,20 @@ def check_supported(table) -> None:
     # the read path, before per-engine dispatch.
     check_sequence_field_valid(table)
     # ``sequence.field`` validity (above) is Java-aligned and engine
-    # independent. Complex sequence-field *types* are valid in Java but
-    # unimplemented in pypaimon's atomic-only comparator, so reject them as
-    # NotImplementedError here -- before per-engine dispatch, so a
-    # raw-convertible split can't bypass the merge reader and skip the check.
-    complex_seq = _complex_sequence_fields(table)
-    if complex_seq:
+    # independent. Some field *types* are valid in Java but unimplemented in
+    # pypaimon's orderable-atomic-only comparator (complex types, plus the
+    # atomic-but-unorderable VARIANT), so reject them as NotImplementedError
+    # here -- before per-engine dispatch, so a raw-convertible split can't
+    # bypass the merge reader and skip the check.
+    unsupported_seq = _unsupported_sequence_fields(table)
+    if unsupported_seq:
         raise NotImplementedError(
-            "sequence.field with complex (non-atomic) type is not "
-            "implemented in pypaimon yet: {}. Java supports ARRAY / MAP / "
-            "ROW etc. via RecordComparator; pypaimon only supports atomic "
-            "sequence-field types. Open an issue to track support.".format(
-                ", ".join(sorted(complex_seq))))
+            "sequence.field with unsupported type is not implemented in "
+            "pypaimon yet: {}. pypaimon only supports orderable atomic "
+            "sequence-field types; complex types (ARRAY / MAP / ROW etc., "
+            "handled by Java via RecordComparator) and VARIANT are not "
+            "supported. Open an issue to track support.".format(
+                ", ".join(sorted(unsupported_seq))))
     engine = table.options.merge_engine()
     if engine == MergeEngine.DEDUPLICATE:
         return

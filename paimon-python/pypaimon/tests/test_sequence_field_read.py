@@ -385,6 +385,21 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             self._read(table)
 
+    def test_trailing_comma_sequence_field_tolerated(self):
+        """A trailing comma (``'ts,'``) must be tolerated, matching Java
+        ``String.split(',')`` which drops trailing empty segments. It
+        behaves exactly like ``'ts'`` -- not rejected as an empty field.
+        """
+        table = self._create_pk_table(
+            'seq_trailing', extra_options={'sequence.field': 'ts,'})
+        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'high'}])
+        self._write(table, [{'id': 1, 'ts': 50, 'ts2': 0, 'val': 'low'}])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'high'}],
+        )
+
     def test_complex_type_sequence_field_rejected(self):
         """A complex (non-atomic) sequence field is valid in Java (handled
         via RecordComparator) but unimplemented in pypaimon's atomic-only
@@ -415,6 +430,43 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
         with self.assertRaises(NotImplementedError) as ctx:
             table.new_read_builder().new_read()
         self.assertIn('seq', str(ctx.exception))
+
+
+class SequenceFieldComparabilityUnitTest(unittest.TestCase):
+    """Unit-level coverage of ``is_comparable_seq_field`` -- the predicate
+    behind the read-builder guard. VARIANT in particular is an
+    ``AtomicType`` but has no ordering, so it must be rejected like the
+    complex types rather than slipping through an ``isinstance(AtomicType)``
+    check.
+    """
+
+    def test_variant_sequence_field_not_comparable(self):
+        from pypaimon.read.reader.sort_merge_reader import (
+            is_comparable_seq_field)
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        variant = DataField(0, 'seq', AtomicType('VARIANT'))
+        self.assertFalse(is_comparable_seq_field(variant))
+
+    def test_atomic_types_are_comparable(self):
+        from pypaimon.read.reader.sort_merge_reader import (
+            is_comparable_seq_field)
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        for type_str in ('BIGINT', 'INT', 'TIMESTAMP(6)', 'DECIMAL(10, 2)',
+                         'STRING', 'BIGINT NOT NULL'):
+            field = DataField(0, 'seq', AtomicType(type_str))
+            self.assertTrue(is_comparable_seq_field(field),
+                            '{} should be comparable'.format(type_str))
+
+    def test_complex_types_not_comparable(self):
+        from pypaimon.read.reader.sort_merge_reader import (
+            is_comparable_seq_field)
+        from pypaimon.schema.data_types import (
+            ArrayType, AtomicType, DataField)
+
+        array = DataField(0, 'seq', ArrayType(True, AtomicType('INT')))
+        self.assertFalse(is_comparable_seq_field(array))
 
 
 class SequenceFieldParameterizedTypeTest(unittest.TestCase):

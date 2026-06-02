@@ -207,6 +207,24 @@ def _base_type_name(field: DataField) -> str:
     return field.type.type.split('(')[0].split(' ')[0]
 
 
+# Atomic type keywords pypaimon can order with Python's native comparison
+# operators. VARIANT is atomic but has no ordering, so it is excluded --
+# matching Java, which has no VARIANT sequence-field support.
+_COMPARABLE_TYPE_NAMES = frozenset(
+    member.value for member in Keyword if member is not Keyword.VARIANT)
+
+
+def is_comparable_seq_field(field: DataField) -> bool:
+    """Whether ``field`` can serve as a ``sequence.field`` for pypaimon's
+    atomic comparator: it must be an ``AtomicType`` whose base type name is
+    orderable. Complex types (ARRAY / MAP / ROW / ...) and the atomic-but-
+    unorderable VARIANT both return ``False``. Used by the read-builder
+    guard to reject unsupported sequence fields up front.
+    """
+    return (isinstance(field.type, AtomicType)
+            and _base_type_name(field) in _COMPARABLE_TYPE_NAMES)
+
+
 def _row_field_comparator(
         fields: List[DataField],
         indices: List[int],
@@ -224,8 +242,7 @@ def _row_field_comparator(
     descending order flips only the non-null value comparison and leaves
     nulls sorting first.
     """
-    comparable_types = {member.value for member in Keyword if member is not Keyword.VARIANT}
-    comparable_flags = [_base_type_name(fields[idx]) in comparable_types for idx in indices]
+    comparable_flags = [_base_type_name(fields[idx]) in _COMPARABLE_TYPE_NAMES for idx in indices]
     sign = 1 if ascending else -1
 
     def comparator(row1: InternalRow, row2: InternalRow) -> int:
@@ -278,19 +295,22 @@ def builtin_seq_comparator(
       (``value_fields`` is the value-side schema, == ``read_type``);
       ``get_field(idx)`` indexes the value ``OffsetRow``.
     - multiple fields compared left-to-right.
-    - ``ascending=False`` reverses the overall result (the value rows here
-      always carry a homogeneous sort order, so negating the final
-      comparison is equivalent to Java reversing each field).
+    - ``ascending=False`` reverses only the non-null value comparison for
+      each field; null ordering stays nulls-first regardless of sort order
+      (mirroring Java's ``nullIsLast=false``). The value rows here carry a
+      homogeneous sort order, so reversing the final non-null comparison is
+      equivalent to Java reversing each field.
 
     A name that does not resolve raises ``ValueError`` -- the read path
     injects missing sequence fields into the projection before this runs,
     so a miss indicates a wiring bug rather than user error.
 
-    A complex (non-atomic) sequence field raises ``NotImplementedError``.
-    Java ``UserDefinedSeqComparator`` delegates to ``RecordComparator`` and
-    supports ARRAY / VECTOR / MAP / MULTISET / ROW, but pypaimon only
-    implements atomic-type comparison here, so reject complex types
-    explicitly rather than failing later with an obscure error.
+    A sequence field whose type pypaimon cannot order raises
+    ``NotImplementedError``: complex types (ARRAY / VECTOR / MAP / MULTISET /
+    ROW), which Java handles via ``RecordComparator``, and the atomic-but-
+    unorderable VARIANT. pypaimon only implements atomic-type comparison
+    here, so reject these explicitly rather than failing later with an
+    obscure error.
     """
     if not sequence_field_names:
         return None
@@ -303,12 +323,13 @@ def builtin_seq_comparator(
                 f"sequence.field '{name}' not found in value fields "
                 f"{[f.name for f in value_fields]}")
         idx = name_to_index[name]
-        if not isinstance(value_fields[idx].type, AtomicType):
+        if not is_comparable_seq_field(value_fields[idx]):
             raise NotImplementedError(
-                f"sequence.field '{name}' has complex type "
-                f"{value_fields[idx].type}; pypaimon only supports atomic "
-                f"sequence-field types. Java supports ARRAY / MAP / ROW etc. "
-                f"via RecordComparator -- open an issue to track support.")
+                f"sequence.field '{name}' has unsupported type "
+                f"{value_fields[idx].type}; pypaimon only supports orderable "
+                f"atomic sequence-field types. Complex types (ARRAY / MAP / "
+                f"ROW etc., handled by Java via RecordComparator) and VARIANT "
+                f"are not supported -- open an issue to track support.")
         indices.append(idx)
 
     return _row_field_comparator(value_fields, indices, ascending)
