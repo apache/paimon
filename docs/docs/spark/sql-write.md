@@ -608,7 +608,7 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 
 #### Limitations
 
-- **CSV column-count mismatch with ON_ERROR=CONTINUE**: Paimon follows Spark's PERMISSIVE mode behavior — rows with fewer columns are padded with NULL, and extra columns are silently ignored. These rows are loaded successfully and not counted as errors.
+- **CSV column-count mismatch**: Rows with fewer or more columns than the target schema are treated as malformed records. With `ON_ERROR = CONTINUE`, these rows are skipped and counted as errors.
 - Only **CSV**, **JSON**, and **Parquet** formats are supported.
 - Writing files only supports `FROM table_name`; `FROM (SELECT ...)` is not supported.
 - `SINGLE = TRUE` (single-file output) is not supported.
