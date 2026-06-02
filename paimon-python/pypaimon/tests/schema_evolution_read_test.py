@@ -25,6 +25,8 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 
+from pypaimon.schema.data_types import AtomicType
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 
@@ -201,6 +203,155 @@ class SchemaEvolutionReadTest(unittest.TestCase):
             'behavior': [None, None, None, None, "e", "g", "h", "f"],
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
+
+    def test_schema_evolution_type_promotion_unpartitioned(self):
+        # End-to-end via public API only (create -> write -> alter column type
+        # -> write -> read). A non-partitioned table whose read needs no column
+        # reordering takes the reader fast path that skips partition padding and
+        # index remapping. The file written before the type change keeps its old
+        # physical type, so it must be aligned to the promoted type to
+        # concatenate with the file written after; otherwise the read crashes
+        # with an Arrow schema mismatch. This is not specific to INT -> BIGINT:
+        # it applies to any type change of an existing column -- integer/float
+        # widening, DECIMAL precision/scale changes, and cross-type changes.
+        import decimal
+
+        # Each case: (name, old arrow type, new arrow type, new Paimon type,
+        # value written to the old-schema file, that same value as it should
+        # read back under the new type, value written to the new-schema file).
+        # The old write value and its expected read form differ for cross-type
+        # changes, where the old file is materialized under the new type.
+        cases = [
+            ("smallint_to_int", pa.int16(), pa.int32(), 'INT',
+             [10, 20], [10, 20], [30, 40]),
+            ("int_to_bigint", pa.int32(), pa.int64(), 'BIGINT',
+             [10, 20], [10, 20], [30, 40]),
+            ("float_to_double", pa.float32(), pa.float64(), 'DOUBLE',
+             [1.5, 2.5], [1.5, 2.5], [3.5, 4.5]),
+            ("decimal_precision_up",
+             pa.decimal128(10, 2), pa.decimal128(20, 2), 'DECIMAL(20, 2)',
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('7.89'), decimal.Decimal('0.12')]),
+            ("decimal_scale_up",
+             pa.decimal128(10, 2), pa.decimal128(10, 4), 'DECIMAL(10, 4)',
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('1.2300'), decimal.Decimal('4.5600')],
+             [decimal.Decimal('7.8901'), decimal.Decimal('0.1234')]),
+            ("int_to_string", pa.int32(), pa.string(), 'STRING',
+             [10, 20], ['10', '20'], ['a', 'b']),
+            # Lossy cross-type change: DOUBLE -> INT truncates (matches Java
+            # CastExecutors), so 1.2/2.8 read back as 1/2.
+            ("double_to_int", pa.float64(), pa.int32(), 'INT',
+             [1.2, 2.8], [1, 2], [3, 4]),
+            # Lossy DECIMAL scale-down: (10,4) -> (10,2) truncates the extra
+            # scale rather than raising.
+            ("decimal_scale_down",
+             pa.decimal128(10, 4), pa.decimal128(10, 2), 'DECIMAL(10, 2)',
+             [decimal.Decimal('1.2345'), decimal.Decimal('4.5678')],
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')],
+             [decimal.Decimal('7.89'), decimal.Decimal('0.12')]),
+        ]
+
+        for (name, old_type, new_type, new_type_str,
+             write_vals, old_read_vals, new_vals) in cases:
+            with self.subTest(case=name):
+                table_name = f'default.promo_{name}'
+                old_schema = pa.schema([('k', pa.int64()), ('v', old_type)])
+                self.catalog.create_table(
+                    table_name, Schema.from_pyarrow_schema(old_schema), False)
+
+                # Write under the original schema (file stamped schema_id 0).
+                table = self.catalog.get_table(table_name)
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+                table_write.write_arrow(pa.Table.from_pydict(
+                    {'k': [1, 2], 'v': write_vals}, schema=old_schema))
+                table_commit.commit(table_write.prepare_commit())
+                table_write.close()
+                table_commit.close()
+
+                # Widen column v through the catalog (new schema_id 1).
+                self.catalog.alter_table(
+                    table_name,
+                    [SchemaChange.update_column_type(
+                        'v', AtomicType(new_type_str))],
+                    False)
+
+                # Write under the promoted schema (file stamped schema_id 1).
+                table = self.catalog.get_table(table_name)
+                new_schema = pa.schema([('k', pa.int64()), ('v', new_type)])
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+                table_write.write_arrow(pa.Table.from_pydict(
+                    {'k': [3, 4], 'v': new_vals}, schema=new_schema))
+                table_commit.commit(table_write.prepare_commit())
+                table_write.close()
+                table_commit.close()
+
+                # Plain full-table read spanning both schema versions.
+                read_builder = table.new_read_builder()
+                actual = read_builder.new_read().to_arrow(
+                    self._scan_table(read_builder))
+                expected = pa.Table.from_pydict(
+                    {'k': [1, 2, 3, 4], 'v': old_read_vals + new_vals},
+                    schema=new_schema)
+                self.assertEqual(expected, actual)
+
+    def test_schema_evolution_type_lossy_old_file_only(self):
+        # Reading ONLY old-schema files after a lossy type change (no
+        # newer-schema file in the splits). The output type must equal the
+        # current read schema regardless of which files the read spans, and the
+        # conversion must truncate to match Java CastExecutors rather than
+        # raise. (A previous fix that relied on pyarrow's safe cast crashed
+        # here on lossy evolutions.)
+        import decimal
+
+        cases = [
+            ("scale_down",
+             pa.decimal128(10, 4), pa.decimal128(10, 2), 'DECIMAL(10, 2)',
+             [decimal.Decimal('1.2345'), decimal.Decimal('4.5678')],
+             [decimal.Decimal('1.23'), decimal.Decimal('4.56')]),
+            ("double_to_int", pa.float64(), pa.int32(), 'INT',
+             [1.2, 2.8], [1, 2]),
+        ]
+
+        for name, old_type, new_type, new_type_str, write_vals, read_vals \
+                in cases:
+            with self.subTest(case=name):
+                table_name = f'default.lossy_old_only_{name}'
+                old_schema = pa.schema([('k', pa.int64()), ('v', old_type)])
+                self.catalog.create_table(
+                    table_name, Schema.from_pyarrow_schema(old_schema), False)
+
+                # Write under the original schema, then change the type. No
+                # write happens afterwards, so the read sees only this file.
+                table = self.catalog.get_table(table_name)
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+                table_write.write_arrow(pa.Table.from_pydict(
+                    {'k': [1, 2], 'v': write_vals}, schema=old_schema))
+                table_commit.commit(table_write.prepare_commit())
+                table_write.close()
+                table_commit.close()
+
+                self.catalog.alter_table(
+                    table_name,
+                    [SchemaChange.update_column_type(
+                        'v', AtomicType(new_type_str))],
+                    False)
+
+                table = self.catalog.get_table(table_name)
+                new_schema = pa.schema([('k', pa.int64()), ('v', new_type)])
+                read_builder = table.new_read_builder()
+                actual = read_builder.new_read().to_arrow(
+                    self._scan_table(read_builder))
+                expected = pa.Table.from_pydict(
+                    {'k': [1, 2], 'v': read_vals}, schema=new_schema)
+                self.assertEqual(expected, actual)
 
     def test_schema_evolution_with_scan_filter(self):
         # schema 0
