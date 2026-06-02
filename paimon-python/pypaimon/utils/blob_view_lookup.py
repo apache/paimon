@@ -16,7 +16,7 @@
 # under the License.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
@@ -58,6 +58,7 @@ class BlobViewLookup:
     def __init__(self, table):
         self._table = table
         self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
+        self._null_value_cache: Set[BlobViewStruct] = set()
 
     def preload(self, view_structs: List[BlobViewStruct]):
         if not view_structs:
@@ -76,7 +77,9 @@ class BlobViewLookup:
 
         if len(tasks) <= 1:
             for plan, range_chunk in tasks:
-                self._descriptor_cache.update(self._load_descriptor_chunk(plan, range_chunk))
+                descriptors, null_values = self._load_descriptor_chunk(plan, range_chunk)
+                self._descriptor_cache.update(descriptors)
+                self._null_value_cache.update(null_values)
             return
 
         with ThreadPoolExecutor(max_workers=min(_PRELOAD_THREAD_NUM, len(tasks))) as executor:
@@ -86,7 +89,9 @@ class BlobViewLookup:
             }
             for future in as_completed(futures):
                 try:
-                    self._descriptor_cache.update(future.result())
+                    descriptors, null_values = future.result()
+                    self._descriptor_cache.update(descriptors)
+                    self._null_value_cache.update(null_values)
                 except Exception as exc:
                     # Cancel remaining futures that have not started yet so a single
                     # failure can abort the rest of the preload work as early as possible.
@@ -97,11 +102,25 @@ class BlobViewLookup:
     def resolve_descriptor(self, view_struct: BlobViewStruct) -> BlobDescriptor:
         descriptor: BlobDescriptor = self._descriptor_cache.get(view_struct)
         if descriptor is None:
+            if view_struct in self._null_value_cache:
+                raise ValueError(
+                    "BlobViewStruct {} resolves to a null blob value.".format(view_struct)
+                )
             raise ValueError(
                 "Cannot resolve BlobViewStruct {} because row id {} was not found "
                 "in upstream table.".format(view_struct, view_struct.row_id)
             )
         return descriptor
+
+    def resolve_to_null(self, view_struct: BlobViewStruct) -> bool:
+        if view_struct in self._null_value_cache:
+            return True
+        if view_struct not in self._descriptor_cache:
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} because row id {} was not found "
+                "in upstream table.".format(view_struct, view_struct.row_id)
+            )
+        return False
 
     def _group_by_table(
             self, view_structs: List[BlobViewStruct]
@@ -127,8 +146,8 @@ class BlobViewLookup:
             Range.to_ranges(table_refs.row_ids))
 
     def _load_descriptor_chunk(
-            self, plan: TableReadPlan, row_ranges: List[Range]
-    ) -> Dict[BlobViewStruct, BlobDescriptor]:
+        self, plan: TableReadPlan, row_ranges: List[Range]
+    ) -> Tuple[Dict[BlobViewStruct, BlobDescriptor], set]:
         identifier: Identifier = plan.identifier
         upstream_table = plan.upstream_table
         read_fields = plan.read_fields
@@ -170,6 +189,7 @@ class BlobViewLookup:
 
         row_id_values: List = result.column(SpecialFields.ROW_ID.name).to_pylist()
         resolved: Dict[BlobViewStruct, BlobDescriptor] = {}
+        null_values: set = set()
         for field in read_fields:
             if field.name == SpecialFields.ROW_ID.name:
                 continue
@@ -177,17 +197,18 @@ class BlobViewLookup:
                 continue
             values = result.column(field.name).to_pylist()
             for row_id, value in zip(row_id_values, values):
-                if value is None:
-                    continue
-                descriptor = BlobDescriptor.deserialize(value)
                 view_struct = BlobViewStruct(
                     identifier.get_full_name(), field.id, int(row_id))
+                if value is None:
+                    null_values.add(view_struct)
+                    continue
+                descriptor = BlobDescriptor.deserialize(value)
                 resolved[view_struct] = descriptor
-        return resolved
+        return resolved, null_values
 
     @staticmethod
     def _split_row_ranges(
-            row_ranges: List[Range], target_rows_per_task: int
+        row_ranges: List[Range], target_rows_per_task: int
     ) -> List[List[Range]]:
         """
         Split row ranges into multiple chunks for parallel task processing.

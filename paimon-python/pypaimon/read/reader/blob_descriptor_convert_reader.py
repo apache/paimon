@@ -56,7 +56,10 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._prescan_reader_factory = prescan_reader_factory
         self.file_io = inner.file_io
         self.blob_field_indices = inner.blob_field_indices
-        self._view_fields = CoreOptions.blob_view_fields(table.options)
+        # Preserve original BlobViewStruct bytes when resolve disabled: skip both
+        # view resolution (Stage 1) and descriptor-to-data resolution (Stage 2).
+        resolve_enabled = CoreOptions.blob_view_resolve_enabled(table.options)
+        self._view_fields = CoreOptions.blob_view_fields(table.options) if resolve_enabled else set()
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self._blob_as_descriptor = CoreOptions.blob_as_descriptor(table.options)
         self._prescan_done = False
@@ -74,7 +77,7 @@ class BlobInlineConvertReader(RecordBatchReader):
         if self._view_fields and self._blob_view_lookup is not None:
             batch = self._resolve_view_fields(batch, self._blob_view_lookup)
         # Resolve BlobDescriptor -> real bytes (if blob-as-descriptor=false)
-        return self._resolve_blob_data(batch)
+        return self._resolve_descriptor_fields(batch)
 
     # ------------------------------------------------------------------
     # Stage 1: BlobView prescan (lightweight, only reads view columns)
@@ -136,8 +139,11 @@ class BlobInlineConvertReader(RecordBatchReader):
                     converted_values.append(value)
                     continue
                 view_struct = BlobViewStruct.deserialize(value)
-                descriptor = blob_view_lookup.resolve_descriptor(view_struct)
-                converted_values.append(descriptor.serialize())
+                if blob_view_lookup.resolve_to_null(view_struct):
+                    converted_values.append(None)
+                else:
+                    descriptor = blob_view_lookup.resolve_descriptor(view_struct)
+                    converted_values.append(descriptor.serialize())
 
             column_idx = batch.schema.names.index(field_name)
             batch = batch.set_column(
@@ -151,7 +157,7 @@ class BlobInlineConvertReader(RecordBatchReader):
     # Stage 2: BlobData resolution (unified exit)
     # ------------------------------------------------------------------
 
-    def _resolve_blob_data(self, batch):
+    def _resolve_descriptor_fields(self, batch):
         if self._blob_as_descriptor:
             return batch
 

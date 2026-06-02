@@ -1476,6 +1476,160 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 "Expected BlobDescriptor bytes when blob-as-descriptor=true"
             )
 
+    def test_blob_view_resolve_disabled_preserves_references(self):
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_resolve_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_resolve_source')
+        payloads = [b'resolve-source-0', b'resolve-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_resolve_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_resolve_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # Default (resolve enabled): view fields are resolved to real blob data.
+        resolved_result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(resolved_result.column('picture').to_pylist(), payloads)
+
+        # resolve disabled: view fields keep the original BlobViewStruct bytes.
+        preserve_table = target_table.copy(
+            {CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(): 'false'}
+        )
+        preserve_result = preserve_table.new_read_builder().new_read().to_arrow(
+            preserve_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        preserved_values = preserve_result.column('picture').to_pylist()
+        self.assertEqual(preserved_values, view_values)
+        for value in preserved_values:
+            self.assertTrue(
+                BlobViewStruct.is_blob_view_struct(value),
+                "Expected original BlobViewStruct bytes when resolve disabled"
+            )
+
+    def test_blob_view_resolves_null_upstream_value(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_null_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_null_source')
+        # Row 0 has a real blob value, row 1 has a null blob value.
+        payloads = [b'null-source-0', None]
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_null_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_null_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # View referencing a real upstream value resolves to data; view
+        # referencing a null upstream value resolves to None (not an error).
+        result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('picture').to_pylist(), [b'null-source-0', None])
+
     def test_blob_view_fields_rejects_non_view_input(self):
         from pypaimon import Schema
 
