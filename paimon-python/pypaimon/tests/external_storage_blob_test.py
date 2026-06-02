@@ -85,16 +85,15 @@ class ExternalStorageBlobValidationTest(unittest.TestCase):
             ('name', pa.string()),
             ('video', pa.large_binary()),
         ])
-        schema = Schema.from_pyarrow_schema(pa_schema, options={
-            'row-tracking.enabled': 'true',
-            'data-evolution.enabled': 'true',
-            'blob-descriptor-field': 'name,video',
-            'blob-external-storage-field': 'name',
-            'blob-external-storage-path': external_path,
-        })
         with self.assertRaises(ValueError) as ctx:
-            self.catalog.create_table('test_db.not_blob_type_test', schema, False)
-        self.assertIn('must be a BLOB type field', str(ctx.exception))
+            Schema.from_pyarrow_schema(pa_schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-descriptor-field': 'name,video',
+                'blob-external-storage-field': 'name',
+                'blob-external-storage-path': external_path,
+            })
+        self.assertIn('must be blob fields', str(ctx.exception))
 
     def test_validation_blob_not_null_field_passes(self):
         """BLOB NOT NULL fields should pass validation (not be rejected by str comparison)."""
