@@ -345,13 +345,15 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
     def _add_text_field(self, schema_builder):
         tokenizer_name = self._index_options.tokenizer_name()
-        index_option = None if self._index_options.with_position else "freq"
+        field_kwargs = {}
+        if not self._index_options.with_position:
+            field_kwargs["index_option"] = "freq"
         if tokenizer_name == "default":
-            schema_builder.add_text_field("text", stored=False, index_option=index_option)
+            schema_builder.add_text_field("text", stored=False, **field_kwargs)
         else:
             schema_builder.add_text_field(
                 "text", stored=False, tokenizer_name=tokenizer_name,
-                index_option=index_option)
+                **field_kwargs)
 
     def _register_tokenizer(self, tantivy, index):
         if (self._index_options.tokenizer == "default"

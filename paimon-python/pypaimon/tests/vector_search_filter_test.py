@@ -167,13 +167,15 @@ class _FakeSchemaBuilder:
     def add_unsigned_field(self, name, stored=False, indexed=True, fast=False):
         self.fields[name] = {"fast": fast}
 
-    def add_text_field(self, name, stored=False, tokenizer_name=None, index_option=None):
+    def add_text_field(self, name, stored=False, tokenizer_name=None, **kwargs):
+        if "index_option" in kwargs and kwargs["index_option"] is None:
+            raise TypeError("index_option must not be None")
         self.fields[name] = {
             "stored": stored,
             "tokenizer_name": tokenizer_name or "default",
         }
-        if index_option is not None:
-            self.fields[name]["index_option"] = index_option
+        if "index_option" in kwargs:
+            self.fields[name]["index_option"] = kwargs["index_option"]
 
     def build(self):
         return types.SimpleNamespace(fields=self.fields)
@@ -1111,6 +1113,48 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 
 
 class FullTextSearchManySplitsTest(unittest.TestCase):
+
+    def test_full_text_read_threads_external_path_to_reader(self):
+        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_search_split import (
+            FullTextSearchSplit,
+        )
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(None, field_id=1, index_type="tantivy-fulltext",
+                       file_name="ft.index",
+                       row_range_start=0, row_range_end=9,
+                       external_path="oss://bucket/ft.index")
+        table = _StubTable(fields=[text_field], entries=[entry])
+        captured_io_metas = []
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list):
+            captured_io_metas.append(list(index_io_meta_list))
+
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    return _completed_future(None)
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        split = FullTextSearchSplit(
+            row_range_start=0, row_range_end=9,
+            full_text_index_files=[entry.index_file])
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            reader = FullTextReadImpl(
+                table, limit=10, text_column=text_field,
+                query_text="test")
+            reader.read([split])
+
+        self.assertEqual(1, len(captured_io_metas))
+        self.assertEqual("oss://bucket/ft.index",
+                         captured_io_metas[0][0].external_path)
 
     def test_full_text_search_with_many_splits(self):
         from pypaimon.globalindex.vector_search_result import (
