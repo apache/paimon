@@ -491,8 +491,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             @Nullable Filter<ManifestEntry> additionalTFilter) {
 
         Filter<InternalRow> entryRowFilter = createEntryRowFilter();
+        Function<ManifestEntry, T> finalConverter =
+                dropStats ? e -> converter.apply(dropStats(e)) : converter;
 
-        List<ManifestEntry> entries =
+        List<T> entries =
                 manifestFileFactory
                         .create()
                         .withCacheMetrics(
@@ -507,14 +509,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
-                                                && filterByStats(entry));
-
-        List<T> result = new ArrayList<>(entries.size());
-        for (ManifestEntry entry : entries) {
-            result.add(converter.apply(dropStats ? dropStats(entry) : entry));
-        }
-        LOG.info("Read {} manifest entries from {}", result.size(), manifest.fileName());
-        return result;
+                                                && filterByStats(entry),
+                                finalConverter);
+        LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
+        return entries;
     }
 
     protected ManifestEntry dropStats(ManifestEntry entry) {

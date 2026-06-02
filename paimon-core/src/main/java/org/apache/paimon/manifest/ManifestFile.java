@@ -47,6 +47,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * This file includes several {@link ManifestEntry}s, representing the additional changes since last
@@ -106,18 +107,41 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable BucketFilter bucketFilter,
             Filter<InternalRow> readFilter,
             Filter<ManifestEntry> readTFilter) {
+        return read(
+                fileName,
+                fileSize,
+                partitionFilter,
+                bucketFilter,
+                readFilter,
+                readTFilter,
+                Function.identity());
+    }
+
+    public <T> List<T> read(
+            String fileName,
+            @Nullable Long fileSize,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            Filter<InternalRow> readFilter,
+            Filter<ManifestEntry> readTFilter,
+            Function<ManifestEntry, T> convertor) {
         try {
             Path path = pathFactory.toPath(fileName);
             if (cache != null) {
+                ManifestEntryFilters filters =
+                        new ManifestEntryFilters(
+                                partitionFilter, bucketFilter, readFilter, readTFilter);
                 return cache.read(
                         path,
                         fileSize,
-                        new ManifestEntryFilters(
-                                partitionFilter, bucketFilter, readFilter, readTFilter));
+                        Filter.alwaysTrue(),
+                        filters.readFilter(),
+                        filters.readVFilter(),
+                        convertor);
             }
 
             return readFromIterator(
-                    createIterator(path, fileSize), serializer, readFilter, readTFilter);
+                    createIterator(path, fileSize), serializer, readFilter, readTFilter, convertor);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
