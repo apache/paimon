@@ -192,6 +192,24 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testCompactPlannerWithUpdatedBlobFiles() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 3L, 100));
+        entries.add(makeBlobEntry("old.blob", 0L, 3L, 100, 0, "pic"));
+        entries.add(makeBlobEntry("updated.blob", 0L, 3L, 100, 1, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).isBlobTask()).isTrue();
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+    }
+
+    @Test
     public void testCompactPlannerDoesNotCompactBlobFilesAcrossDataFiles() {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(makeEntry("file1.parquet", 0L, 100L, 100));
