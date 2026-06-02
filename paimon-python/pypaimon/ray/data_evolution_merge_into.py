@@ -126,6 +126,15 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         c for c in full_target_field_names if c not in blob_cols
     ]
     on_map = dict(zip(target_on_cols, source_on_cols))
+    partition_keys = set(table.partition_keys)
+    if when_matched and partition_keys:
+        updated_partition_keys = partition_keys & set(settable_field_names)
+        if updated_partition_keys:
+            raise ValueError(
+                f"merge_into does not support updating partition key "
+                f"columns {sorted(updated_partition_keys)}; "
+                f"cross-partition row movement is not implemented."
+            )
     matched_specs = [
         _NormalizedClause(
             spec=_normalize_set_spec(
@@ -261,7 +270,6 @@ def _execute_and_commit(
             f.row_count for m in insert_msgs for f in m.new_files
         )
         all_msgs.extend(insert_msgs)
-    # TODO: add global-index update action check after PR #8045 merges
     if all_msgs:
         wb = table.new_batch_write_builder()
         tc = wb.new_commit()

@@ -450,6 +450,75 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         self.assertEqual(self._snapshot_id(target), before)
 
+    def test_partitioned_update_rejects_partition_key_change(self):
+        pt_schema = pa.schema([
+            ('pt', pa.string()),
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(
+            pt_schema, partition_keys=['pt'], options=self.de_options,
+        )
+        self.catalog.create_table(name, s, False)
+
+        source = pa.Table.from_pydict(
+            {
+                'pt': ['a'],
+                'id': pa.array([1], type=pa.int32()),
+                'name': ['x'],
+            },
+            schema=pt_schema,
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=name,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched(update='*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('partition key', str(ctx.exception))
+
+    def test_partitioned_insert_allowed(self):
+        pt_schema = pa.schema([
+            ('pt', pa.string()),
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(
+            pt_schema, partition_keys=['pt'], options=self.de_options,
+        )
+        self.catalog.create_table(name, s, False)
+
+        source = pa.Table.from_pydict(
+            {
+                'pt': ['a', 'b'],
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['x', 'y'],
+            },
+            schema=pt_schema,
+        )
+
+        merge_into(
+            target=name,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['pt'], ['a', 'b'])
+
 
 class TargetProjectionTest(unittest.TestCase):
 
