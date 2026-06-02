@@ -43,6 +43,21 @@ class ScanStats:
     entries_after_partition: int = 0
     entries_after_bucket: int = 0
     entries_after_stats: int = 0
+    entries_after_file_index: int = 0
+
+    # Number of entries on which the file index was actually evaluated (feature
+    # enabled, predicate present, and the file carried an embedded index). Used
+    # by ``explain`` to decide whether to render the file-index pruning line at
+    # all — if nothing was ever evaluated, the stage is reported as ``n/a``
+    # rather than a misleading ``N -> N``.
+    entries_file_index_applied: int = 0
+
+    # Number of entries where file index evaluation hit the FileScanner-level
+    # fail-safe (an unexpected error, kept the file). Expected "cannot hash this
+    # literal" cases fail open inside the evaluator and are NOT counted here, so
+    # a non-zero value indicates pushdown silently degraded and is worth seeing
+    # in explain.
+    file_index_fail_open_count: int = 0
 
     partition_keys_before: Set[Tuple] = field(default_factory=set)
     partition_keys_after: Set[Tuple] = field(default_factory=set)

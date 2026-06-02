@@ -575,6 +575,13 @@ class CoreOptions:
         )
     )
 
+    FILE_INDEX_READ_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("file-index.read.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description("Whether to enable file index pushdown during reads.")
+    )
+
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
@@ -922,6 +929,9 @@ class CoreOptions:
 
     def local_cache_whitelist(self) -> str:
         return self.options.get(CoreOptions.LOCAL_CACHE_WHITELIST)
+
+    def file_index_read_enabled(self) -> bool:
+        return self.options.get(CoreOptions.FILE_INDEX_READ_ENABLED, True)
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)

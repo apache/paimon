@@ -211,6 +211,10 @@ class FileScanner:
         self._global_index_result = None
         self._scanned_snapshot = None
         self._scanned_snapshot_id = None
+        # Cache of {schema_id: {field_name: field_type}} for file-index type
+        # lookup. A scan typically covers many files sharing one schema_id, so
+        # this avoids re-fetching the schema and rebuilding the dict per entry.
+        self._file_index_schema_fields = {}
         # Opt-in scan-plan tracking. Stays ``None`` for the read hot path;
         # ``scan_with_stats()`` flips it on for a single explain pass and
         # the filter callbacks below increment counters when present.
@@ -603,17 +607,18 @@ class FileScanner:
                     return False
             if stats is not None:
                 stats.entries_after_stats += 1
-            return True
+
+            return self._passes_file_index(entry, stats)
         else:
             if not self.predicate or self.predicate_for_stats is None:
                 if stats is not None:
                     stats.entries_after_stats += 1
-                return True
+                return self._passes_file_index(entry, stats)
             # Data evolution: file stats may be from another schema, skip stats filter and filter in reader.
             if self.data_evolution:
                 if stats is not None:
                     stats.entries_after_stats += 1
-                return True
+                return self._passes_file_index(entry, stats)
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
             else:
@@ -627,9 +632,124 @@ class FileScanner:
                 evolved_stats,
                 entry.file.row_count
             )
-            if kept and stats is not None:
+            if not kept:
+                return False
+            if stats is not None:
                 stats.entries_after_stats += 1
-            return kept
+
+            return self._passes_file_index(entry, stats)
+
+    def _passes_file_index(self, entry: ManifestEntry, stats) -> bool:
+        """Apply file index (bloom-filter) pushdown to an entry that has already
+        survived the stats stage.
+
+        Returns True if the file should be kept. The survivor counter
+        ``entries_after_file_index`` is incremented for every kept entry that
+        reached this stage — whether or not the index actually applied — so it
+        stays consistent with the other ``entries_after_*`` survivor counters
+        and the explain funnel reads ``entries_after_stats -> entries_after_file_index``.
+        ``entries_file_index_applied`` separately tracks the entries the index
+        was actually evaluated on, so explain can tell "nothing to do" apart from
+        "evaluated, pruned nothing".
+        """
+        if self._should_apply_file_index(entry):
+            if stats is not None:
+                stats.entries_file_index_applied += 1
+            if not self._test_file_index(entry, stats):
+                return False
+        if stats is not None:
+            stats.entries_after_file_index += 1
+        return True
+
+    def _should_apply_file_index(self, entry: ManifestEntry) -> bool:
+        """Check if file index filtering should be applied."""
+        # Check if feature is enabled
+        if not self.table.options.file_index_read_enabled():
+            return False
+
+        # Check if predicate exists
+        if self.predicate is None:
+            return False
+
+        # Check if file has embedded index
+        if entry.file.embedded_index is None:
+            return False
+
+        # Under data evolution, a file's stats/index belong to its own (older)
+        # schema while the predicate is expressed against the query schema. We
+        # look indexes up by column name, but column names can be reused for
+        # different field ids across schema evolution (drop x, add a new x), so
+        # a name match could probe an unrelated column's bloom filter and wrongly
+        # SKIP a file. Java handles this by devolving the filter to the file's
+        # schema by field id before evaluating the index; this Python first
+        # version intentionally disables file-index pushdown under data evolution
+        # instead (out of scope) rather than risk dropping rows.
+        if self.data_evolution:
+            return False
+
+        # Outside data evolution, the file index is still resolved by column
+        # name (in the file's own schema), whereas Java resolves by field id.
+        # The risky case is name reuse across schema changes — drop column "x"
+        # then add a new "x" with a different field id. This stays safe here:
+        # a file written before the re-add carries no bloom entry for the new
+        # "x" (the index is over the old column), so read_column_index finds no
+        # matching index for the queried column and returns REMAIN rather than
+        # probing an unrelated bloom. The only way a stale name could collide is
+        # if both old and new columns carried a "bloom-filter" index AND the old
+        # file's blob were keyed by the reused name with different semantics,
+        # which the writer does not produce. If that assumption ever changes,
+        # this must move to id-based resolution like Java.
+
+        # Bloom filter is a *value* index. On primary-key tables, files within a
+        # bucket may overlap (a key can be updated across files), so dropping an
+        # individual file by a value predicate can keep a stale older value while
+        # skipping the newer overwrite -> wrong results. Java only applies the
+        # value file-index on the whole bucket (or per-file when files do not
+        # overlap). We mirror the existing value-stats gate here and only apply
+        # the file index on PK tables in deletion-vector mode, where level-0
+        # files are excluded and the remaining files within a bucket do not
+        # overlap, making per-file pruning safe.
+        if self.table.is_primary_key_table and not self.deletion_vectors_enabled:
+            return False
+
+        return True
+
+    def _test_file_index(self, entry: ManifestEntry, stats=None) -> bool:
+        """
+        Test if file passes file index filter.
+
+        Returns:
+            True if file should be kept, False if it can be skipped
+        """
+        try:
+            from pypaimon.fileindex.file_index_predicate import FileIndexPredicate
+
+            # Build schema fields dict for type lookup, cached per schema_id
+            # since a scan usually covers many files of the same schema.
+            schema_id = entry.file.schema_id
+            schema_fields = self._file_index_schema_fields.get(schema_id)
+            if schema_fields is None:
+                schema = self.table.schema_manager.get_schema(schema_id)
+                schema_fields = {field.name: field.type for field in schema.fields}
+                self._file_index_schema_fields[schema_id] = schema_fields
+
+            # Create evaluator
+            evaluator = FileIndexPredicate(entry.file.embedded_index, schema_fields)
+
+            # Evaluate predicate
+            result = evaluator.evaluate(self.predicate)
+
+            # REMAIN means keep file, SKIP means drop it
+            return result.remain()
+        except Exception as e:
+            # On any error, keep the file (fail-safe). This is a backstop only:
+            # expected "cannot evaluate this literal" cases already fail open
+            # inside the evaluator, so reaching here points at an unexpected bug.
+            # Count it so explain can surface that pushdown silently degraded.
+            if stats is not None:
+                stats.file_index_fail_open_count += 1
+            logger.debug(f"File index evaluation failed, keeping file: {e}")
+            return True
 
     def _scan_dv_index(self, snapshot, buckets: Set[tuple]) -> Dict[tuple, Dict[str, DeletionFile]]:
         """

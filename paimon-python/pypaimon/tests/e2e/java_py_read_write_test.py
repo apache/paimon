@@ -633,6 +633,100 @@ class JavaPyReadWriteTest(unittest.TestCase):
             "partial append should not drop index manifest"
         )
 
+    def test_read_bloom_filter_index_table(self):
+        # Tables written by JavaPyE2ETest.testBloomFilterIndexWrite, each with an
+        # embedded bloom-filter file index over column 'k'. This is the
+        # authoritative cross-language guard: pypaimon decodes a bloom blob that
+        # the real Java writer produced and must prune exactly the same way.
+        #
+        # The absent keys are chosen to fall *inside* each file's value-stats
+        # min/max (e.g. keys 10/20/30 -> [10,30]), so value-stats pruning cannot
+        # drop them first. That forces the prune decision onto the Java-written
+        # bloom blob, which is the path under test.
+        import datetime as _dt
+
+        self._test_read_bloom_index_generic(
+            'test_bloom_index_bigint', present=20, absent=15, k_type=pa.int64())
+        self._test_read_bloom_index_generic(
+            'test_bloom_index_int', present=20, absent=15, k_type=pa.int32())
+        self._test_read_bloom_index_generic(
+            'test_bloom_index_string', present='bar', absent='bay', k_type=pa.string())
+
+        # Temporal / float / binary types: anchor the conversion layers against
+        # the real Java writer. We assert the prune *behavior* (present kept,
+        # absent pruned, disabled not pruned) rather than the exact value
+        # round-trip, which is already covered by test_read_append_table; the
+        # point here is that the bloom hash matches Java for these types.
+        self._test_read_bloom_index_prune_only(
+            'test_bloom_index_date',
+            present=_dt.date(2021, 1, 20), absent=_dt.date(2021, 1, 15))
+        self._test_read_bloom_index_prune_only(
+            'test_bloom_index_time',
+            present=_dt.time(2, 0, 0), absent=_dt.time(1, 30, 0))
+        self._test_read_bloom_index_prune_only(
+            'test_bloom_index_timestamp',
+            present=_dt.datetime(2021, 1, 1, 2, 0), absent=_dt.datetime(2021, 1, 1, 1, 30))
+        self._test_read_bloom_index_prune_only(
+            'test_bloom_index_double', present=20.0, absent=15.0)
+        self._test_read_bloom_index_prune_only(
+            'test_bloom_index_float', present=20.0, absent=15.0)
+        self._test_read_bloom_index_prune_only(
+            'test_bloom_index_binary', present=b'cccc', absent=b'bbbb')
+
+    def _test_read_bloom_index_prune_only(self, table_name, present, absent):
+        """Assert bloom prune behavior without asserting the exact value
+        round-trip (used for temporal/float/binary columns)."""
+        table = self.catalog.get_table('default.' + table_name)
+
+        # Present key (inside min/max, in the bloom): file kept.
+        rb = table.new_read_builder()
+        rb.with_filter(rb.new_predicate_builder().equal('k', present))
+        self.assertGreater(len(rb.new_scan().plan().splits()), 0,
+                           f"{table_name}: present key {present!r} should keep the file")
+
+        # Absent key (inside min/max, NOT in the bloom): file pruned by the bloom.
+        rb2 = table.new_read_builder()
+        rb2.with_filter(rb2.new_predicate_builder().equal('k', absent))
+        self.assertEqual(len(rb2.new_scan().plan().splits()), 0,
+                         f"{table_name}: absent key {absent!r} should be pruned by bloom index")
+
+        # Feature flag off: pruning must not happen even for an absent key.
+        rb3 = table.new_read_builder()
+        rb3.with_filter(rb3.new_predicate_builder().equal('k', absent))
+        scan3 = rb3.new_scan()
+        scan3.file_scanner.table.options.options.data['file-index.read.enabled'] = 'false'
+        self.assertGreater(len(scan3.plan().splits()), 0,
+                           f"{table_name}: disabled file index must not prune")
+
+    def _test_read_bloom_index_generic(self, table_name, present, absent, k_type):
+        table = self.catalog.get_table('default.' + table_name)
+
+        # Present key: the bloom filter keeps the file and the row is returned.
+        rb = table.new_read_builder()
+        rb.with_filter(rb.new_predicate_builder().equal('k', present))
+        present_splits = rb.new_scan().plan().splits()
+        self.assertGreater(len(present_splits), 0,
+                           f"{table_name}: present key {present} should keep the file")
+        actual = rb.new_read().to_arrow(present_splits)
+        self.assertEqual(actual.num_rows, 1)
+        self.assertEqual(actual.column('k')[0].as_py(), present)
+
+        # Absent key: the bloom filter proves the value is missing, so the only
+        # data file is pruned and no splits remain.
+        rb2 = table.new_read_builder()
+        rb2.with_filter(rb2.new_predicate_builder().equal('k', absent))
+        absent_splits = rb2.new_scan().plan().splits()
+        self.assertEqual(len(absent_splits), 0,
+                         f"{table_name}: absent key {absent} should be pruned by bloom index")
+
+        # Feature flag off: pruning must not happen even for an absent key.
+        rb3 = table.new_read_builder()
+        rb3.with_filter(rb3.new_predicate_builder().equal('k', absent))
+        scan3 = rb3.new_scan()
+        scan3.file_scanner.table.options.options.data['file-index.read.enabled'] = 'false'
+        self.assertGreater(len(scan3.plan().splits()), 0,
+                           f"{table_name}: disabled file index must not prune")
+
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):
         table = self.catalog.get_table(

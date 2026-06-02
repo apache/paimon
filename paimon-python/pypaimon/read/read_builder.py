@@ -210,6 +210,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     partition_pruning = _partition_pruning(stats, scan)
     bucket_pruning = _bucket_pruning(stats, scan)
     file_skipping = _file_skipping(stats, scan)
+    file_index_pruning = _file_index_pruning(stats, scan)
 
     files_per_split = [len(getattr(s, 'files', []) or []) for s in splits]
     sizes = [int(getattr(s, 'file_size', 0) or 0) for s in splits]
@@ -283,6 +284,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
         partition_pruning=partition_pruning,
         bucket_pruning=bucket_pruning,
         file_skipping=file_skipping,
+        file_index_pruning=file_index_pruning,
+        file_index_fail_open_count=stats.file_index_fail_open_count,
         file_count=file_count,
         total_file_size=total_size,
         estimated_row_count=rows_total,
@@ -343,6 +346,18 @@ def _file_skipping(stats: ScanStats, scan: TableScan) -> Optional[PruningStat]:
     if scan.predicate is None:
         return None
     return PruningStat(before=stats.entries_after_bucket, after=stats.entries_after_stats)
+
+
+def _file_index_pruning(stats: ScanStats, scan: TableScan) -> Optional[PruningStat]:
+    # Captures the funnel between stats-stage survivors and the entries that
+    # survived file index (bloom-filter) pushdown. Rather than re-deriving the
+    # apply-gate (feature flag, data-evolution, PK/DV), which would drift from
+    # FileScanner._should_apply_file_index, we key off the recorded counter: if
+    # the index was never actually evaluated on any entry, the stage did no work
+    # and rendering "N -> N" would be misleading, so we report ``None``.
+    if scan.predicate is None or stats.entries_file_index_applied == 0:
+        return None
+    return PruningStat(before=stats.entries_after_stats, after=stats.entries_after_file_index)
 
 
 def _safe_bucket_mode(table) -> str:

@@ -98,6 +98,11 @@ class ExplainResult:
     partition_pruning: Optional[PruningStat] = None
     bucket_pruning: Optional[PruningStat] = None
     file_skipping: Optional[PruningStat] = None
+    file_index_pruning: Optional[PruningStat] = None
+
+    # Number of entries that hit the file-index fail-safe (unexpected error,
+    # kept the file). Shown in explain only when non-zero.
+    file_index_fail_open_count: int = 0
 
     # File-level aggregates over final splits
     file_count: int = 0
@@ -163,6 +168,11 @@ def render_explain(result: ExplainResult) -> str:
           result.bucket_pruning.format() if result.bucket_pruning else "n/a")
     _line(out, "File skipping",
           result.file_skipping.format() if result.file_skipping else "n/a")
+    _line(out, "File index pruning",
+          result.file_index_pruning.format() if result.file_index_pruning else "n/a")
+    if result.file_index_fail_open_count:
+        _line(out, "File index fail-open",
+              "{}  (evaluation errored, files kept)".format(result.file_index_fail_open_count))
 
     out.write("\n")
     _line(out, "Splits", str(result.split_count))

@@ -74,6 +74,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -756,6 +757,122 @@ public class JavaPyE2ETest {
                 .createReader(readBuilder.newScan().plan())
                 .forEachRemaining(r -> result.add(r.getString(1).toString()));
         assertThat(result).containsExactlyInAnyOrder("v3", "v5");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBloomFilterIndexWrite() throws Exception {
+        // Keys are spaced (10/20/30) so an in-range-but-absent key exists between
+        // them; the read-side tests query that key to exercise the bloom SKIP
+        // path rather than value-stats pruning.
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.BIGINT(), "test_bloom_index_bigint", 10L, 20L, 30L, 15L);
+        testBloomFilterIndexWriteGeneric(DataTypes.INT(), "test_bloom_index_int", 10, 20, 30, 15);
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.STRING(),
+                "test_bloom_index_string",
+                BinaryString.fromString("foo"),
+                BinaryString.fromString("bar"),
+                BinaryString.fromString("baz"),
+                BinaryString.fromString("bay"));
+
+        // Anchor the temporal / float / binary conversion layers against the real
+        // Java writer (not just self-referential Python tests). Values mirror the
+        // pypaimon read-side test; absent keys lie inside [key1, key3] so value
+        // stats cannot prune them and the bloom must.
+        // DATE: internal repr is epoch-day (int). 18637/18647/18657 = 2021-01-10/20/30,
+        // absent 18642 = 2021-01-15.
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.DATE(), "test_bloom_index_date", 18637, 18647, 18657, 18642);
+        // TIME: internal repr is millis-of-day (int). 01:00/02:00/03:00, absent 01:30.
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.TIME(3), "test_bloom_index_time", 3600000, 7200000, 10800000, 5400000);
+        // TIMESTAMP(3): hashed as millis.
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.TIMESTAMP(3),
+                "test_bloom_index_timestamp",
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1609462800000L),
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1609466400000L),
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1609470000000L),
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1609464600000L));
+        // DOUBLE / FLOAT: hashed via their IEEE-754 bit patterns.
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.DOUBLE(), "test_bloom_index_double", 10.0d, 20.0d, 30.0d, 15.0d);
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.FLOAT(), "test_bloom_index_float", 10.0f, 20.0f, 30.0f, 15.0f);
+        // BINARY: hashed via xxhash over the raw bytes.
+        testBloomFilterIndexWriteGeneric(
+                DataTypes.BINARY(4),
+                "test_bloom_index_binary",
+                "aaaa".getBytes(StandardCharsets.UTF_8),
+                "cccc".getBytes(StandardCharsets.UTF_8),
+                "eeee".getBytes(StandardCharsets.UTF_8),
+                "bbbb".getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void testBloomFilterIndexWriteGeneric(
+            DataType keyType,
+            String tableName,
+            Object key1,
+            Object key2,
+            Object key3,
+            Object absentInRangeKey)
+            throws Exception {
+        RowType rowType =
+                RowType.of(new DataType[] {keyType, DataTypes.STRING()}, new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
+        options.set(PATH, tablePath.toString());
+        // Write a bloom-filter file index over column "k" and force it to be
+        // stored embedded in the manifest (large threshold) so the pypaimon read
+        // path, which only consumes embedded indexes, can decode it.
+        options.set("file-index.bloom-filter.columns", "k");
+        options.set("file-index.in-manifest-threshold", "1 MB");
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(key1, BinaryString.fromString("v1")));
+            write.write(GenericRow.of(key2, BinaryString.fromString("v2")));
+            write.write(GenericRow.of(key3, BinaryString.fromString("v3")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // Sanity check on the Java side: the embedded index must let an existing
+        // key through.
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder hit = table.newReadBuilder().withFilter(predicateBuilder.equal(0, key2));
+        List<String> hitRows = new ArrayList<>();
+        hit.newRead()
+                .createReader(hit.newScan().plan())
+                .forEachRemaining(r -> hitRows.add(r.getString(1).toString()));
+        assertThat(hitRows).containsOnly("v2");
+
+        // And it must prune an in-range-but-absent key: value stats alone could
+        // not drop it (it lies within [key1, key3]), so a non-empty result here
+        // would mean the embedded bloom is not actually pruning.
+        ReadBuilder miss =
+                table.newReadBuilder().withFilter(predicateBuilder.equal(0, absentInRangeKey));
+        List<String> missRows = new ArrayList<>();
+        miss.newRead()
+                .createReader(miss.newScan().plan())
+                .forEachRemaining(r -> missRows.add(r.getString(1).toString()));
+        assertThat(missRows).isEmpty();
     }
 
     @Test
