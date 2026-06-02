@@ -36,6 +36,7 @@ import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.types.RowType
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
@@ -64,7 +65,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
   with WithFileStoreTable
-  with ExpressionHelper {
+  with ExpressionHelper
+  with Logging {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -146,9 +148,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
     val snapshotReader = table.newSnapshotReader()
-    if (table.coreOptions().dataEvolutionMergeIntoSkipFilePruning()) {
-      pushDownMergePartitionFilter(snapshotReader)
-    }
+    pushDownMergePartitionFilter(snapshotReader)
     val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
@@ -254,7 +254,10 @@ case class MergeIntoPaimonDataEvolutionTable(
       return tableSplits
     }
 
-    if (table.coreOptions().dataEvolutionMergeIntoSkipFilePruning()) {
+    if (!table.coreOptions().dataEvolutionMergeIntoFilePruning()) {
+      logInfo(
+        "Skip file-level pruning for MergeInto partial column update on data-evolution table " +
+          s"${table.name()}.")
       return tableSplits
     }
 

@@ -635,11 +635,11 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
   }
 
   Seq(false, true).foreach {
-    skipFilePruning =>
-      test(s"Data Evolution: merge into can skip file pruning: $skipFilePruning") {
+    filePruning =>
+      test(s"Data Evolution: merge into file pruning: $filePruning") {
         withSparkSQLConf(
-          "spark.paimon.data-evolution.merge-into.skip-file-pruning" ->
-            skipFilePruning.toString) {
+          "spark.paimon.data-evolution.merge-into.file-pruning" ->
+            filePruning.toString) {
           withTable("source", "target") {
             sql("CREATE TABLE source (id INT, b INT, dt STRING)")
             sql("INSERT INTO source VALUES (1, 100, '2026-05-28'), (3, 300, '2026-05-28')")
@@ -661,7 +661,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
                 |WHEN MATCHED THEN UPDATE SET target.b = source.b
                 |WHEN NOT MATCHED THEN INSERT (id, b, c, dt) VALUES (id, b, 'new', dt)
                 |""".stripMargin,
-              skipFilePruning
+              filePruning
             )
 
             checkAnswer(
@@ -677,9 +677,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       }
   }
 
-  private def executeMergeIntoAndAssertFilePruning(
-      mergeSql: String,
-      skipFilePruning: Boolean): Unit = {
+  private def executeMergeIntoAndAssertFilePruning(mergeSql: String, filePruning: Boolean): Unit = {
     @volatile var hasTargetFilePruningJoin = false
     val listener = new QueryExecutionListener {
       override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
@@ -694,8 +692,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         if (isTargetFilePruningJoinPlan(plan)) {
           hasTargetFilePruningJoin = true
           assert(
-            !skipFilePruning,
-            s"File pruning join should be skipped when skipFilePruning is enabled: $plan")
+            filePruning,
+            s"File pruning join should be skipped when file pruning is disabled: $plan")
         }
       }
     }
@@ -708,7 +706,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       spark.listenerManager.unregister(listener)
     }
 
-    if (!skipFilePruning) {
+    if (filePruning) {
       assert(hasTargetFilePruningJoin, "Expected target file pruning join plan.")
     }
   }
@@ -723,7 +721,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
   }
 
   test("Data Evolution: merge into skip file pruning push down partition filter in on condition") {
-    withSparkSQLConf("spark.paimon.data-evolution.merge-into.skip-file-pruning" -> "true") {
+    withSparkSQLConf("spark.paimon.data-evolution.merge-into.file-pruning" -> "false") {
       withTempView("source") {
         withTable("target") {
           Seq((1, 100), (2, 200), (3, 300)).toDF("id", "b").createOrReplaceTempView("source")
