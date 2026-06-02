@@ -61,7 +61,8 @@ from pypaimon.read.reader.partial_update_merge_function import \
 from pypaimon.read.reader.first_row_merge_function import \
     FirstRowMergeFunction
 from pypaimon.read.reader.sort_merge_reader import (DeduplicateMergeFunction,
-                                                    SortMergeReaderWithMinHeap)
+                                                    SortMergeReaderWithMinHeap,
+                                                    builtin_seq_comparator)
 from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
@@ -651,6 +652,15 @@ class MergeFileSplitRead(SplitRead):
         )
         self.outer_extract_name_paths = outer_extract_name_paths
         self.limit = limit
+        # Built once per split-read (value_fields and options are constant
+        # for the object's life), not per section. ``None`` when
+        # ``sequence.field`` is unset, in which case the heap falls back to
+        # the file-level sequence number.
+        self.seq_comparator = builtin_seq_comparator(
+            self.value_fields,
+            self.table.options.sequence_field(),
+            self.table.options.sequence_field_sort_order_is_ascending(),
+        )
 
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
         file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
@@ -672,7 +682,8 @@ class MergeFileSplitRead(SplitRead):
             readers.append(ConcatRecordReader(data_readers))
         merge_function = self._build_merge_function()
         return SortMergeReaderWithMinHeap(
-            readers, self.table.table_schema, merge_function=merge_function)
+            readers, self.table.table_schema, merge_function=merge_function,
+            seq_comparator=self.seq_comparator)
 
     def _build_merge_function(self):
         """Pick the right MergeFunction implementation for the table's

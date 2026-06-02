@@ -42,6 +42,7 @@ from typing import Any, List, Optional
 from pypaimon.read.reader.aggregate import create_field_aggregator
 from pypaimon.read.reader.aggregate.aggregators import (
     NAME_LAST_NON_NULL_VALUE,
+    NAME_LAST_VALUE,
     NAME_PRIMARY_KEY,
 )
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
@@ -56,22 +57,28 @@ from pypaimon.table.row.row_kind import RowKind
 # ---------------------------------------------------------------------------
 
 
-def resolve_agg_func_name(field_name, primary_keys, options_map):
-    """Pick the aggregator identifier for ``field_name`` using the
-    following precedence:
+def resolve_agg_func_name(field_name, primary_keys, options_map,
+                          sequence_fields=()):
+    """Pick the aggregator identifier for ``field_name`` using the same
+    precedence as Java ``AggregateMergeFunction.getAggFuncName``:
 
-    1. Primary-key columns use ``primary_key`` (identity).
-    2. Otherwise, field-level ``fields.<f>.aggregate-function``
+    1. Sequence fields use ``last_value`` (no aggregation -- the
+       sequence column just carries the latest-by-sequence value).
+    2. Primary-key columns use ``primary_key`` (identity).
+    3. Otherwise, field-level ``fields.<f>.aggregate-function``
        overrides everything.
-    3. Otherwise, the table-wide ``fields.default-aggregate-function``.
-    4. Otherwise, the system default ``last_non_null_value``.
+    4. Otherwise, the table-wide ``fields.default-aggregate-function``.
+    5. Otherwise, the system default ``last_non_null_value``.
 
-    Sequence fields are intentionally **not** special-cased here: the
-    merge-engine guard in :mod:`pypaimon.read.merge_engine_support`
-    rejects any table that sets ``sequence.field`` on the
-    ``aggregation`` engine, so by the time this function runs there is
-    no sequence field to disambiguate.
+    Sequence fields take precedence over the table-wide
+    ``fields.default-aggregate-function``, matching Java: the value of a
+    ``sequence.field`` column must not be aggregated. An *explicit*
+    ``fields.<seq>.aggregate-function`` on a sequence column is rejected
+    up-front (see ``merge_engine_support.check_sequence_field_valid``), so
+    it never reaches this precedence.
     """
+    if field_name in sequence_fields:
+        return NAME_LAST_VALUE
     if field_name in primary_keys:
         return NAME_PRIMARY_KEY
     return (
@@ -96,9 +103,11 @@ def build_field_aggregators(
     """
     options_map = core_options.options.to_map()
     pk_set = set(primary_keys)
+    sequence_fields = set(core_options.sequence_field())
     aggregators = []
     for field in value_fields:
-        agg_name = resolve_agg_func_name(field.name, pk_set, options_map)
+        agg_name = resolve_agg_func_name(
+            field.name, pk_set, options_map, sequence_fields)
         aggregators.append(
             create_field_aggregator(
                 field.type, field.name, agg_name, core_options
