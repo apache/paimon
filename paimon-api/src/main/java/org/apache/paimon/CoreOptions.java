@@ -2249,6 +2249,13 @@ public class CoreOptions implements Serializable {
                                     + "to be updated, so that the overhead of collecting touched file IDs "
                                     + "outweighs the benefit of pruning untouched files.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST =
+            key("data-evolution.merge-into.source-persist")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to persist source when process merge into action on data evolution table.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -3757,6 +3764,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionMergeIntoFilePruning() {
         return options.get(DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING);
+    }
+
+    public boolean dataEvolutionMergeIntoSourcePersist() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
     }
 
     public boolean blobCompactionEnabled() {
