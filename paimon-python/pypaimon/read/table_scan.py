@@ -176,30 +176,30 @@ class TableScan:
 
         has_snapshot_id = options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
         has_tag_name = options.contains(CoreOptions.SCAN_TAG_NAME)
-        has_watermark = options.contains_key("scan.watermark")
-        has_timestamp_millis = options.contains_key("scan.timestamp-millis")
-        has_timestamp = options.contains_key("scan.timestamp")
+        has_watermark = options.contains(CoreOptions.SCAN_WATERMARK)
+        has_timestamp_millis = options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
+        has_timestamp = options.contains(CoreOptions.SCAN_TIMESTAMP)
         has_incremental = options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
-        has_file_creation_time = options.contains_key("scan.file-creation-time-millis")
-        has_creation_time = options.contains_key("scan.creation-time-millis")
+        has_file_creation_time = options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS)
+        has_creation_time = options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS)
 
         present_keys = []
         if has_snapshot_id:
-            present_keys.append("scan.snapshot-id")
+            present_keys.append(CoreOptions.SCAN_SNAPSHOT_ID.key())
         if has_tag_name:
-            present_keys.append("scan.tag-name")
+            present_keys.append(CoreOptions.SCAN_TAG_NAME.key())
         if has_watermark:
-            present_keys.append("scan.watermark")
+            present_keys.append(CoreOptions.SCAN_WATERMARK.key())
         if has_timestamp_millis:
-            present_keys.append("scan.timestamp-millis")
+            present_keys.append(CoreOptions.SCAN_TIMESTAMP_MILLIS.key())
         if has_timestamp:
-            present_keys.append("scan.timestamp")
+            present_keys.append(CoreOptions.SCAN_TIMESTAMP.key())
         if has_incremental:
-            present_keys.append("incremental-between-timestamp")
+            present_keys.append(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key())
         if has_file_creation_time:
-            present_keys.append("scan.file-creation-time-millis")
+            present_keys.append(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key())
         if has_creation_time:
-            present_keys.append("scan.creation-time-millis")
+            present_keys.append(CoreOptions.SCAN_CREATION_TIME_MILLIS.key())
 
         # scan.timestamp-millis and scan.timestamp are mutually exclusive
         if has_timestamp_millis and has_timestamp:
@@ -209,27 +209,34 @@ class TableScan:
 
         # Define allowed companion keys per mode
         if mode == StartupMode.FROM_TIMESTAMP:
-            allowed = {"scan.timestamp-millis", "scan.timestamp"}
+            allowed = {
+                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                CoreOptions.SCAN_TIMESTAMP.key(),
+            }
             if not (has_timestamp_millis or has_timestamp):
                 raise ValueError(
                     "scan.mode is 'from-timestamp' but neither "
                     "scan.timestamp-millis nor scan.timestamp is set."
                 )
         elif mode == StartupMode.FROM_SNAPSHOT_FULL:
-            allowed = {"scan.snapshot-id"}
+            allowed = {CoreOptions.SCAN_SNAPSHOT_ID.key()}
             if not has_snapshot_id:
                 raise ValueError(
                     "scan.mode is 'from-snapshot-full' but scan.snapshot-id is not set."
                 )
         elif mode == StartupMode.FROM_SNAPSHOT:
-            allowed = {"scan.snapshot-id", "scan.tag-name", "scan.watermark"}
+            allowed = {
+                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                CoreOptions.SCAN_TAG_NAME.key(),
+                CoreOptions.SCAN_WATERMARK.key(),
+            }
             if not (has_snapshot_id or has_tag_name or has_watermark):
                 raise ValueError(
                     "scan.mode is 'from-snapshot' but none of "
                     "scan.snapshot-id, scan.tag-name, or scan.watermark is set."
                 )
         elif mode == StartupMode.INCREMENTAL:
-            allowed = {"incremental-between-timestamp"}
+            allowed = {CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key()}
             if not has_incremental:
                 raise ValueError(
                     "scan.mode is 'incremental' but "
@@ -240,7 +247,7 @@ class TableScan:
         elif mode in (StartupMode.COMPACTED_FULL,
                       StartupMode.FROM_CREATION_TIMESTAMP,
                       StartupMode.FROM_FILE_CREATION_TIME):
-            raise NotImplementedError(
+            raise ValueError(
                 f"scan.mode '{mode.value}' is not yet supported in pypaimon."
             )
         else:

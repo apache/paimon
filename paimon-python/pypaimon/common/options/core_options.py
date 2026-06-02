@@ -16,6 +16,7 @@
 # under the License.
 
 import sys
+import warnings
 from datetime import timedelta
 from enum import Enum
 from typing import Dict, List, Optional
@@ -406,6 +407,24 @@ class CoreOptions:
         .with_description(
             "Optional watermark used for time travel to the first snapshot "
             "with watermark greater than or equal to the given value."
+        )
+    )
+
+    SCAN_FILE_CREATION_TIME_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.file-creation-time-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "After configuring this time, only the data files created after this time will be read."
+        )
+    )
+
+    SCAN_CREATION_TIME_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.creation-time-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp used in case of 'from-creation-timestamp' scan mode."
         )
     )
 
@@ -844,22 +863,27 @@ class CoreOptions:
         """
         mode = self.scan_mode()
         if mode == StartupMode.DEFAULT:
-            if (self.options.contains_key("scan.timestamp-millis")
-                    or self.options.contains_key("scan.timestamp")):
+            if (self.options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
+                    or self.options.contains(CoreOptions.SCAN_TIMESTAMP)):
                 return StartupMode.FROM_TIMESTAMP
             elif (self.options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
                   or self.options.contains(CoreOptions.SCAN_TAG_NAME)
-                  or self.options.contains_key("scan.watermark")):
+                  or self.options.contains(CoreOptions.SCAN_WATERMARK)):
                 return StartupMode.FROM_SNAPSHOT
             elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 return StartupMode.INCREMENTAL
-            elif self.options.contains_key("scan.file-creation-time-millis"):
+            elif self.options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS):
                 return StartupMode.FROM_FILE_CREATION_TIME
-            elif self.options.contains_key("scan.creation-time-millis"):
+            elif self.options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS):
                 return StartupMode.FROM_CREATION_TIMESTAMP
             else:
                 return StartupMode.LATEST_FULL
         elif mode == StartupMode.FULL:
+            warnings.warn(
+                "scan.mode 'full' is deprecated, use 'latest-full' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             return StartupMode.LATEST_FULL
         else:
             return mode
