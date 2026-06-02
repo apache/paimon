@@ -15,17 +15,22 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-# Core dependencies for pypaimon are in requirements.txt
+# Core dependencies for pypaimon
+-r requirements.txt
 
 # Test dependencies for pypaimon are as follows
-duckdb==1.3.2
+duckdb==1.3.2; python_version >= "3.8"
 flake8==4.0.1
-pytest~=7.0
+parameterized==0.8.1; python_version < "3.7"
+parameterized==0.9.0; python_version >= "3.7"
+py4j==0.10.9.9
+pypaimon-rust==0.2.0; python_version >= "3.10"
+pytest<7; python_version < "3.7"
+pytest~=7.0; python_version >= "3.7"
 # merge_into needs Dataset.join (added in Ray 2.50). Python 3.8 has no 2.50 wheel.
-ray>=2.10.0; python_version < "3.9"
+ray>=2.10.0; python_version >= "3.8" and python_version < "3.9"
 ray>=2.50.0; python_version >= "3.9"
 requests
-parameterized
 # Vortex 0.71.0 regresses native predicate pushdown on single-row files.
 vortex-data==0.70.0; python_version >= "3.11"
 # merge_into condition expressions (optional, for condition tests)
