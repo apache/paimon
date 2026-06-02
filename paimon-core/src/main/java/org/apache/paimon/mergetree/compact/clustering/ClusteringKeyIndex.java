@@ -123,8 +123,7 @@ public class ClusteringKeyIndex implements Closeable {
                         pageSize,
                         maxNumFileHandles,
                         compression,
-                        MemorySize.MAX_VALUE,
-                        false);
+                        MemorySize.MAX_VALUE);
 
         RowCompactedSerializer keySerializer = new RowCompactedSerializer(keyType);
         InternalRow.FieldGetter[] keyFieldGetters =

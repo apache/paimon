@@ -21,7 +21,6 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -32,13 +31,16 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
 
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
@@ -46,16 +48,27 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 /** Convert from Flink row data. */
 public class FlinkRowWrapper implements InternalRow {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkRowWrapper.class);
+
     private final org.apache.flink.table.data.RowData row;
     private final UriReaderFactory uriReaderFactory;
+    private final boolean checkBlobDescriptorExists;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
     }
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
+        this(row, catalogContext, false);
+    }
+
+    public FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists) {
         this.row = row;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.checkBlobDescriptorExists = checkBlobDescriptorExists;
     }
 
     @Override
@@ -75,7 +88,10 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
-        return row.isNullAt(pos);
+        if (row.isNullAt(pos)) {
+            return true;
+        }
+        return checkBlobDescriptorExists && isMissingBlobDescriptor(pos, row.getBinary(pos));
     }
 
     @Override
@@ -143,13 +159,44 @@ public class FlinkRowWrapper implements InternalRow {
     @Override
     public Blob getBlob(int pos) {
         byte[] bytes = row.getBinary(pos);
-        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
-        if (blobDes) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
-            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
-            return Blob.fromDescriptor(uriReader, blobDescriptor);
-        } else {
-            return new BlobData(bytes);
+        return Blob.fromBytes(bytes, uriReaderFactory, null);
+    }
+
+    private boolean isMissingBlobDescriptor(int pos, byte[] bytes) {
+        if (!checkBlobDescriptorExists
+                || bytes == null
+                || !BlobDescriptor.isBlobDescriptor(bytes)) {
+            return false;
+        }
+
+        BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
+        return !descriptorFileExists(pos, descriptor);
+    }
+
+    private boolean descriptorFileExists(int pos, BlobDescriptor descriptor) {
+        try {
+            boolean exists = uriReaderFactory.exists(descriptor.uri());
+            if (!exists) {
+                LOG.warn(
+                        "Blob descriptor file {} does not exist, returning NULL for BLOB field at position {}.",
+                        descriptor.uri(),
+                        pos);
+            }
+            return exists;
+        } catch (IOException e) {
+            LOG.warn(
+                    "Failed to check blob descriptor file {} for BLOB field at position {}.",
+                    descriptor.uri(),
+                    pos,
+                    e);
+            throw new RuntimeException(e);
+        } catch (RuntimeException e) {
+            LOG.warn(
+                    "Failed to check blob descriptor file {} for BLOB field at position {}.",
+                    descriptor.uri(),
+                    pos,
+                    e);
+            throw e;
         }
     }
 
@@ -255,7 +302,7 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public Blob getBlob(int pos) {
-            return new BlobData(array.getBinary(pos));
+            return Blob.fromBytes(array.getBinary(pos), null, null);
         }
 
         @Override

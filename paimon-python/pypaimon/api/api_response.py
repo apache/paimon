@@ -1,20 +1,19 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -25,6 +24,7 @@ from pypaimon.common.json_util import T, json_field
 from pypaimon.common.options import Options
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 
@@ -179,6 +179,53 @@ class ListTablesResponse(PagedResponse[str]):
 
     def get_next_page_token(self) -> Optional[str]:
         return self.next_page_token
+
+
+@dataclass
+class GetTagResponse(RESTResponse):
+    """Response for getting a tag.
+
+    Mirrors Java ``GetTagResponse`` (paimon-api/.../rest/responses/GetTagResponse.java).
+    """
+    FIELD_TAG_NAME = "tagName"
+    FIELD_SNAPSHOT = "snapshot"
+    FIELD_TAG_CREATE_TIME = "tagCreateTime"
+    FIELD_TAG_TIME_RETAINED = "tagTimeRetained"
+
+    tag_name: Optional[str] = json_field(FIELD_TAG_NAME, default=None)
+    snapshot: Optional[Snapshot] = json_field(FIELD_SNAPSHOT, default=None)
+    tag_create_time: Optional[int] = json_field(FIELD_TAG_CREATE_TIME, default=None)
+    tag_time_retained: Optional[str] = json_field(FIELD_TAG_TIME_RETAINED, default=None)
+
+
+@dataclass
+class ListTagsResponse(PagedResponse[str]):
+    """Paged response for listing tag names. Mirrors Java
+    ``ListTagsResponse`` (paimon-api/.../rest/responses/ListTagsResponse.java)."""
+    FIELD_TAGS = "tags"
+
+    tags: Optional[List[str]] = json_field(FIELD_TAGS, default=None)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN, default=None)
+
+    def data(self) -> Optional[List[str]]:
+        return self.tags
+
+    def get_next_page_token(self) -> Optional[str]:
+        return self.next_page_token
+
+
+@dataclass
+class ListBranchesResponse(RESTResponse):
+    """Response for listing branches.
+
+    Mirrors Java ``ListBranchesResponse`` — NOT a paged response (no
+    ``nextPageToken``); Java's ``listBranches`` returns plain
+    ``List<String>``.
+    """
+    FIELD_BRANCHES = "branches"
+
+    branches: Optional[List[str]] = json_field(FIELD_BRANCHES, default=None)
 
 
 @dataclass

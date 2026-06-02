@@ -44,9 +44,12 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -524,27 +527,86 @@ public class ExpireSnapshotsTest {
         builder.snapshotRetainMin(1)
                 .snapshotRetainMax(Integer.MAX_VALUE)
                 .snapshotTimeRetain(Duration.ofMillis(1000));
-        ExpireSnapshots expire = store.newExpire(builder.build());
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(builder.build());
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
-        Thread.sleep(1500);
+        for (int i = 1; i <= 5; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
         commit(5, allData, snapshotPositions);
-        long expireMillis = System.currentTimeMillis();
-        // expire twice to check for idempotence
+        for (int i = 6; i <= 10; i++) {
+            rewriteSnapshotTime(i, 2000);
+        }
 
+        // expire at time 2500, olderThanMills = 1500
+        expire.setCurrentTimeMillis(() -> 2500L);
+        // expire twice to check for idempotence
         expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
         expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
 
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
-        for (int i = 1; i <= latestSnapshotId; i++) {
-            if (snapshotManager.snapshotExists(i)) {
-                assertThat(snapshotManager.snapshot(i).timeMillis())
-                        .isBetween(expireMillis - 1000, expireMillis);
-                assertSnapshot(i, allData, snapshotPositions);
-            }
+        // snapshots 1-4 should be expired, snapshot 5 is retained because its next
+        // snapshot (6) is within the time window
+        for (int i = 1; i <= 4; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
         }
+        for (int i = 5; i <= latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(i, allData, snapshotPositions);
+        }
+
+        store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireWithTimeProtectsEachSnapshot() throws Exception {
+        // Even with a small retainMin, each snapshot should be protected by
+        // snapshotTimeRetain: a snapshot can only be expired when its next
+        // snapshot has been alive longer than snapshotTimeRetain.
+        ExpireConfig.Builder builder = ExpireConfig.builder();
+        builder.snapshotRetainMin(1)
+                .snapshotRetainMax(Integer.MAX_VALUE)
+                .snapshotTimeRetain(Duration.ofMillis(5000));
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(builder.build());
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+
+        // create 5 snapshots quickly
+        commit(5, allData, snapshotPositions);
+        for (int i = 1; i <= 5; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+
+        // expire immediately - no snapshot should be expired because each
+        // snapshot's next snapshot is still within the time window
+        expire.setCurrentTimeMillis(() -> 100L);
+        expire.config(builder.build()).expire();
+
+        for (int i = 1; i <= 5; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(i, allData, snapshotPositions);
+        }
+
+        // create one more snapshot so snapshot 5 has a "next"
+        commit(1, allData, snapshotPositions);
+        rewriteSnapshotTime(6, 6000);
+
+        // expire again - now snapshots 1-4 can be expired (their next snapshots
+        // are older than 5000ms), but snapshot 5 is still protected because its
+        // next snapshot (6) was just created
+        expire.setCurrentTimeMillis(() -> 6500L);
+        expire.config(builder.build()).expire();
+
+        for (int i = 1; i <= 4; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
+        }
+        assertThat(snapshotManager.snapshotExists(5)).isTrue();
+        assertThat(snapshotManager.snapshotExists(6)).isTrue();
+        assertSnapshot(5, allData, snapshotPositions);
+        assertSnapshot(6, allData, snapshotPositions);
 
         store.assertCleaned();
     }
@@ -738,6 +800,15 @@ public class ExpireSnapshotsTest {
                         null)
                 .changelogProducer(changelogProducer)
                 .build();
+    }
+
+    private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
+        String oldJson = fileIO.readFileUtf8(snapshotManager.snapshotPath(snapshotId));
+        ObjectNode node = (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(oldJson);
+        node.put("timeMillis", newTimeMillis);
+        String newJson = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.writeValueAsString(node);
+        fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshotId), newJson);
+        snapshotManager.invalidateCache();
     }
 
     protected void commit(int numCommits, List<KeyValue> allData, List<Integer> snapshotPositions)

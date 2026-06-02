@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import logging
 import os
 import shutil
@@ -33,9 +33,6 @@ from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
-from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
@@ -415,14 +412,31 @@ class LocalFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
 
+    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
+        try:
+            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+            from pypaimon.schema.data_types import PyarrowFieldParser
+
+            if fields is None:
+                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
+
+            file_path = self._to_file(path)
+            parent = file_path.parent
+            if parent and not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+
+            with open(file_path, 'wb') as output_stream:
+                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+                writer.write_table(data)
+                writer.close()
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
+
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
-            
-            column = data.column(0)
-            if column.null_count > 0:
-                raise RuntimeError("Blob format does not support null values")
             
             field = data.schema[0]
             if pyarrow.types.is_large_binary(field.type):
@@ -443,31 +457,7 @@ class LocalFileIO(FileIO):
             with open(file_path, 'wb') as output_stream:
                 writer = BlobFormatWriter(output_stream)
                 for i in range(num_rows):
-                    col_data = records_dict[field_name][i]
-                    if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if hasattr(col_data, 'as_py'):
-                            col_data = col_data.as_py()
-                        if isinstance(col_data, str):
-                            col_data = col_data.encode('utf-8')
-                        if isinstance(col_data, bytearray):
-                            col_data = bytes(col_data)
-
-                        if isinstance(col_data, bytes):
-                            if BlobDescriptor.is_blob_descriptor(col_data):
-                                descriptor = BlobDescriptor.deserialize(col_data)
-                                uri_reader = self.uri_reader_factory.create(descriptor.uri)
-                                blob_data = Blob.from_descriptor(uri_reader, descriptor)
-                            else:
-                                blob_data = BlobData(col_data)
-                        else:
-                            raise RuntimeError(
-                                "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
-                            )
-                        row_values = [blob_data]
-                    else:
-                        row_values = [col_data]
-                    row = GenericRow(row_values, fields, RowKind.INSERT)
-                    writer.add_element(row)
+                    writer.write_value(records_dict[field_name][i], fields, self.uri_reader_factory)
                 writer.close()
         except Exception as e:
             self.delete_quietly(path)

@@ -199,6 +199,38 @@ class ParquetFiltersTest {
     }
 
     @Test
+    public void testIsNaNDouble() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "d1", new DoubleType()))));
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(Collections.singletonList(builder.isNaN(0)));
+        FilterPredicateCompat compat = (FilterPredicateCompat) filter;
+        assertThat(compat.getFilterPredicate().toString())
+                .contains(
+                        "userdefinedbyinstance(d1, org.apache.parquet.filter2.predicate.ParquetFilters$IsNaNDoublePredicate");
+    }
+
+    @Test
+    public void testIsNaNFloat() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "f1", new FloatType()))));
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(Collections.singletonList(builder.isNaN(0)));
+        FilterPredicateCompat compat = (FilterPredicateCompat) filter;
+        assertThat(compat.getFilterPredicate().toString())
+                .contains(
+                        "userdefinedbyinstance(f1, org.apache.parquet.filter2.predicate.ParquetFilters$IsNaNFloatPredicate");
+    }
+
+    @Test
     public void testInFilterFloat() {
         PredicateBuilder builder =
                 new PredicateBuilder(

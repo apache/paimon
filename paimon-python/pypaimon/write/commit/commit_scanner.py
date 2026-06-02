@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """
 Manifest entries scanner for commit operations.
@@ -66,7 +66,7 @@ class CommitScanner:
 
         all_manifests = self.manifest_list_manager.read_all(latest_snapshot)
         return FileScanner(
-            self.table, lambda: ([], None), partition_filter
+            self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(all_manifests)
 
     def read_incremental_entries_from_changed_partitions(self, snapshot: Snapshot,
@@ -92,7 +92,7 @@ class CommitScanner:
         partition_filter = self._build_partition_filter_from_entries(commit_entries)
 
         return FileScanner(
-            self.table, lambda: ([], None), partition_filter
+            self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(delta_manifests)
 
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):
@@ -116,12 +116,15 @@ class CommitScanner:
         if not changed_partitions:
             return None
 
-        predicate_builder = PredicateBuilder(self.table.fields)
+        predicate_builder = PredicateBuilder(self.table.partition_keys_fields)
         partition_predicates = []
         for partition_values in changed_partitions:
             sub_predicates = []
             for i, key in enumerate(partition_keys):
-                sub_predicates.append(predicate_builder.equal(key, partition_values[i]))
+                if partition_values[i] is None:
+                    sub_predicates.append(predicate_builder.is_null(key))
+                else:
+                    sub_predicates.append(predicate_builder.equal(key, partition_values[i]))
             partition_predicates.append(predicate_builder.and_predicates(sub_predicates))
 
         return predicate_builder.or_predicates(partition_predicates)

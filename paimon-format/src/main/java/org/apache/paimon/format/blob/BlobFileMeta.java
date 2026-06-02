@@ -55,7 +55,7 @@ public class BlobFileMeta {
         long[] blobOffsets = new long[blobLengths.length];
         long offset = 0;
         for (int i = 0; i < blobLengths.length; i++) {
-            if (blobLengths[i] == -1) {
+            if (blobLengths[i] < 0) {
                 blobOffsets[i] = -1;
             } else {
                 blobOffsets[i] = offset;
@@ -86,7 +86,11 @@ public class BlobFileMeta {
     }
 
     public boolean isNull(int i) {
-        return blobLengths[i] == -1;
+        return blobLengths[i] == BlobFormatWriter.NULL_LENGTH;
+    }
+
+    public boolean isPlaceHolder(int i) {
+        return blobLengths[i] == BlobFormatWriter.PLACE_HOLDER_LENGTH;
     }
 
     public long blobLength(int i) {
@@ -98,7 +102,7 @@ public class BlobFileMeta {
     }
 
     public int returnedPosition(int i) {
-        return returnedPositions == null ? i : returnedPositions[i - 1];
+        return returnedPositions == null ? i - 1 : returnedPositions[i - 1];
     }
 
     public int recordNumber() {

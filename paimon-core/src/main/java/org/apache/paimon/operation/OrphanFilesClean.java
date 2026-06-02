@@ -181,6 +181,7 @@ public abstract class OrphanFilesClean implements Serializable {
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         List<FileStatus> statuses = tryBestListingDirs(directory);
         return statuses.stream()
+                .filter(status -> !status.isDir())
                 .filter(fileStatusFilter)
                 .filter(status -> fileFilter.test(status.getPath()))
                 .map(status -> Pair.of(status.getPath(), status.getLen()))
@@ -220,11 +221,15 @@ public abstract class OrphanFilesClean implements Serializable {
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
-                    fileIO.deleteDirectoryQuietly(path);
+                    LOG.error(
+                            "Refusing to delete directory {} in orphan file cleanup. "
+                                    + "This indicates a bug in candidate collection.",
+                            path);
                 } else {
                     fileIO.deleteQuietly(path);
                 }
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                LOG.warn("Failed to check whether {} is directory, skip deleting it.", path, e);
             }
         }
     }
@@ -393,7 +398,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
         for (FileStatus status : statuses) {
             Path path = status.getPath();
-            if (filter.test(path)) {
+            if (status.isDir() && filter.test(path)) {
                 filtered.add(path);
             }
             // ignore unknown dirs

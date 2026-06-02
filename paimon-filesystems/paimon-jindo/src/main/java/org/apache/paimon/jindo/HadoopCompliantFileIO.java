@@ -200,6 +200,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
+        return doDelete(path, recursive);
+    }
+
+    /**
+     * Perform the actual filesystem delete. Subclasses that override {@link #delete} can call this
+     * to execute the real delete when needed.
+     */
+    protected boolean doDelete(Path path, boolean recursive) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return getFileSystem(hadoopPath, false).delete(hadoopPath, recursive);
     }

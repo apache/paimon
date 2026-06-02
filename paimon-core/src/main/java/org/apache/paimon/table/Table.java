@@ -210,6 +210,10 @@ public interface Table extends Serializable {
     @Experimental
     void fastForward(String branchName);
 
+    /** Merge source branch into target branch (append-only tables only). */
+    @Experimental
+    void mergeBranch(String sourceBranch, String targetBranch);
+
     /** Manually expire snapshots, parameters can be controlled independently of table options. */
     @Experimental
     ExpireSnapshots newExpireSnapshots();

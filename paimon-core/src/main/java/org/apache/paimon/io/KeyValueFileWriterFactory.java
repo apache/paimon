@@ -149,6 +149,8 @@ public class KeyValueFileWriterFactory {
 
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, WriteFormatKey key, FileSource fileSource, boolean isExternalPath) {
+        // Changelog is sequentially consumed, file index is unnecessary.
+        FileIndexOptions indexOptions = key.isChangelog ? new FileIndexOptions() : fileIndexOptions;
         return formatContext.thinModeEnabled
                 ? new KeyValueThinDataFileWriterImpl(
                         fileIO,
@@ -161,7 +163,7 @@ public class KeyValueFileWriterFactory {
                         key.level,
                         options,
                         fileSource,
-                        fileIndexOptions,
+                        indexOptions,
                         isExternalPath)
                 : new KeyValueDataFileWriterImpl(
                         fileIO,
@@ -174,7 +176,7 @@ public class KeyValueFileWriterFactory {
                         key.level,
                         options,
                         fileSource,
-                        fileIndexOptions,
+                        indexOptions,
                         isExternalPath);
     }
 

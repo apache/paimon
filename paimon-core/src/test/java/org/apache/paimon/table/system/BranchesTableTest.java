@@ -19,19 +19,27 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -89,5 +97,66 @@ class BranchesTableTest extends TableTestBase {
                                 .map(v -> v.getString(0).toString())
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("my_branch1", "my_branch2", "my_branch3");
+    }
+
+    @Test
+    void testReadWithBranchNameEqualFilter() throws Exception {
+        table.createBranch("my_branch1", "2023-07-17");
+        table.createBranch("my_branch2", "2023-07-18");
+        table.createBranch("my_branch3", "2023-07-18");
+
+        PredicateBuilder builder = new PredicateBuilder(BranchesTable.TABLE_TYPE);
+        assertThat(readBranchNames(builder.equal(0, BinaryString.fromString("my_branch2"))))
+                .containsExactly("my_branch2");
+        assertThat(readBranchNames(builder.equal(0, BinaryString.fromString("nope")))).isEmpty();
+    }
+
+    @Test
+    void testReadWithBranchNameInFilter() throws Exception {
+        table.createBranch("my_branch1", "2023-07-17");
+        table.createBranch("my_branch2", "2023-07-18");
+        table.createBranch("my_branch3", "2023-07-18");
+
+        PredicateBuilder builder = new PredicateBuilder(BranchesTable.TABLE_TYPE);
+        assertThat(
+                        readBranchNames(
+                                builder.in(
+                                        0,
+                                        Arrays.asList(
+                                                (Object) BinaryString.fromString("my_branch1"),
+                                                BinaryString.fromString("my_branch3")))))
+                .containsExactlyInAnyOrder("my_branch1", "my_branch3");
+    }
+
+    @Test
+    void testReadWithBranchNameNotEqualFilter() throws Exception {
+        table.createBranch("my_branch1", "2023-07-17");
+        table.createBranch("my_branch2", "2023-07-18");
+        table.createBranch("my_branch3", "2023-07-18");
+
+        PredicateBuilder builder = new PredicateBuilder(BranchesTable.TABLE_TYPE);
+        assertThat(readBranchNames(builder.notEqual(0, BinaryString.fromString("my_branch2"))))
+                .containsExactlyInAnyOrder("my_branch1", "my_branch3");
+    }
+
+    @Test
+    void testReadWithNullFilterReturnsAll() throws Exception {
+        table.createBranch("my_branch1", "2023-07-17");
+        table.createBranch("my_branch2", "2023-07-18");
+
+        assertThat(readBranchNames(null)).containsExactlyInAnyOrder("my_branch1", "my_branch2");
+    }
+
+    private List<String> readBranchNames(Predicate predicate) throws IOException {
+        ReadBuilder readBuilder = branchesTable.newReadBuilder();
+        if (predicate != null) {
+            readBuilder = readBuilder.withFilter(predicate);
+        }
+        List<String> names = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> names.add(row.getString(0).toString()));
+        }
+        return names;
     }
 }

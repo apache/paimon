@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
@@ -50,7 +51,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Hadoop {@link FileIO}. */
-public class HadoopFileIO implements FileIO {
+public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     private static final long serialVersionUID = 1L;
 
@@ -89,6 +90,11 @@ public class HadoopFileIO implements FileIO {
 
     public org.apache.paimon.options.Options hadoopOptions() {
         return new org.apache.paimon.options.Options(hadoopConf.get());
+    }
+
+    @Override
+    public org.apache.paimon.options.Options hadoopOptions(Path path, String opType) {
+        return hadoopOptions();
     }
 
     @Override

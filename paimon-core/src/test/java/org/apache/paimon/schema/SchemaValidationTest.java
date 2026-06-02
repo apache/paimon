@@ -40,6 +40,8 @@ import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
+import static org.apache.paimon.schema.TableSchema.CURRENT_VERSION;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -181,6 +183,34 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testNestedRowAggregateOptionRejected() {
+        // PAIMON-6471: nested-path agg config was silently ignored, leaving the parent ROW
+        // on the default aggregator and producing wrong results without any error.
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "data",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "num", DataTypes.INT()),
+                                        DataTypes.FIELD(3, "info", DataTypes.STRING()))));
+
+        Map<String, String> options = new HashMap<>();
+        options.put("merge-engine", "aggregation");
+        options.put("fields.data.num.aggregate-function", "sum");
+        options.put("fields.data.sequence-group", "data");
+        options.put(BUCKET.key(), "1");
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Nested-field path is not supported on ROW field 'data'")
+                .hasMessageContaining("fields.data.num.aggregate-function");
+    }
+
+    @Test
     public void testChainTableAllowsNonDeduplicateMergeEngine() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
@@ -202,6 +232,29 @@ class SchemaValidationTest {
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
 
         assertThatNoException().isThrownBy(() -> validateTableSchema(schema));
+    }
+
+    @Test
+    public void testChainTableRequiresSequenceField() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.STRING()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.BIGINT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = Arrays.asList("f0", "f1");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessage("Sequence field is required for chain table.");
     }
 
     @Test
@@ -313,5 +366,256 @@ class SchemaValidationTest {
                                                 "")))
                 .hasMessage(
                         "Data evolution config must enabled for table with vector-store file format.");
+    }
+
+    @Test
+    void testRowTrackingWithPkTable() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-2));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.STRING()));
+        List<String> primaryKeys = singletonList("f1");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                primaryKeys,
+                                                options,
+                                                "")))
+                .hasMessageContaining("primary-key");
+    }
+
+    @Test
+    public void testFileIndexColumns() {
+        List<String> keys =
+                Arrays.asList(
+                        "file-index.bloom-filter.columns",
+                        "file-index.bitmap.columns",
+                        "file-index.bsi.columns",
+                        "file-index.range-bitmap.columns");
+
+        for (String key : keys) {
+            // valid: all referenced columns exist
+            Map<String, String> okOptions = new HashMap<>();
+            okOptions.put(key, "f0,f3");
+            assertThatCode(() -> validateTableSchemaExec(okOptions))
+                    .as("valid key=%s", key)
+                    .doesNotThrowAnyException();
+
+            // invalid: references a non-existent column
+            Map<String, String> badOptions = new HashMap<>();
+            badOptions.put(key, "f0,not_exist");
+            assertThatThrownBy(() -> validateTableSchemaExec(badOptions))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Column 'not_exist' specified in 'file-index.<index-type>.columns' does not exist in table schema.");
+        }
+    }
+
+    @Test
+    public void testFileIndexNestedColumn() {
+        List<String> keys =
+                Arrays.asList(
+                        "file-index.bloom-filter.columns",
+                        "file-index.bitmap.columns",
+                        "file-index.bsi.columns",
+                        "file-index.range-bitmap.columns");
+
+        for (String key : keys) {
+            // valid: nested syntax on a map column with string key
+            Map<String, String> okOptions = new HashMap<>();
+            okOptions.put(key, "m[k]");
+            assertThatCode(() -> validateTableSchemaWithMapField(okOptions))
+                    .doesNotThrowAnyException();
+
+            // invalid: nested syntax on a non-map column
+            Map<String, String> nonMapOptions = new HashMap<>();
+            nonMapOptions.put(key, "f3[k]");
+            assertThatThrownBy(() -> validateTableSchemaWithMapField(nonMapOptions))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Column 'f3' is configured as nested column in 'file-index.<index-type>.columns' but is not a map type.");
+
+            // invalid: nested syntax on a map column with non-string key
+            Map<String, String> nonStringKeyOptions = new HashMap<>();
+            nonStringKeyOptions.put(key, "mi[k]");
+            assertThatThrownBy(() -> validateTableSchemaWithMapField(nonStringKeyOptions))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Column 'mi' is configured as nested column in 'file-index.<index-type>.columns', but its map key type is INT. Only CHAR/VARCHAR/STRING is supported.");
+        }
+    }
+
+    private void validateTableSchemaWithMapField(Map<String, String> options) {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()),
+                        new DataField(4, "m", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        new DataField(5, "mi", DataTypes.MAP(DataTypes.INT(), DataTypes.INT())));
+        options.put(BUCKET.key(), String.valueOf(-1));
+        validateTableSchema(
+                new TableSchema(1, fields, 10, emptyList(), singletonList("f1"), options, ""));
+    }
+
+    @Test
+    public void testFileFormatPerLevelRejectsIncompatibleSchema() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(1, "v", DataTypes.TIMESTAMP(9)));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(-1));
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:avro");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("k"),
+                                                options,
+                                                "")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("file.format.per.level")
+                .hasMessageContaining("0:avro")
+                .hasMessageContaining("TIMESTAMP");
+    }
+
+    @Test
+    public void testFileFormatPerLevelAcceptsCompatibleSchema() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "k", DataTypes.INT()),
+                        new DataField(1, "v", DataTypes.TIMESTAMP(9)));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), String.valueOf(-1));
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:parquet");
+
+        validateTableSchema(
+                new TableSchema(1, fields, 10, emptyList(), singletonList("k"), options, ""));
+    }
+
+    @Test
+    public void testMergeOnReadCoexistsWithVisibilityCallback() {
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.enabled", "true");
+        options.put("deletion-vectors.merge-on-read", "true");
+        options.put("visibility-callback.enabled", "true");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testMergeOnReadCoexistsWithVisibilityCallbackAndPostponeBucket() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.enabled", "true");
+        options.put("deletion-vectors.merge-on-read", "true");
+        options.put("visibility-callback.enabled", "true");
+        options.put(BUCKET.key(), String.valueOf(-2));
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                singletonList("f1"),
+                                                options,
+                                                "")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testBucketAppendBackwardCompatibility() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.STRING()));
+
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(BUCKET.key(), "1");
+
+        TableSchema legacySchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyOptions,
+                        "",
+                        0L);
+
+        assertThatCode(() -> validateTableSchema(legacySchema)).doesNotThrowAnyException();
+
+        Map<String, String> currentOptions = new HashMap<>();
+        currentOptions.put(BUCKET.key(), "1");
+
+        TableSchema currentSchema =
+                new TableSchema(
+                        CURRENT_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        currentOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(currentSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
+
+        Map<String, String> legacyMultiBucketOptions = new HashMap<>();
+        legacyMultiBucketOptions.put(BUCKET.key(), "2");
+
+        TableSchema legacyMultiBucketSchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyMultiBucketOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(legacyMultiBucketSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
+    }
+
+    @Test
+    public void testMergeOnReadRequiresDvEnabled() {
+        Map<String, String> options = new HashMap<>();
+        options.put("deletion-vectors.merge-on-read", "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true");
     }
 }

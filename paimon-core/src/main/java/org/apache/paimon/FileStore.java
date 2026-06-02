@@ -117,7 +117,11 @@ public interface FileStore<T> {
 
     ServiceManager newServiceManager();
 
-    boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
+    boolean mergeSchema(
+            RowType rowType,
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive);
 
     List<TagCallback> createTagCallbacks(FileStoreTable table);
 

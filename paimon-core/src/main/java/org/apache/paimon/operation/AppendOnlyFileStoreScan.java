@@ -99,7 +99,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifestFiles, boolean useSequential) {
         Iterator<ManifestEntry> result = super.readManifestEntries(manifestFiles, useSequential);
-        if (limit == null || limit <= 0 || deletionVectorsEnabled || dataEvolutionEnabled) {
+        if (limit == null
+                || limit <= 0
+                || deletionVectorsEnabled
+                || dataEvolutionEnabled
+                || inputFilter != null) {
             return result;
         }
 

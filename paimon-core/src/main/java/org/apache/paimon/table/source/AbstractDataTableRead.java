@@ -29,6 +29,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -88,14 +90,35 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return this;
     }
 
+    protected TableSchema schema() {
+        return schema;
+    }
+
+    protected RowType currentReadType() {
+        return readType == null ? schema.logicalRowType() : readType;
+    }
+
+    @Nullable
+    protected Predicate predicate() {
+        return predicate;
+    }
+
     @Override
-    public final RecordReader<InternalRow> createReader(Split split) throws IOException {
-        TableQueryAuthResult authResult = null;
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
+        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+    }
+
+    protected final QueryAuthContext unwrapQueryAuthSplit(Split split) {
         if (split instanceof QueryAuthSplit) {
             QueryAuthSplit authSplit = (QueryAuthSplit) split;
-            split = authSplit.split();
-            authResult = authSplit.authResult();
+            return new QueryAuthContext(authSplit.split(), authSplit.authResult());
         }
+        return new QueryAuthContext(split, null);
+    }
+
+    protected final RecordReader<InternalRow> createDataReader(
+            Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
         RecordReader<InternalRow> reader;
         if (authResult == null) {
             reader = reader(split);
@@ -157,5 +180,26 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
         Predicate finalFilter = predicate;
         return reader.filter(finalFilter::test);
+    }
+
+    /** Split with auth context. */
+    protected static class QueryAuthContext {
+
+        private final Split split;
+        @Nullable private final TableQueryAuthResult authResult;
+
+        private QueryAuthContext(Split split, @Nullable TableQueryAuthResult authResult) {
+            this.split = split;
+            this.authResult = authResult;
+        }
+
+        protected Split split() {
+            return split;
+        }
+
+        @Nullable
+        protected TableQueryAuthResult authResult() {
+            return authResult;
+        }
     }
 }

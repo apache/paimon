@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """Full-text scan to scan index files."""
 
@@ -53,16 +52,16 @@ class FullTextScanImpl(FullTextScan):
 
     def scan(self) -> FullTextScanPlan:
         from pypaimon.index.index_file_handler import IndexFileHandler
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
         text_column = self._text_column
-        snapshot = SnapshotManager(self._table).get_latest_snapshot()
+        snapshot = self._table.snapshot_manager().get_latest_snapshot()
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         from pypaimon.common.options.options import Options
         travel_snapshot = TimeTravelUtil.try_travel_to_snapshot(
             Options(self._table.table_schema.options),
-            self._table.tag_manager()
+            self._table.tag_manager(),
+            self._table.snapshot_manager(),
         )
         if travel_snapshot is not None:
             snapshot = travel_snapshot

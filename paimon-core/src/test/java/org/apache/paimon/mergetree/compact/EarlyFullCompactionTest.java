@@ -91,6 +91,41 @@ public class EarlyFullCompactionTest {
     }
 
     @Test
+    public void testCreateWithInitialLastFullCompaction() {
+        Options options = new Options();
+        options.set(COMPACTION_OPTIMIZATION_INTERVAL, Duration.ofHours(1));
+        EarlyFullCompaction trigger =
+                EarlyFullCompaction.create(new CoreOptions(options), 1234567890L);
+        assertThat(trigger).isNotNull();
+    }
+
+    @Test
+    public void testIntervalDoesNotRetriggerWhenSeededRecent() {
+        AtomicLong time = new AtomicLong(10_000);
+        TestableEarlyFullCompaction trigger =
+                new TestableEarlyFullCompaction(1000L, null, null, 9_500L, time);
+
+        Optional<CompactUnit> compactUnit = trigger.tryFullCompact(5, createRuns(100, 200));
+        assertThat(compactUnit).isEmpty();
+
+        time.addAndGet(501); // now 10_501, diff vs seed (9_500) is 1001 > 1000
+        compactUnit = trigger.tryFullCompact(5, createRuns(100, 200));
+        assertThat(compactUnit).isPresent();
+        assertThat(compactUnit.get().outputLevel()).isEqualTo(4);
+    }
+
+    @Test
+    public void testIntervalTriggersWhenSeededOld() {
+        AtomicLong time = new AtomicLong(10_000);
+        TestableEarlyFullCompaction trigger =
+                new TestableEarlyFullCompaction(1000L, null, null, 5_000L, time);
+
+        Optional<CompactUnit> compactUnit = trigger.tryFullCompact(5, createRuns(100, 200));
+        assertThat(compactUnit).isPresent();
+        assertThat(compactUnit.get().outputLevel()).isEqualTo(4);
+    }
+
+    @Test
     public void testInterval() {
         AtomicLong time = new AtomicLong(10_000);
         TestableEarlyFullCompaction trigger =
@@ -277,6 +312,20 @@ public class EarlyFullCompactionTest {
                 @Nullable Long incrementalSizeThreshold,
                 AtomicLong currentTime) {
             super(fullCompactionInterval, totalSizeThreshold, incrementalSizeThreshold);
+            this.currentTime = currentTime;
+        }
+
+        public TestableEarlyFullCompaction(
+                @Nullable Long fullCompactionInterval,
+                @Nullable Long totalSizeThreshold,
+                @Nullable Long incrementalSizeThreshold,
+                @Nullable Long initialLastFullCompaction,
+                AtomicLong currentTime) {
+            super(
+                    fullCompactionInterval,
+                    totalSizeThreshold,
+                    incrementalSizeThreshold,
+                    initialLastFullCompaction);
             this.currentTime = currentTime;
         }
 

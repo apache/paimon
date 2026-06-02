@@ -72,6 +72,10 @@ public class TantivySearcher implements AutoCloseable {
         }
     }
 
+    public boolean isClosed() {
+        return closed;
+    }
+
     private void checkNotClosed() {
         if (closed) {
             throw new IllegalStateException("Searcher is already closed");

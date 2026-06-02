@@ -24,7 +24,10 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.junit.jupiter.api.Assertions
+
+import scala.collection.JavaConverters._
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
@@ -643,6 +646,217 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
         spark.sql("ALTER TABLE t UNSET TBLPROPERTIES ('write-buffer-spillable')")
         assert(
           !hmsClient.getTable("paimon_db", "t").getParameters.containsKey("write-buffer-spillable"))
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: create table like with SparkGenericCatalog") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("paimon_source", "paimon_like", "csv_source", "csv_like", "csv_like_paimon") {
+        spark.sql("""
+                    |CREATE TABLE paimon_source (
+                    |  id INT,
+                    |  name STRING,
+                    |  pt STRING
+                    |) USING paimon
+                    |PARTITIONED BY (pt)
+                    |COMMENT 'paimon source comment'
+                    |TBLPROPERTIES (
+                    |  'primary-key' = 'id,pt',
+                    |  'bucket' = '4',
+                    |  'target-file-size' = '128MB'
+                    |)
+                    |""".stripMargin)
+        spark.sql("CREATE TABLE paimon_like LIKE paimon_source USING paimon")
+
+        val paimonLike = loadTable("paimon_db", "paimon_like")
+        Assertions.assertEquals(
+          spark.table("paimon_source").schema,
+          spark.table("paimon_like").schema)
+        Assertions.assertEquals("paimon source comment", paimonLike.comment().get())
+        Assertions.assertEquals(List("pt"), paimonLike.partitionKeys().asScala.toList)
+        Assertions.assertEquals(List("id", "pt"), paimonLike.primaryKeys().asScala.toList)
+        Assertions.assertEquals("4", paimonLike.options().get("bucket"))
+        Assertions.assertEquals("128MB", paimonLike.options().get("target-file-size"))
+
+        spark.sql("""
+                    |CREATE TABLE csv_source (
+                    |  id INT,
+                    |  c_char CHAR(9),
+                    |  c_varchar VARCHAR(10),
+                    |  pt STRING
+                    |) USING csv
+                    |PARTITIONED BY (pt)
+                    |COMMENT 'csv source comment'
+                    |TBLPROPERTIES ('target-file-size' = '256MB')
+                    |""".stripMargin)
+        spark.sql("CREATE TABLE csv_like LIKE csv_source")
+
+        val csvLike = spark.sessionState.catalog.getTableMetadata(
+          TableIdentifier("csv_like", Some("paimon_db")))
+        Assertions.assertEquals(Seq("pt"), csvLike.partitionColumnNames)
+        Assertions.assertTrue(csvLike.provider.contains("csv"))
+        Assertions.assertTrue(csvLike.comment.isEmpty)
+        Assertions.assertFalse(csvLike.properties.contains("target-file-size"))
+
+        spark.sql("CREATE TABLE csv_like_paimon LIKE csv_source USING paimon")
+
+        val csvLikePaimon = loadTable("paimon_db", "csv_like_paimon")
+        Assertions.assertEquals(
+          spark.table("csv_source").schema,
+          spark.table("csv_like_paimon").schema)
+        checkAnswer(
+          spark
+            .sql("DESC csv_like_paimon")
+            .select("col_name", "data_type")
+            .where("col_name IN ('c_char', 'c_varchar')")
+            .orderBy("col_name"),
+          Row("c_char", "char(9)") :: Row("c_varchar", "varchar(10)") :: Nil
+        )
+        Assertions.assertEquals("csv source comment", csvLikePaimon.comment().get())
+        Assertions.assertEquals(List("pt"), csvLikePaimon.partitionKeys().asScala.toList)
+        Assertions.assertTrue(csvLikePaimon.primaryKeys().isEmpty)
+        Assertions.assertFalse(csvLikePaimon.options().containsKey("target-file-size"))
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: SparkGenericCatalog explicit Paimon replace") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("rt", "rtas", "missing") {
+        spark.sql("""
+                    |CREATE TABLE rt (id BIGINT, data STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+                    |""".stripMargin)
+        spark.sql("INSERT INTO rt VALUES (1, 'old')")
+        val oldSnapshotId = loadTable("paimon_db", "rt").snapshotManager().latestSnapshotId()
+
+        spark.sql("""
+                    |REPLACE TABLE rt (id BIGINT, name STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '4')
+                    |""".stripMargin)
+
+        val replaced = loadTable("paimon_db", "rt")
+        Assertions.assertEquals("4", replaced.options().get("bucket"))
+        Assertions.assertEquals(Seq("id", "name"), spark.table("rt").schema.fieldNames.toSeq)
+        checkAnswer(spark.sql("SELECT * FROM rt"), Seq.empty[Row])
+        checkAnswer(
+          spark.sql(s"SELECT id, data FROM rt VERSION AS OF $oldSnapshotId"),
+          Row(1L, "old") :: Nil)
+
+        val error = intercept[AnalysisException] {
+          spark.sql("""
+                      |REPLACE TABLE missing (id BIGINT, data STRING)
+                      |USING paimon
+                      |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+                      |""".stripMargin)
+        }.getMessage
+        Assertions.assertTrue(
+          error.contains("TABLE_OR_VIEW_NOT_FOUND") ||
+            error.contains("cannot be found") ||
+            error.contains("not found"))
+
+        Seq((2L, "new")).toDF("id", "data").createOrReplaceTempView("source")
+        spark.sql("""
+                    |CREATE TABLE rtas (id BIGINT, data STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+                    |""".stripMargin)
+        spark.sql("INSERT INTO rtas VALUES (1, 'old')")
+        val oldLocation = loadTable("paimon_db", "rtas").location().toString
+        val oldRtasSnapshotId =
+          loadTable("paimon_db", "rtas").snapshotManager().latestSnapshotId()
+        spark.sql("""
+                    |CREATE OR REPLACE TABLE rtas
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '3')
+                    |AS SELECT * FROM source
+                    |""".stripMargin)
+
+        val replacedAsSelect = loadTable("paimon_db", "rtas")
+        Assertions.assertEquals(oldLocation, replacedAsSelect.location().toString)
+        Assertions.assertEquals("3", replacedAsSelect.options().get("bucket"))
+        checkAnswer(spark.sql("SELECT * FROM rtas"), Row(2L, "new") :: Nil)
+        checkAnswer(
+          spark.sql(s"SELECT id, data FROM rtas VERSION AS OF $oldRtasSnapshotId"),
+          Row(1L, "old") :: Nil)
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: SparkGenericCatalog explicit Paimon replace fallback") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("csv_to_paimon", "rtas_csv_to_paimon") {
+        spark.sql("CREATE TABLE csv_to_paimon (id BIGINT, data STRING) USING csv")
+        spark.sql("INSERT INTO csv_to_paimon VALUES (1, 'csv')")
+
+        spark.sql("""
+                    |REPLACE TABLE csv_to_paimon (id BIGINT, name STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('bucket' = '-1')
+                    |""".stripMargin)
+
+        val paimonTable = loadTable("paimon_db", "csv_to_paimon")
+        Assertions.assertEquals("-1", paimonTable.options().get("bucket"))
+        Assertions.assertEquals(
+          Seq("id", "name"),
+          spark.table("csv_to_paimon").schema.fieldNames.toSeq)
+        checkAnswer(spark.sql("SELECT * FROM csv_to_paimon"), Seq.empty[Row])
+
+        Seq((2L, "new")).toDF("id", "data").createOrReplaceTempView("provider_source")
+        spark.sql("""
+                    |CREATE TABLE rtas_csv_to_paimon (id BIGINT, data STRING)
+                    |USING csv
+                    |""".stripMargin)
+
+        spark.sql("""
+                    |CREATE OR REPLACE TABLE rtas_csv_to_paimon
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '3')
+                    |AS SELECT * FROM provider_source
+                    |""".stripMargin)
+
+        val rtasPaimonTable = loadTable("paimon_db", "rtas_csv_to_paimon")
+        Assertions.assertEquals("3", rtasPaimonTable.options().get("bucket"))
+        checkAnswer(spark.sql("SELECT * FROM rtas_csv_to_paimon"), Row(2L, "new") :: Nil)
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: SparkGenericCatalog CTAS with non-Paimon provider") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("csv_ctas") {
+        Seq((1L, "x1"), (2L, "x2")).toDF("id", "data").createOrReplaceTempView("source")
+        spark.sql("CREATE TABLE csv_ctas USING csv AS SELECT * FROM source")
+
+        val csvTable = spark.sessionState.catalog.getTableMetadata(
+          TableIdentifier("csv_ctas", Some("paimon_db")))
+        Assertions.assertTrue(csvTable.provider.contains("csv"))
+        checkAnswer(
+          spark.sql("SELECT * FROM csv_ctas ORDER BY id"),
+          Row(1L, "x1") :: Row(2L, "x2") :: Nil)
       }
     }
   }

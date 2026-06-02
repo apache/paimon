@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.aggregate.PushedAggregateResult;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
@@ -57,7 +58,30 @@ public class DataTableSource extends BaseDataTableSource
             Table table,
             boolean unbounded,
             DynamicTableFactory.Context context) {
-        this(tableIdentifier, table, unbounded, context, null, null, null, null, null, null);
+        this(tableIdentifier, table, unbounded, context, null, null, null, null, null);
+    }
+
+    public DataTableSource(
+            ObjectIdentifier tableIdentifier,
+            Table table,
+            boolean unbounded,
+            DynamicTableFactory.Context context,
+            @Nullable Predicate predicate,
+            @Nullable int[][] projectFields,
+            @Nullable Long limit,
+            @Nullable WatermarkStrategy<RowData> watermarkStrategy,
+            @Nullable List<String> dynamicPartitionFilteringFields) {
+        this(
+                tableIdentifier,
+                table,
+                unbounded,
+                context,
+                predicate,
+                projectFields,
+                limit,
+                watermarkStrategy,
+                dynamicPartitionFilteringFields,
+                null);
     }
 
     public DataTableSource(
@@ -70,7 +94,7 @@ public class DataTableSource extends BaseDataTableSource
             @Nullable Long limit,
             @Nullable WatermarkStrategy<RowData> watermarkStrategy,
             @Nullable List<String> dynamicPartitionFilteringFields,
-            @Nullable Long countPushed) {
+            @Nullable PushedAggregateResult pushedAggregateResult) {
         super(
                 tableIdentifier,
                 table,
@@ -80,7 +104,7 @@ public class DataTableSource extends BaseDataTableSource
                 projectFields,
                 limit,
                 watermarkStrategy,
-                countPushed);
+                pushedAggregateResult);
         this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
@@ -96,7 +120,7 @@ public class DataTableSource extends BaseDataTableSource
                 limit,
                 watermarkStrategy,
                 dynamicPartitionFilteringFields,
-                countPushed);
+                pushedAggregateResult);
     }
 
     @Override

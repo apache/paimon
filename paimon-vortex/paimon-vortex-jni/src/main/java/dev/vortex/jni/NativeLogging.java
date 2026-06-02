@@ -26,11 +26,16 @@ public final class NativeLogging {
 
     private NativeLogging() {}
 
-    public static final int ERROR = 0;
-    public static final int WARN = 1;
-    public static final int INFO = 2;
-    public static final int DEBUG = 3;
-    public static final int TRACE = 4;
+    /** Logging level constant for error messages only */
+    public static final int ERROR = 1;
+
+    public static final int WARN = 2;
+
+    public static final int INFO = 3;
+
+    public static final int DEBUG = 4;
+
+    public static final int TRACE = 5;
 
     public static native void initLogging(int level);
 }

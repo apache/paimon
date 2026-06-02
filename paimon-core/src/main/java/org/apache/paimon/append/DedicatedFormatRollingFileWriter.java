@@ -159,7 +159,7 @@ public class DedicatedFormatRollingFileWriter
                 fieldNamesInVectorFile(writeSchema, vectorFileFormat != null);
         if (context != null) {
             fieldsInDedicatedFile.addAll(
-                    fieldNamesInBlobFile(writeSchema, context.blobDescriptorFields()));
+                    fieldNamesInBlobFile(writeSchema, context.blobInlineFields()));
         }
         List<DataField> fieldsInNormalFile = new ArrayList<>();
         for (DataField field : writeSchema.getFields()) {
@@ -198,7 +198,7 @@ public class DedicatedFormatRollingFileWriter
                                     statsDenseStore,
                                     blobTargetFileSize,
                                     context.blobConsumer(),
-                                    context.blobDescriptorFields());
+                                    context.blobInlineFields());
         } else {
             this.blobWriterFactory = null;
         }

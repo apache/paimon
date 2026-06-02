@@ -616,6 +616,17 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testCopyWithLatestSchemaPicksUpAlteredOptions() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+
+        schemaManager.commitChanges(SchemaChange.setOption("my-custom-key", "my-custom-value"));
+
+        FileStoreTable updated = table.copyWithLatestSchema();
+        assertThat(updated.schema().options()).containsEntry("my-custom-key", "my-custom-value");
+    }
+
+    @Test
     public void testConsumerIdNotBlank() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -736,7 +747,10 @@ public abstract class SimpleTableTestBase {
                         })
                 .satisfies(
                         anyCauseMatches(
-                                OutOfRangeException.class, "The snapshot with id 5 has expired."));
+                                OutOfRangeException.class,
+                                "The wanted read snapshot with id 5 has expired."))
+                .hasMessageContaining("Earliest Snapshot ID:")
+                .hasMessageContaining("Latest Snapshot ID:");
 
         write.close();
         commit.close();
@@ -1351,6 +1365,35 @@ public abstract class SimpleTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                         "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
                         "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
+    public void testFastForwardWithoutTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createBranch(BRANCH_NAME);
+        FileStoreTable tableBranch = createBranchTable(BRANCH_NAME);
+
+        try (StreamTableWrite write = tableBranch.newWrite(commitUser);
+                StreamTableCommit commit = tableBranch.newCommit(commitUser)) {
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        table.fastForward(BRANCH_NAME);
+
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .contains("2|20|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test

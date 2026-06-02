@@ -15,3 +15,4 @@
 
 org.apache.paimon.fs.RequireOptionsFileIOLoader
 org.apache.paimon.utils.HadoopUtilsITCase$TestFileIOLoader
+org.apache.paimon.fs.IsolatedDirectoryFileIO$Loader

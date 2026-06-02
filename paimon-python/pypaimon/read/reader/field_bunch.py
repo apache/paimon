@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 """
 FieldBunch classes for organizing files by field in data evolution.
 
@@ -51,8 +51,8 @@ class DataBunch(FieldBunch):
         return [self.data_file]
 
 
-class BlobBunch(FieldBunch):
-    """Files for partial field (blob files)."""
+class _SpecialFieldBunch(FieldBunch):
+    """Base class for partial field files (blob/vector)."""
 
     def __init__(self, expected_row_count: int, row_id_push_down: bool = False):
         self._files: List[DataFileMeta] = []
@@ -63,15 +63,23 @@ class BlobBunch(FieldBunch):
         self.latest_max_sequence_number = -1
         self._row_count = 0
 
+    def _is_special_file(self, file_name: str) -> bool:
+        raise NotImplementedError
+
+    def _file_type_label(self) -> str:
+        raise NotImplementedError
+
     def add(self, file: DataFileMeta) -> None:
-        """Add a blob file to this bunch."""
-        if not DataFileMeta.is_blob_file(file.file_name):
-            raise ValueError("Only blob file can be added to a blob bunch.")
+        if not self._is_special_file(file.file_name):
+            raise ValueError(
+                f"Only {self._file_type_label()} file can be added to "
+                f"a {self._file_type_label()} bunch.")
 
         if file.first_row_id == self.latest_first_row_id:
             if file.max_sequence_number >= self.latest_max_sequence_number:
                 raise ValueError(
-                    "Blob file with same first row id should have decreasing sequence number."
+                    f"{self._file_type_label().capitalize()} file with same first row id "
+                    f"should have decreasing sequence number."
                 )
             return
 
@@ -88,32 +96,30 @@ class BlobBunch(FieldBunch):
                 if first_row_id < self.expected_next_first_row_id:
                     if file.max_sequence_number >= self.latest_max_sequence_number:
                         raise ValueError(
-                            "Blob file with overlapping row id should have "
-                            "decreasing sequence number."
+                            f"{self._file_type_label().capitalize()} file with overlapping "
+                            f"row id should have decreasing sequence number."
                         )
                     return
                 elif first_row_id > self.expected_next_first_row_id:
                     raise ValueError(
-                        f"Blob file first row id should be continuous, expect "
-                        f"{self.expected_next_first_row_id} but got {first_row_id}"
+                        f"{self._file_type_label().capitalize()} file first row id should "
+                        f"be continuous, expect {self.expected_next_first_row_id} "
+                        f"but got {first_row_id}"
                     )
 
             if self._files:
-                if not DataFileMeta.is_blob_file(file.file_name):
-                    if file.schema_id != self._files[0].schema_id:
-                        raise ValueError(
-                            "All files in a blob bunch should have the same schema id."
-                        )
                 if file.write_cols != self._files[0].write_cols:
                     raise ValueError(
-                        "All files in a blob bunch should have the same write columns."
+                        f"All files in a {self._file_type_label()} bunch should "
+                        f"have the same write columns."
                     )
 
         self._files.append(file)
         self._row_count += file.row_count
         if self._row_count > self.expected_row_count:
             raise ValueError(
-                f"Blob files row count exceed the expect {self.expected_row_count}"
+                f"{self._file_type_label().capitalize()} files row count exceed "
+                f"the expect {self.expected_row_count}"
             )
 
         self.latest_max_sequence_number = file.max_sequence_number
@@ -125,3 +131,23 @@ class BlobBunch(FieldBunch):
 
     def files(self) -> List[DataFileMeta]:
         return self._files
+
+
+class BlobBunch(_SpecialFieldBunch):
+    """Files for partial field (blob files)."""
+
+    def _is_special_file(self, file_name: str) -> bool:
+        return DataFileMeta.is_blob_file(file_name)
+
+    def _file_type_label(self) -> str:
+        return "blob"
+
+
+class VectorBunch(_SpecialFieldBunch):
+    """Files for partial field (vector files)."""
+
+    def _is_special_file(self, file_name: str) -> bool:
+        return DataFileMeta.is_vector_file(file_name)
+
+    def _file_type_label(self) -> str:
+        return "vector"

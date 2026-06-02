@@ -1,20 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
-
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 import re
@@ -30,20 +29,28 @@ if TYPE_CHECKING:
     from pypaimon.catalog.rest.rest_token import RESTToken
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
+                                      CreateBranchRequest,
                                       CreateDatabaseRequest,
-                                      CreateTableRequest, RenameTableRequest)
+                                      CreateTableRequest, CreateTagRequest,
+                                      RenameBranchRequest,
+                                      RenameTableRequest)
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetFunctionResponse,
-                                       GetTableResponse, ListDatabasesResponse,
+                                       GetTableResponse, GetTagResponse,
+                                       ListBranchesResponse,
+                                       ListDatabasesResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
                                        ListPartitionsResponse, ListTablesResponse,
+                                       ListTagsResponse,
                                        PagedList, Partition,
                                        RESTResponse, ErrorResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
-from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
+from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
+                                                BranchNotExistException,
+                                                DatabaseNoPermissionException,
                                                 DatabaseNotExistException,
                                                 TableNoPermissionException,
                                                 TableNotExistException, DatabaseAlreadyExistException,
@@ -51,7 +58,9 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 FunctionNotExistException,
                                                 FunctionAlreadyExistException,
                                                 DefinitionAlreadyExistException,
-                                                DefinitionNotExistException)
+                                                DefinitionNotExistException,
+                                                TagNotExistException,
+                                                TagAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
@@ -72,6 +81,7 @@ TABLE_TYPE = "tableType"
 VIEW_NAME_PATTERN = "viewNamePattern"
 FUNCTION_NAME_PATTERN = "functionNamePattern"
 PARTITION_NAME_PATTERN = "partitionNamePattern"
+TAG_NAME_PREFIX = "tagNamePrefix"
 MAX_RESULTS = "maxResults"
 PAGE_TOKEN = "pageToken"
 
@@ -205,6 +215,10 @@ class RESTCatalogServer:
         self.table_latest_snapshot_store: Dict[str, str] = {}
         self.table_partitions_store: Dict[str, List] = {}
         self.function_store: Dict[str, Dict] = {}  # key: "db.func_name", value: GetFunctionResponse-like dict
+        # Tag store: key = full table name, value = {tag_name: GetTagResponse}.
+        self.tag_store: Dict[str, Dict[str, GetTagResponse]] = {}
+        # Branch store: key = full table name, value = set of branch names.
+        self.branch_store: Dict[str, set] = {}
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
         self.table_token_store: Dict[str, "RESTToken"] = {}
@@ -466,6 +480,26 @@ class RESTCatalogServer:
                 ErrorResponse.RESOURCE_TYPE_FUNCTION, e.identifier.get_full_name(), str(e), 409
             )
             return self._mock_response(response, 409)
+        except TagNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TAG, e.tag, str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except TagAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TAG, e.tag, str(e), 409
+            )
+            return self._mock_response(response, 409)
+        except BranchNotExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_BRANCH, e.branch, str(e), 404
+            )
+            return self._mock_response(response, 404)
+        except BranchAlreadyExistException as e:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_BRANCH, e.branch, str(e), 409
+            )
+            return self._mock_response(response, 409)
         except DefinitionAlreadyExistException as e:
             response = ErrorResponse(
                 ErrorResponse.RESOURCE_TYPE_DEFINITION, e.name, str(e), 409
@@ -484,25 +518,16 @@ class RESTCatalogServer:
     def _handle_table_resource(self, method: str, path_parts: List[str],
                                identifier: Identifier, data: str,
                                parameters: Dict[str, str]) -> Tuple[str, int]:
-        """Handle table-specific resource requests"""
-        # Extract table name and check for branch information
-        raw_table_name = path_parts[2]
-
-        # Parse table name with potential branch (e.g., "table.main" -> "table", branch="main")
-        if '.' in raw_table_name and len(raw_table_name.split('.')) > 1:
-            # This might be a table with branch
-            table_parts = raw_table_name.split('.')
-            if len(table_parts) == 2:
-                table_name_part = table_parts[0]
-                branch_part = table_parts[1]
-                # Recreate identifier without branch for lookup
-                lookup_identifier = Identifier.create(identifier.get_database_name(), table_name_part)
-            else:
-                lookup_identifier = identifier
-                branch_part = None
+        """Handle table-specific resource requests."""
+        # The branch (if any) is encoded into the object name as
+        # "$branch_<name>" — see Identifier. Strip it for table lookup, and
+        # surface the branch separately for routes that care (e.g. commit).
+        branch_part = identifier.get_branch_name()
+        if branch_part is not None:
+            lookup_identifier = Identifier.create(
+                identifier.get_database_name(), identifier.get_table_name())
         else:
             lookup_identifier = identifier
-            branch_part = None
 
         # Check table permissions using the base identifier
         if lookup_identifier.get_full_name() in self.no_permission_tables:
@@ -524,8 +549,26 @@ class RESTCatalogServer:
                 return self._table_snapshot_handle(method, lookup_identifier)
             elif operation == ResourcePaths.PARTITIONS:
                 return self._table_partitions_handle(method, lookup_identifier, parameters)
+            elif operation == ResourcePaths.TAGS:
+                return self._tags_handle(method, data, lookup_identifier, parameters)
+            elif operation == ResourcePaths.BRANCHES:
+                return self._branches_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+        elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
+            tag_name = RESTUtil.decode_string(path_parts[4])
+            return self._tag_handle(method, lookup_identifier, tag_name)
+        elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.BRANCHES:
+            branch_name = RESTUtil.decode_string(path_parts[4])
+            return self._branch_handle(method, lookup_identifier, branch_name)
+        elif len(path_parts) == 6 and path_parts[3] == ResourcePaths.BRANCHES:
+            branch_name = RESTUtil.decode_string(path_parts[4])
+            sub = path_parts[5]
+            if sub == ResourcePaths.RENAME:
+                return self._branch_rename_handle(method, data, lookup_identifier, branch_name)
+            if sub == ResourcePaths.FORWARD:
+                return self._branch_forward_handle(method, lookup_identifier, branch_name)
+            return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
     # ======================= Function Handlers ===============================
@@ -721,6 +764,153 @@ class RESTCatalogServer:
 
         partitions = self._list_partitions(identifier, parameters)
         return self._generate_final_list_partitions_response(parameters, partitions)
+
+    # ======================= Tag Handlers ====================================
+
+    def _tags_handle(self, method: str, data: str, identifier: Identifier,
+                     parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle the table-scoped tags collection (POST create / GET list-paged)."""
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        if method == "POST":
+            request = JSON.from_json(data, CreateTagRequest)
+            store = self.tag_store.setdefault(identifier.get_full_name(), {})
+            if request.tag_name in store:
+                raise TagAlreadyExistException(request.tag_name)
+            snapshot = self._resolve_tag_snapshot(identifier, request.snapshot_id)
+            store[request.tag_name] = GetTagResponse(
+                tag_name=request.tag_name,
+                snapshot=snapshot,
+                tag_create_time=int(time.time() * 1000),
+                tag_time_retained=request.time_retained,
+            )
+            return self._mock_response("", 200)
+
+        if method == "GET":
+            tags = list(self.tag_store.get(identifier.get_full_name(), {}).keys())
+            tag_name_prefix = parameters.get(TAG_NAME_PREFIX)
+            if tag_name_prefix:
+                tags = [t for t in tags if t.startswith(tag_name_prefix)]
+            if tags:
+                max_results = self._get_max_results(parameters)
+                page_token = parameters.get(PAGE_TOKEN)
+                paged = self._build_paged_entities(tags, max_results, page_token)
+                response = ListTagsResponse(
+                    tags=paged.elements, next_page_token=paged.next_page_token)
+            else:
+                response = ListTagsResponse(tags=[], next_page_token=None)
+            return self._mock_response(response, 200)
+
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _tag_handle(self, method: str, identifier: Identifier,
+                    tag_name: str) -> Tuple[str, int]:
+        """Handle a single tag (GET / DELETE)."""
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+        store = self.tag_store.get(identifier.get_full_name(), {})
+
+        if method == "GET":
+            if tag_name not in store:
+                raise TagNotExistException(tag_name)
+            return self._mock_response(store[tag_name], 200)
+        if method == "DELETE":
+            if tag_name not in store:
+                raise TagNotExistException(tag_name)
+            del store[tag_name]
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _resolve_tag_snapshot(self, identifier: Identifier,
+                              snapshot_id: Optional[int]):
+        """Look up the snapshot to embed in GetTagResponse.
+
+        When ``snapshot_id`` is None, fall back to the table's latest snapshot.
+        Mirrors Java behavior of ``TagManager`` resolving the latest snapshot
+        when no explicit id is supplied.
+        """
+        try:
+            table = self._get_file_table(identifier)
+            snapshot_manager = table.snapshot_manager()
+            if snapshot_id is None:
+                return snapshot_manager.get_latest_snapshot()
+            return snapshot_manager.get_snapshot_by_id(snapshot_id)
+        except Exception:
+            return None
+
+    # ======================= Branch Handlers ================================
+
+    def _branches_handle(self, method: str, data: str,
+                         identifier: Identifier) -> Tuple[str, int]:
+        """Handle the table-scoped branches collection (POST create / GET list)."""
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        if method == "POST":
+            request = JSON.from_json(data, CreateBranchRequest)
+            # Mock simplification: ``from_tag`` existence is NOT validated here.
+            # The real Java REST server checks against TagManager and returns
+            # 404+TAG when the tag is missing. pypaimon's mock doesn't track
+            # tag-to-branch dependencies; a TODO for full validation lives
+            # with the Tag CRUD work in #7746.
+            store = self.branch_store.setdefault(identifier.get_full_name(), set())
+            if request.branch in store:
+                raise BranchAlreadyExistException(request.branch)
+            store.add(request.branch)
+            return self._mock_response("", 200)
+
+        if method == "GET":
+            store = self.branch_store.get(identifier.get_full_name(), set())
+            response = ListBranchesResponse(branches=sorted(store))
+            return self._mock_response(response, 200)
+
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _branch_handle(self, method: str, identifier: Identifier,
+                       branch_name: str) -> Tuple[str, int]:
+        """Handle a single branch DELETE."""
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+        store = self.branch_store.get(identifier.get_full_name(), set())
+
+        if method == "DELETE":
+            if branch_name not in store:
+                raise BranchNotExistException(branch_name)
+            store.discard(branch_name)
+            return self._mock_response("", 200)
+        return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _branch_rename_handle(self, method: str, data: str, identifier: Identifier,
+                              from_branch: str) -> Tuple[str, int]:
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        store = self.branch_store.setdefault(identifier.get_full_name(), set())
+        if from_branch not in store:
+            raise BranchNotExistException(from_branch)
+        request = JSON.from_json(data, RenameBranchRequest)
+        if request.to_branch in store:
+            raise BranchAlreadyExistException(request.to_branch)
+        store.discard(from_branch)
+        store.add(request.to_branch)
+        return self._mock_response("", 200)
+
+    def _branch_forward_handle(self, method: str, identifier: Identifier,
+                               branch_name: str) -> Tuple[str, int]:
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        store = self.branch_store.get(identifier.get_full_name(), set())
+        if branch_name not in store:
+            raise BranchNotExistException(branch_name)
+        # Mock no-op: real Java fast-forward moves the main branch ref to the
+        # target branch's snapshot. Mock just acknowledges the request.
+        return self._mock_response("", 200)
 
     def _databases_api_handler(self, method: str, data: str,
                                parameters: Dict[str, str]) -> Tuple[str, int]:

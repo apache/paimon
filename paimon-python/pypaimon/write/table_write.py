@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -77,6 +77,7 @@ class TableWrite:
         overwrite: bool = False,
         concurrency: Optional[int] = None,
         ray_remote_args: Optional[Dict[str, Any]] = None,
+        hash_fixed_precluster: str = "auto",
     ) -> None:
         """
         Write a Ray Dataset to Paimon table.
@@ -89,8 +90,18 @@ class TableWrite:
                 By default, dynamically decided based on available resources.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
+            hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
+                and ``"off"`` write append-only HASH_FIXED tables directly
+                and reject HASH_FIXED primary-key tables. ``"map_groups"``
+                preserves the legacy small-file optimization and its single
+                group memory bound for HASH_FIXED primary-key tables.
         """
+        from pypaimon.ray.shuffle import maybe_apply_repartition
         from pypaimon.write.ray_datasink import PaimonDatasink
+
+        dataset = maybe_apply_repartition(
+            dataset, self.table, hash_fixed_precluster)
+
         datasink = PaimonDatasink(self.table, overwrite=overwrite)
         dataset.write_datasink(
             datasink,

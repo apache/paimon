@@ -136,8 +136,7 @@ public class ClusteringFileRewriter {
                         pageSize,
                         maxNumFileHandles,
                         compression,
-                        MemorySize.MAX_VALUE,
-                        false);
+                        MemorySize.MAX_VALUE);
 
         try (RecordReader<KeyValue> reader = valueReaderFactory.createRecordReader(inputFile)) {
             try (CloseableIterator<KeyValue> iterator = reader.toCloseableIterator()) {

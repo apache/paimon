@@ -18,15 +18,12 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Optional;
 
 /** VectorSearch to perform vector similarity search. * */
 public class VectorSearch implements Serializable {
@@ -89,10 +86,6 @@ public class VectorSearch implements Serializable {
             return target;
         }
         return this;
-    }
-
-    public Optional<ScoredGlobalIndexResult> visit(GlobalIndexReader visitor) {
-        return visitor.visitVectorSearch(this);
     }
 
     @Override

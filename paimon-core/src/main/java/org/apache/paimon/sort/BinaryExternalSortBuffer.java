@@ -32,7 +32,6 @@ import org.apache.paimon.disk.FileChannelUtil;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -101,30 +100,9 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int pageSize,
             int maxNumFileHandles,
             CompressOptions compression,
-            MemorySize maxDiskSize,
-            boolean sequenceOrder) {
-        return create(
-                ioManager,
-                rowType,
-                keyFields,
-                new HeapMemorySegmentPool(bufferSize, pageSize),
-                maxNumFileHandles,
-                compression,
-                maxDiskSize,
-                sequenceOrder);
-    }
-
-    public static BinaryExternalSortBuffer create(
-            IOManager ioManager,
-            RowType rowType,
-            int[] keyFields,
-            MemorySegmentPool pool,
-            int maxNumFileHandles,
-            CompressOptions compression,
-            MemorySize maxDiskSize,
-            boolean sequenceOrder) {
-        RecordComparator comparator =
-                newRecordComparator(rowType.getFieldTypes(), keyFields, sequenceOrder);
+            MemorySize maxDiskSize) {
+        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
+        HeapMemorySegmentPool pool = new HeapMemorySegmentPool(bufferSize, pageSize);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
                         newNormalizedKeyComputer(rowType.getFieldTypes(), keyFields),
@@ -200,7 +178,11 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             }
             if (inMemorySortBuffer.isEmpty()) {
                 // did not fit in a fresh buffer, must be large...
-                throw new IOException("The record exceeds the maximum size of a sort buffer.");
+                throw new IOException(
+                        "The record exceeds the maximum size of a Paimon write sort buffer. "
+                                + "A single serialized record cannot fit into an empty write buffer. "
+                                + "Please check whether the input contains an oversized row, "
+                                + "or increase the table option 'write-buffer-size'.");
             } else {
                 spill();
 

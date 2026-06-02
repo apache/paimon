@@ -37,14 +37,28 @@ public class SparkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, merge the data schema and the table schema automatically before write data.");
+                            "If true, evolve the table schema to accept new columns from the incoming data. "
+                                    + "Existing column types are preserved and incoming values are cast to them; "
+                                    + "to also widen existing types, enable 'write.merge-schema.type-widening'.");
+
+    public static final ConfigOption<Boolean> TYPE_WIDENING =
+            key("write.merge-schema.type-widening")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Only effective when 'write.merge-schema' is true. "
+                                    + "If true, widen an existing column type when the incoming data has a wider "
+                                    + "compatible type (e.g. INT -> BIGINT, DECIMAL precision increase). "
+                                    + "Lossy changes are still rejected unless 'write.merge-schema.explicit-cast' is also true.");
 
     public static final ConfigOption<Boolean> EXPLICIT_CAST =
             key("write.merge-schema.explicit-cast")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, allow to merge data types if the two types meet the rules for explicit casting.");
+                            "Only effective when 'write.merge-schema.type-widening' is true. "
+                                    + "If true, also allow lossy type changes between compatible types "
+                                    + "(e.g. BIGINT -> INT, STRING -> DATE).");
 
     public static final ConfigOption<Boolean> USE_V2_WRITE =
             key("write.use-v2-write")

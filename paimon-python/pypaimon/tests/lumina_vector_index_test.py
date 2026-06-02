@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import ctypes
 import os
@@ -23,6 +22,9 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
+
+lumina_data = pytest.importorskip("lumina_data")
 from lumina_data import LuminaBuilder
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
@@ -96,7 +98,7 @@ class LuminaVectorIndexTest(unittest.TestCase):
                 options=paimon_options,
             ) as reader:
                 vs = VectorSearch(vector=raw[:dim], limit=5, field_name="embedding")
-                result = reader.visit_vector_search(vs)
+                result = reader.visit_vector_search(vs).result()
 
                 self.assertIsNotNone(result)
                 row_ids = result.results()
@@ -155,7 +157,7 @@ class LuminaVectorIndexTest(unittest.TestCase):
                 vector=raw[:dim], limit=3, field_name="embedding",
                 include_row_ids=include_ids,
             )
-            result = reader.visit_vector_search(vs)
+            result = reader.visit_vector_search(vs).result()
 
             self.assertIsNotNone(result)
             for row_id in result.results():

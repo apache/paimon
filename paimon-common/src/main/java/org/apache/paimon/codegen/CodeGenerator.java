@@ -39,6 +39,16 @@ public interface CodeGenerator {
             List<DataType> inputTypes, int[] sortFields);
 
     /**
+     * Generate a {@link NormalizedKeyComputer} with per-field ascending order control.
+     *
+     * @param inputTypes input types.
+     * @param sortFields the sort key fields.
+     * @param ascendingOrders per-field ascending order, must have the same length as sortFields.
+     */
+    GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders);
+
+    /**
      * Generate a {@link RecordComparator}.
      *
      * @param inputTypes input types.
@@ -48,6 +58,16 @@ public interface CodeGenerator {
      */
     GeneratedClass<RecordComparator> generateRecordComparator(
             List<DataType> inputTypes, int[] sortFields, boolean isAscendingOrder);
+
+    /**
+     * Generate a {@link RecordComparator} with per-field ascending order control.
+     *
+     * @param inputTypes input types.
+     * @param sortFields the sort key fields.
+     * @param ascendingOrders per-field ascending order, must have the same length as sortFields.
+     */
+    GeneratedClass<RecordComparator> generateRecordComparator(
+            List<DataType> inputTypes, int[] sortFields, boolean[] ascendingOrders);
 
     /** Generate a {@link RecordEqualiser} with fields. */
     GeneratedClass<RecordEqualiser> generateRecordEqualiser(

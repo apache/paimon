@@ -50,6 +50,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -92,6 +93,18 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         int[] sortFieldArray = sortFields.toArray();
 
+        // build per-field ascending orders:
+        // key fields -> ascending, uds fields -> based on config, sequence number -> ascending
+        int keyFieldCount = keyType.getFieldCount();
+        boolean udsAscending =
+                userDefinedSeqComparator == null || userDefinedSeqComparator.isAscendingOrder();
+        boolean[] ascendingOrders = new boolean[sortFieldArray.length];
+        Arrays.fill(ascendingOrders, true);
+        if (!udsAscending) {
+            int udsFieldCount = userDefinedSeqComparator.compareFields().length;
+            Arrays.fill(ascendingOrders, keyFieldCount, keyFieldCount + udsFieldCount, false);
+        }
+
         // row type
         List<DataType> fieldTypes = new ArrayList<>(keyType.getFieldTypes());
         fieldTypes.add(new BigIntType(false));
@@ -99,9 +112,9 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         fieldTypes.addAll(valueType.getFieldTypes());
 
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray);
+                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray, ascendingOrders);
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, true);
+                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, ascendingOrders);
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(

@@ -427,17 +427,20 @@ under the License.
             <modules>
                 <module>paimon-spark/paimon-spark4-common</module>
                 <module>paimon-spark/paimon-spark-4.0</module>
+                <module>paimon-spark/paimon-spark-4.1</module>
             </modules>
             <properties>
                 <target.java.version>17</target.java.version>
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
-                <scala.version>${scala213.version}</scala.version>
-                <paimon-spark-common.spark.version>4.0.2</paimon-spark-common.spark.version>
+                <!-- Spark 4.1.2 is built against Scala 2.13.17; force the same stdlib here so that
+                     `MurmurHash3.caseClassHash$default$2` and related APIs resolve at runtime. -->
+                <scala.version>2.13.17</scala.version>
+                <paimon-spark-common.spark.version>4.1.2</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
-                <test.spark.main.version>4.0</test.spark.main.version>
-                <test.spark.version>4.0.2</test.spark.version>
+                <test.spark.main.version>4.1</test.spark.main.version>
+                <test.spark.version>4.1.2</test.spark.version>
             </properties>
             <activation>
                 <property>
@@ -512,6 +515,31 @@ under the License.
             <activation>
                 <jdk>11</jdk>
             </activation>
+        </profile>
+
+        <profile>
+            <!-- JDK 9+ supports the ignore-source-errors flag for javadoc -->
+            <id>javadoc-jdk9+</id>
+            <activation>
+                <jdk>[9,)</jdk>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-javadoc-plugin</artifactId>
+                            <configuration>
+                                <release>8</release>
+                                <additionalJOptions combine.children="append">
+                                    <!-- Suppress the error that is accepted by JDK 8 but not by JDK 11. -->
+                                    <additionalJOption>--ignore-source-errors</additionalJOption>
+                                </additionalJOptions>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
         </profile>
 
         <profile>
@@ -612,12 +640,17 @@ under the License.
                         <!-- Generated content -->
                         <exclude>**/target/**</exclude>
                         <exclude>**/scalastyle-output.xml</exclude>
-                        <exclude>docs/resources/**</exclude>
-                        <exclude>docs/public/**</exclude>
-                        <exclude>docs/themes/book/**</exclude>
-                        <exclude>docs/assets/github.css</exclude>
-                        <exclude>docs/static/js/anchor.min.js</exclude>
-                        <exclude>docs/static/js/redoc.standalone.js</exclude>
+                        <exclude>docs/node_modules/**</exclude>
+                        <exclude>docs/build/**</exclude>
+                        <exclude>docs/.docusaurus/**</exclude>
+                        <exclude>docs/yarn.lock</exclude>
+                        <exclude>docs/**/*.js</exclude>
+                        <exclude>docs/**/*.jsx</exclude>
+                        <exclude>docs/**/*.json</exclude>
+                        <exclude>docs/**/*.css</exclude>
+                        <exclude>docs/**/*.mdx</exclude>
+                        <exclude>docs/generated/**</exclude>
+                        <exclude>docs/static/**</exclude>
                         <exclude>**/*.svg</exclude>
                         <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->
@@ -1046,12 +1079,10 @@ under the License.
                     <configuration>
                         <quiet>true</quiet>
                         <detectOfflineLinks>false</detectOfflineLinks>
-                        <release>8</release>
+                        <source>8</source>
                         <failOnError>false</failOnError>
                         <additionalJOptions>
                             <additionalJOption>-Xdoclint:none</additionalJOption>
-                            <!-- Suppress the error that is accepted by JDK 8 but not by JDK 11. -->
-                            <additionalJOption>--ignore-source-errors</additionalJOption>
                         </additionalJOptions>
                     </configuration>
                 </plugin>
@@ -1136,6 +1167,14 @@ under the License.
                 </plugin>
             </plugins>
         </pluginManagement>
+
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
     </build>
 
     <!--

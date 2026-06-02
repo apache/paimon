@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """
 SQL commands for Paimon CLI.
@@ -25,6 +25,8 @@ import os
 import re
 import sys
 import time
+
+import pyarrow as pa
 
 _PAIMON_BANNER = r"""
     ____        _
@@ -131,7 +133,7 @@ def cmd_sql(args):
     config = load_catalog_config(config_path)
 
     try:
-        from pypaimon.sql.sql_context import SQLContext
+        from pypaimon_rust.datafusion import SQLContext
         catalog_options = {str(k): str(v) for k, v in config.items()}
         ctx = SQLContext()
         ctx.register_catalog("paimon", catalog_options)
@@ -151,12 +153,15 @@ def cmd_sql(args):
 def _execute_query(ctx, query, output_format):
     """Execute a single SQL query and print the result."""
     try:
-        table = ctx.sql(query)
+        batches = ctx.sql(query)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    _print_table(table, output_format)
+    if batches:
+        _print_table(pa.Table.from_batches(batches), output_format)
+    else:
+        print("OK")
 
 
 def _print_table(table, output_format, elapsed=None):
@@ -255,9 +260,12 @@ def _interactive_repl(ctx, output_format):
 
             try:
                 start = time.time()
-                table = ctx.sql(query)
+                batches = ctx.sql(query)
                 elapsed = time.time() - start
-                _print_table(table, output_format, elapsed)
+                if batches:
+                    _print_table(pa.Table.from_batches(batches), output_format, elapsed)
+                else:
+                    print(f"OK ({elapsed:.2f}s)")
                 print()
             except Exception as e:
                 print(f"Error: {e}\n", file=sys.stderr)

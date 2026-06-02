@@ -21,8 +21,9 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.DataEvolutionSplitRead.BlobFileBunch;
 import org.apache.paimon.operation.DataEvolutionSplitRead.FieldBunch;
-import org.apache.paimon.operation.DataEvolutionSplitRead.SpecialFieldBunch;
+import org.apache.paimon.operation.DataEvolutionSplitRead.VectorFileBunch;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -42,150 +43,149 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link SpecialFieldBunch}. */
+/** Tests for blob and vector field bunches. */
 public class DataEvolutionReadTest {
 
-    private SpecialFieldBunch blobBunch;
+    private VectorFileBunch vectorBunch;
 
     @BeforeEach
     public void setUp() {
-        blobBunch = new SpecialFieldBunch(Long.MAX_VALUE, false);
+        vectorBunch = new VectorFileBunch(Long.MAX_VALUE, false);
     }
 
     @Test
-    public void testAddSingleBlobEntry() {
-        DataFileMeta blobEntry = createBlobFile("blob1", 0L, 100L, 1L);
+    public void testAddSingleVectorEntry() {
+        DataFileMeta vectorEntry = createVectorFile("vector1", 0L, 100L, 1L);
 
-        blobBunch.add(blobEntry);
+        vectorBunch.add(vectorEntry);
 
-        assertThat(blobBunch.files).hasSize(1);
-        assertThat(blobBunch.files.get(0)).isEqualTo(blobEntry);
-        assertThat(blobBunch.rowCount()).isEqualTo(100);
-        assertThat(blobBunch.files.get(0).firstRowId()).isEqualTo(0);
-        assertThat(blobBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("blob_col"));
+        assertThat(vectorBunch.files).hasSize(1);
+        assertThat(vectorBunch.files.get(0)).isEqualTo(vectorEntry);
+        assertThat(vectorBunch.rowCount()).isEqualTo(100);
+        assertThat(vectorBunch.files.get(0).firstRowId()).isEqualTo(0);
+        assertThat(vectorBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("vector_col"));
     }
 
     @Test
-    public void testAddBlobEntryAndTail() {
-        DataFileMeta blobEntry = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobTail = createBlobFile("blob2", 100, 200, 1);
+    public void testAddVectorEntryAndTail() {
+        DataFileMeta vectorEntry = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorTail = createVectorFile("vector2", 100, 200, 1);
 
-        blobBunch.add(blobEntry);
-        blobBunch.add(blobTail);
+        vectorBunch.add(vectorEntry);
+        vectorBunch.add(vectorTail);
 
-        assertThat(blobBunch.files).hasSize(2);
-        assertThat(blobBunch.files.get(0)).isEqualTo(blobEntry);
-        assertThat(blobBunch.files.get(1)).isEqualTo(blobTail);
-        assertThat(blobBunch.rowCount()).isEqualTo(300);
-        assertThat(blobBunch.files.get(0).firstRowId()).isEqualTo(0);
-        assertThat(blobBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("blob_col"));
-        assertThat(blobBunch.files.get(0).schemaId()).isEqualTo(0L);
+        assertThat(vectorBunch.files).hasSize(2);
+        assertThat(vectorBunch.files.get(0)).isEqualTo(vectorEntry);
+        assertThat(vectorBunch.files.get(1)).isEqualTo(vectorTail);
+        assertThat(vectorBunch.rowCount()).isEqualTo(300);
+        assertThat(vectorBunch.files.get(0).firstRowId()).isEqualTo(0);
+        assertThat(vectorBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("vector_col"));
+        assertThat(vectorBunch.files.get(0).schemaId()).isEqualTo(0L);
     }
 
     @Test
-    public void testAddNonBlobFileThrowsException() {
+    public void testAddNonVectorFileThrowsException() {
         DataFileMeta normalFile = createNormalFile("normal1.parquet", 0, 100, 1, 0L);
 
-        assertThatThrownBy(() -> blobBunch.add(normalFile))
+        assertThatThrownBy(() -> vectorBunch.add(normalFile))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Only blob/vector-store file can be added to this bunch.");
+                .hasMessage("Only vector-store file can be added to this bunch.");
     }
 
     @Test
-    public void testAddBlobFileWithSameFirstRowId() {
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 0, 50, 2);
+    public void testAddVectorFileWithSameFirstRowId() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 0, 50, 2);
 
-        blobBunch.add(blobEntry1);
+        vectorBunch.add(vectorEntry1);
         // Adding file with same firstRowId but higher sequence number should throw exception
-        assertThatThrownBy(() -> blobBunch.add(blobEntry2))
+        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        "Blob/vector-store file with same first row id should have decreasing sequence number.");
+                        "Vector file with same first row id should have decreasing sequence number.");
     }
 
     @Test
-    public void testAddBlobFileWithSameFirstRowIdAndLowerSequenceNumber() {
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 2);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 0, 50, 1);
+    public void testAddVectorFileWithSameFirstRowIdAndLowerSequenceNumber() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 2);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 0, 50, 1);
 
-        blobBunch.add(blobEntry1);
+        vectorBunch.add(vectorEntry1);
         // Adding file with same firstRowId and lower sequence number should be ignored
-        blobBunch.add(blobEntry2);
+        vectorBunch.add(vectorEntry2);
 
-        assertThat(blobBunch.files).hasSize(1);
-        assertThat(blobBunch.files.get(0)).isEqualTo(blobEntry1);
+        assertThat(vectorBunch.files).hasSize(1);
+        assertThat(vectorBunch.files.get(0)).isEqualTo(vectorEntry1);
     }
 
     @Test
-    public void testAddBlobFileWithOverlappingRowId() {
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 2);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 50, 150, 1);
+    public void testAddVectorFileWithOverlappingRowId() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 2);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 50, 150, 1);
 
-        blobBunch.add(blobEntry1);
+        vectorBunch.add(vectorEntry1);
         // Adding file with overlapping row id and lower sequence number should be ignored
-        blobBunch.add(blobEntry2);
+        vectorBunch.add(vectorEntry2);
 
-        assertThat(blobBunch.files).hasSize(1);
-        assertThat(blobBunch.files.get(0)).isEqualTo(blobEntry1);
+        assertThat(vectorBunch.files).hasSize(1);
+        assertThat(vectorBunch.files.get(0)).isEqualTo(vectorEntry1);
     }
 
     @Test
-    public void testAddBlobFileWithOverlappingRowIdAndHigherSequenceNumber() {
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 50, 150, 2);
+    public void testAddVectorFileWithOverlappingRowIdAndHigherSequenceNumber() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 50, 150, 2);
 
-        blobBunch.add(blobEntry1);
+        vectorBunch.add(vectorEntry1);
         // Adding file with overlapping row id and higher sequence number should throw exception
-        assertThatThrownBy(() -> blobBunch.add(blobEntry2))
+        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        "Blob/vector-store file with overlapping row id should have decreasing sequence number.");
+                        "Vector file with overlapping row id should have decreasing sequence number.");
     }
 
     @Test
-    public void testAddBlobFileWithNonContinuousRowId() {
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 200, 300, 1);
+    public void testAddVectorFileWithNonContinuousRowId() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 200, 300, 1);
 
-        blobBunch.add(blobEntry1);
+        vectorBunch.add(vectorEntry1);
         // Adding file with non-continuous row id should throw exception
-        assertThatThrownBy(() -> blobBunch.add(blobEntry2))
+        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        "Blob/vector-store file first row id should be continuous, expect 100 but got 200");
+                        "Vector file first row id should be continuous, expect 100 but got 200");
     }
 
     @Test
-    public void testAddBlobFileWithDifferentWriteCols() {
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobEntry2 =
-                createBlobFileWithCols("blob2", 100, 200, 1, Arrays.asList("different_col"));
+    public void testAddVectorFileWithDifferentWriteCols() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorEntry2 =
+                createVectorFileWithCols("vector2", 100, 200, 1, Arrays.asList("different_col"));
 
-        blobBunch.add(blobEntry1);
+        vectorBunch.add(vectorEntry1);
         // Adding file with different write columns should throw exception
-        assertThatThrownBy(() -> blobBunch.add(blobEntry2))
+        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("All files in this bunch should have the same write columns.");
     }
 
     @Test
-    public void testComplexBlobBunchScenario() {
-        // Create a complex scenario with multiple blob entries and a tail
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 100, 200, 1);
-        DataFileMeta blobEntry3 = createBlobFile("blob3", 300, 300, 1);
-        DataFileMeta blobTail = createBlobFile("blob4", 600, 400, 1);
+    public void testComplexVectorBunchScenario() {
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 100, 200, 1);
+        DataFileMeta vectorEntry3 = createVectorFile("vector3", 300, 300, 1);
+        DataFileMeta vectorTail = createVectorFile("vector4", 600, 400, 1);
 
-        blobBunch.add(blobEntry1);
-        blobBunch.add(blobEntry2);
-        blobBunch.add(blobEntry3);
-        blobBunch.add(blobTail);
+        vectorBunch.add(vectorEntry1);
+        vectorBunch.add(vectorEntry2);
+        vectorBunch.add(vectorEntry3);
+        vectorBunch.add(vectorTail);
 
-        assertThat(blobBunch.files).hasSize(4);
-        assertThat(blobBunch.rowCount()).isEqualTo(1000);
-        assertThat(blobBunch.files.get(0).firstRowId()).isEqualTo(0);
-        assertThat(blobBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("blob_col"));
+        assertThat(vectorBunch.files).hasSize(4);
+        assertThat(vectorBunch.rowCount()).isEqualTo(1000);
+        assertThat(vectorBunch.files.get(0).firstRowId()).isEqualTo(0);
+        assertThat(vectorBunch.files.get(0).writeCols()).isEqualTo(Arrays.asList("vector_col"));
     }
 
     @Test
@@ -209,26 +209,31 @@ public class DataEvolutionReadTest {
 
         List<DataFileMeta> batch = batches.get(0);
 
-        assertThat(batch.get(1).fileName()).contains("blob5"); // pick
-        assertThat(batch.get(2).fileName()).contains("blob2"); // skip
-        assertThat(batch.get(3).fileName()).contains("blob1"); // skip
-        assertThat(batch.get(4).fileName()).contains("blob9"); // pick
-        assertThat(batch.get(5).fileName()).contains("blob6"); // skip
-        assertThat(batch.get(6).fileName()).contains("blob3"); // skip
-        assertThat(batch.get(7).fileName()).contains("blob7"); // pick
-        assertThat(batch.get(8).fileName()).contains("blob4"); // skip
-        assertThat(batch.get(9).fileName()).contains("blob8"); // pick
+        assertThat(batch.get(1).fileName()).contains("blob5");
+        assertThat(batch.get(2).fileName()).contains("blob2");
+        assertThat(batch.get(3).fileName()).contains("blob1");
+        assertThat(batch.get(4).fileName()).contains("blob9");
+        assertThat(batch.get(5).fileName()).contains("blob6");
+        assertThat(batch.get(6).fileName()).contains("blob3");
+        assertThat(batch.get(7).fileName()).contains("blob7");
+        assertThat(batch.get(8).fileName()).contains("blob4");
+        assertThat(batch.get(9).fileName()).contains("blob8");
 
         List<FieldBunch> fieldBunches =
                 splitFieldBunches(batch, file -> makeBlobRowType(file.writeCols(), f -> 0));
         assertThat(fieldBunches.size()).isEqualTo(2);
 
-        SpecialFieldBunch blobBunch = (SpecialFieldBunch) fieldBunches.get(1);
-        assertThat(blobBunch.files).hasSize(4);
+        BlobFileBunch blobBunch = (BlobFileBunch) fieldBunches.get(1);
+        assertThat(blobBunch.files).hasSize(9);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
-        assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
-        assertThat(blobBunch.files.get(2).fileName()).contains("blob7");
-        assertThat(blobBunch.files.get(3).fileName()).contains("blob8");
+        assertThat(blobBunch.files.get(1).fileName()).contains("blob2");
+        assertThat(blobBunch.files.get(2).fileName()).contains("blob1");
+        assertThat(blobBunch.files.get(3).fileName()).contains("blob9");
+        assertThat(blobBunch.files.get(4).fileName()).contains("blob6");
+        assertThat(blobBunch.files.get(5).fileName()).contains("blob3");
+        assertThat(blobBunch.files.get(6).fileName()).contains("blob7");
+        assertThat(blobBunch.files.get(7).fileName()).contains("blob4");
+        assertThat(blobBunch.files.get(8).fileName()).contains("blob8");
     }
 
     @Test
@@ -275,19 +280,44 @@ public class DataEvolutionReadTest {
                         batch, file -> makeBlobRowType(file.writeCols(), String::hashCode));
         assertThat(fieldBunches.size()).isEqualTo(3);
 
-        SpecialFieldBunch blobBunch = (SpecialFieldBunch) fieldBunches.get(1);
-        assertThat(blobBunch.files).hasSize(4);
+        BlobFileBunch blobBunch = (BlobFileBunch) fieldBunches.get(1);
+        assertThat(blobBunch.files).hasSize(9);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
-        assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
-        assertThat(blobBunch.files.get(2).fileName()).contains("blob7");
-        assertThat(blobBunch.files.get(3).fileName()).contains("blob8");
+        assertThat(blobBunch.files.get(1).fileName()).contains("blob2");
+        assertThat(blobBunch.files.get(2).fileName()).contains("blob1");
+        assertThat(blobBunch.files.get(3).fileName()).contains("blob9");
+        assertThat(blobBunch.files.get(4).fileName()).contains("blob6");
+        assertThat(blobBunch.files.get(5).fileName()).contains("blob3");
+        assertThat(blobBunch.files.get(6).fileName()).contains("blob7");
+        assertThat(blobBunch.files.get(7).fileName()).contains("blob4");
+        assertThat(blobBunch.files.get(8).fileName()).contains("blob8");
 
-        blobBunch = (SpecialFieldBunch) fieldBunches.get(2);
-        assertThat(blobBunch.files).hasSize(4);
+        blobBunch = (BlobFileBunch) fieldBunches.get(2);
+        assertThat(blobBunch.files).hasSize(9);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob15");
-        assertThat(blobBunch.files.get(1).fileName()).contains("blob19");
-        assertThat(blobBunch.files.get(2).fileName()).contains("blob17");
-        assertThat(blobBunch.files.get(3).fileName()).contains("blob18");
+        assertThat(blobBunch.files.get(1).fileName()).contains("blob12");
+        assertThat(blobBunch.files.get(2).fileName()).contains("blob11");
+        assertThat(blobBunch.files.get(3).fileName()).contains("blob19");
+        assertThat(blobBunch.files.get(4).fileName()).contains("blob16");
+        assertThat(blobBunch.files.get(5).fileName()).contains("blob13");
+        assertThat(blobBunch.files.get(6).fileName()).contains("blob17");
+        assertThat(blobBunch.files.get(7).fileName()).contains("blob14");
+        assertThat(blobBunch.files.get(8).fileName()).contains("blob18");
+    }
+
+    @Test
+    public void testBlobOnlySplitWithMultipleBlobFields() {
+        List<DataFileMeta> files = new ArrayList<>();
+        files.add(createBlobFileWithCols("blob1", 0, 100, 1, Collections.singletonList("blobc1")));
+        files.add(createBlobFileWithCols("blob2", 0, 100, 1, Collections.singletonList("blobc2")));
+
+        List<FieldBunch> fieldBunches =
+                splitFieldBunches(
+                        files, file -> makeBlobRowType(file.writeCols(), String::hashCode));
+
+        assertThat(fieldBunches).hasSize(2);
+        assertThat(fieldBunches.get(0).rowCount()).isEqualTo(100);
+        assertThat(fieldBunches.get(1).rowCount()).isEqualTo(100);
     }
 
     /** Creates a blob file with the specified parameters. */
@@ -357,8 +387,81 @@ public class DataEvolutionReadTest {
                 writeCols);
     }
 
+    private DataFileMeta createVectorFile(
+            String fileName, long firstRowId, long rowCount, long maxSequenceNumber) {
+        return createVectorFileWithCols(
+                fileName, firstRowId, rowCount, maxSequenceNumber, Arrays.asList("vector_col"));
+    }
+
+    private DataFileMeta createVectorFileWithSchema(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSequenceNumber,
+            long schemaId) {
+        return createFile(
+                fileName + ".vector.avro",
+                firstRowId,
+                rowCount,
+                maxSequenceNumber,
+                schemaId,
+                Arrays.asList("vector_col"));
+    }
+
+    private DataFileMeta createVectorFileWithCols(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSequenceNumber,
+            List<String> writeCols) {
+        return createFile(
+                fileName + ".vector.avro", firstRowId, rowCount, maxSequenceNumber, 0L, writeCols);
+    }
+
+    private DataFileMeta createFile(
+            String fileName,
+            long firstRowId,
+            long rowCount,
+            long maxSequenceNumber,
+            long schemaId,
+            List<String> writeCols) {
+        return DataFileMeta.create(
+                fileName,
+                rowCount,
+                rowCount,
+                DataFileMeta.EMPTY_MIN_KEY,
+                DataFileMeta.EMPTY_MAX_KEY,
+                SimpleStats.EMPTY_STATS,
+                SimpleStats.EMPTY_STATS,
+                0,
+                maxSequenceNumber,
+                schemaId,
+                DataFileMeta.DUMMY_LEVEL,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(System.currentTimeMillis()),
+                rowCount,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                firstRowId,
+                writeCols);
+    }
+
+    @Test
+    void testAddVectorFilesWithDifferentSchemaId() {
+        DataFileMeta vectorEntry1 = createVectorFileWithSchema("vector1", 0, 100, 1, 0L);
+        DataFileMeta vectorEntry2 = createVectorFileWithSchema("vector2", 100, 200, 1, 1L);
+
+        vectorBunch.add(vectorEntry1);
+        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("All files in this bunch should have the same schema id.");
+    }
+
     @Test
     void testAddBlobFilesWithDifferentSchemaId() {
+        BlobFileBunch blobBunch = new BlobFileBunch(300, false);
         DataFileMeta blobEntry1 = createBlobFileWithSchema("blob1", 0, 100, 1, 0L);
         DataFileMeta blobEntry2 = createBlobFileWithSchema("blob2", 100, 200, 1, 1L);
 
@@ -373,24 +476,24 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testRowIdPushDown() {
-        SpecialFieldBunch blobBunch = new SpecialFieldBunch(Long.MAX_VALUE, true);
-        DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        DataFileMeta blobEntry2 = createBlobFile("blob2", 200, 300, 1);
-        blobBunch.add(blobEntry1);
-        SpecialFieldBunch finalBlobBunch = blobBunch;
-        DataFileMeta finalBlobEntry = blobEntry2;
-        assertThatCode(() -> finalBlobBunch.add(finalBlobEntry)).doesNotThrowAnyException();
+        VectorFileBunch vectorBunch = new VectorFileBunch(Long.MAX_VALUE, true);
+        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        DataFileMeta vectorEntry2 = createVectorFile("vector2", 200, 300, 1);
+        vectorBunch.add(vectorEntry1);
+        VectorFileBunch finalVectorBunch = vectorBunch;
+        DataFileMeta finalVectorEntry = vectorEntry2;
+        assertThatCode(() -> finalVectorBunch.add(finalVectorEntry)).doesNotThrowAnyException();
 
-        blobBunch = new SpecialFieldBunch(Long.MAX_VALUE, true);
-        blobEntry1 = createBlobFile("blob1", 0, 100, 1);
-        blobEntry2 = createBlobFile("blob2", 50, 200, 2);
-        blobBunch.add(blobEntry1);
-        blobBunch.add(blobEntry2);
-        assertThat(blobBunch.files).containsExactlyInAnyOrder(blobEntry2);
+        vectorBunch = new VectorFileBunch(Long.MAX_VALUE, true);
+        vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
+        vectorEntry2 = createVectorFile("vector2", 50, 200, 2);
+        vectorBunch.add(vectorEntry1);
+        vectorBunch.add(vectorEntry2);
+        assertThat(vectorBunch.files).containsExactlyInAnyOrder(vectorEntry2);
 
-        SpecialFieldBunch finalBlobBunch2 = blobBunch;
-        DataFileMeta blobEntry3 = createBlobFile("blob2", 250, 100, 2);
-        assertThatCode(() -> finalBlobBunch2.add(blobEntry3)).doesNotThrowAnyException();
+        VectorFileBunch finalVectorBunch2 = vectorBunch;
+        DataFileMeta vectorEntry3 = createVectorFile("vector2", 250, 100, 2);
+        assertThatCode(() -> finalVectorBunch2.add(vectorEntry3)).doesNotThrowAnyException();
     }
 
     /** Creates a normal (non-blob) file for testing. */

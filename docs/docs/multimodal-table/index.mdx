@@ -1,0 +1,47 @@
+---
+title: "Multimodal Table"
+sidebar_position: 4
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Overview
+
+Multimodal Table extends the Append Table with capabilities for storing and querying multimodal data — images, videos,
+audio, vectors, and full-text content — all within a single table. It is built on top of the
+[Data Evolution](./data-evolution) mode, which enables efficient partial column updates and schema evolution without
+rewriting entire data files.
+
+Key capabilities:
+
+- **[Data Evolution](./data-evolution)**: Update partial columns without rewriting entire files, enabling efficient schema evolution.
+- **[Blob Storage](./blob)**: Store large binary objects (images, videos, audio) in dedicated `.blob` files with efficient column projection.
+- **[Vector Storage](./vector)**: Store and manage vector embeddings in dedicated Vortex-format files optimized for vector workloads.
+- **[Global Index](./global-index)**: Build BTree, vector (DiskANN), and full-text (Tantivy) indexes for efficient lookups and similarity search.
+
+All multimodal features require the following table properties:
+
+```sql
+'row-tracking.enabled' = 'true',
+'data-evolution.enabled' = 'true'
+```

@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 from typing import Callable, Dict, List, Optional, Union
@@ -22,19 +22,23 @@ import re
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest,
                                       AlterTableRequest, CommitTableRequest,
-                                      CreateDatabaseRequest, CreateFunctionRequest,
-                                      CreateTableRequest, RenameTableRequest,
+                                      CreateBranchRequest, CreateDatabaseRequest,
+                                      CreateFunctionRequest, CreateTableRequest,
+                                      CreateTagRequest, ForwardBranchRequest,
+                                      RenameBranchRequest, RenameTableRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
                                        GetTableResponse,
-                                       GetTableTokenResponse,
+                                       GetTableTokenResponse, GetTagResponse,
+                                       ListBranchesResponse,
                                        ListDatabasesResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
                                        ListPartitionsResponse,
-                                       ListTablesResponse, PagedList,
+                                       ListTablesResponse, ListTagsResponse,
+                                       PagedList,
                                        PagedResponse, GetTableSnapshotResponse,
                                        Partition)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
@@ -59,6 +63,7 @@ class RESTApi:
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
+    TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     # Function name validation pattern
@@ -435,6 +440,119 @@ class RESTApi:
 
         partitions = response.data() or []
         return PagedList(partitions, response.get_next_page_token())
+
+    # Tag CRUD wrappers — mirror Java RESTApi tag methods.
+    def create_tag(
+            self,
+            identifier: Identifier,
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+    ) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = CreateTagRequest(
+            tag_name=tag_name,
+            snapshot_id=snapshot_id,
+            time_retained=time_retained,
+        )
+        self.client.post(
+            self.resource_paths.tags(database_name, table_name),
+            request,
+            self.rest_auth_function,
+        )
+
+    def get_tag(self, identifier: Identifier, tag_name: str) -> GetTagResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+        return self.client.get(
+            self.resource_paths.tag(database_name, table_name, tag_name),
+            GetTagResponse,
+            self.rest_auth_function,
+        )
+
+    def list_tags_paged(
+            self,
+            identifier: Identifier,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            tag_name_prefix: Optional[str] = None,
+    ) -> PagedList[str]:
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get_with_params(
+            self.resource_paths.tags(database_name, table_name),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {self.TAG_NAME_PREFIX: tag_name_prefix},
+            ),
+            ListTagsResponse,
+            self.rest_auth_function,
+        )
+        tags = response.data() or []
+        return PagedList(tags, response.get_next_page_token())
+
+    def delete_tag(self, identifier: Identifier, tag_name: str) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        self.client.delete(
+            self.resource_paths.tag(database_name, table_name, tag_name),
+            self.rest_auth_function,
+        )
+
+    # Branch CRUD wrappers — mirror Java RESTApi branch methods.
+    def create_branch(
+            self,
+            identifier: Identifier,
+            branch_name: str,
+            tag_name: Optional[str] = None,
+    ) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not branch_name or not branch_name.strip():
+            raise ValueError("Branch name cannot be empty")
+        request = CreateBranchRequest(branch=branch_name, from_tag=tag_name)
+        self.client.post(
+            self.resource_paths.branches(database_name, table_name),
+            request,
+            self.rest_auth_function,
+        )
+
+    def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        self.client.delete(
+            self.resource_paths.branch(database_name, table_name, branch_name),
+            self.rest_auth_function,
+        )
+
+    def rename_branch(
+            self,
+            identifier: Identifier,
+            from_branch: str,
+            to_branch: str,
+    ) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not to_branch or not to_branch.strip():
+            raise ValueError("Target branch name cannot be empty")
+        request = RenameBranchRequest(to_branch=to_branch)
+        self.client.post(
+            self.resource_paths.rename_branch(database_name, table_name, from_branch),
+            request,
+            self.rest_auth_function,
+        )
+
+    def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
+        database_name, table_name = self.__validate_identifier(identifier)
+        self.client.post(
+            self.resource_paths.forward_branch(database_name, table_name, branch_name),
+            ForwardBranchRequest(),
+            self.rest_auth_function,
+        )
+
+    def list_branches(self, identifier: Identifier) -> List[str]:
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get(
+            self.resource_paths.branches(database_name, table_name),
+            ListBranchesResponse,
+            self.rest_auth_function,
+        )
+        return response.branches or []
 
     @staticmethod
     def is_valid_function_name(name: str) -> bool:

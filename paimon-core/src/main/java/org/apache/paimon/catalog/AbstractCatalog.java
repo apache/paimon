@@ -21,10 +21,13 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.cache.CachingFileIO;
+import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -40,6 +43,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
@@ -62,6 +66,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DATA_FILE_EXTERNAL_PATHS;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
@@ -82,15 +87,18 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
     protected final CatalogContext context;
+    protected final @Nullable LocalCacheManager cacheManager;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = new HashMap<>();
         this.context = CatalogContext.create(new Options());
+        this.cacheManager = null;
     }
 
     protected AbstractCatalog(FileIO fileIO, CatalogContext context) {
-        this.fileIO = fileIO;
+        this.cacheManager = CachingFileIO.createCacheManager(context);
+        this.fileIO = CachingFileIO.wrapWithCachingIfNeeded(fileIO, context, cacheManager);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
         this.context = context;
     }
@@ -387,7 +395,15 @@ public abstract class AbstractCatalog implements Catalog {
             return Collections.emptyList();
         }
         return schemas.stream()
-                .map(schema -> schema.toSchema().options().get(DATA_FILE_EXTERNAL_PATHS.key()))
+                .flatMap(
+                        schema -> {
+                            Map<String, String> options = schema.toSchema().options();
+                            return Arrays.stream(
+                                    new String[] {
+                                        options.get(DATA_FILE_EXTERNAL_PATHS.key()),
+                                        options.get(GLOBAL_INDEX_EXTERNAL_PATH.key())
+                                    });
+                        })
                 .filter(Objects::nonNull)
                 .flatMap(externalPath -> Arrays.stream(externalPath.split(",")))
                 .map(Path::new)
@@ -485,6 +501,94 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
+
+    @Override
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        checkNotBranch(identifier, "replaceTable");
+        checkNotSystemTable(identifier, "replaceTable");
+        validateCreateTable(newSchema, false);
+        validateCustomTablePath(newSchema.options());
+        copyTableDefaultOptions(newSchema.options());
+
+        Table existing;
+        try {
+            existing = getTable(identifier);
+        } catch (TableNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw e;
+        }
+
+        TableType targetTableType = Options.fromMap(newSchema.options()).get(TYPE);
+        if (!(existing instanceof FileStoreTable) || !targetTableType.equals(TableType.TABLE)) {
+            dropAndCreateTable(identifier, newSchema);
+            return;
+        }
+
+        // todo: support this
+        List<String> oldPartitionKeys = ((FileStoreTable) existing).schema().partitionKeys();
+        List<String> newPartitionKeys = newSchema.partitionKeys();
+        if (!Objects.equals(oldPartitionKeys, newPartitionKeys)) {
+            throw new UnsupportedOperationException(
+                    "replaceTable does not support changing partition keys (old="
+                            + oldPartitionKeys
+                            + ", new="
+                            + newPartitionKeys
+                            + "). Drop and re-create the table instead.");
+        }
+
+        replaceTableImpl(identifier, (FileStoreTable) existing, newSchema);
+    }
+
+    private void dropAndCreateTable(Identifier identifier, Schema newSchema)
+            throws TableNotExistException {
+        dropTable(identifier, false);
+        try {
+            createTable(identifier, newSchema, false);
+        } catch (TableAlreadyExistException | DatabaseNotExistException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Truncate visible data first, then append the new schema. Non-atomic on failure. */
+    protected void replaceTableImpl(
+            Identifier identifier, FileStoreTable existingTable, Schema newSchema)
+            throws TableNotExistException {
+        truncateTable(existingTable);
+        try {
+            appendNewSchema(existingTable, newSchema);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Append a new schema (id = latest + 1) via atomic CAS. Returns the new schema id. */
+    protected long appendNewSchema(FileStoreTable existingTable, Schema newSchema)
+            throws Exception {
+        SchemaManager sm = existingTable.schemaManager();
+        while (true) {
+            TableSchema latest = sm.latestOrThrow("Cannot replace: schema chain is empty.");
+            TableSchema staged = TableSchema.create(latest.id() + 1, newSchema);
+            if (sm.commit(staged)) {
+                return staged.id();
+            }
+        }
+    }
+
+    protected void truncateTable(FileStoreTable existingTable) {
+        try (TableCommitImpl commit =
+                existingTable.newCommit("replace-table-" + java.util.UUID.randomUUID())) {
+            commit.truncateTable();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {

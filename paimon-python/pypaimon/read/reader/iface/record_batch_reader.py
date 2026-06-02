@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from abc import abstractmethod
 from typing import Iterator, Optional, TypeVar
@@ -34,6 +33,10 @@ class RecordBatchReader(RecordReader):
     """
     The reader that reads the pyarrow batches of records.
     """
+
+    file_io = None
+    blob_field_indices = None
+    vector_field_indices = None
 
     @abstractmethod
     def read_arrow_batch(self) -> Optional[RecordBatch]:
@@ -62,13 +65,20 @@ class RecordBatchReader(RecordReader):
         df = self.read_next_df()
         if df is None:
             return None
-        return InternalRowWrapperIterator(df.iter_rows(), df.width)
+        return InternalRowWrapperIterator(
+            df.iter_rows(), df.width, self.file_io,
+            self.blob_field_indices, self.vector_field_indices)
 
 
 class InternalRowWrapperIterator(RecordIterator[InternalRow]):
-    def __init__(self, iterator: Iterator[tuple], width: int):
+    def __init__(self, iterator: Iterator[tuple], width: int,
+                 file_io=None, blob_field_indices=None,
+                 vector_field_indices=None):
         self._iterator = iterator
-        self._reused_row = OffsetRow(None, 0, width)
+        self._reused_row = OffsetRow(None, 0, width,
+                                     file_io=file_io,
+                                     blob_field_indices=blob_field_indices,
+                                     vector_field_indices=vector_field_indices)
 
     def next(self) -> Optional[InternalRow]:
         row_tuple = next(self._iterator, None)

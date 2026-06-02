@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import uuid
 from abc import ABC
@@ -22,7 +21,8 @@ from typing import Optional
 
 from pypaimon.write.table_commit import (BatchTableCommit, StreamTableCommit,
                                          TableCommit)
-from pypaimon.write.table_update import TableUpdate
+from pypaimon.write.table_update import (BatchTableUpdate, StreamTableUpdate,
+                                         TableUpdate)
 from pypaimon.write.table_write import (BatchTableWrite, StreamTableWrite,
                                         TableWrite)
 
@@ -61,8 +61,8 @@ class BatchWriteBuilder(WriteBuilder):
     def new_write(self) -> BatchTableWrite:
         return BatchTableWrite(self.table, self.commit_user)
 
-    def new_update(self) -> TableUpdate:
-        return TableUpdate(self.table, self.commit_user)
+    def new_update(self) -> BatchTableUpdate:
+        return BatchTableUpdate(self.table, self.commit_user)
 
     def new_commit(self) -> BatchTableCommit:
         commit = BatchTableCommit(self.table, self.commit_user, self.static_partition)
@@ -74,8 +74,8 @@ class StreamWriteBuilder(WriteBuilder):
     def new_write(self) -> StreamTableWrite:
         return StreamTableWrite(self.table, self.commit_user)
 
-    def new_update(self) -> TableUpdate:
-        raise ValueError("StreamWriteBuilder.new_update() not supported.")
+    def new_update(self) -> StreamTableUpdate:
+        return StreamTableUpdate(self.table, self.commit_user)
 
     def new_commit(self) -> StreamTableCommit:
         commit = StreamTableCommit(self.table, self.commit_user, self.static_partition)

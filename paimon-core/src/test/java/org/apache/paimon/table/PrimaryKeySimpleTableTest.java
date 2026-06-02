@@ -82,8 +82,6 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
-
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -144,6 +142,7 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -1138,9 +1137,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(BUCKET, 1);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
-                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("parquet.block.size", "524288");
+                            conf.set("parquet.page.size.row.check.min", "100");
+                            conf.set("parquet.page.row.count.limit", "300");
                             conf.set("file-index.bitmap.columns", "b");
                         });
 
@@ -1247,9 +1246,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(BUCKET, 1);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
-                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("parquet.block.size", "524288");
+                            conf.set("parquet.page.size.row.check.min", "100");
+                            conf.set("parquet.page.row.count.limit", "300");
                             conf.set("file-index.range-bitmap.columns", indexColumnName);
                         });
 
@@ -1334,9 +1333,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
                             conf.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
-                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("parquet.block.size", "524288");
+                            conf.set("parquet.page.size.row.check.min", "100");
+                            conf.set("parquet.page.row.count.limit", "300");
                         });
 
         int rowCount = 10000;
@@ -2671,5 +2670,22 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 options.toMap(),
                                 ""));
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    @Test
+    public void testMergeBranchPrimaryKeyTable() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(anyCauseMatches(IllegalArgumentException.class, "append-only tables"));
     }
 }

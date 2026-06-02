@@ -30,6 +30,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -61,9 +62,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -184,11 +187,23 @@ public class FileKeyRangesTable implements ReadonlyTable {
 
     private static class FileKeyRangesRead implements InnerTableRead {
 
+        private static final Set<String> SCAN_PUSHDOWN_FIELDS = scanPushdownFields();
+
+        private static Set<String> scanPushdownFields() {
+            Set<String> fields = new HashSet<>();
+            fields.add("partition");
+            fields.add("bucket");
+            fields.add("level");
+            return Collections.unmodifiableSet(fields);
+        }
+
         private final SchemaManager schemaManager;
 
         private final FileStoreTable storeTable;
 
         private RowType readType;
+
+        @Nullable private Predicate postFilter;
 
         private FileKeyRangesRead(SchemaManager schemaManager, FileStoreTable fileStoreTable) {
             this.schemaManager = schemaManager;
@@ -197,7 +212,14 @@ public class FileKeyRangesTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                this.postFilter = null;
+                return this;
+            }
+            List<Predicate> remaining =
+                    PredicateBuilder.excludePredicateWithFields(
+                            PredicateBuilder.splitAnd(predicate), SCAN_PUSHDOWN_FIELDS);
+            this.postFilter = remaining.isEmpty() ? null : PredicateBuilder.and(remaining);
             return this;
         }
 
@@ -264,6 +286,11 @@ public class FileKeyRangesTable implements ReadonlyTable {
                                                 file)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());
+
+            if (postFilter != null) {
+                rows = Iterators.filter(rows, postFilter::test);
+            }
+
             if (readType != null) {
                 rows =
                         Iterators.transform(

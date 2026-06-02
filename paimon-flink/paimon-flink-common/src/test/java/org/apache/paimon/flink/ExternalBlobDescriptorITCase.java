@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.IsolatedDirectoryFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.UriReaderFactory;

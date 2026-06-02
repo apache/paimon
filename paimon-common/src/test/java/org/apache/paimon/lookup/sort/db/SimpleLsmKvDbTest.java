@@ -1407,6 +1407,77 @@ public class SimpleLsmKvDbTest {
     }
 
     @Test
+    public void testBulkLoadFailsOnUnsortedEntries() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(entry("key-00002", "value-2"));
+            entries.add(entry("key-00001", "value-1"));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+            Assertions.assertTrue(exception.getMessage().contains("sorted"));
+            Assertions.assertEquals(0, db.getSstFileCount());
+        }
+    }
+
+    @Test
+    public void testBulkLoadFailsOnUnorderedSstRanges() throws IOException {
+        SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bulk-unordered-ranges-db"))
+                        .memTableFlushThreshold(1024)
+                        .maxSstFileSize(1)
+                        .blockSize(256)
+                        .level0FileNumCompactTrigger(4)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build();
+
+        try {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(entry("key-00001", "value-1"));
+            entries.add(entry("key-00003", "value-3"));
+            entries.add(entry("key-00002", "value-2"));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+            Assertions.assertTrue(exception.getMessage().contains("ranges"));
+            Assertions.assertEquals(0, db.getSstFileCount());
+        } finally {
+            db.close();
+        }
+    }
+
+    @Test
+    public void testBulkLoadOrderCheckUsesConfiguredComparator() throws IOException {
+        Comparator<MemorySlice> reverseComparator =
+                new Comparator<MemorySlice>() {
+                    @Override
+                    public int compare(MemorySlice a, MemorySlice b) {
+                        return b.compareTo(a);
+                    }
+                };
+
+        try (SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bulk-reverse-db"))
+                        .memTableFlushThreshold(1024)
+                        .blockSize(256)
+                        .level0FileNumCompactTrigger(4)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .keyComparator(reverseComparator)
+                        .build()) {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(entry("key-a", "value-a"));
+            entries.add(entry("key-b", "value-b"));
+
+            IllegalArgumentException exception =
+                    Assertions.assertThrows(
+                            IllegalArgumentException.class, () -> db.bulkLoad(entries.iterator()));
+            Assertions.assertTrue(exception.getMessage().contains("comparator"));
+        }
+    }
+
+    @Test
     public void testBulkLoadThenPutAndGet() throws IOException {
         try (SimpleLsmKvDb db = createDb()) {
             // Bulk load initial data
@@ -1498,6 +1569,10 @@ public class SimpleLsmKvDbTest {
 
     private static void putString(SimpleLsmKvDb db, String key, String value) throws IOException {
         db.put(key.getBytes(UTF_8), value.getBytes(UTF_8));
+    }
+
+    private static Map.Entry<byte[], byte[]> entry(String key, String value) {
+        return new AbstractMap.SimpleImmutableEntry<>(key.getBytes(UTF_8), value.getBytes(UTF_8));
     }
 
     private static String getString(SimpleLsmKvDb db, String key) throws IOException {

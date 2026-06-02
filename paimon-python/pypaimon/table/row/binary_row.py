@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 from typing import Any, List
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.row.internal_row import InternalRow
@@ -50,6 +50,24 @@ class BinaryRow(InternalRow):
                                                         GenericRowDeserializer.calculate_bit_set_width_in_bytes(
                                                             self.arity),
                                                         index, self.fields[index].type)
+
+    def get_blob(self, pos: int):
+        from pypaimon.table.row.blob import Blob
+        value = self.get_field(pos)
+        if value is None:
+            return None
+        if isinstance(value, Blob):
+            return value
+        raise TypeError(f"Cannot get Blob from {type(value)} at position {pos}")
+
+    def get_vector(self, pos: int):
+        from pypaimon.table.row.vector import Vector
+        value = self.get_field(pos)
+        if value is None:
+            return None
+        if isinstance(value, Vector):
+            return value
+        raise TypeError(f"Cannot get Vector from {type(value)} at position {pos}")
 
     def get_row_kind(self) -> RowKind:
         return self.row_kind

@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-#################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Union
@@ -292,4 +291,113 @@ class Catalog(ABC):
         """
         raise NotImplementedError(
             "list_branches is not supported by this catalog."
+        )
+
+    def rename_branch(
+            self,
+            identifier: Identifier,
+            from_branch: str,
+            to_branch: str
+    ) -> None:
+        """
+        Rename a branch for the table.
+
+        Args:
+            identifier: Table identifier
+            from_branch: Existing branch name to rename
+            to_branch: New branch name
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "rename_branch is not supported by this catalog."
+        )
+
+    def create_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional[str] = None,
+            ignore_if_exists: bool = False,
+    ) -> None:
+        """Create a tag on a table.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            tag_name: Tag name to create.
+            snapshot_id: Optional snapshot id; if not set the latest snapshot is tagged.
+            time_retained: Optional time retained string (e.g., ``"1d"``, ``"12h"``, ``"30m"``).
+            ignore_if_exists: If True, do not raise when the tag already exists.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "create_tag is not supported by this catalog."
+        )
+
+    def delete_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ) -> None:
+        """Delete a tag from a table.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            tag_name: Tag name to delete.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "delete_tag is not supported by this catalog."
+        )
+
+    def get_tag(
+            self,
+            identifier: Union[str, Identifier],
+            tag_name: str,
+    ):
+        """Get a tag of a table.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            tag_name: Tag name to look up.
+
+        Returns:
+            GetTagResponse describing the tag.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "get_tag is not supported by this catalog."
+        )
+
+    def list_tags_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            tag_name_prefix: Optional[str] = None,
+    ):
+        """List tags of a table with pagination.
+
+        Args:
+            identifier: Table identifier (Identifier or string).
+            max_results: Maximum number of results to return per page.
+            page_token: Token for pagination.
+            tag_name_prefix: Optional prefix filter for tag names.
+
+        Returns:
+            PagedList of tag names.
+
+        Raises:
+            NotImplementedError: If the catalog does not support tag management.
+        """
+        raise NotImplementedError(
+            "list_tags_paged is not supported by this catalog."
         )

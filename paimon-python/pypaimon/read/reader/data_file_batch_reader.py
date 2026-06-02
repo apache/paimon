@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import List, Optional
 
@@ -26,7 +25,7 @@ from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.blob import Blob, BlobDescriptor
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -43,7 +42,8 @@ class DataFileBatchReader(RecordBatchReader):
                  system_fields: dict,
                  blob_as_descriptor: bool = False,
                  blob_descriptor_fields: Optional[set] = None,
-                 file_io: Optional[FileIO] = None):
+                 file_io: Optional[FileIO] = None,
+                 row_id_offsets: Optional[List[int]] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -51,6 +51,8 @@ class DataFileBatchReader(RecordBatchReader):
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
+        self.row_id_offsets = row_id_offsets
+        self._row_id_cursor = 0
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
         self.blob_as_descriptor = blob_as_descriptor
@@ -179,28 +181,9 @@ class DataFileBatchReader(RecordBatchReader):
         value = self._normalize_blob_cell(value)
         if value is None:
             return None
-
         if not isinstance(value, bytes):
             return value
-
-        descriptor = self._deserialize_descriptor_or_none(value)
-        if descriptor is None:
-            return value
-
-        try:
-            uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
-            blob = Blob.from_descriptor(uri_reader, descriptor)
-            return blob.to_data()
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to read blob bytes from descriptor URI while converting blob value."
-            ) from e
-
-    @staticmethod
-    def _deserialize_descriptor_or_none(raw: bytes):
-        if not BlobDescriptor.is_blob_descriptor(raw):
-            return None
-        return BlobDescriptor.deserialize(raw)
+        return Blob.from_bytes(value, self.file_io).to_data()
 
     def _assign_row_tracking(self, record_batch: RecordBatch) -> RecordBatch:
         """Assign row tracking meta fields (_ROW_ID and _SEQUENCE_NUMBER)."""
@@ -209,9 +192,15 @@ class DataFileBatchReader(RecordBatchReader):
         # Handle _ROW_ID field
         if SpecialFields.ROW_ID.name in self.system_fields.keys():
             idx = self.system_fields[SpecialFields.ROW_ID.name]
-            # Create a new array that fills with computed row IDs
-            arrays[idx] = pa.array(range(self.first_row_id, self.first_row_id + record_batch.num_rows), type=pa.int64())
-            self.first_row_id += record_batch.num_rows
+            if self.row_id_offsets is not None:
+                end = self._row_id_cursor + record_batch.num_rows
+                row_ids = [self.first_row_id + o for o in self.row_id_offsets[self._row_id_cursor:end]]
+                arrays[idx] = pa.array(row_ids, type=pa.int64())
+                self._row_id_cursor = end
+            else:
+                row_id_range = range(self.first_row_id, self.first_row_id + record_batch.num_rows)
+                arrays[idx] = pa.array(row_id_range, type=pa.int64())
+                self.first_row_id += record_batch.num_rows
 
         # Handle _SEQUENCE_NUMBER field
         if SpecialFields.SEQUENCE_NUMBER.name in self.system_fields.keys():

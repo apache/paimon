@@ -20,6 +20,12 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.Path;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Classification of Paimon files.
  *
@@ -28,7 +34,7 @@ import org.apache.paimon.fs.Path;
  *       _SUCCESS, consumer, service files
  *   <li>{@link #DATA}: data files and any unrecognized files (default)
  *   <li>{@link #BUCKET_INDEX}: bucket level index files (Hash, DV)
- *   <li>{@link #GLOBAL_INDEX}: table level global index files (btree, bitmap, lumina, tantivy)
+ *   <li>{@link #GLOBAL_INDEX}: table level global index files (btree, lumina, tantivy)
  *   <li>{@link #FILE_INDEX}: data-file index files (bloom filter, bitmap, etc.)
  * </ul>
  */
@@ -38,6 +44,8 @@ public enum FileType {
     BUCKET_INDEX,
     GLOBAL_INDEX,
     FILE_INDEX;
+
+    private static final Logger LOG = LoggerFactory.getLogger(FileType.class);
 
     // keep in sync with SnapshotManager.SNAPSHOT_PREFIX
     private static final String SNAPSHOT_PREFIX = "snapshot-";
@@ -62,9 +70,52 @@ public enum FileType {
     private static final String CHANGELOG_DIR = "changelog";
     private static final String GLOBAL_INDEX_INFIX = "global-index-";
 
+    // keep in sync with Path.createTempPath(): ".{name}.{UUID}.tmp"
+    private static final String TEMP_FILE_SUFFIX = ".tmp";
+
     /** Returns {@code true} if this file type is any kind of index. */
     public boolean isIndex() {
         return this == BUCKET_INDEX || this == GLOBAL_INDEX || this == FILE_INDEX;
+    }
+
+    /** Parse a comma-separated whitelist string into a set of {@link FileType}s. */
+    public static Set<FileType> parseWhitelist(String whitelist) {
+        Set<FileType> result = EnumSet.noneOf(FileType.class);
+        for (String name : whitelist.split(",")) {
+            name = name.trim();
+            switch (name) {
+                case "meta":
+                    result.add(META);
+                    break;
+                case "global-index":
+                    result.add(GLOBAL_INDEX);
+                    break;
+                case "bucket-index":
+                    result.add(BUCKET_INDEX);
+                    break;
+                case "data":
+                    result.add(DATA);
+                    break;
+                case "file-index":
+                    result.add(FILE_INDEX);
+                    break;
+                default:
+                    if (!name.isEmpty()) {
+                        LOG.warn(
+                                "Unknown local-cache.whitelist value '{}'. "
+                                        + "Supported values: meta, global-index, bucket-index, data, file-index.",
+                                name);
+                    }
+                    break;
+            }
+        }
+        return result;
+    }
+
+    /** Returns {@code true} if the file is mutable and should not be cached. */
+    public static boolean isMutable(Path filePath) {
+        String name = filePath.getName();
+        return "EARLIEST".equals(name) || "LATEST".equals(name);
     }
 
     /**
@@ -74,6 +125,10 @@ public enum FileType {
      */
     public static FileType classify(Path filePath) {
         String name = filePath.getName();
+
+        // Strip temporary file wrapper produced by Path.createTempPath():
+        // format is ".{originalName}.{UUID}.tmp"
+        name = unwrapTempFileName(name);
 
         // meta file prefixes: snapshot-, schema-, stat-, tag-, consumer-, service-
         if (name.startsWith(SNAPSHOT_PREFIX)
@@ -122,5 +177,27 @@ public enum FileType {
 
         // default: DATA
         return DATA;
+    }
+
+    /**
+     * Unwrap a temporary file name produced by {@link Path#createTempPath()}.
+     *
+     * <p>The format is {@code .{originalName}.{UUID}.tmp}. If the name matches this pattern, the
+     * original file name is extracted and returned. Otherwise the name is returned as-is.
+     */
+    static String unwrapTempFileName(String name) {
+        // format: .{originalName}.{UUID}.tmp
+        // suffix ".{UUID}.tmp" is fixed 41 chars: 1(dot) + 36(UUID) + 4(.tmp)
+        // minimum total: 1(leading dot) + 1(name) + 41(suffix) = 43
+        if (name.length() < 43 || name.charAt(0) != '.' || !name.endsWith(TEMP_FILE_SUFFIX)) {
+            return name;
+        }
+
+        int dotBeforeUuid = name.length() - 41;
+        if (name.charAt(dotBeforeUuid) != '.') {
+            return name;
+        }
+
+        return name.substring(1, dotBeforeUuid);
     }
 }

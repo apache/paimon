@@ -81,7 +81,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
         RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
+        scan.withGlobalIndexResult(GlobalIndexResult.create(finalRowIds));
 
         List<String> readF1 = new ArrayList<>();
         table.newRead()

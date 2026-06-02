@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import List, Optional
 
@@ -82,9 +81,13 @@ class FileStoreTable(Table):
 
         return cls(file_io, identifier, table_path, table_schema)
 
+    def schema(self) -> TableSchema:
+        """Get the table schema."""
+        return self.table_schema
+
     def current_branch(self) -> str:
-        """Get the current branch name from options."""
-        return self.options.branch()
+        """Get the current branch name from the identifier."""
+        return self.identifier.get_branch_name_or_default()
 
     def comment(self) -> Optional[str]:
         """Get the table comment."""
@@ -98,7 +101,12 @@ class FileStoreTable(Table):
     def snapshot_manager(self):
         """Get the snapshot manager for this table."""
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
-        return SnapshotManager(self)
+        return SnapshotManager(
+            self.file_io,
+            self.table_path,
+            self.current_branch(),
+            self.catalog_environment.snapshot_loader(),
+        )
 
     def tag_manager(self):
         """Get the tag manager for this table."""
@@ -294,6 +302,23 @@ class FileStoreTable(Table):
         return RollbackHelper(
             self.snapshot_manager(), self.tag_manager(), self.file_io)
 
+    def rollback_to_timestamp(self, timestamp_millis: int) -> None:
+        """Rollback table to the latest snapshot with commit time <= the given timestamp.
+
+        Args:
+            timestamp_millis: The timestamp in milliseconds to rollback to.
+
+        Raises:
+            ValueError: If no snapshot exists at or before the given timestamp.
+        """
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
+        if snapshot is None:
+            raise ValueError(
+                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+            )
+        self.rollback_to(snapshot.id)
+
     def rename_tag(self, old_name: str, new_name: str) -> None:
         """
         Rename a tag.
@@ -308,6 +333,28 @@ class FileStoreTable(Table):
         """
         tag_mgr = self.tag_manager()
         tag_mgr.rename_tag(old_name, new_name)
+
+    def replace_tag(self, tag_name: str, snapshot_id: int = None) -> None:
+        """
+        Replace an existing tag with a new snapshot.
+
+        Args:
+            tag_name: Name of the tag to replace
+            snapshot_id: The snapshot id to associate with the tag.
+                        If None, uses the latest snapshot.
+
+        Raises:
+            ValueError: If tag doesn't exist, or snapshot doesn't exist
+        """
+        if snapshot_id is None:
+            snapshot = self.snapshot_manager().get_latest_snapshot()
+            if snapshot is None:
+                raise ValueError("Cannot replace tag because latest snapshot doesn't exist.")
+        else:
+            snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
+        self.tag_manager().replace_tag(snapshot, tag_name)
 
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
@@ -406,8 +453,23 @@ class FileStoreTable(Table):
         if time_travel_schema is not None:
             new_table_schema = time_travel_schema
 
-        return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
-                              self.catalog_environment)
+        # Re-encode the branch into the identifier when the option changes, so
+        # current_branch() and any catalog-routed snapshot commit see the
+        # branched object name without an extra side channel.
+        new_identifier = self.identifier
+        catalog_env = self.catalog_environment
+        branch_key = CoreOptions.BRANCH.key()
+        if branch_key in options:
+            new_branch = options[branch_key]
+            new_identifier = Identifier.create(
+                self.identifier.get_database_name(),
+                self.identifier.get_table_name(),
+                branch=new_branch,
+            )
+            catalog_env = self.catalog_environment.copy(new_identifier)
+
+        return FileStoreTable(self.file_io, new_identifier, self.table_path, new_table_schema,
+                              catalog_env)
 
     def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
         """
@@ -415,6 +477,7 @@ class FileStoreTable(Table):
 
         Supports the following time travel options:
         - scan.tag-name: Travel to a specific tag
+        - scan.snapshot-id: Travel to a specific snapshot id
 
         Returns:
             The TableSchema at the time travel point, or None if no time travel option is set.
@@ -422,7 +485,9 @@ class FileStoreTable(Table):
 
         try:
             from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-            snapshot = TimeTravelUtil.try_travel_to_snapshot(options, self.tag_manager())
+            snapshot = TimeTravelUtil.try_travel_to_snapshot(
+                options, self.tag_manager(), self.snapshot_manager()
+            )
             if snapshot is None:
                 return None
             return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())

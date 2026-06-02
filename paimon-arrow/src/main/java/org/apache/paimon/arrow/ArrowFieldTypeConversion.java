@@ -149,7 +149,8 @@ public class ArrowFieldTypeConversion {
             int precision = localZonedTimestampType.getPrecision();
             TimeUnit timeUnit = getTimeUnit(precision);
             ArrowType arrowType =
-                    new ArrowType.Timestamp(timeUnit, ZoneId.systemDefault().toString());
+                    new ArrowType.Timestamp(
+                            timeUnit, ZoneId.systemDefault().normalized().toString());
             return new FieldType(localZonedTimestampType.isNullable(), arrowType, null);
         }
 

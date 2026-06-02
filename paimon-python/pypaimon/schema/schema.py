@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-#################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.json_util import json_field
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser, VectorType
 
 
 @dataclass
@@ -63,15 +63,19 @@ class Schema:
                     field.type.nullable = False
 
         # Check if Blob type exists in the schema
-        has_blob_type = any(
-            'blob' in str(field.type).lower()
-            for field in fields
-        )
+        blob_names = [
+            field.name for field in fields
+            if 'blob' in str(field.type).lower()
+        ]
 
-        # If Blob type exists, validate required options
-        if has_blob_type:
+        if blob_names:
             if options is None:
                 options = {}
+
+            if len(fields) <= len(blob_names):
+                raise ValueError(
+                    "Table with BLOB type column must have other normal columns."
+                )
 
             required_options = {
                 CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
@@ -91,5 +95,41 @@ class Schema:
 
             if primary_keys is not None:
                 raise ValueError("Blob type is not supported with primary key.")
+
+        # Check if Vector type with dedicated file format
+        vector_names = [
+            field.name for field in fields
+            if isinstance(field.type, VectorType)
+        ]
+        vector_file_format = options.get(CoreOptions.VECTOR_FILE_FORMAT.key(), '') if options else ''
+
+        if vector_names and vector_file_format:
+            if options is None:
+                options = {}
+
+            if len(fields) <= len(vector_names):
+                raise ValueError(
+                    "Table with VECTOR type column must have other normal columns."
+                )
+
+            partition_key_set = set(partition_keys) if partition_keys else set()
+            vector_partitions = [n for n in vector_names if n in partition_key_set]
+            if vector_partitions:
+                raise ValueError(
+                    "The vector-store columns can not be part of partition keys."
+                )
+
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true',
+            }
+            missing = [
+                f"{k}='{v}'" for k, v in required_options.items()
+                if options.get(k) != v
+            ]
+            if missing:
+                raise ValueError(
+                    f"Table with vector-store file format requires: {', '.join(missing)}."
+                )
 
         return Schema(fields, partition_keys, primary_keys, options, comment)

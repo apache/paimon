@@ -109,6 +109,11 @@ public class CatalogBranchManager implements BranchManager {
     }
 
     @Override
+    public void mergeBranch(String sourceBranch, String targetBranch) {
+        throw new UnsupportedOperationException("Branch merge is not supported via catalog.");
+    }
+
+    @Override
     public void renameBranch(String fromBranch, String toBranch) {
         executePost(catalog -> catalog.renameBranch(identifier, fromBranch, toBranch));
     }

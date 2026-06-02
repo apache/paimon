@@ -25,8 +25,10 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
@@ -56,6 +58,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -63,6 +67,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
@@ -99,10 +104,122 @@ public class JavaPyLuminaE2ETest {
         warehouse = new Path("file://" + tempDir.resolve("warehouse"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "lance"})
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testLuminaVectorIndexWrite(String fileFormat) throws Exception {
+        String tableName =
+                "lance".equals(fileFormat) ? "test_lumina_vector_lance" : "test_lumina_vector";
+        Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
+
+        int dimension = 4;
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), new ArrayType(new FloatType())},
+                        new String[] {"id", "embedding"});
+
+        Options options = new Options();
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        if (!"orc".equals(fileFormat)) {
+            options.setString(FILE_FORMAT.key(), fileFormat);
+        }
+        options.setString(LuminaVectorIndexOptions.DIMENSION.key(), String.valueOf(dimension));
+        options.setString(LuminaVectorIndexOptions.DISTANCE_METRIC.key(), "l2");
+        options.setString(LuminaVectorIndexOptions.ENCODING_TYPE.key(), "rawf32");
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f, 0.0f, 0.0f},
+                    new float[] {0.9f, 0.1f, 0.0f, 0.0f},
+                    new float[] {0.0f, 1.0f, 0.0f, 0.0f},
+                    new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                    new float[] {0.0f, 0.0f, 0.0f, 1.0f},
+                    new float[] {0.95f, 0.05f, 0.0f, 0.0f}
+                };
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < vectors.length; i++) {
+                write.write(GenericRow.of(i, new GenericArray(vectors[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        DataField embeddingField = table.rowType().getField("embedding");
+        Options indexOptions = table.coreOptions().toConfiguration();
+
+        GlobalIndexSingletonWriter writer =
+                (GlobalIndexSingletonWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                LuminaVectorGlobalIndexerFactory.IDENTIFIER,
+                                embeddingField,
+                                indexOptions);
+
+        for (float[] vec : vectors) {
+            writer.write(vec);
+        }
+
+        List<ResultEntry> entries = writer.finish();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).rowCount()).isEqualTo(vectors.length);
+
+        Range rowRange = new Range(0, vectors.length - 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        embeddingField.id(),
+                        LuminaVectorGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        List<org.apache.paimon.manifest.IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest());
+        assertThat(indexEntries).hasSize(1);
+        assertThat(indexEntries.get(0).indexFile().indexType())
+                .isEqualTo(LuminaVectorGlobalIndexerFactory.IDENTIFIER);
+    }
+
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testLuminaVectorIndexWrite() throws Exception {
-        String tableName = "test_lumina_vector";
+    public void testLuminaVectorWithBTreeIndexWrite() throws Exception {
+        String tableName = "test_lumina_vector_btree_filter";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
 
         int dimension = 4;
@@ -138,7 +255,7 @@ public class JavaPyLuminaE2ETest {
                         tableSchema,
                         CatalogEnvironment.empty());
 
-        // Test vectors: 6 vectors of dimension 4
+        // Same 6 vectors as testLuminaVectorIndexWrite, paired with ids 0..5.
         float[][] vectors =
                 new float[][] {
                     new float[] {1.0f, 0.0f, 0.0f, 0.0f},
@@ -149,7 +266,6 @@ public class JavaPyLuminaE2ETest {
                     new float[] {0.95f, 0.05f, 0.0f, 0.0f}
                 };
 
-        // Write data rows
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
@@ -159,30 +275,23 @@ public class JavaPyLuminaE2ETest {
             commit.commit(write.prepareCommit());
         }
 
-        // Build Lumina vector index on "embedding" column
-        DataField embeddingField = table.rowType().getField("embedding");
         Options indexOptions = table.coreOptions().toConfiguration();
-        LuminaVectorIndexOptions luminaOptions = new LuminaVectorIndexOptions(indexOptions);
+        Range rowRange = new Range(0, vectors.length - 1);
 
-        GlobalIndexSingletonWriter writer =
+        // Build Lumina vector index on "embedding".
+        DataField embeddingField = table.rowType().getField("embedding");
+        GlobalIndexSingletonWriter vectorWriter =
                 (GlobalIndexSingletonWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 LuminaVectorGlobalIndexerFactory.IDENTIFIER,
                                 embeddingField,
                                 indexOptions);
-
-        // Write vectors to index
         for (float[] vec : vectors) {
-            writer.write(vec);
+            vectorWriter.write(vec);
         }
-
-        List<ResultEntry> entries = writer.finish();
-        assertThat(entries).hasSize(1);
-        assertThat(entries.get(0).rowCount()).isEqualTo(vectors.length);
-
-        Range rowRange = new Range(0, vectors.length - 1);
-        List<IndexFileMeta> indexFiles =
+        List<ResultEntry> vectorEntries = vectorWriter.finish();
+        List<IndexFileMeta> vectorIndexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),
                         table.store().pathFactory().globalIndexFileFactory(),
@@ -190,10 +299,33 @@ public class JavaPyLuminaE2ETest {
                         rowRange,
                         embeddingField.id(),
                         LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        vectorEntries);
 
-        // Commit the index
-        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        // Build BTree global index on "id".
+        DataField idField = table.rowType().getField("id");
+        GlobalIndexParallelWriter idWriter =
+                (GlobalIndexParallelWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, indexOptions);
+        for (int i = 0; i < vectors.length; i++) {
+            idWriter.write(i, i);
+        }
+        List<ResultEntry> idEntries = idWriter.finish();
+        List<IndexFileMeta> idIndexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        idField.id(),
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        idEntries);
+
+        // Commit both index sets in a single index-only commit.
+        java.util.List<IndexFileMeta> allIndexFiles = new java.util.ArrayList<>();
+        allIndexFiles.addAll(vectorIndexFiles);
+        allIndexFiles.addAll(idIndexFiles);
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(allIndexFiles);
         CommitMessage message =
                 new CommitMessageImpl(
                         BinaryRow.EMPTY_ROW,
@@ -205,11 +337,16 @@ public class JavaPyLuminaE2ETest {
             commit.commit(Collections.singletonList(message));
         }
 
-        // Verify index was committed
+        // Verify both index types are present.
         List<org.apache.paimon.manifest.IndexManifestEntry> indexEntries =
                 table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest());
-        assertThat(indexEntries).hasSize(1);
-        assertThat(indexEntries.get(0).indexFile().indexType())
-                .isEqualTo(LuminaVectorGlobalIndexerFactory.IDENTIFIER);
+        assertThat(indexEntries).hasSize(2);
+        assertThat(
+                        indexEntries.stream()
+                                .map(e -> e.indexFile().indexType())
+                                .collect(java.util.stream.Collectors.toSet()))
+                .containsExactlyInAnyOrder(
+                        LuminaVectorGlobalIndexerFactory.IDENTIFIER,
+                        BTreeGlobalIndexerFactory.IDENTIFIER);
     }
 }

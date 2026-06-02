@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -41,6 +42,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -142,5 +144,53 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
         for (ManifestFileMeta manifest : manifestList.readDataManifests(snapshot4)) {
             assertThat(fileIO.exists(pathFactory.toManifestFilePath(manifest.fileName()))).isTrue();
         }
+    }
+
+    @Test
+    public void testExpireWithMiddleChangelogNotFound() throws Exception {
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+        for (int i = 1; i <= 10; i++) {
+            write(write, createRow(1, 0, i, i * 10));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        write.close();
+        commit.close();
+
+        SnapshotManager snapshotManager = table.snapshotManager();
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        // changelogRetainMax > snapshotRetainMax to ensure changelogDecoupled=true
+        ExpireConfig expireConfig =
+                ExpireConfig.builder()
+                        .changelogRetainMax((int) latestSnapshotId)
+                        .changelogRetainMin(1)
+                        .changelogTimeRetain(Duration.ofMillis(0))
+                        .snapshotRetainMax(1)
+                        .snapshotRetainMin(1)
+                        .build();
+        ExpireSnapshotsImpl expireSnapshots =
+                (ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig);
+        expireSnapshots.expire();
+
+        ChangelogManager changelogManager = table.changelogManager();
+        FileIO fileIO = table.fileIO();
+        long latestChangelogId = changelogManager.latestLongLivedChangelogId();
+        long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
+
+        // Delete a middle changelog to simulate concurrent deletion
+        long middleId = (earliestChangelogId + latestChangelogId) / 2;
+        assertThat(fileIO.exists(changelogManager.longLivedChangelogPath(middleId))).isTrue();
+        fileIO.deleteQuietly(changelogManager.longLivedChangelogPath(middleId));
+
+        ExpireChangelogImpl expire =
+                (ExpireChangelogImpl) table.newExpireChangelog().config(expireConfig);
+
+        // should not throw even though a middle changelog is missing
+        assertThatCode(expire::expire).doesNotThrowAnyException();
+
+        // earliest should be advanced past the deleted range
+        assertThat(changelogManager.earliestLongLivedChangelogId()).isEqualTo(latestChangelogId);
     }
 }

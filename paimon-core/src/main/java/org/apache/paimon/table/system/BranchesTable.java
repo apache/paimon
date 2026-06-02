@@ -65,6 +65,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -191,13 +192,15 @@ public class BranchesTable implements ReadonlyTable {
         private final FileIO fileIO;
         private RowType readType;
 
+        @Nullable private Predicate postFilter;
+
         public BranchesRead(FileIO fileIO) {
             this.fileIO = fileIO;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.postFilter = predicate;
             return this;
         }
 
@@ -226,6 +229,10 @@ public class BranchesTable implements ReadonlyTable {
                 rows = branches(table, predicate).iterator();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
+            }
+
+            if (postFilter != null) {
+                rows = Iterators.filter(rows, postFilter::test);
             }
 
             if (readType != null) {
@@ -261,7 +268,6 @@ public class BranchesTable implements ReadonlyTable {
             BranchManager branchManager = table.branchManager();
             Path tablePath = table.location();
             List<InternalRow> result = new ArrayList<>();
-            // Handle predicate filtering for branch_name
             if (predicate != null) {
                 // Handle Equal predicate
                 if (predicate instanceof LeafPredicate
@@ -273,32 +279,28 @@ public class BranchesTable implements ReadonlyTable {
                     if (branchManager.branchExists(equalValue)) {
                         result.add(createBranchRow(equalValue, tablePath));
                     }
+                    return result;
                 }
 
                 // Handle CompoundPredicate (OR case for IN filter)
-                if (predicate instanceof CompoundPredicate) {
-                    CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-                    if ((compoundPredicate.function()) instanceof Or) {
-                        List<String> branchNames = new ArrayList<>();
-                        InPredicateVisitor.extractInElements(predicate, BRANCH_NAME)
-                                .ifPresent(
-                                        e ->
-                                                e.stream()
-                                                        .map(Object::toString)
-                                                        .forEach(branchNames::add));
-                        for (String branchName : branchNames) {
+                if (predicate instanceof CompoundPredicate
+                        && ((CompoundPredicate) predicate).function() instanceof Or) {
+                    Optional<List<Object>> inElements =
+                            InPredicateVisitor.extractInElements(predicate, BRANCH_NAME);
+                    if (inElements.isPresent()) {
+                        for (Object element : inElements.get()) {
+                            String branchName = element.toString();
                             if (branchManager.branchExists(branchName)) {
                                 result.add(createBranchRow(branchName, tablePath));
                             }
                         }
+                        return result;
                     }
                 }
-            } else {
-                // Fallback to original logic if no predicate
-                List<String> branches = branchManager.branches();
-                for (String branch : branches) {
-                    result.add(createBranchRow(branch, tablePath));
-                }
+            }
+            // Fallback: list all branches; the read-side post-filter refines the result.
+            for (String branch : branchManager.branches()) {
+                result.add(createBranchRow(branch, tablePath));
             }
             return result;
         }

@@ -1,31 +1,31 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """Full-text read to read index files."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from concurrent.futures import wait
+from typing import List
 
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
-from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
 
@@ -60,19 +60,28 @@ class FullTextReadImpl(FullTextRead):
         if not splits:
             return GlobalIndexResult.create_empty()
 
-        result = ScoredGlobalIndexResult.create_empty()
-        for split in splits:
-            split_result = self._eval(
+        futures = [
+            self._eval(
                 split.row_range_start, split.row_range_end,
                 split.full_text_index_files
             )
+            for split in splits
+        ]
+
+        wait(futures)
+
+        merged_scores = {}
+        for future in futures:
+            split_result = future.result()
             if split_result is not None:
-                result = result.or_(split_result)
+                score_getter = split_result.score_getter()
+                for row_id in split_result.results():
+                    if row_id not in merged_scores:
+                        merged_scores[row_id] = score_getter(row_id)
 
-        return result.top_k(self._limit)
+        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
-    def _eval(self, row_range_start, row_range_end, full_text_index_files
-              ) -> Optional[ScoredGlobalIndexResult]:
+    def _eval(self, row_range_start, row_range_end, full_text_index_files):
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
@@ -100,11 +109,10 @@ class FullTextReadImpl(FullTextRead):
             field_name=self._text_column.name
         )
 
-        try:
-            offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-            return offset_reader.visit_full_text_search(full_text_search)
-        finally:
-            reader.close()
+        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        future = offset_reader.visit_full_text_search(full_text_search)
+        future.add_done_callback(lambda _: reader.close())
+        return future
 
 
 def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list):

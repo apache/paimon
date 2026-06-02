@@ -28,6 +28,7 @@ import org.apache.paimon.utils.RowRangeIndex;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
@@ -106,6 +107,34 @@ public class DataEvolutionBatchScanTest {
                 assertThat(indexedSplit.rowRanges()).containsExactlyElementsOf(expected);
             }
         }
+    }
+
+    @Test
+    public void testWrapToIndexSplitsWithUnorderedAndDiscontiguousDataFiles() {
+        DataFileMeta file1 = newAppendFile(4650L, 51L, "file-1");
+        DataFileMeta file2 = newAppendFile(4300L, 151L, "file-2");
+        DataFileMeta file3 = newAppendFile(4200L, 208L, "file-3");
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(file1, file2, file3))
+                        .build();
+
+        List<Split> indexedSplits =
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Collections.singletonList(split),
+                                RowRangeIndex.create(Collections.singletonList(new Range(0, 5000))),
+                                null)
+                        .splits();
+
+        assertThat(indexedSplits).hasSize(1);
+        IndexedSplit indexedSplit = (IndexedSplit) indexedSplits.get(0);
+        assertThat(indexedSplit.dataSplit()).isEqualTo(split);
+        assertThat(indexedSplit.rowRanges())
+                .containsExactly(new Range(4200, 4450), new Range(4650, 4700));
     }
 
     private static List<Range> expectedRanges(long min, long max, List<Range> rowRanges) {

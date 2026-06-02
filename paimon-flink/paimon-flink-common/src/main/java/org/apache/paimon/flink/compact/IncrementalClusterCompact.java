@@ -286,8 +286,7 @@ public class IncrementalClusterCompact {
                                         options.localSortMaxNumFileHandles(),
                                         options.spillCompressOptions(),
                                         sinkParallelism,
-                                        options.writeBufferSpillDiskSize(),
-                                        options.sequenceFieldSortOrderIsAscending()))
+                                        options.writeBufferSpillDiskSize()))
                         .setParallelism(sinkParallelism);
 
         // Step 3: remove the prepended key columns and convert back to RowData

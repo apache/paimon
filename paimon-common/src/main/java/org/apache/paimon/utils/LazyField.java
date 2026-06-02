@@ -20,12 +20,11 @@ package org.apache.paimon.utils;
 
 import java.util.function.Supplier;
 
-/** A class to lazy initialized field. */
+/** A class to lazy initialized field. Thread-safe via double-checked locking. */
 public class LazyField<T> {
 
-    private final Supplier<T> supplier;
-
-    private boolean initialized;
+    private volatile boolean initialized;
+    private Supplier<T> supplier;
     private T value;
 
     public LazyField(Supplier<T> supplier) {
@@ -33,13 +32,17 @@ public class LazyField<T> {
     }
 
     public T get() {
-        if (!initialized) {
-            T t = supplier.get();
-            value = t;
-            initialized = true;
-            return t;
+        if (initialized) {
+            return value;
         }
-        return value;
+        synchronized (this) {
+            if (!initialized) {
+                value = supplier.get();
+                initialized = true;
+                supplier = null;
+            }
+            return value;
+        }
     }
 
     public boolean initialized() {

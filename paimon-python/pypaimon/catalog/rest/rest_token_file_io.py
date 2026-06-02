@@ -1,20 +1,20 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
 import logging
 import threading
 import time
@@ -29,7 +29,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.api.auth.bearer import BearTokenAuthProvider
 from pypaimon.api.auth.dlf_provider import DLFAuthProvider
-from pypaimon.common.identifier import Identifier, SYSTEM_TABLE_SPLITTER
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
@@ -191,6 +191,9 @@ class RESTTokenFileIO(FileIO):
     def write_blob(self, path: str, data, **kwargs):
         return self.file_io().write_blob(path, data, **kwargs)
 
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        return self.file_io().write_row(path, data, fields, zstd_level, **kwargs)
+
     @property
     def uri_reader_factory(self):
         if self._uri_reader_factory_cache is None:
@@ -273,12 +276,14 @@ class RESTTokenFileIO(FileIO):
             self.api_instance = RESTApi(self.properties, False)
 
         table_identifier = self.identifier
-        if SYSTEM_TABLE_SPLITTER in self.identifier.get_object_name():
-            base_table = self.identifier.get_object_name().split(SYSTEM_TABLE_SPLITTER)[0]
-            table_identifier = Identifier(
-                database=self.identifier.get_database_name(),
-                object=base_table,
-                branch=self.identifier.get_branch_name())
+        if self.identifier.is_system_table():
+            # Strip the system-table suffix; preserve the branch so the token
+            # request resolves against the correct branch backing.
+            table_identifier = Identifier.create(
+                self.identifier.get_database_name(),
+                self.identifier.get_table_name(),
+                branch=self.identifier.get_branch_name(),
+            )
 
         response = self.api_instance.load_table_token(table_identifier)
         self.log.info(
