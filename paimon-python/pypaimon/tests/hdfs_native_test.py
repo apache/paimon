@@ -539,6 +539,29 @@ class ViewFsFallbackTest(unittest.TestCase):
             "hdfs://nsA/",
         )
 
+    def test_fallback_from_link_in_overrides_only(self):
+        # Zero-file viewfs setup: link.* arrives via catalog options
+        # (overrides), no hadoop xml present. The fallback must still be
+        # derived from the merged view.
+        overrides = {
+            "fs.viewfs.mounttable.c1.link./home": "hdfs://ns-prod/home",
+        }
+        xml = {}
+        self.Fio._maybe_inject_viewfs_fallback("viewfs", "c1", overrides, xml)
+        self.assertEqual(
+            overrides.get("fs.viewfs.mounttable.c1.linkFallback"),
+            "hdfs://ns-prod/",
+        )
+
+    def test_fallback_from_nameservices_in_overrides_only(self):
+        overrides = {"dfs.nameservices": "nsA,nsB"}
+        xml = {}
+        self.Fio._maybe_inject_viewfs_fallback("viewfs", "c1", overrides, xml)
+        self.assertEqual(
+            overrides.get("fs.viewfs.mounttable.c1.linkFallback"),
+            "hdfs://nsA/",
+        )
+
     def test_fallback_already_in_xml_not_overridden(self):
         overrides = {}
         xml = {
@@ -826,6 +849,68 @@ class PickleTest(unittest.TestCase):
         # The pickled blob should reference the constructor inputs only;
         # specifically it should not embed the literal mock _client.
         self.assertNotIn(b"_client", blob)
+
+
+class HdfsNativeWriteFormatTest(unittest.TestCase):
+    """HdfsNativeFileIO is the default hdfs:// backend, so it must keep the
+    same write surface as the pyarrow backend it replaces — including
+    lance/vortex, which otherwise fall through to FileIO's NotImplementedError.
+    """
+
+    def setUp(self):
+        self._fake, self._client_cls, _ = _install_fake_hdfs_native()
+        self._client_cls.return_value = MagicMock(name="ClientInstance")
+        from pypaimon.filesystem.hdfs_native_file_io import HdfsNativeFileIO
+        self.fio = HdfsNativeFileIO("hdfs://ns/", Options({}))
+
+    def tearDown(self):
+        _uninstall_fake_hdfs_native()
+
+    def test_lance_and_vortex_are_overridden(self):
+        # The regression this guards: with these unimplemented, an HDFS table
+        # using file.format=lance/vortex would hit FileIO's NotImplementedError.
+        from pypaimon.common.file_io import FileIO
+        self.assertIsNot(
+            type(self.fio).write_lance, FileIO.write_lance)
+        self.assertIsNot(
+            type(self.fio).write_vortex, FileIO.write_vortex)
+
+    def test_write_lance_delegates_to_lance_specified(self):
+        import pyarrow
+        table = pyarrow.table({"a": [1, 2]})
+        writer = MagicMock(name="LanceFileWriter")
+        fake_lance = types.ModuleType("lance")
+        fake_lance.file = types.SimpleNamespace(
+            LanceFileWriter=MagicMock(return_value=writer))
+        with patch.dict(sys.modules, {"lance": fake_lance}), \
+                patch("pypaimon.read.reader.lance_utils.to_lance_specified",
+                      return_value=("hdfs://ns/x.lance", {"opt": "v"})) as spec:
+            self.fio.write_lance("hdfs://ns/x.lance", table)
+        spec.assert_called_once()
+        _, kwargs = fake_lance.file.LanceFileWriter.call_args
+        self.assertEqual(kwargs.get("storage_options"), {"opt": "v"})
+        writer.close.assert_called_once()
+
+    def test_write_vortex_delegates_to_vortex_specified(self):
+        import pyarrow
+        table = pyarrow.table({"a": [1, 2]})
+        fake_vortex = types.ModuleType("vortex")
+        fake_vortex.array = MagicMock(return_value="varr")
+        fake_vortex.store = types.SimpleNamespace(from_url=MagicMock())
+        fake_io = types.ModuleType("vortex._lib.io")
+        fake_io.write = MagicMock()
+        fake_lib = types.ModuleType("vortex._lib")
+        fake_lib.io = fake_io
+        fake_modules = {
+            "vortex": fake_vortex,
+            "vortex._lib": fake_lib,
+            "vortex._lib.io": fake_io,
+        }
+        with patch.dict(sys.modules, fake_modules), \
+                patch("pypaimon.read.reader.vortex_utils.to_vortex_specified",
+                      return_value=("hdfs://ns/x.vortex", None)):
+            self.fio.write_vortex("hdfs://ns/x.vortex", table)
+        fake_io.write.assert_called_once_with("varr", "hdfs://ns/x.vortex")
 
 
 if __name__ == "__main__":

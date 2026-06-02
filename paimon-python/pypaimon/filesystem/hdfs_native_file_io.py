@@ -334,6 +334,12 @@ class HdfsNativeFileIO(FileIO):
 
         hdfs-native rejects viewfs init without a fallback mount; libhdfs
         tolerates it. This bridges the gap without touching cluster xml.
+
+        The mount-table state is read from the merged view of hadoop xml and
+        catalog-option overrides, so a zero-file viewfs setup (link.* /
+        dfs.nameservices pushed purely through catalog options) gets a
+        fallback too; the injected key is still only written back to
+        `overrides`.
         """
         if scheme != "viewfs" or not netloc:
             return
@@ -342,8 +348,10 @@ class HdfsNativeFileIO(FileIO):
         if fallback_key in overrides or fallback_key in hadoop_xml:
             return
 
+        merged = {**hadoop_xml, **overrides}
+
         link_prefix = f"fs.viewfs.mounttable.{cluster}.link."
-        for key, value in hadoop_xml.items():
+        for key, value in merged.items():
             if key.startswith(link_prefix) and value:
                 parsed = urlparse(value)
                 if parsed.scheme == "hdfs" and parsed.netloc:
@@ -352,7 +360,7 @@ class HdfsNativeFileIO(FileIO):
 
         nameservices = [
             ns.strip()
-            for ns in hadoop_xml.get("dfs.nameservices", "").split(",")
+            for ns in merged.get("dfs.nameservices", "").split(",")
             if ns.strip()
         ]
         if nameservices:
@@ -633,6 +641,49 @@ class HdfsNativeFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
+
+    def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
+        # Mirror the remote-scheme writer: lance/vortex talk to the backend
+        # through their own object_store, so we hand them the URI plus any
+        # storage options the FileIO exposes rather than routing through the
+        # native client. Without these two methods, an HDFS table configured
+        # with file.format=lance/vortex would hit FileIO's NotImplementedError
+        # now that this class is the default hdfs:// backend.
+        try:
+            import lance
+
+            from pypaimon.read.reader.lance_utils import to_lance_specified
+            file_path_for_lance, storage_options = to_lance_specified(self, path)
+
+            writer = lance.file.LanceFileWriter(
+                file_path_for_lance, data.schema,
+                storage_options=storage_options, **kwargs)
+            try:
+                for batch in data.to_batches():
+                    writer.write_batch(batch)
+            finally:
+                writer.close()
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
+
+    def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import vortex
+            from vortex import store
+
+            from pypaimon.read.reader.vortex_utils import to_vortex_specified
+            file_path_for_vortex, store_kwargs = to_vortex_specified(self, path)
+
+            if store_kwargs:
+                vortex_store = store.from_url(file_path_for_vortex, **store_kwargs)
+                vortex_store.write(vortex.array(data))
+            else:
+                from vortex._lib.io import write as vortex_write
+                vortex_write(vortex.array(data), file_path_for_vortex)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
 
     def close(self):
         self._client = None

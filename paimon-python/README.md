@@ -44,6 +44,11 @@ Install with the optional extra:
 pip install 'pypaimon[hdfs]'
 ```
 
+The native backend requires **Python 3.10+** (and is unavailable on Windows).
+On older interpreters the extra is skipped, so `pypaimon` still installs — keep
+using the legacy `pyarrow` (`libhdfs`/JVM) backend there via
+`hdfs.client.impl=pyarrow`.
+
 For `hdfs://` and `viewfs://` URIs this backend is now the default.
 Switch back to the legacy `libhdfs` (JNI) path with:
 
