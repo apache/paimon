@@ -387,12 +387,18 @@ class Blob(ABC):
         return BlobRef(uri_reader, descriptor)
 
     @staticmethod
+    def from_view(view_struct: BlobViewStruct) -> 'BlobView':
+        return BlobView(view_struct)
+
+    @staticmethod
     def from_bytes(data: Optional[bytes], file_io=None, allow_blob_data: bool = True) -> Optional['Blob']:
         if data is None:
             return None
         if not isinstance(data, (bytes, bytearray)):
             raise TypeError(f"Blob.from_bytes expects bytes, got {type(data)}")
         data = bytes(data)
+        if BlobViewStruct.is_blob_view_struct(data):
+            return Blob.from_view(BlobViewStruct.deserialize(data))
         is_descriptor = BlobDescriptor.is_blob_descriptor(data)
         if not allow_blob_data and not is_descriptor:
             raise ValueError(
