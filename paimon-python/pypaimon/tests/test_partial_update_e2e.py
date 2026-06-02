@@ -21,10 +21,9 @@
 Each test creates a PK table with ``merge-engine`` set to a particular
 value, writes one or more batches, and reads back. Partial-update reads
 must merge non-null fields across batches; ``deduplicate`` must keep
-the latest row only; ``first-row`` must keep the earliest row;
-``aggregation`` must raise ``NotImplementedError`` (until it is
-ported), since silently treating it as deduplicate would corrupt the
-user's data.
+the latest row only; ``first-row`` must keep the earliest row.
+``aggregation`` has its own engine-specific e2e coverage in
+:mod:`test_aggregation_e2e`.
 """
 
 import os
@@ -268,27 +267,7 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'second', 'b': 'new', 'c': None}],
         )
 
-    # -- engines we don't support yet ------------------------------------
-
-    def test_aggregation_engine_raises_not_implemented(self):
-        """Until ``aggregation`` is ported, reading from an aggregation
-        table must raise rather than silently produce dedupe results.
-
-        The write path's in-memory merge buffer falls back to dedupe
-        for wholly unsupported engines so the file still keeps the LSM
-        "PK unique within a file" invariant -- but the read-side
-        dispatch still raises explicitly, which is what protects users.
-        """
-        table = self._create_pk_table('agg_unsupported',
-                                      merge_engine='aggregation')
-        self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
-        self._write(table, [{'id': 1, 'a': 'y', 'b': None, 'c': None}])
-
-        rb = table.new_read_builder()
-        splits = rb.new_scan().plan().splits()
-        with self.assertRaises(NotImplementedError) as cm:
-            rb.new_read().to_arrow(splits)
-        self.assertIn('aggregation', str(cm.exception))
+    # -- other supported engines (smoke) ---------------------------------
 
     def test_first_row_engine_keeps_first(self):
         """The ``first-row`` engine must keep the earliest row per PK.

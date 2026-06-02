@@ -16,5 +16,16 @@
 # under the License.
 
 from pypaimon.ray.ray_paimon import read_paimon, write_paimon
+from pypaimon.ray.data_evolution_merge_into import (
+    WhenMatched,
+    WhenNotMatched,
+    merge_into,
+)
 
-__all__ = ["read_paimon", "write_paimon"]
+__all__ = [
+    "read_paimon",
+    "write_paimon",
+    "merge_into",
+    "WhenMatched",
+    "WhenNotMatched",
+]

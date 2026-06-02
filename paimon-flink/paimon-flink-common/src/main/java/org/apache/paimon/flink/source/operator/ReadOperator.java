@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.NestedProjectedRowData;
+import org.apache.paimon.flink.source.RecordLimiter;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
@@ -68,6 +69,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient long emitEventTimeLag = FileStoreSourceReaderMetrics.UNDEFINED;
     private transient long idleStartTime = FileStoreSourceReaderMetrics.ACTIVE;
     private transient Counter numRecordsIn;
+    @Nullable private transient RecordLimiter recordLimiter;
     @Nullable private final Long limit;
 
     public ReadOperator(
@@ -98,6 +100,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                                 .getIOManager()
                                 .getSpillingDirectoriesPaths());
         this.read = readSupplier.get().withIOManager(ioManager);
+        this.recordLimiter = RecordLimiter.create(limit);
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(null);
         this.idlingStarted();
@@ -122,7 +125,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
         boolean firstRecord = true;
         try (CloseableIterator<InternalRow> iterator =
                 read.createReader(split).toCloseableIterator()) {
-            while (iterator.hasNext()) {
+            while (!reachLimit() && iterator.hasNext()) {
                 emitEventTimeLag = System.currentTimeMillis() - eventTime;
 
                 // each Split is already counted as one input record,
@@ -133,10 +136,6 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                     numRecordsIn.inc();
                 }
 
-                if (reachLimit()) {
-                    return;
-                }
-
                 reuseRow.replace(iterator.next());
                 if (nestedProjectedRowData == null) {
                     reuseRecord.replace(reuseRow);
@@ -145,6 +144,10 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                     reuseRecord.replace(nestedProjectedRowData);
                 }
                 output.collect(reuseRecord);
+
+                if (recordLimiter != null) {
+                    recordLimiter.increment();
+                }
             }
         }
         // start idle when data sending is completed
@@ -160,7 +163,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private boolean reachLimit() {
-        if (limit != null && numRecordsIn.getCount() > limit) {
+        if (recordLimiter != null && recordLimiter.reachLimit()) {
             LOG.info("Reader {} reach the limit record {}.", this, limit);
             return true;
         }
