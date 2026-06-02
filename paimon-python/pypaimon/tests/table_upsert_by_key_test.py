@@ -473,9 +473,10 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             result['id'].to_pylist(),
             result['name'].to_pylist(),
             result['age'].to_pylist(),
+            result['region'].to_pylist(),
         ))
-        self.assertEqual((4, 'D_v2', 41), rows[0])
-        self.assertEqual((5, 'E', 50), rows[1])
+        self.assertEqual((4, 'D_v2', 41, 'EU'), rows[0])
+        self.assertEqual((5, 'E', 50, 'EU'), rows[1])
 
     # ==================================================================
     # update_cols partial update (non-partitioned)
