@@ -241,7 +241,12 @@ inherits Ray's `map_groups()` memory bound. Large append-only buckets
 or hot append-only partitions should use the default mode or
 `hash_fixed_precluster="off"`.
 
-For non-HASH_FIXED tables the dataset is written as-is.
+For non-HASH_FIXED append-only tables, the dataset is written as-is.
+Non-HASH_FIXED primary-key Ray writes are not supported and fail fast,
+including the default dynamic-bucket primary-key table (`bucket = -1`)
+and cross-partition primary-key tables. Ray write tasks create
+independent Paimon writers, which can assign overlapping buckets or
+sequence numbers for those modes.
 
 **Parameters:**
 - `dataset`: the Ray Dataset to write.
@@ -253,9 +258,11 @@ For non-HASH_FIXED tables the dataset is written as-is.
   (e.g. `{"num_cpus": 2}`).
 - `hash_fixed_precluster`: HASH_FIXED pre-clustering mode. `"auto"` and
   `"off"` write append-only HASH_FIXED tables directly and reject
-  HASH_FIXED primary-key tables. `"map_groups"` enables the legacy
-  small-file optimization and requires each `(partition_keys..., bucket)`
-  group to fit in memory on one Ray node.
+  primary-key tables. `"map_groups"` enables the legacy small-file
+  optimization for HASH_FIXED primary-key tables and requires each
+  `(partition_keys..., bucket)` group to fit in memory on one Ray node.
+  This option does not enable Ray writes for non-HASH_FIXED primary-key
+  tables.
 
 ### `TableWrite.write_ray()` (lower-level)
 
@@ -290,7 +297,8 @@ table_write.write_ray(
 #   - overwrite: Whether to overwrite existing data (default: False)
 #   - concurrency: Optional max number of concurrent Ray tasks
 #   - ray_remote_args: Optional kwargs passed to ray.remote() (e.g., {"num_cpus": 2})
-#   - hash_fixed_precluster: Same HASH_FIXED modes as write_paimon()
+#   - hash_fixed_precluster: Same HASH_FIXED modes and primary-key safety
+#     checks as write_paimon()
 
 # 3. Commit data (required for write_pandas/write_arrow/write_arrow_batch only)
 commit_messages = table_write.prepare_commit()

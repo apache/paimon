@@ -32,7 +32,8 @@ explicitly selected. These tests cover:
     (partition, bucket) on the small test dataset.
   * regression: a table whose schema already contains a column named
     ``__paimon_bucket__`` still works (collision-safe column name).
-  * non-HASH_FIXED tables (BUCKET_UNAWARE etc.) pass through unchanged.
+  * non-HASH_FIXED append-only tables pass through unchanged.
+  * dynamic-bucket primary-key tables fail fast.
 """
 
 import glob
@@ -186,6 +187,52 @@ class RayShuffleTest(unittest.TestCase):
         writer = table.new_batch_write_builder().new_write()
         try:
             with self.assertRaisesRegex(ValueError, "HASH_FIXED primary-key"):
+                writer.write_ray(ds)
+        finally:
+            writer.close()
+
+    def test_primary_key_dynamic_bucket_default_fails_fast(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_pk_dynamic_bucket_default_fails_fast'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        with self.assertRaisesRegex(ValueError, "HASH_DYNAMIC primary-key"):
+            write_paimon(ds, identifier, self.catalog_options)
+
+    def test_table_write_ray_primary_key_dynamic_bucket_default_fails_fast(self):
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_table_write_ray_pk_dynamic_default_fails_fast'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        catalog = CatalogFactory.create(self.catalog_options)
+        table = catalog.get_table(identifier)
+        writer = table.new_batch_write_builder().new_write()
+        try:
+            with self.assertRaisesRegex(ValueError, "HASH_DYNAMIC primary-key"):
                 writer.write_ray(ds)
         finally:
             writer.close()
