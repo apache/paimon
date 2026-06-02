@@ -47,8 +47,6 @@ public class GlobalIndexBuilderUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexBuilderUtils.class);
 
-    public static final int MULTI_COLUMN_INDEX_FIELD_ID = -1;
-
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
@@ -62,6 +60,12 @@ public class GlobalIndexBuilderUtils {
                 fileIO, indexPathFactory, options, range, indexFieldId, null, indexType, entries);
     }
 
+    /**
+     * Builds the index file metas. The first column in {@code fields} is treated as the primary
+     * index column (e.g. the first column in {@code CREATE ... INDEX ON (a, b, c)}) and is stored
+     * as {@code indexFieldId}; the remaining columns go into {@code extraFieldIds}. Callers must
+     * pass {@code fields} in the intended column order.
+     */
     public static List<IndexFileMeta> toIndexFileMetas(
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
@@ -71,15 +75,15 @@ public class GlobalIndexBuilderUtils {
             String indexType,
             List<ResultEntry> entries)
             throws IOException {
-        int indexFieldId;
-        int[] extraFieldIds;
-        if (fields.size() > 1) {
-            indexFieldId = MULTI_COLUMN_INDEX_FIELD_ID;
-            extraFieldIds = fields.stream().mapToInt(DataField::id).toArray();
-        } else {
-            indexFieldId = fields.get(0).id();
-            extraFieldIds = null;
-        }
+        // The first column is the primary index column and is stored as indexFieldId; the
+        // remaining columns (if any) go into extraFieldIds.
+        int indexFieldId = fields.get(0).id();
+        int[] extraFieldIds =
+                fields.size() > 1
+                        ? fields.subList(1, fields.size()).stream()
+                                .mapToInt(DataField::id)
+                                .toArray()
+                        : null;
         return toIndexFileMetas(
                 fileIO,
                 indexPathFactory,

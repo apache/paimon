@@ -18,7 +18,6 @@
 
 package org.apache.paimon.index;
 
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -81,8 +80,13 @@ public class GlobalIndexMeta {
         return indexFieldId;
     }
 
+    /**
+     * Whether this index covers more than one column. {@link #indexFieldId} is always the primary
+     * column; {@link #extraFieldIds} holds the remaining columns and is null/empty for a
+     * single-column index.
+     */
     public boolean isMultiColumn() {
-        return indexFieldId == GlobalIndexBuilderUtils.MULTI_COLUMN_INDEX_FIELD_ID;
+        return extraFieldIds != null && extraFieldIds.length > 0;
     }
 
     @Nullable
@@ -95,19 +99,30 @@ public class GlobalIndexMeta {
         return indexMeta;
     }
 
+    /** All indexed field ids in order: the primary {@link #indexFieldId} followed by the rest. */
+    public List<Integer> getIndexedFieldIds() {
+        List<Integer> ids = new ArrayList<>();
+        ids.add(indexFieldId);
+        if (extraFieldIds != null) {
+            for (int id : extraFieldIds) {
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
+    public List<DataField> getIndexedFields(RowType rowType) {
+        List<DataField> fields = new ArrayList<>();
+        for (int id : getIndexedFieldIds()) {
+            fields.add(rowType.getField(id));
+        }
+        return fields;
+    }
+
     public List<String> getIndexedFieldNames(RowType rowType) {
         List<String> names = new ArrayList<>();
-        if (isMultiColumn()) {
-            for (int id : extraFieldIds) {
-                names.add(rowType.getField(id).name());
-            }
-        } else {
-            names.add(rowType.getField(indexFieldId).name());
-            if (extraFieldIds != null) {
-                for (int id : extraFieldIds) {
-                    names.add(rowType.getField(id).name());
-                }
-            }
+        for (int id : getIndexedFieldIds()) {
+            names.add(rowType.getField(id).name());
         }
         return names;
     }

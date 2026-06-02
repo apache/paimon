@@ -34,7 +34,6 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
 import java.util.ArrayList;
@@ -84,11 +83,7 @@ public class FullTextReadImpl implements FullTextRead {
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer globalIndexer;
         if (firstMeta.isMultiColumn()) {
-            RowType rowType = table.rowType();
-            List<DataField> fields = new ArrayList<>();
-            for (int id : firstMeta.extraFieldIds()) {
-                fields.add(rowType.getField(id));
-            }
+            List<DataField> fields = firstMeta.getIndexedFields(table.rowType());
             globalIndexer =
                     GlobalIndexerFactoryUtils.load(indexType)
                             .create(fields, table.coreOptions().toConfiguration());

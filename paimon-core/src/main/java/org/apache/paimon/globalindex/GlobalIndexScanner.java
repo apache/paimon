@@ -37,7 +37,6 @@ import org.apache.paimon.utils.Range;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,6 +53,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
@@ -75,74 +75,42 @@ public class GlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
-
-        // Single-column indexes: fieldId -> indexType -> range -> files
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
-        // Multi-column indexes: fieldIds -> indexType -> range -> files
-        Map<List<Integer>, Map<String, Map<Range, List<IndexFileMeta>>>> multiColumnMetas =
-                new HashMap<>();
-        // Reverse lookup: fieldId -> all multi-column groups it participates in. A field can
-        // belong to several multi-column indexes (e.g. (a,b) and (a,c)) at the same time.
-        Map<Integer, List<List<Integer>>> fieldToGroups = new HashMap<>();
-
+        Map<Integer, List<Integer>> fieldIdToIndexFields = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             String indexType = indexFile.indexType();
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-
-            if (meta.isMultiColumn() && meta.extraFieldIds() != null) {
-                // Multi-column index: all participating fields share the same IndexFileMeta.
-                // Multiple index files belonging to the same group are aggregated under the same
-                // multiColumnMetas key, and each participating field records this group.
-                List<Integer> fieldIds =
-                        Arrays.stream(meta.extraFieldIds()).boxed().collect(Collectors.toList());
-                multiColumnMetas
-                        .computeIfAbsent(fieldIds, k -> new HashMap<>())
-                        .computeIfAbsent(indexType, k -> new HashMap<>())
-                        .computeIfAbsent(range, k -> new ArrayList<>())
-                        .add(indexFile);
-                for (int id : fieldIds) {
-                    List<List<Integer>> groups =
-                            fieldToGroups.computeIfAbsent(id, k -> new ArrayList<>());
-                    if (!groups.contains(fieldIds)) {
-                        groups.add(fieldIds);
-                    }
-                }
+            int fieldId = meta.indexFieldId();
+            List<Integer> indexFields = meta.getIndexedFieldIds();
+            List<Integer> existing = fieldIdToIndexFields.get(fieldId);
+            if (existing == null) {
+                fieldIdToIndexFields.put(fieldId, indexFields);
             } else {
-                // Single-column index
-                int fieldId = meta.indexFieldId();
-                indexMetas
-                        .computeIfAbsent(fieldId, k -> new HashMap<>())
-                        .computeIfAbsent(indexType, k -> new HashMap<>())
-                        .computeIfAbsent(range, k -> new ArrayList<>())
-                        .add(indexFile);
+                checkArgument(
+                        existing.equals(indexFields),
+                        "Primary field %s owns multiple indexes with different columns %s and %s; "
+                                + "a primary column can own at most one index.",
+                        fieldId,
+                        existing,
+                        indexFields);
             }
+            indexMetas
+                    .computeIfAbsent(fieldId, k -> new HashMap<>())
+                    .computeIfAbsent(indexType, k -> new HashMap<>())
+                    .computeIfAbsent(range, k -> new ArrayList<>())
+                    .add(indexFile);
         }
 
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
-                    // A filter on a single field can be served by any index covering that field,
-                    // and every such index returns the same matching row ids. So pick ONE index
-                    // instead of running them all: prefer the single-column index (purpose-built
-                    // for this field and always able to serve the predicate); otherwise fall back
-                    // to one of the multi-column groups this field participates in.
-                    Map<String, Map<Range, List<IndexFileMeta>>> singleColumn = indexMetas.get(fId);
-                    if (singleColumn != null) {
-                        return createReaders(
-                                indexFileReader,
-                                singleColumn,
-                                Collections.singletonList(rowType.getField(fId)));
+                    List<Integer> group = fieldIdToIndexFields.get(fId);
+                    if (group == null) {
+                        return Collections.emptyList();
                     }
-                    List<List<Integer>> groups = fieldToGroups.get(fId);
-                    if (groups != null && !groups.isEmpty()) {
-                        // No single-column index for this field: pick one of the multi-column
-                        // groups it belongs to to accelerate the single-column filter.
-                        List<Integer> group = groups.get(0);
-                        List<DataField> fields =
-                                group.stream().map(rowType::getField).collect(Collectors.toList());
-                        return createReaders(indexFileReader, multiColumnMetas.get(group), fields);
-                    }
-                    return Collections.emptyList();
+                    List<DataField> fields =
+                            group.stream().map(rowType::getField).collect(Collectors.toList());
+                    return createReaders(indexFileReader, indexMetas.get(fId), fields);
                 };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }

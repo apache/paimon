@@ -36,7 +36,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -93,11 +92,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer globalIndexer;
         if (firstMeta.isMultiColumn()) {
-            RowType rowType = table.rowType();
-            List<DataField> fields = new ArrayList<>();
-            for (int id : firstMeta.extraFieldIds()) {
-                fields.add(rowType.getField(id));
-            }
+            List<DataField> fields = firstMeta.getIndexedFields(table.rowType());
             globalIndexer =
                     GlobalIndexerFactoryUtils.load(indexType)
                             .create(fields, table.coreOptions().toConfiguration());

@@ -77,7 +77,7 @@ class GlobalIndexBuilderUtilsTest {
         coreOptions = new CoreOptions(new Options().toMap());
     }
 
-    // Test: 2 columns (title + vec), indexFieldId=-1, all field ids stored in extraFieldIds
+    // Test: 2 columns (title + vec), primary column title is indexFieldId, rest in extraFieldIds
     @Test
     void testToIndexFileMetasMultiColumn() throws IOException {
         DataField titleField = new DataField(1, "title", new VarCharType(Integer.MAX_VALUE));
@@ -92,8 +92,8 @@ class GlobalIndexBuilderUtilsTest {
                         fileIO, indexPathFactory, coreOptions, range, fields, "test-type", entries);
 
         assertThat(metas).hasSize(1);
-        assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(-1);
-        assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isEqualTo(new int[] {1, 2});
+        assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
+        assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isEqualTo(new int[] {2});
         assertThat(metas.get(0).globalIndexMeta().rowRangeStart()).isEqualTo(0);
         assertThat(metas.get(0).globalIndexMeta().rowRangeEnd()).isEqualTo(99);
     }
@@ -117,7 +117,8 @@ class GlobalIndexBuilderUtilsTest {
         assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isNull();
     }
 
-    // Test: 3 columns (title + vec + id), indexFieldId=-1, all field ids in extraFieldIds
+    // Test: 3 columns (title + vec + id), primary column title is indexFieldId, rest in
+    // extraFieldIds
     @Test
     void testToIndexFileMetasThreeColumns() throws IOException {
         DataField titleField = new DataField(1, "title", new VarCharType(Integer.MAX_VALUE));
@@ -133,8 +134,8 @@ class GlobalIndexBuilderUtilsTest {
                         fileIO, indexPathFactory, coreOptions, range, fields, "test-type", entries);
 
         assertThat(metas).hasSize(1);
-        assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(-1);
-        assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isEqualTo(new int[] {1, 2, 3});
+        assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
+        assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isEqualTo(new int[] {2, 3});
     }
 
     private List<ResultEntry> createDummyResultEntries() throws IOException {
