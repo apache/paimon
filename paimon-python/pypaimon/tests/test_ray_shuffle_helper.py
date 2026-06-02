@@ -202,13 +202,12 @@ class BucketModeDispatchTest(unittest.TestCase):
             maybe_apply_repartition(dataset, table)
         dataset.map_batches.assert_not_called()
 
-    def test_postpone_primary_key_raises_value_error(self):
+    def test_postpone_primary_key_returns_dataset_unchanged(self):
         dataset = MagicMock(name="dataset")
         table = self._make_table(
             BucketMode.POSTPONE_MODE, is_primary_key_table=True)
 
-        with self.assertRaisesRegex(ValueError, "POSTPONE_MODE primary-key"):
-            maybe_apply_repartition(dataset, table)
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
         dataset.map_batches.assert_not_called()
 
     def test_hash_fixed_default_returns_dataset_unchanged(self):

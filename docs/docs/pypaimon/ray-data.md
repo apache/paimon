@@ -242,11 +242,12 @@ or hot append-only partitions should use the default mode or
 `hash_fixed_precluster="off"`.
 
 For non-HASH_FIXED append-only tables, the dataset is written as-is.
-Non-HASH_FIXED primary-key Ray writes are not supported and fail fast,
-including the default dynamic-bucket primary-key table (`bucket = -1`)
-and cross-partition primary-key tables. Ray write tasks create
-independent Paimon writers, which can assign overlapping buckets or
-sequence numbers for those modes.
+Postpone-bucket primary-key tables (`bucket = -2`) are also written
+as-is to the `bucket-postpone` directory. HASH_DYNAMIC and
+CROSS_PARTITION primary-key Ray writes are not supported and fail fast,
+including the default dynamic-bucket primary-key table (`bucket = -1`).
+Ray write tasks create independent Paimon writers, which can assign
+overlapping buckets or sequence numbers for those modes.
 
 **Parameters:**
 - `dataset`: the Ray Dataset to write.
@@ -258,11 +259,11 @@ sequence numbers for those modes.
   (e.g. `{"num_cpus": 2}`).
 - `hash_fixed_precluster`: HASH_FIXED pre-clustering mode. `"auto"` and
   `"off"` write append-only HASH_FIXED tables directly and reject
-  primary-key tables. `"map_groups"` enables the legacy small-file
-  optimization for HASH_FIXED primary-key tables and requires each
-  `(partition_keys..., bucket)` group to fit in memory on one Ray node.
-  This option does not enable Ray writes for non-HASH_FIXED primary-key
-  tables.
+  HASH_FIXED primary-key tables. `"map_groups"` enables the legacy
+  small-file optimization for HASH_FIXED primary-key tables and requires
+  each `(partition_keys..., bucket)` group to fit in memory on one Ray
+  node. This option does not enable Ray writes for HASH_DYNAMIC or
+  CROSS_PARTITION primary-key tables.
 
 ### `TableWrite.write_ray()` (lower-level)
 

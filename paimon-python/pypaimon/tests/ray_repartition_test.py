@@ -33,7 +33,8 @@ explicitly selected. These tests cover:
   * regression: a table whose schema already contains a column named
     ``__paimon_bucket__`` still works (collision-safe column name).
   * non-HASH_FIXED append-only tables pass through unchanged.
-  * dynamic-bucket primary-key tables fail fast.
+  * dynamic-bucket primary-key tables fail fast, while postpone-bucket
+    primary-key tables pass through.
 """
 
 import glob
@@ -236,6 +237,37 @@ class RayShuffleTest(unittest.TestCase):
                 writer.write_ray(ds)
         finally:
             writer.close()
+
+    def test_primary_key_postpone_bucket_roundtrip_to_postpone_files(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('dt', pa.string()),
+            ('value', pa.int64()),
+        ])
+        table_name = 'test_pk_postpone_bucket_ray_write'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id', 'dt'], partition_keys=['dt'],
+            options={'bucket': '-2'},
+        )
+
+        rows = pa.Table.from_pydict({
+            'id': list(range(10)),
+            'dt': ['2026-01-01'] * 5 + ['2026-01-02'] * 5,
+            'value': list(range(10)),
+        }, schema=pa_schema)
+        write_paimon(
+            ray.data.from_arrow(rows).repartition(2),
+            identifier,
+            self.catalog_options,
+        )
+
+        files = self._count_data_files(table_name)
+        self.assertGreater(len(files), 0)
+        self.assertTrue(all('/bucket-postpone/' in path for path in files))
+        self.assertEqual(len(self._read_table(identifier)), 0)
 
     def test_partitioned_fixed_bucket_roundtrip(self):
         """Partitioned table — confirms the post-groupby schema does not

@@ -92,9 +92,9 @@ class TableWrite:
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
             hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
                 and ``"off"`` write append-only HASH_FIXED tables directly
-                and reject primary-key tables. ``"map_groups"`` preserves
-                the legacy small-file optimization and its single group
-                memory bound for HASH_FIXED primary-key tables.
+                and reject HASH_FIXED primary-key tables. ``"map_groups"``
+                preserves the legacy small-file optimization and its single
+                group memory bound for HASH_FIXED primary-key tables.
         """
         from pypaimon.ray.shuffle import maybe_apply_repartition
         from pypaimon.write.ray_datasink import PaimonDatasink

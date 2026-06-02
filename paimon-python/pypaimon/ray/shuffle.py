@@ -91,7 +91,10 @@ def maybe_apply_repartition(
     is_primary_key_table = getattr(table, "is_primary_key_table", False)
 
     if bucket_mode != BucketMode.HASH_FIXED:
-        if is_primary_key_table:
+        if is_primary_key_table and bucket_mode in (
+                BucketMode.HASH_DYNAMIC,
+                BucketMode.CROSS_PARTITION,
+        ):
             raise ValueError(
                 "{} primary-key Ray writes are not supported. Multiple "
                 "Ray tasks create independent Paimon writers, which can "
