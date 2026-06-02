@@ -77,27 +77,22 @@ public class DVMetaCache {
     private static final class DVMetaCacheValue {
 
         private final int weight;
+        private final DeletionFilesField deletionFilesField;
 
-        @Nullable private final Map<String, DeletionFile> eagerDeletionFiles;
-        @Nullable private final LazyField<Map<String, DeletionFile>> lazyDeletionFiles;
-
-        private DVMetaCacheValue(
-                int weight,
-                @Nullable Map<String, DeletionFile> eagerDeletionFiles,
-                @Nullable LazyField<Map<String, DeletionFile>> lazyDeletionFiles) {
+        private DVMetaCacheValue(int weight, DeletionFilesField deletionFilesField) {
             this.weight = weight;
-            this.eagerDeletionFiles = eagerDeletionFiles;
-            this.lazyDeletionFiles = lazyDeletionFiles;
+            this.deletionFilesField = deletionFilesField;
         }
 
         private static DVMetaCacheValue eager(Map<String, DeletionFile> deletionFiles) {
-            return new DVMetaCacheValue(deletionFiles.size() + 1, deletionFiles, null);
+            return new DVMetaCacheValue(
+                    deletionFiles.size() + 1, new ExistingDeletionFilesField(deletionFiles));
         }
 
         private static DVMetaCacheValue lazy(
                 int valueNumber, Supplier<Map<String, DeletionFile>> deletionFilesSupplier) {
             return new DVMetaCacheValue(
-                    valueNumber + 1, null, new LazyField<>(deletionFilesSupplier));
+                    valueNumber + 1, new LazyDeletionFilesField(deletionFilesSupplier));
         }
 
         private int weight() {
@@ -105,7 +100,40 @@ public class DVMetaCache {
         }
 
         private Map<String, DeletionFile> get() {
-            return eagerDeletionFiles == null ? lazyDeletionFiles.get() : eagerDeletionFiles;
+            return deletionFilesField.get();
+        }
+    }
+
+    private interface DeletionFilesField {
+
+        Map<String, DeletionFile> get();
+    }
+
+    private static final class ExistingDeletionFilesField implements DeletionFilesField {
+
+        private final Map<String, DeletionFile> deletionFiles;
+
+        private ExistingDeletionFilesField(Map<String, DeletionFile> deletionFiles) {
+            this.deletionFiles = deletionFiles;
+        }
+
+        @Override
+        public Map<String, DeletionFile> get() {
+            return deletionFiles;
+        }
+    }
+
+    private static final class LazyDeletionFilesField implements DeletionFilesField {
+
+        private final LazyField<Map<String, DeletionFile>> deletionFiles;
+
+        private LazyDeletionFilesField(Supplier<Map<String, DeletionFile>> deletionFilesSupplier) {
+            this.deletionFiles = new LazyField<>(deletionFilesSupplier);
+        }
+
+        @Override
+        public Map<String, DeletionFile> get() {
+            return deletionFiles.get();
         }
     }
 
