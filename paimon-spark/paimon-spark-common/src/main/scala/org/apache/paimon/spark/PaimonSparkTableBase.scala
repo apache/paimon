@@ -118,6 +118,9 @@ abstract class PaimonSparkTableBase(val table: Table)
       _metadataColumns.append(PaimonMetadataColumn.ROW_ID)
       _metadataColumns.append(PaimonMetadataColumn.SEQUENCE_NUMBER)
     }
+    if (table.isInstanceOf[VectorSearchTable]) {
+      _metadataColumns.append(PaimonMetadataColumn.VECTOR_SEARCH_SCORE)
+    }
 
     _metadataColumns.appendAll(
       Seq(

@@ -18,7 +18,9 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.connector.catalog.Identifier
+import org.apache.spark.sql.functions.col
 
 object CopyIntoUtils {
 
@@ -27,5 +29,18 @@ object CopyIntoUtils {
       ident.namespace().toSeq ++
       Seq(ident.name())
     parts.filter(_.nonEmpty).map(p => s"`${p.replace("`", "``")}`").mkString(".")
+  }
+
+  def extractBaseName(fullPath: String): String = {
+    fullPath.substring(fullPath.lastIndexOf('/') + 1)
+  }
+
+  /** Count rows per file, keyed by base file name. */
+  def countPerFile(df: DataFrame, fileCol: String): Map[String, Long] = {
+    df.groupBy(col(fileCol))
+      .count()
+      .collect()
+      .map(row => extractBaseName(row.getString(0)) -> row.getLong(1))
+      .toMap
   }
 }

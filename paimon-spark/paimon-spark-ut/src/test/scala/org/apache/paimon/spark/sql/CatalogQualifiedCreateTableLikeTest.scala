@@ -129,6 +129,16 @@ class CatalogQualifiedCreateTableLikeTest extends PaimonSparkTestBase {
     Assertions.assertEquals("tag", nonReservedIdentifierCommand.targetIdent.name())
     Assertions.assertEquals(Seq("test"), nonReservedIdentifierCommand.targetIdent.namespace().toSeq)
 
+    val continueCommand =
+      parseCreateTableLikeCommand("CREATE TABLE paimon.test.continue LIKE paimon.test.source_tbl")
+    Assertions.assertEquals("continue", continueCommand.targetIdent.name())
+    Assertions.assertEquals(Seq("test"), continueCommand.targetIdent.namespace().toSeq)
+
+    val skipFileCommand =
+      parseCreateTableLikeCommand("CREATE TABLE paimon.test.skip_file LIKE paimon.test.source_tbl")
+    Assertions.assertEquals("skip_file", skipFileCommand.targetIdent.name())
+    Assertions.assertEquals(Seq("test"), skipFileCommand.targetIdent.namespace().toSeq)
+
     val nestedIdentifierCommand =
       parseCreateTableLikeCommand(
         "CREATE TABLE paimon.test.extra.target_tbl LIKE paimon.test.extra.source_tbl")

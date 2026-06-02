@@ -81,6 +81,17 @@ class BlobWriter(AppendOnlyDataWriter):
         # This ensures each row has a unique sequence number for data versioning and consistency
         self.sequence_generator.next()
 
+    def write_blob(self, value, arrow_type=pa.large_binary()):
+        if self.current_writer is None:
+            self.open_current_writer()
+
+        self.current_writer.write_blob(self.blob_column, arrow_type, value)
+        self.sequence_generator.next()
+        self.record_count += 1
+
+        if self.rolling_file():
+            self.close_current_writer()
+
     def open_current_writer(self):
         file_name = (f"{CoreOptions.data_file_prefix(self.options)}"
                      f"{self.file_uuid}-{self.file_count}.{self.file_format}")

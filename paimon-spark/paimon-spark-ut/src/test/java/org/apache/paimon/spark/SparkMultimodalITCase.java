@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.TestHiveMetastore;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
@@ -77,7 +78,6 @@ public class SparkMultimodalITCase {
         spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
         spark.sql("USE spark_catalog.my_db1");
 
-        /** Create table */
         spark.sql(
                 "\n"
                         + "CREATE TABLE my_db1.vector_test (gid BIGINT, sid STRING, embs ARRAY<FLOAT>)"
@@ -128,6 +128,16 @@ public class SparkMultimodalITCase {
                                 "select gid, sid,  embs from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5)  where date = '20260420'")
                         .collectAsList();
         assertThat(rows).hasSize(5);
+        Dataset<Row> df =
+                spark.sql(
+                        "select gid, sid,  embs, __paimon_vector_search_score from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5)  where date = '20260420'");
+        assertThat(df.columns()).hasSize(4);
+        rows = df.collectAsList();
+        assertThat(rows).hasSize(5);
+        spark.close();
+
+        spark = builder.getOrCreate();
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`vector_test`;");
         spark.close();
     }
 }

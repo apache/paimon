@@ -1062,6 +1062,82 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             [b'first_blob', None, b'third_blob', None, b'fifth_blob'],
         )
 
+    def test_update_blob_column(self):
+        from pypaimon import Schema
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_update_column', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_column')
+
+        initial = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+            'blob_data': [b'blob-1', b'blob-2', b'blob-3'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([1], type=pa.int64()),
+            'blob_data': pa.array([b'updated-blob-2'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_files = [f for msg in update_messages for f in msg.new_files]
+        update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
+        self.assertGreater(len(update_blob_files), 0)
+        self.assertTrue(all(f.write_cols == ['blob_data'] for f in update_files))
+        update_blob_lengths = []
+        blob_fields = [field for field in table.fields if field.name == 'blob_data']
+        for blob_file in update_blob_files:
+            blob_reader = FormatBlobReader(
+                file_io=table.file_io,
+                file_path=blob_file.file_path,
+                read_fields=['blob_data'],
+                full_fields=blob_fields,
+                push_down_predicate=None,
+                blob_as_descriptor=False,
+            )
+            update_blob_lengths.extend(blob_reader.blob_lengths)
+            blob_reader.close()
+        self.assertEqual(
+            update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
+            2,
+        )
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id, {
+            1: b'blob-1',
+            2: b'updated-blob-2',
+            3: b'blob-3',
+        })
+
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
         from pypaimon import Schema

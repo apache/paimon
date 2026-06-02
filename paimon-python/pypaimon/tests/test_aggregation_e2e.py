@@ -27,7 +27,7 @@ behaviour when no aggregator is configured is ``last_non_null_value``.
 
 The second half of the file exercises the merge-engine-support guard:
 tables that configure aggregation with options pypaimon does not yet
-implement (retract opt-ins, sequence fields, out-of-scope aggregator
+implement (retract opt-ins, sequence-group, out-of-scope aggregator
 identifiers) must raise ``NotImplementedError`` at TableRead
 construction rather than silently fall back to a wrong answer.
 """
@@ -227,17 +227,19 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
     # construction, not silently produce wrong results.
 
     def _create_and_expect_unsupported(self, table_name, extra_options,
-                                       expected_substring):
+                                       expected_substring,
+                                       error_type=NotImplementedError):
         table = self._create_pk_table(
             table_name, extra_options=extra_options
         )
         # Writing is fine — the guard fires when a reader is built.
         self._write(table, [{'id': 1, 'total': 1, 'max_score': 1, 'label': 'a'}])
         rb = table.new_read_builder()
-        with self.assertRaises(NotImplementedError) as cm:
+        with self.assertRaises(error_type) as cm:
             rb.new_read()
         msg = str(cm.exception)
-        self.assertIn('aggregation', msg)
+        if error_type is NotImplementedError:
+            self.assertIn('aggregation', msg)
         self.assertIn(expected_substring, msg)
 
     def test_remove_record_on_delete_rejected(self):
@@ -254,11 +256,34 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
             'fields.total.ignore-retract',
         )
 
-    def test_sequence_field_rejected(self):
+    def test_sequence_field_supported(self):
+        # Top-level sequence.field is honored by the aggregation engine:
+        # aggregators fold in sequence-field order, not file order. Here
+        # ``last_value`` must pick the value from the highest-``total`` row
+        # even though it was written first.
+        table = self._create_pk_table(
+            'agg_sequence_field',
+            field_aggs={'max_score': 'last_value', 'label': 'last_value'},
+            extra_options={'sequence.field': 'total'},
+        )
+        self._write(table, [{'id': 1, 'total': 100, 'max_score': 9, 'label': 'hi'}])
+        self._write(table, [{'id': 1, 'total': 50, 'max_score': 1, 'label': 'lo'}])
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'total': 100, 'max_score': 9, 'label': 'hi'}],
+        )
+
+    def test_aggregate_function_on_sequence_field_rejected(self):
+        # An explicit aggregator on the sequence column is invalid: Java
+        # rejects fields.<seq>.aggregate-function in
+        # SchemaValidation.validateSequenceField. Rather than silently
+        # override 'sum' with last_value, the guard must reject it.
         self._create_and_expect_unsupported(
-            'agg_reject_sequence_field',
-            {'sequence.field': 'total'},
-            'sequence.field',
+            'agg_reject_agg_on_seq',
+            {'sequence.field': 'total',
+             'fields.total.aggregate-function': 'sum'},
+            'fields.total.aggregate-function',
+            error_type=ValueError,
         )
 
     def test_field_sequence_group_rejected(self):

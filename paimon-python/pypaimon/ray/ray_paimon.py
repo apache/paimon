@@ -122,9 +122,9 @@ def write_paimon(
     writer. Optional pre-clustering is only a file-count optimization.
     The legacy ``map_groups`` pre-clustering mode materializes each
     ``(partition_keys..., bucket)`` group on one Ray node and should
-    only be used when every group fits in memory. HASH_FIXED primary-key
-    tables require ``map_groups`` until Ray writes have a bounded
-    strategy that preserves per-bucket sequence ordering.
+    only be used when every group fits in memory. HASH_DYNAMIC and
+    CROSS_PARTITION primary-key Ray writes are rejected because Ray
+    write tasks create independent Paimon writers.
 
     Args:
         dataset: The Ray Dataset to write.
@@ -137,7 +137,7 @@ def write_paimon(
             and ``"off"`` write append-only HASH_FIXED tables directly
             and reject HASH_FIXED primary-key tables. ``"map_groups"``
             preserves the legacy small-file optimization and its single
-            group memory bound.
+            group memory bound for HASH_FIXED primary-key tables.
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.ray.shuffle import maybe_apply_repartition

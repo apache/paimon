@@ -25,12 +25,14 @@ import pyarrow.compute as pc
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.utils.range import Range
 from pypaimon.schema.data_types import DataField
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.writer.blob_writer import BlobWriter
 
 
 @dataclass(frozen=True)
@@ -99,15 +101,35 @@ class TableUpdateByRowId:
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
         row_id_ranges: List[Range] = []
         for split in splits:
+            files_with_row_id = [
+                file for file in split.files if file.first_row_id is not None
+            ]
+            data_files = [
+                file for file in files_with_row_id
+                if not DataFileMeta.is_blob_file(file.file_name)
+            ]
             for file in split.files:
-                if file.first_row_id is None or file.file_name.endswith('.blob'):
+                if file.first_row_id is None or DataFileMeta.is_blob_file(file.file_name):
                     continue
                 row_id_ranges.append(file.row_id_range())
+            for file in data_files:
+                target_files = [
+                    target_file
+                    for target_file in files_with_row_id
+                    if self._overlaps(file.row_id_range(), target_file.row_id_range())
+                ]
+
                 entry = index.get(file.first_row_id)
                 if entry is None:
-                    index[file.first_row_id] = (split, [file])
+                    index[file.first_row_id] = (split, target_files)
                 else:
-                    entry[1].append(file)
+                    existing_files = entry[1]
+                    existing_names = {existing.file_name for existing in existing_files}
+                    existing_files.extend(
+                        target_file
+                        for target_file in target_files
+                        if target_file.file_name not in existing_names
+                    )
 
         # Multiple physical files may share the same first_row_id (data evolution);
         # summing row_count per file would over-count logical rows and widen
@@ -125,6 +147,10 @@ class TableUpdateByRowId:
             first_row_id_index=index,
             total_row_count=total_row_count,
         )
+
+    @staticmethod
+    def _overlaps(left: Range, right: Range) -> bool:
+        return left.from_ <= right.to and right.from_ <= left.to
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """
@@ -226,7 +252,7 @@ class TableUpdateByRowId:
         """
         wanted = set(column_names)
         read_fields: List[DataField] = [
-            field for field in self.table.fields if field.name in wanted
+            table_field for table_field in self.table.fields if table_field.name in wanted
         ]
         if not read_fields:
             return None
@@ -245,8 +271,12 @@ class TableUpdateByRowId:
         table_read = TableRead(self.table, predicate=None, read_type=read_fields)
         return table_read.to_arrow([origin_split])
 
-    def _merge_update_with_original(self, original_data: Optional[pa.Table], update_data: pa.Table,
-                                    column_names: List[str], first_row_id: int) -> pa.Table:
+    def _merge_update_with_original(
+            self,
+            original_data: Optional[pa.Table],
+            update_data: pa.Table,
+            column_names: List[str],
+            first_row_id: int) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
         """Merge update data with original data, preserving row order.
 
         For rows that have updates, use the update values.
@@ -259,7 +289,7 @@ class TableUpdateByRowId:
             first_row_id: The first_row_id of this file group
 
         Returns:
-            Merged PyArrow Table with all rows
+            Normal merged PyArrow Table and blob values to write row-by-row.
         """
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
@@ -274,18 +304,40 @@ class TableUpdateByRowId:
 
         # Build the merged table column by column
         merged_columns = {}
+        blob_columns = {}
+        update_by_col = {
+            col_name: update_data[col_name].combine_chunks()
+            for col_name in column_names
+        }
+        update_positions = {
+            int(relative_index.as_py()): idx
+            for idx, relative_index in enumerate(relative_indices)
+        }
         for col_name in column_names:
-            update_col = update_data[col_name].combine_chunks()
+            update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
-            # replace_with_mask fills mask=True positions with update values in order
-            merged_columns[col_name] = pc.replace_with_mask(
-                original_col, mask, update_col.cast(original_col.type)
-            )
+            if self._is_blob_column(col_name):
+                blob_columns[col_name] = [
+                    update_col[update_positions[i]].as_py()
+                    if i in update_positions
+                    else Blob.PLACE_HOLDER
+                    for i in range(original_data.num_rows)
+                ]
+            else:
+                # replace_with_mask fills mask=True positions with update values in order
+                merged_columns[col_name] = pc.replace_with_mask(
+                    original_col, mask, update_col.cast(original_col.type)
+                )
 
-        # Create the merged table
-        merged_table = pa.table(merged_columns)
+        merged_table = pa.table(merged_columns) if merged_columns else None
 
-        return merged_table
+        return merged_table, blob_columns
+
+    def _is_blob_column(self, column_name: str) -> bool:
+        for table_field in self.table.fields:
+            if table_field.name == column_name:
+                return getattr(table_field.type, 'type', None) == 'BLOB'
+        return False
 
     def _write_group(self, partition: GenericRow, first_row_id: int,
                      data: pa.Table, column_names: List[str]):
@@ -295,25 +347,54 @@ class TableUpdateByRowId:
         writes a single output file (rolling disabled) for the group.
         """
         original_data = self._read_original_file_data(first_row_id, column_names)
-        merged_data = self._merge_update_with_original(
+        merged_data, blob_columns = self._merge_update_with_original(
             original_data, data, column_names, first_row_id,
         )
 
-        file_store_write = FileStoreWrite(self.table, self.commit_user)
+        partition_tuple = tuple(partition.values)
+        new_files = []
+        file_store_write = None
+        blob_writers = []
         try:
-            file_store_write.disable_rolling()
-            file_store_write.write_cols = column_names
+            if merged_data is not None:
+                file_store_write = FileStoreWrite(self.table, self.commit_user)
+                file_store_write.disable_rolling()
+                file_store_write.write_cols = list(merged_data.column_names)
+                for batch in merged_data.to_batches():
+                    file_store_write.write(partition_tuple, 0, batch)
+                new_messages = file_store_write.prepare_commit(self.commit_identifier)
+                for msg in new_messages:
+                    new_files.extend(msg.new_files)
 
-            partition_tuple = tuple(partition.values)
-            for batch in merged_data.to_batches():
-                file_store_write.write(partition_tuple, 0, batch)
+            for column_name, values in blob_columns.items():
+                blob_writer = BlobWriter(
+                    self.table,
+                    partition_tuple,
+                    0,
+                    0,
+                    column_name,
+                    self.table.options,
+                )
+                blob_writers.append(blob_writer)
+                arrow_type = original_data.schema.field(column_name).type
+                for value in values:
+                    blob_writer.write_blob(value, arrow_type)
+                new_files.extend(blob_writer.prepare_commit())
 
-            new_messages = file_store_write.prepare_commit(self.commit_identifier)
-            for msg in new_messages:
-                msg.check_from_snapshot = self.snapshot_id
-                for file in msg.new_files:
+            if new_files:
+                for file in new_files:
                     file.first_row_id = first_row_id
-                    file.write_cols = column_names
-            self.commit_messages.extend(new_messages)
+                    file.write_cols = file.write_cols or column_names
+                self.commit_messages.append(
+                    CommitMessage(
+                        partition=partition_tuple,
+                        bucket=0,
+                        new_files=new_files,
+                        check_from_snapshot=self.snapshot_id,
+                    )
+                )
         finally:
-            file_store_write.close()
+            if file_store_write is not None:
+                file_store_write.close()
+            for blob_writer in blob_writers:
+                blob_writer.close()
