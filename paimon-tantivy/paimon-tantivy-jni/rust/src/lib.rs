@@ -20,13 +20,18 @@ mod jni_directory;
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jfloat, jint, jlong, jobject};
 use jni::JNIEnv;
+use serde::Deserialize;
 use std::ptr;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions,
 };
-use tantivy::tokenizer::{LowerCaser, NgramTokenizer, TextAnalyzer};
+use tantivy::tokenizer::{
+    AsciiFoldingFilter, Language, LowerCaser, NgramTokenizer, RawTokenizer, RemoveLongFilter,
+    SimpleTokenizer, Stemmer, StopWordFilter, TextAnalyzer, TextAnalyzerBuilder,
+    WhitespaceTokenizer,
+};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy};
 use tantivy_jieba::JiebaTokenizer;
 
@@ -56,63 +61,176 @@ struct TantivySearcherHandle {
     text_field: Field,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 struct TokenizerConfig {
-    name: String,
-    min_gram: usize,
-    max_gram: usize,
-    prefix_only: bool,
+    tokenizer: String,
+    ngram_min_gram: usize,
+    ngram_max_gram: usize,
+    ngram_prefix_only: bool,
     lower_case: bool,
+    max_token_length: usize,
+    ascii_folding: bool,
+    stem: bool,
+    language: String,
+    remove_stop_words: bool,
+    stop_words: Vec<String>,
+    with_position: bool,
 }
 
 impl Default for TokenizerConfig {
     fn default() -> Self {
         Self {
-            name: "default".to_string(),
-            min_gram: 2,
-            max_gram: 2,
-            prefix_only: false,
+            tokenizer: "default".to_string(),
+            ngram_min_gram: 2,
+            ngram_max_gram: 2,
+            ngram_prefix_only: false,
             lower_case: true,
+            max_token_length: 40,
+            ascii_folding: false,
+            stem: false,
+            language: "english".to_string(),
+            remove_stop_words: false,
+            stop_words: Vec::new(),
+            with_position: true,
         }
     }
 }
 
 impl TokenizerConfig {
     fn tokenizer_name(&self) -> &str {
-        match self.name.as_str() {
+        match self.tokenizer.as_str() {
             "ngram" => "paimon_ngram",
             "jieba" => "paimon_jieba",
-            _ => &self.name,
+            "simple" | "whitespace" | "raw" => "paimon_custom",
+            "default" if self.needs_custom_default_tokenizer() => "paimon_custom",
+            _ => &self.tokenizer,
+        }
+    }
+
+    fn needs_custom_default_tokenizer(&self) -> bool {
+        self.max_token_length != 40
+            || !self.lower_case
+            || self.ascii_folding
+            || self.stem
+            || self.remove_stop_words
+            || !self.stop_words.is_empty()
+    }
+
+    fn normalize(mut self) -> Result<Self, String> {
+        self.tokenizer = self.tokenizer.trim().to_lowercase();
+        self.language = self.language.trim().to_lowercase();
+        self.stop_words = self
+            .stop_words
+            .into_iter()
+            .map(|word| word.trim().to_string())
+            .filter(|word| !word.is_empty())
+            .collect();
+        self.validate()?;
+        Ok(self)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        match self.tokenizer.as_str() {
+            "default" | "simple" | "whitespace" | "raw" | "ngram" | "jieba" => {}
+            _ => return Err(format!("Unsupported tokenizer: {}", self.tokenizer)),
+        }
+        if self.ngram_min_gram == 0 {
+            return Err("minGram must be positive, got 0".to_string());
+        }
+        if self.ngram_max_gram == 0 {
+            return Err("maxGram must be positive, got 0".to_string());
+        }
+        if self.ngram_min_gram > self.ngram_max_gram {
+            return Err(format!(
+                "minGram must not be greater than maxGram, got {} > {}",
+                self.ngram_min_gram, self.ngram_max_gram
+            ));
+        }
+        if self.max_token_length == 0 {
+            return Err("maxTokenLength must be positive, got 0".to_string());
+        }
+        self.language()?;
+        Ok(())
+    }
+
+    fn language(&self) -> Result<Language, String> {
+        match self.language.as_str() {
+            "arabic" => Ok(Language::Arabic),
+            "danish" => Ok(Language::Danish),
+            "dutch" => Ok(Language::Dutch),
+            "english" => Ok(Language::English),
+            "finnish" => Ok(Language::Finnish),
+            "french" => Ok(Language::French),
+            "german" => Ok(Language::German),
+            "greek" => Ok(Language::Greek),
+            "hungarian" => Ok(Language::Hungarian),
+            "italian" => Ok(Language::Italian),
+            "norwegian" => Ok(Language::Norwegian),
+            "portuguese" => Ok(Language::Portuguese),
+            "romanian" => Ok(Language::Romanian),
+            "russian" => Ok(Language::Russian),
+            "spanish" => Ok(Language::Spanish),
+            "swedish" => Ok(Language::Swedish),
+            "tamil" => Ok(Language::Tamil),
+            "turkish" => Ok(Language::Turkish),
+            _ => Err(format!("Unsupported language: {}", self.language)),
         }
     }
 }
 
-fn register_tokenizer(index: &Index, config: &TokenizerConfig) -> tantivy::Result<()> {
-    if config.name == "ngram" {
-        let tokenizer = NgramTokenizer::new(config.min_gram, config.max_gram, config.prefix_only)?;
-        if config.lower_case {
-            index.tokenizers().register(
-                config.tokenizer_name(),
-                TextAnalyzer::builder(tokenizer).filter(LowerCaser).build(),
-            );
-        } else {
-            index
-                .tokenizers()
-                .register(config.tokenizer_name(), tokenizer);
-        }
-    } else if config.name == "jieba" {
-        let tokenizer = JiebaTokenizer {};
-        if config.lower_case {
-            index.tokenizers().register(
-                config.tokenizer_name(),
-                TextAnalyzer::builder(tokenizer).filter(LowerCaser).build(),
-            );
-        } else {
-            index
-                .tokenizers()
-                .register(config.tokenizer_name(), tokenizer);
-        }
+fn build_base_analyzer(config: &TokenizerConfig) -> Result<TextAnalyzerBuilder, String> {
+    match config.tokenizer.as_str() {
+        "default" | "simple" => Ok(TextAnalyzer::builder(SimpleTokenizer::default()).dynamic()),
+        "whitespace" => Ok(TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()),
+        "raw" => Ok(TextAnalyzer::builder(RawTokenizer::default()).dynamic()),
+        "ngram" => Ok(TextAnalyzer::builder(
+            NgramTokenizer::new(
+                config.ngram_min_gram,
+                config.ngram_max_gram,
+                config.ngram_prefix_only,
+            )
+            .map_err(|e| e.to_string())?,
+        )
+        .dynamic()),
+        "jieba" => Ok(TextAnalyzer::builder(JiebaTokenizer {}).dynamic()),
+        _ => Err(format!("Unsupported tokenizer: {}", config.tokenizer)),
     }
+}
+
+fn build_analyzer(config: &TokenizerConfig) -> Result<TextAnalyzer, String> {
+    let mut analyzer_builder = build_base_analyzer(config)?;
+    analyzer_builder =
+        analyzer_builder.filter_dynamic(RemoveLongFilter::limit(config.max_token_length));
+    if config.lower_case {
+        analyzer_builder = analyzer_builder.filter_dynamic(LowerCaser);
+    }
+    if config.ascii_folding {
+        analyzer_builder = analyzer_builder.filter_dynamic(AsciiFoldingFilter);
+    }
+    if config.stem {
+        analyzer_builder = analyzer_builder.filter_dynamic(Stemmer::new(config.language()?));
+    }
+    if config.remove_stop_words {
+        let stop_word_filter = StopWordFilter::new(config.language()?).ok_or_else(|| {
+            format!(
+                "Removing stop words for language '{}' is not supported",
+                config.language
+            )
+        })?;
+        analyzer_builder = analyzer_builder.filter_dynamic(stop_word_filter);
+    }
+    if !config.stop_words.is_empty() {
+        analyzer_builder =
+            analyzer_builder.filter_dynamic(StopWordFilter::remove(config.stop_words.clone()));
+    }
+    Ok(analyzer_builder.build())
+}
+
+fn register_tokenizer(index: &Index, config: &TokenizerConfig) -> Result<(), String> {
+    index
+        .tokenizers()
+        .register(config.tokenizer_name(), build_analyzer(config)?);
     Ok(())
 }
 
@@ -129,38 +247,43 @@ fn tokenizer_config_from_java(
         .map_err(|e| format!("Failed to get tokenizer name: {}", e))?
         .into();
     let name = name.trim().to_lowercase();
-    if name != "default" && name != "ngram" && name != "jieba" {
-        return Err(format!("Unsupported tokenizer: {}", name));
-    }
-    if min_gram <= 0 {
-        return Err(format!("minGram must be positive, got {}", min_gram));
-    }
-    if max_gram <= 0 {
-        return Err(format!("maxGram must be positive, got {}", max_gram));
-    }
-    if min_gram > max_gram {
-        return Err(format!(
-            "minGram must not be greater than maxGram, got {} > {}",
-            min_gram, max_gram
-        ));
-    }
-    Ok(TokenizerConfig {
-        name,
-        min_gram: min_gram as usize,
-        max_gram: max_gram as usize,
-        prefix_only: prefix_only != 0,
+    TokenizerConfig {
+        tokenizer: name,
+        ngram_min_gram: min_gram as usize,
+        ngram_max_gram: max_gram as usize,
+        ngram_prefix_only: prefix_only != 0,
         lower_case: lower_case != 0,
-    })
+        ..TokenizerConfig::default()
+    }
+    .normalize()
+}
+
+fn tokenizer_config_from_json(
+    env: &mut JNIEnv,
+    config_json: JString,
+) -> Result<TokenizerConfig, String> {
+    let json: String = env
+        .get_string(&config_json)
+        .map_err(|e| format!("Failed to get tokenizer config: {}", e))?
+        .into();
+    serde_json::from_str::<TokenizerConfig>(&json)
+        .map_err(|e| format!("Failed to parse tokenizer config: {}", e))?
+        .normalize()
 }
 
 fn build_schema(config: &TokenizerConfig) -> (Schema, Field, Field) {
     let mut builder = Schema::builder();
     let row_id_field =
         builder.add_u64_field("row_id", NumericOptions::default().set_indexed().set_fast());
+    let index_option = if config.with_position {
+        IndexRecordOption::WithFreqsAndPositions
+    } else {
+        IndexRecordOption::WithFreqs
+    };
     let text_options = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer(config.tokenizer_name())
-            .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            .set_index_option(index_option),
     );
     let text_field = builder.add_text_field("text", text_options);
     (builder.build(), row_id_field, text_field)
@@ -350,6 +473,20 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivyIndexWriter_createI
 }
 
 #[no_mangle]
+pub extern "system" fn Java_org_apache_paimon_tantivy_TantivyIndexWriter_createIndexWithTokenizerConfig(
+    mut env: JNIEnv,
+    _class: JClass,
+    index_path: JString,
+    config_json: JString,
+) -> jlong {
+    let config = match tokenizer_config_from_json(&mut env, config_json) {
+        Ok(config) => config,
+        Err(e) => return throw_and_return(&mut env, &e),
+    };
+    create_index_internal(env, index_path, config)
+}
+
+#[no_mangle]
 pub extern "system" fn Java_org_apache_paimon_tantivy_TantivyIndexWriter_writeDocument(
     mut env: JNIEnv,
     _class: JClass,
@@ -435,6 +572,20 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openIndexW
     open_index_internal(env, index_path, config)
 }
 
+#[no_mangle]
+pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openIndexWithTokenizerConfig(
+    mut env: JNIEnv,
+    _class: JClass,
+    index_path: JString,
+    config_json: JString,
+) -> jlong {
+    let config = match tokenizer_config_from_json(&mut env, config_json) {
+        Ok(config) => config,
+        Err(e) => return throw_and_return(&mut env, &e),
+    };
+    open_index_internal(env, index_path, config)
+}
+
 /// Open an index from a Java StreamFileInput callback object.
 ///
 /// fileNames: String[] — names of files in the archive
@@ -495,6 +646,30 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openFromSt
     )
 }
 
+#[no_mangle]
+pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openFromStreamWithTokenizerConfig(
+    mut env: JNIEnv,
+    _class: JClass,
+    file_names: jni::objects::JObjectArray,
+    file_offsets: jni::objects::JLongArray,
+    file_lengths: jni::objects::JLongArray,
+    stream_input: JObject,
+    config_json: JString,
+) -> jlong {
+    let config = match tokenizer_config_from_json(&mut env, config_json) {
+        Ok(config) => config,
+        Err(e) => return throw_and_return(&mut env, &e),
+    };
+    open_from_stream_internal(
+        env,
+        file_names,
+        file_offsets,
+        file_lengths,
+        stream_input,
+        config,
+    )
+}
+
 /// Search and return a SearchResult(long[] rowIds, float[] scores).
 #[no_mangle]
 pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchIndex(
@@ -503,6 +678,7 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchInde
     searcher_ptr: jlong,
     query_string: JString,
     limit: jint,
+    query_operator: JString,
 ) -> jobject {
     let handle = unsafe { &*(searcher_ptr as *const TantivySearcherHandle) };
     let query_str: String = match env.get_string(&query_string) {
@@ -511,9 +687,28 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchInde
             return throw_and_return_null(&mut env, &format!("Failed to get query string: {}", e))
         }
     };
+    let query_operator_str: String = match env.get_string(&query_operator) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            return throw_and_return_null(&mut env, &format!("Failed to get query operator: {}", e))
+        }
+    };
+    let query_operator_str = query_operator_str.trim().to_lowercase();
+    if query_operator_str != "or" && query_operator_str != "and" {
+        return throw_and_return_null(
+            &mut env,
+            &format!(
+                "Query operator must be 'or' or 'and', got: {}",
+                query_operator_str
+            ),
+        );
+    }
 
     let searcher = handle.reader.searcher();
-    let query_parser = QueryParser::for_index(&searcher.index(), vec![handle.text_field]);
+    let mut query_parser = QueryParser::for_index(&searcher.index(), vec![handle.text_field]);
+    if query_operator_str == "and" {
+        query_parser.set_conjunction_by_default();
+    }
     let query = match query_parser.parse_query(&query_str) {
         Ok(q) => q,
         Err(e) => {

@@ -77,12 +77,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
             this.tempIndexDir.deleteOnExit();
             this.writer =
                     new TantivyIndexWriter(
-                            tempIndexDir.getAbsolutePath(),
-                            indexOptions.tokenizer(),
-                            indexOptions.ngramMinGram(),
-                            indexOptions.ngramMaxGram(),
-                            indexOptions.ngramPrefixOnly(),
-                            indexOptions.lowerCase());
+                            tempIndexDir.getAbsolutePath(), indexOptions.toNativeConfigJson());
         } catch (IOException e) {
             throw new RuntimeException("Failed to create temp index directory", e);
         }

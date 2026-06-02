@@ -1031,7 +1031,13 @@ All available procedures are listed below.
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
             `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=jieba')
+            `options` => 'tantivy.tokenizer=jieba')<br/><br/>
+         -- Create Tantivy full-text index with a custom analyzer<br/>
+         CALL sys.create_global_index(<br/>
+            `table` => 'default.T',<br/>
+            `index_column` => 'content',<br/>
+            `index_type` => 'tantivy-fulltext',<br/>
+            `options` => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true')
       </td>
    </tr>
    <tr>

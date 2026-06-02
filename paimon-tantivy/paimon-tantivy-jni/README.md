@@ -104,3 +104,19 @@ try (TantivySearcher searcher =
     System.out.println(result.size());
 }
 ```
+
+For analyzer customization, pass a JSON tokenizer config. This supports the same base tokenizers
+and token filters as the global index options:
+
+```java
+String configJson =
+        "{\"tokenizer\":\"simple\",\"stem\":true,\"removeStopWords\":true,"
+                + "\"language\":\"english\"}";
+try (TantivyIndexWriter writer = new TantivyIndexWriter("/tmp/my_index", configJson);
+        TantivySearcher searcher = new TantivySearcher("/tmp/my_index", configJson)) {
+    writer.addDocument(1L, "running with Apache Paimon");
+    writer.commit();
+    SearchResult result = searcher.search("run", 10, "and");
+    System.out.println(result.size());
+}
+```

@@ -36,7 +36,28 @@ from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 TANTIVY_FULLTEXT_IDENTIFIER = "tantivy-fulltext"
 TANTIVY_NGRAM_TOKENIZER = "paimon_ngram"
 TANTIVY_JIEBA_TOKENIZER = "paimon_jieba"
+TANTIVY_CUSTOM_TOKENIZER = "paimon_custom"
 _META_VERSION = 1
+_SUPPORTED_LANGUAGES = {
+    "arabic",
+    "danish",
+    "dutch",
+    "english",
+    "finnish",
+    "french",
+    "german",
+    "greek",
+    "hungarian",
+    "italian",
+    "norwegian",
+    "portuguese",
+    "romanian",
+    "russian",
+    "spanish",
+    "swedish",
+    "tamil",
+    "turkish",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +69,13 @@ class TantivyFullTextIndexOptions:
     ngram_max_gram: int = 2
     ngram_prefix_only: bool = False
     lower_case: bool = True
+    max_token_length: int = 40
+    ascii_folding: bool = False
+    stem: bool = False
+    language: str = "english"
+    remove_stop_words: bool = False
+    stop_words: str = ""
+    with_position: bool = True
 
     @staticmethod
     def deserialize(data):
@@ -65,19 +93,45 @@ class TantivyFullTextIndexOptions:
         ngram_max_gram, offset = _read_meta_int(data, offset)
         ngram_prefix_only, offset = _read_meta_bool(data, offset)
         lower_case, offset = _read_meta_bool(data, offset)
+        max_token_length = 40
+        ascii_folding = False
+        stem = False
+        language = "english"
+        remove_stop_words = False
+        stop_words = ""
+        with_position = True
+        if offset < len(data):
+            max_token_length, offset = _read_meta_int(data, offset)
+            ascii_folding, offset = _read_meta_bool(data, offset)
+            stem, offset = _read_meta_bool(data, offset)
+            language, offset = _read_meta_utf(data, offset)
+            remove_stop_words, offset = _read_meta_bool(data, offset)
+            stop_words, offset = _read_meta_utf(data, offset)
+            with_position, offset = _read_meta_bool(data, offset)
 
         return TantivyFullTextIndexOptions(
             tokenizer=tokenizer,
             ngram_min_gram=ngram_min_gram,
             ngram_max_gram=ngram_max_gram,
             ngram_prefix_only=ngram_prefix_only,
-            lower_case=lower_case)
+            lower_case=lower_case,
+            max_token_length=max_token_length,
+            ascii_folding=ascii_folding,
+            stem=stem,
+            language=language,
+            remove_stop_words=remove_stop_words,
+            stop_words=stop_words,
+            with_position=with_position)
 
     def __post_init__(self):
         tokenizer = "" if self.tokenizer is None else self.tokenizer.strip().lower()
         object.__setattr__(self, "tokenizer", tokenizer)
+        language = "" if self.language is None else self.language.strip().lower()
+        object.__setattr__(self, "language", language)
+        object.__setattr__(self, "stop_words", _normalize_stop_words(self.stop_words))
 
-        if tokenizer not in ("default", "ngram", "jieba"):
+        supported_tokenizers = ("default", "simple", "whitespace", "raw", "ngram", "jieba")
+        if tokenizer not in supported_tokenizers:
             raise ValueError("Unsupported Tantivy tokenizer: %s" % tokenizer)
         if self.ngram_min_gram <= 0:
             raise ValueError("ngram min gram must be positive.")
@@ -86,13 +140,39 @@ class TantivyFullTextIndexOptions:
         if self.ngram_min_gram > self.ngram_max_gram:
             raise ValueError(
                 "ngram min gram must not be greater than max gram.")
+        if self.max_token_length <= 0:
+            raise ValueError("max token length must be positive.")
+        if self.language not in _SUPPORTED_LANGUAGES:
+            raise ValueError("Unsupported Tantivy language: %s" % self.language)
 
     def tokenizer_name(self):
         if self.tokenizer == "ngram":
             return TANTIVY_NGRAM_TOKENIZER
         if self.tokenizer == "jieba":
             return TANTIVY_JIEBA_TOKENIZER
+        if self._needs_custom_tokenizer():
+            return TANTIVY_CUSTOM_TOKENIZER
         return self.tokenizer
+
+    def stop_word_list(self):
+        if not self.stop_words:
+            return []
+        return [
+            word.strip()
+            for word in self.stop_words.split(";")
+            if word.strip()
+        ]
+
+    def _needs_custom_tokenizer(self):
+        return (
+            self.tokenizer in ("simple", "whitespace", "raw")
+            or self.max_token_length != 40
+            or not self.lower_case
+            or self.ascii_folding
+            or self.stem
+            or self.remove_stop_words
+            or bool(self.stop_word_list())
+        )
 
 
 class StreamDirectory:
@@ -208,13 +288,12 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
     def visit_full_text_search(self, full_text_search):
         self._ensure_loaded()
 
-        query_text = full_text_search.query_text
         limit = full_text_search.limit
 
         searcher = self._searcher
         import tantivy
 
-        query = self._parse_query(tantivy, query_text)
+        query = self._parse_query(tantivy, full_text_search)
 
         results = searcher.search(query, limit)
         if not results.hits:
@@ -266,28 +345,61 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
     def _add_text_field(self, schema_builder):
         tokenizer_name = self._index_options.tokenizer_name()
+        index_option = None if self._index_options.with_position else "freq"
         if tokenizer_name == "default":
-            schema_builder.add_text_field("text", stored=False)
+            schema_builder.add_text_field("text", stored=False, index_option=index_option)
         else:
             schema_builder.add_text_field(
-                "text", stored=False, tokenizer_name=tokenizer_name)
+                "text", stored=False, tokenizer_name=tokenizer_name,
+                index_option=index_option)
 
     def _register_tokenizer(self, tantivy, index):
-        if self._index_options.tokenizer != "ngram":
+        if (self._index_options.tokenizer == "default"
+                and self._index_options.tokenizer_name() == "default"):
             return
 
-        analyzer_builder = tantivy.TextAnalyzerBuilder(
-            tantivy.Tokenizer.ngram(
+        if self._index_options.tokenizer == "ngram":
+            tokenizer = tantivy.Tokenizer.ngram(
                 min_gram=self._index_options.ngram_min_gram,
                 max_gram=self._index_options.ngram_max_gram,
-                prefix_only=self._index_options.ngram_prefix_only))
+                prefix_only=self._index_options.ngram_prefix_only)
+        elif self._index_options.tokenizer in ("default", "simple"):
+            tokenizer = tantivy.Tokenizer.simple()
+        elif self._index_options.tokenizer == "whitespace":
+            tokenizer = tantivy.Tokenizer.whitespace()
+        elif self._index_options.tokenizer == "raw":
+            tokenizer = tantivy.Tokenizer.raw()
+        else:
+            return
+
+        analyzer_builder = tantivy.TextAnalyzerBuilder(tokenizer)
+        if self._index_options.max_token_length != 40:
+            analyzer_builder = analyzer_builder.filter(
+                tantivy.Filter.remove_long(self._index_options.max_token_length))
         if self._index_options.lower_case:
             analyzer_builder = analyzer_builder.filter(tantivy.Filter.lowercase())
+        if self._index_options.ascii_folding:
+            analyzer_builder = analyzer_builder.filter(tantivy.Filter.ascii_fold())
+        if self._index_options.stem:
+            analyzer_builder = analyzer_builder.filter(
+                tantivy.Filter.stemmer(self._index_options.language))
+        if self._index_options.remove_stop_words:
+            analyzer_builder = analyzer_builder.filter(
+                tantivy.Filter.stopword(self._index_options.language))
+        stop_words = self._index_options.stop_word_list()
+        if stop_words:
+            analyzer_builder = analyzer_builder.filter(
+                tantivy.Filter.custom_stopword(stop_words))
         analyzer = analyzer_builder.build()
-        index.register_tokenizer(TANTIVY_NGRAM_TOKENIZER, analyzer)
+        index.register_tokenizer(self._index_options.tokenizer_name(), analyzer)
 
-    def _parse_query(self, tantivy, query_text):
+    def _parse_query(self, tantivy, full_text_search):
+        query_text = full_text_search.query_text
+        conjunction_by_default = full_text_search.query_operator == "and"
         if self._index_options.tokenizer != "jieba":
+            if conjunction_by_default:
+                return self._index.parse_query(
+                    query_text, ["text"], conjunction_by_default=True)
             return self._index.parse_query(query_text, ["text"])
 
         tokens = self._jieba_query_tokens(query_text)
@@ -300,8 +412,9 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         ]
         if len(term_queries) == 1:
             return term_queries[0]
+        occur = tantivy.Occur.Must if conjunction_by_default else tantivy.Occur.Should
         return tantivy.Query.boolean_query([
-            (tantivy.Occur.Should, query)
+            (occur, query)
             for query in term_queries
         ])
 
@@ -326,13 +439,19 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         return tokens
 
     def _verify_tantivy_tokenizer_api(self, tantivy):
-        if self._index_options.tokenizer not in ("ngram", "jieba"):
+        if (self._index_options.tokenizer == "default"
+                and self._index_options.tokenizer_name() == "default"):
             return
 
         missing = []
-        if self._index_options.tokenizer == "ngram":
+        if self._index_options.tokenizer != "jieba":
             required_classes = ["TextAnalyzerBuilder", "Tokenizer"]
-            if self._index_options.lower_case:
+            if (self._index_options.lower_case
+                    or self._index_options.max_token_length != 40
+                    or self._index_options.ascii_folding
+                    or self._index_options.stem
+                    or self._index_options.remove_stop_words
+                    or self._index_options.stop_word_list()):
                 required_classes.append("Filter")
         else:
             required_classes = ["Query", "Occur"]
@@ -344,20 +463,42 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         filter_ = getattr(tantivy, "Filter", None)
         query = getattr(tantivy, "Query", None)
         occur = getattr(tantivy, "Occur", None)
-        if (self._index_options.tokenizer == "ngram" and tokenizer is not None
-                and not hasattr(tokenizer, "ngram")):
-            missing.append("Tokenizer.ngram")
-        if (self._index_options.tokenizer == "ngram"
-                and self._index_options.lower_case and filter_ is not None
-                and not hasattr(filter_, "lowercase")):
-            missing.append("Filter.lowercase")
+        tokenizer_apis = {
+            "default": "simple",
+            "ngram": "ngram",
+            "simple": "simple",
+            "whitespace": "whitespace",
+            "raw": "raw",
+        }
+        tokenizer_api = tokenizer_apis.get(self._index_options.tokenizer)
+        if (tokenizer_api is not None and tokenizer is not None
+                and not hasattr(tokenizer, tokenizer_api)):
+            missing.append("Tokenizer.%s" % tokenizer_api)
+        if self._index_options.tokenizer != "jieba" and filter_ is not None:
+            filter_checks = []
+            if self._index_options.max_token_length != 40:
+                filter_checks.append(("remove_long", "Filter.remove_long"))
+            if self._index_options.lower_case:
+                filter_checks.append(("lowercase", "Filter.lowercase"))
+            if self._index_options.ascii_folding:
+                filter_checks.append(("ascii_fold", "Filter.ascii_fold"))
+            if self._index_options.stem:
+                filter_checks.append(("stemmer", "Filter.stemmer"))
+            if self._index_options.remove_stop_words:
+                filter_checks.append(("stopword", "Filter.stopword"))
+            if self._index_options.stop_word_list():
+                filter_checks.append(("custom_stopword", "Filter.custom_stopword"))
+            for attr, api_name in filter_checks:
+                if not hasattr(filter_, attr):
+                    missing.append(api_name)
         if self._index_options.tokenizer == "jieba" and query is not None:
             for name in ("empty_query", "term_query", "boolean_query"):
                 if not hasattr(query, name):
                     missing.append("Query.%s" % name)
-        if (self._index_options.tokenizer == "jieba" and occur is not None
-                and not hasattr(occur, "Should")):
-            missing.append("Occur.Should")
+        if self._index_options.tokenizer == "jieba" and occur is not None:
+            for name in ("Should", "Must"):
+                if not hasattr(occur, name):
+                    missing.append("Occur.%s" % name)
         if missing:
             tokenizer_name = self._index_options.tokenizer
             raise RuntimeError(
@@ -486,6 +627,16 @@ def _read_meta_utf(data: bytes, offset: int):
     offset += 2
     _check_meta_remaining(data, offset, utf_len)
     return data[offset:offset + utf_len].decode('utf-8'), offset + utf_len
+
+
+def _normalize_stop_words(stop_words):
+    if stop_words is None:
+        return ""
+    return ";".join(
+        word.strip()
+        for word in stop_words.split(";")
+        if word.strip()
+    )
 
 
 def _check_meta_remaining(data: bytes, offset: int, length: int):

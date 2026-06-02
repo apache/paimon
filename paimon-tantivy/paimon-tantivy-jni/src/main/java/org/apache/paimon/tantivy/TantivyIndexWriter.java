@@ -40,9 +40,26 @@ public class TantivyIndexWriter implements AutoCloseable {
             int maxGram,
             boolean prefixOnly,
             boolean lowerCase) {
+        this(
+                indexPath,
+                "{\"tokenizer\":\""
+                        + tokenizerName
+                        + "\",\"ngramMinGram\":"
+                        + minGram
+                        + ",\"ngramMaxGram\":"
+                        + maxGram
+                        + ",\"ngramPrefixOnly\":"
+                        + prefixOnly
+                        + ",\"lowerCase\":"
+                        + lowerCase
+                        + ",\"maxTokenLength\":40,\"asciiFolding\":false,\"stem\":false,"
+                        + "\"language\":\"english\",\"removeStopWords\":false,"
+                        + "\"stopWords\":[],\"withPosition\":true}");
+    }
+
+    public TantivyIndexWriter(String indexPath, String configJson) {
         this.indexPtr =
-                createIndexWithTokenizer(
-                        indexPath, tokenizerName, minGram, maxGram, prefixOnly, lowerCase);
+                createIndexWithTokenizerConfig(indexPath, configJson);
         this.closed = false;
     }
 
@@ -82,6 +99,8 @@ public class TantivyIndexWriter implements AutoCloseable {
             int maxGram,
             boolean prefixOnly,
             boolean lowerCase);
+
+    static native long createIndexWithTokenizerConfig(String indexPath, String configJson);
 
     static native void writeDocument(long indexPtr, long rowId, String text);
 

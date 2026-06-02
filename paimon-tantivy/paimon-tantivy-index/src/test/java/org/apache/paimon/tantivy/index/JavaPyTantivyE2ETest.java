@@ -125,6 +125,14 @@ public class JavaPyTantivyE2ETest {
                 "ngram");
 
         writeTableWithTantivyIndex(
+                "test_tantivy_fulltext_simple",
+                Arrays.asList(
+                        "Running runners search Apache Paimon",
+                        "Run search with Paimon lake",
+                        "The connector runs analytics"),
+                "simple");
+
+        writeTableWithTantivyIndex(
                 "test_tantivy_fulltext_jieba",
                 Arrays.asList(
                         "张华在百货公司当售货员",
@@ -186,6 +194,9 @@ public class JavaPyTantivyE2ETest {
         if ("ngram".equals(tokenizer)) {
             indexOptions.set(TantivyFullTextIndexOptions.NGRAM_MIN_GRAM, 2);
             indexOptions.set(TantivyFullTextIndexOptions.NGRAM_MAX_GRAM, 2);
+        } else if ("simple".equals(tokenizer)) {
+            indexOptions.set(TantivyFullTextIndexOptions.STEM, true);
+            indexOptions.set(TantivyFullTextIndexOptions.REMOVE_STOP_WORDS, true);
         }
 
         GlobalIndexSingletonWriter writer =
@@ -209,6 +220,10 @@ public class JavaPyTantivyE2ETest {
         assertThat(persistedOptions.tokenizer()).isEqualTo(tokenizer);
         assertThat(persistedOptions.ngramMinGram()).isEqualTo(2);
         assertThat(persistedOptions.ngramMaxGram()).isEqualTo(2);
+        if ("simple".equals(tokenizer)) {
+            assertThat(persistedOptions.stem()).isTrue();
+            assertThat(persistedOptions.removeStopWords()).isTrue();
+        }
 
         Range rowRange = new Range(0, contents.size() - 1);
         List<IndexFileMeta> indexFiles =

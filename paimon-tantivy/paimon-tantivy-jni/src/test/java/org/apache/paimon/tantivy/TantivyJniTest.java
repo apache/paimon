@@ -113,4 +113,29 @@ public class TantivyJniTest {
             assertEquals(1L, result.getRowIds()[0]);
         }
     }
+
+    @Test
+    public void testTokenizerConfigAndQueryOperator(@TempDir Path tempDir) {
+        assumeNativeAvailable();
+        String indexPath = tempDir.resolve("config_index").toString();
+        String configJson =
+                "{\"tokenizer\":\"simple\",\"stem\":true,\"removeStopWords\":true,"
+                        + "\"language\":\"english\"}";
+
+        try (TantivyIndexWriter writer = new TantivyIndexWriter(indexPath, configJson)) {
+            writer.addDocument(1L, "Apache Paimon runs streaming jobs");
+            writer.addDocument(2L, "Apache Spark runs batch jobs");
+            writer.addDocument(3L, "Paimon lake stores data");
+            writer.commit();
+        }
+
+        try (TantivySearcher searcher = new TantivySearcher(indexPath, configJson)) {
+            SearchResult orResult = searcher.search("paimon spark", 10);
+            assertEquals(3, orResult.size());
+
+            SearchResult andResult = searcher.search("paimon run", 10, "and");
+            assertEquals(1, andResult.size());
+            assertEquals(1L, andResult.getRowIds()[0]);
+        }
+    }
 }

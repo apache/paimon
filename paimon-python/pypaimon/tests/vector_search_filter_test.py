@@ -124,12 +124,25 @@ def _patch_snapshot(testcase, entries):
 
 
 def _java_tantivy_meta(tokenizer="ngram", min_gram=2, max_gram=2,
-                       prefix_only=False, lower_case=True):
+                       prefix_only=False, lower_case=True,
+                       max_token_length=40, ascii_folding=False,
+                       stem=False, language="english",
+                       remove_stop_words=False, stop_words="",
+                       with_position=True):
     tokenizer_bytes = tokenizer.encode("utf-8")
+    language_bytes = language.encode("utf-8")
+    stop_words_bytes = stop_words.encode("utf-8")
     return (
         struct.pack(">iH", 1, len(tokenizer_bytes)) +
         tokenizer_bytes +
-        struct.pack(">ii??", min_gram, max_gram, prefix_only, lower_case)
+        struct.pack(">ii??i??H", min_gram, max_gram, prefix_only,
+                    lower_case, max_token_length, ascii_folding, stem,
+                    len(language_bytes)) +
+        language_bytes +
+        struct.pack(">?", remove_stop_words) +
+        struct.pack(">H", len(stop_words_bytes)) +
+        stop_words_bytes +
+        struct.pack(">?", with_position)
     )
 
 
@@ -154,11 +167,13 @@ class _FakeSchemaBuilder:
     def add_unsigned_field(self, name, stored=False, indexed=True, fast=False):
         self.fields[name] = {"fast": fast}
 
-    def add_text_field(self, name, stored=False, tokenizer_name=None):
+    def add_text_field(self, name, stored=False, tokenizer_name=None, index_option=None):
         self.fields[name] = {
             "stored": stored,
             "tokenizer_name": tokenizer_name or "default",
         }
+        if index_option is not None:
+            self.fields[name]["index_option"] = index_option
 
     def build(self):
         return types.SimpleNamespace(fields=self.fields)
@@ -169,11 +184,43 @@ class _FakeTokenizer:
     def ngram(min_gram=2, max_gram=3, prefix_only=False):
         return ("ngram", min_gram, max_gram, prefix_only)
 
+    @staticmethod
+    def simple():
+        return ("simple",)
+
+    @staticmethod
+    def whitespace():
+        return ("whitespace",)
+
+    @staticmethod
+    def raw():
+        return ("raw",)
+
 
 class _FakeFilter:
     @staticmethod
     def lowercase():
         return "lowercase"
+
+    @staticmethod
+    def remove_long(length_limit):
+        return ("remove_long", length_limit)
+
+    @staticmethod
+    def ascii_fold():
+        return "ascii_fold"
+
+    @staticmethod
+    def stemmer(language):
+        return ("stemmer", language)
+
+    @staticmethod
+    def stopword(language):
+        return ("stopword", language)
+
+    @staticmethod
+    def custom_stopword(stopwords):
+        return ("custom_stopword", tuple(stopwords))
 
 
 class _FakeTextAnalyzerBuilder:
@@ -206,6 +253,7 @@ class _FakeQuery:
 
 class _FakeOccur:
     Should = "should"
+    Must = "must"
 
 
 class _FakeSearchResults:
@@ -240,8 +288,8 @@ class _FakeIndex:
         self.searcher_instance = _FakeSearcher()
         return self.searcher_instance
 
-    def parse_query(self, query_text, fields):
-        return (query_text, tuple(fields))
+    def parse_query(self, query_text, fields, **kwargs):
+        return (query_text, tuple(fields), kwargs)
 
 
 class _FakeTantivy(types.SimpleNamespace):
@@ -308,6 +356,13 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         self.assertEqual(2, options.ngram_max_gram)
         self.assertFalse(options.ngram_prefix_only)
         self.assertTrue(options.lower_case)
+        self.assertEqual(40, options.max_token_length)
+        self.assertFalse(options.ascii_folding)
+        self.assertFalse(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertFalse(options.remove_stop_words)
+        self.assertEqual("", options.stop_words)
+        self.assertTrue(options.with_position)
         self.assertEqual("default", options.tokenizer_name())
 
     def test_deserializes_java_ngram_metadata(self):
@@ -327,6 +382,30 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         self.assertTrue(options.ngram_prefix_only)
         self.assertFalse(options.lower_case)
         self.assertEqual(TANTIVY_NGRAM_TOKENIZER, options.tokenizer_name())
+
+    def test_deserializes_extended_analyzer_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(
+                tokenizer=" WHITESPACE ", lower_case=False, max_token_length=12,
+                ascii_folding=True, stem=True, language="English",
+                remove_stop_words=True, stop_words="paimon;lake",
+                with_position=False))
+
+        self.assertEqual("whitespace", options.tokenizer)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(12, options.max_token_length)
+        self.assertTrue(options.ascii_folding)
+        self.assertTrue(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertTrue(options.remove_stop_words)
+        self.assertEqual("paimon;lake", options.stop_words)
+        self.assertEqual(["paimon", "lake"], options.stop_word_list())
+        self.assertFalse(options.with_position)
+        self.assertEqual("paimon_custom", options.tokenizer_name())
 
     def test_deserializes_java_jieba_metadata(self):
         from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
@@ -385,6 +464,54 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             tantivy.last_index.registered_tokenizer)
         self.assertEqual([7], sorted(list(result.results())))
 
+        query = tantivy.last_index.searcher_instance.query
+        self.assertEqual(("中文", ("text",), {}), query)
+
+    def test_custom_analyzer_reader_registers_matching_tantivy_analyzer(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_CUSTOM_TOKENIZER,
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(
+                        tokenizer="simple", max_token_length=16,
+                        ascii_folding=True, stem=True, language="english",
+                        remove_stop_words=True, stop_words="paimon;lake",
+                        with_position=False))])
+            try:
+                reader.visit_full_text_search(
+                    FullTextSearch("running", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual({"row_id": {"fast": True},
+                          "text": {"stored": False,
+                                   "tokenizer_name": TANTIVY_CUSTOM_TOKENIZER,
+                                   "index_option": "freq"}},
+                         tantivy.last_schema.fields)
+        self.assertEqual(
+            (TANTIVY_CUSTOM_TOKENIZER,
+             ("simple",
+              (("remove_long", 16), "lowercase", "ascii_fold", ("stemmer", "english"),
+               ("stopword", "english"), ("custom_stopword", ("paimon", "lake"))))),
+            tantivy.last_index.registered_tokenizer)
+
     def test_ngram_reader_requires_custom_tokenizer_api(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
         from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
@@ -439,7 +566,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                     metadata=_java_tantivy_meta(tokenizer="jieba"))])
             try:
                 result = reader.visit_full_text_search(
-                    FullTextSearch("售货员", 10, "content")).result()
+                    FullTextSearch("售货员", 10, "content", "and")).result()
             finally:
                 reader.close()
         finally:
@@ -464,6 +591,9 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         self.assertEqual(
             ("售货", "货员", "售货员"),
             tuple(sub_query[1][3] for sub_query in query[1]))
+        self.assertEqual(
+            ("must", "must", "must"),
+            tuple(sub_query[0] for sub_query in query[1]))
 
     def test_jieba_reader_requires_jieba_package(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch

@@ -981,6 +981,28 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Tantivy ngram search for '片段': row_ids={fragment_row_ids}")
         self.assertEqual(fragment_row_ids, [4])
 
+        ngram_and_builder = ngram_table.new_full_text_search_builder()
+        ngram_and_builder.with_text_column('content')
+        ngram_and_builder.with_query_text('中文 片段')
+        ngram_and_builder.with_query_operator('and')
+        ngram_and_builder.with_limit(10)
+
+        ngram_and_result = ngram_and_builder.execute_local()
+        ngram_and_row_ids = sorted(list(ngram_and_result.results()))
+        print(f"Tantivy ngram AND search for '中文 片段': row_ids={ngram_and_row_ids}")
+        self.assertEqual(ngram_and_row_ids, [4])
+
+        simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
+        simple_builder = simple_table.new_full_text_search_builder()
+        simple_builder.with_text_column('content')
+        simple_builder.with_query_text('running')
+        simple_builder.with_limit(10)
+
+        simple_result = simple_builder.execute_local()
+        simple_row_ids = sorted(list(simple_result.results()))
+        print(f"Tantivy simple stemmed search for 'running': row_ids={simple_row_ids}")
+        self.assertEqual(simple_row_ids, [0, 1, 2])
+
         jieba_table = self.catalog.get_table('default.test_tantivy_fulltext_jieba')
 
         # Search for Chinese words using the jieba tokenizer metadata written by Java.
@@ -1012,6 +1034,17 @@ class JavaPyReadWriteTest(unittest.TestCase):
         jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
         print(f"Tantivy jieba search for '自然': row_ids={jieba_phrase_row_ids}")
         self.assertEqual(jieba_phrase_row_ids, [3])
+
+        jieba_and_builder = jieba_table.new_full_text_search_builder()
+        jieba_and_builder.with_text_column('content')
+        jieba_and_builder.with_query_text('中文 自然')
+        jieba_and_builder.with_query_operator('and')
+        jieba_and_builder.with_limit(10)
+
+        jieba_and_result = jieba_and_builder.execute_local()
+        jieba_and_row_ids = sorted(list(jieba_and_result.results()))
+        print(f"Tantivy jieba AND search for '中文 自然': row_ids={jieba_and_row_ids}")
+        self.assertEqual(jieba_and_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
         """Test reading a Lumina vector index built by Java (orc and lance formats)."""

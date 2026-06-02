@@ -41,9 +41,11 @@ public class TantivySearcher implements AutoCloseable {
             int maxGram,
             boolean prefixOnly,
             boolean lowerCase) {
-        this.searcherPtr =
-                openIndexWithTokenizer(
-                        indexPath, tokenizerName, minGram, maxGram, prefixOnly, lowerCase);
+        this(indexPath, defaultConfigJson(tokenizerName, minGram, maxGram, prefixOnly, lowerCase));
+    }
+
+    public TantivySearcher(String indexPath, String configJson) {
+        this.searcherPtr = openIndexWithTokenizerConfig(indexPath, configJson);
         this.closed = false;
     }
 
@@ -74,17 +76,23 @@ public class TantivySearcher implements AutoCloseable {
             int maxGram,
             boolean prefixOnly,
             boolean lowerCase) {
+        this(
+                fileNames,
+                fileOffsets,
+                fileLengths,
+                streamInput,
+                defaultConfigJson(tokenizerName, minGram, maxGram, prefixOnly, lowerCase));
+    }
+
+    public TantivySearcher(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String configJson) {
         this.searcherPtr =
-                openFromStreamWithTokenizer(
-                        fileNames,
-                        fileOffsets,
-                        fileLengths,
-                        streamInput,
-                        tokenizerName,
-                        minGram,
-                        maxGram,
-                        prefixOnly,
-                        lowerCase);
+                openFromStreamWithTokenizerConfig(
+                        fileNames, fileOffsets, fileLengths, streamInput, configJson);
         this.closed = false;
     }
 
@@ -96,8 +104,12 @@ public class TantivySearcher implements AutoCloseable {
      * @return search results containing rowIds and scores
      */
     public SearchResult search(String queryString, int limit) {
+        return search(queryString, limit, "or");
+    }
+
+    public SearchResult search(String queryString, int limit, String queryOperator) {
         checkNotClosed();
-        return searchIndex(searcherPtr, queryString, limit);
+        return searchIndex(searcherPtr, queryString, limit, queryOperator);
     }
 
     @Override
@@ -131,6 +143,8 @@ public class TantivySearcher implements AutoCloseable {
             boolean prefixOnly,
             boolean lowerCase);
 
+    static native long openIndexWithTokenizerConfig(String indexPath, String configJson);
+
     static native long openFromStream(
             String[] fileNames, long[] fileOffsets, long[] fileLengths, StreamFileInput streamInput);
 
@@ -145,7 +159,32 @@ public class TantivySearcher implements AutoCloseable {
             boolean prefixOnly,
             boolean lowerCase);
 
-    static native SearchResult searchIndex(long searcherPtr, String queryString, int limit);
+    static native long openFromStreamWithTokenizerConfig(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String configJson);
+
+    static native SearchResult searchIndex(
+            long searcherPtr, String queryString, int limit, String queryOperator);
 
     static native void freeSearcher(long searcherPtr);
+
+    private static String defaultConfigJson(
+            String tokenizerName, int minGram, int maxGram, boolean prefixOnly, boolean lowerCase) {
+        return "{\"tokenizer\":\""
+                + tokenizerName
+                + "\",\"ngramMinGram\":"
+                + minGram
+                + ",\"ngramMaxGram\":"
+                + maxGram
+                + ",\"ngramPrefixOnly\":"
+                + prefixOnly
+                + ",\"lowerCase\":"
+                + lowerCase
+                + ",\"maxTokenLength\":40,\"asciiFolding\":false,\"stem\":false,"
+                + "\"language\":\"english\",\"removeStopWords\":false,"
+                + "\"stopWords\":[],\"withPosition\":true}";
+    }
 }

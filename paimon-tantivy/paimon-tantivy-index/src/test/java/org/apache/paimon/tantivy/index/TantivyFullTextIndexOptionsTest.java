@@ -38,6 +38,13 @@ public class TantivyFullTextIndexOptionsTest {
         assertThat(indexOptions.ngramMaxGram()).isEqualTo(2);
         assertThat(indexOptions.ngramPrefixOnly()).isFalse();
         assertThat(indexOptions.lowerCase()).isTrue();
+        assertThat(indexOptions.maxTokenLength()).isEqualTo(40);
+        assertThat(indexOptions.asciiFolding()).isFalse();
+        assertThat(indexOptions.stem()).isFalse();
+        assertThat(indexOptions.language()).isEqualTo("english");
+        assertThat(indexOptions.removeStopWords()).isFalse();
+        assertThat(indexOptions.stopWords()).isEmpty();
+        assertThat(indexOptions.withPosition()).isTrue();
     }
 
     @Test
@@ -58,6 +65,36 @@ public class TantivyFullTextIndexOptionsTest {
         assertThat(indexOptions.ngramMaxGram()).isEqualTo(3);
         assertThat(indexOptions.ngramPrefixOnly()).isTrue();
         assertThat(indexOptions.lowerCase()).isFalse();
+    }
+
+    @Test
+    public void testSerializeDeserializeAnalyzerOptions() throws Exception {
+        Options options = new Options();
+        options.set(TantivyFullTextIndexOptions.TOKENIZER, " WHITESPACE ");
+        options.set(TantivyFullTextIndexOptions.LOWER_CASE, false);
+        options.set(TantivyFullTextIndexOptions.MAX_TOKEN_LENGTH, 12);
+        options.set(TantivyFullTextIndexOptions.ASCII_FOLDING, true);
+        options.set(TantivyFullTextIndexOptions.STEM, true);
+        options.set(TantivyFullTextIndexOptions.LANGUAGE, "English");
+        options.set(TantivyFullTextIndexOptions.REMOVE_STOP_WORDS, true);
+        options.set(TantivyFullTextIndexOptions.STOP_WORDS, "paimon;lake");
+        options.set(TantivyFullTextIndexOptions.WITH_POSITION, false);
+
+        TantivyFullTextIndexOptions indexOptions =
+                TantivyFullTextIndexOptions.deserialize(
+                        TantivyFullTextIndexOptions.from(options).serialize());
+
+        assertThat(indexOptions.tokenizer()).isEqualTo("whitespace");
+        assertThat(indexOptions.lowerCase()).isFalse();
+        assertThat(indexOptions.maxTokenLength()).isEqualTo(12);
+        assertThat(indexOptions.asciiFolding()).isTrue();
+        assertThat(indexOptions.stem()).isTrue();
+        assertThat(indexOptions.language()).isEqualTo("english");
+        assertThat(indexOptions.removeStopWords()).isTrue();
+        assertThat(indexOptions.stopWords()).isEqualTo("paimon;lake");
+        assertThat(indexOptions.stopWordList()).containsExactly("paimon", "lake");
+        assertThat(indexOptions.withPosition()).isFalse();
+        assertThat(indexOptions.toNativeConfigJson()).contains("\"tokenizer\":\"whitespace\"");
     }
 
     @Test
@@ -86,5 +123,13 @@ public class TantivyFullTextIndexOptionsTest {
         assertThatThrownBy(() -> new TantivyFullTextIndexOptions("ngram", 3, 2, false, true))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ngram min gram must not be greater than max gram");
+
+        assertThatThrownBy(
+                        () ->
+                                new TantivyFullTextIndexOptions(
+                                        "default", 2, 2, false, true, 40, false, true, "klingon",
+                                        false, "", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unsupported Tantivy language");
     }
 }
