@@ -21,6 +21,7 @@ Reads the archive header to get file layout, then opens a Tantivy searcher
 backed by a stream-based Directory. No temp files are created on disk.
 """
 
+import json
 import os
 import struct
 import threading
@@ -81,6 +82,8 @@ class TantivyFullTextIndexOptions:
     def deserialize(data):
         if not data:
             return TantivyFullTextIndexOptions()
+        if data.lstrip().startswith(b"{"):
+            return TantivyFullTextIndexOptions._deserialize_json(data)
 
         offset = 0
         version, offset = _read_meta_int(data, offset)
@@ -122,6 +125,28 @@ class TantivyFullTextIndexOptions:
             remove_stop_words=remove_stop_words,
             stop_words=stop_words,
             with_position=with_position)
+
+    @staticmethod
+    def _deserialize_json(data):
+        config = json.loads(data.decode("utf-8"))
+        stop_words = config.get("stopWords", [])
+        if isinstance(stop_words, list):
+            stop_words = ";".join(
+                word for word in stop_words if word is not None)
+
+        return TantivyFullTextIndexOptions(
+            tokenizer=config.get("tokenizer", "default"),
+            ngram_min_gram=config.get("ngramMinGram", 2),
+            ngram_max_gram=config.get("ngramMaxGram", 2),
+            ngram_prefix_only=config.get("ngramPrefixOnly", False),
+            lower_case=config.get("lowerCase", True),
+            max_token_length=config.get("maxTokenLength", 40),
+            ascii_folding=config.get("asciiFolding", False),
+            stem=config.get("stem", False),
+            language=config.get("language", "english"),
+            remove_stop_words=config.get("removeStopWords", False),
+            stop_words=stop_words,
+            with_position=config.get("withPosition", True))
 
     def __post_init__(self):
         tokenizer = "" if self.tokenizer is None else self.tokenizer.strip().lower()

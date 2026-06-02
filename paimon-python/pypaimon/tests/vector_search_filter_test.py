@@ -22,6 +22,7 @@ redundancy.
 """
 
 import io
+import json
 import struct
 import sys
 import types
@@ -144,6 +145,30 @@ def _java_tantivy_meta(tokenizer="ngram", min_gram=2, max_gram=2,
         stop_words_bytes +
         struct.pack(">?", with_position)
     )
+
+
+def _java_tantivy_json_meta(tokenizer="ngram", min_gram=2, max_gram=2,
+                            prefix_only=False, lower_case=True,
+                            max_token_length=40, ascii_folding=False,
+                            stem=False, language="english",
+                            remove_stop_words=False, stop_words=None,
+                            with_position=True):
+    if stop_words is None:
+        stop_words = []
+    return json.dumps({
+        "tokenizer": tokenizer,
+        "ngramMinGram": min_gram,
+        "ngramMaxGram": max_gram,
+        "ngramPrefixOnly": prefix_only,
+        "lowerCase": lower_case,
+        "maxTokenLength": max_token_length,
+        "asciiFolding": ascii_folding,
+        "stem": stem,
+        "language": language,
+        "removeStopWords": remove_stop_words,
+        "stopWords": stop_words,
+        "withPosition": with_position,
+    }, separators=(",", ":")).encode("utf-8")
 
 
 class _FakeFileIO:
@@ -385,6 +410,24 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         self.assertFalse(options.lower_case)
         self.assertEqual(TANTIVY_NGRAM_TOKENIZER, options.tokenizer_name())
 
+    def test_deserializes_java_json_ngram_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_NGRAM_TOKENIZER,
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_json_meta(
+                tokenizer=" NGRAM ", min_gram=2, max_gram=3,
+                prefix_only=True, lower_case=False))
+
+        self.assertEqual("ngram", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(3, options.ngram_max_gram)
+        self.assertTrue(options.ngram_prefix_only)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(TANTIVY_NGRAM_TOKENIZER, options.tokenizer_name())
+
     def test_deserializes_extended_analyzer_metadata(self):
         from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
             TantivyFullTextIndexOptions,
@@ -395,6 +438,30 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                 tokenizer=" WHITESPACE ", lower_case=False, max_token_length=12,
                 ascii_folding=True, stem=True, language="English",
                 remove_stop_words=True, stop_words="paimon;lake",
+                with_position=False))
+
+        self.assertEqual("whitespace", options.tokenizer)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(12, options.max_token_length)
+        self.assertTrue(options.ascii_folding)
+        self.assertTrue(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertTrue(options.remove_stop_words)
+        self.assertEqual("paimon;lake", options.stop_words)
+        self.assertEqual(["paimon", "lake"], options.stop_word_list())
+        self.assertFalse(options.with_position)
+        self.assertEqual("paimon_custom", options.tokenizer_name())
+
+    def test_deserializes_java_json_analyzer_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_json_meta(
+                tokenizer=" WHITESPACE ", lower_case=False, max_token_length=12,
+                ascii_folding=True, stem=True, language="English",
+                remove_stop_words=True, stop_words=["paimon", "lake"],
                 with_position=False))
 
         self.assertEqual("whitespace", options.tokenizer)
