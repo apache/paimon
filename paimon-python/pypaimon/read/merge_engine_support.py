@@ -63,22 +63,114 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "sum", "max", "min",
     "bool_or", "bool_and",
 ])
-_SEQUENCE_FIELD_KEY = "sequence.field"
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
 _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
 _FIELD_IGNORE_RETRACT_SUFFIX = ".ignore-retract"
+_FIELD_NESTED_SEQUENCE_SUFFIX = ".nested-sequence-field"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
+
+
+def _nested_sequence_field_options(table) -> Set[str]:
+    """Option keys configuring ``nested-sequence-field`` (a per-field
+    nested sequence ordering distinct from the top-level
+    ``sequence.field``). pypaimon implements top-level ``sequence.field``
+    but not nested sequence fields, so reject them on every PK engine
+    rather than silently ignoring them.
+    """
+    flagged: Set[str] = set()
+    raw = table.options.options.to_map()
+    for key in raw:
+        if key.startswith(_FIELDS_PREFIX) and key.endswith(
+                _FIELD_NESTED_SEQUENCE_SUFFIX):
+            flagged.add(key)
+    return flagged
+
+
+def check_sequence_field_valid(table) -> None:
+    """Reject ``sequence.field`` configurations Java forbids at schema
+    validation (``SchemaValidation.validateSequenceField``), raising
+    ``ValueError`` to mirror Java's ``IllegalArgumentException``.
+
+    These are invalid configurations, not deferred features, so they are
+    rejected on every merge engine regardless of pypaimon's read-path
+    coverage. Mirrors all of Java's checks:
+
+    1. Every sequence field must exist in the table schema.
+    2. No sequence field may be declared more than once.
+    3. ``fields.<seq>.aggregate-function`` on a sequence column: Java
+       forbids aggregating the sequence column outright. pypaimon's
+       aggregation engine otherwise silently overrides it with
+       ``last_value``, hiding the misconfiguration.
+    4. ``sequence.field`` together with ``merge-engine=first-row``:
+       first-row keeps the earliest-written row and never honors a
+       sequence ordering.
+    5. ``sequence.field`` together with cross-partition update (the PK
+       does not include all partition fields).
+    """
+    sequence_fields = table.options.sequence_field()
+    if not sequence_fields:
+        return
+
+    field_names = set(table.field_names)
+    seen: Set[str] = set()
+    options_map = table.options.options.to_map()
+    for field in sequence_fields:
+        if field not in field_names:
+            raise ValueError(
+                "Sequence field: '{}' can not be found in table "
+                "schema.".format(field)
+            )
+        if field in seen:
+            raise ValueError(
+                "Sequence field '{}' is defined repeatedly.".format(field)
+            )
+        seen.add(field)
+        agg_key = "fields.{}.aggregate-function".format(field)
+        if options_map.get(agg_key) is not None:
+            raise ValueError(
+                "Should not define aggregation on sequence field: '{}' "
+                "({}).".format(field, agg_key)
+            )
+
+    if table.options.merge_engine() == MergeEngine.FIRST_ROW:
+        raise ValueError(
+            "Do not support use sequence.field on FIRST_ROW merge engine."
+        )
+
+    if table.cross_partition_update:
+        raise ValueError(
+            "You can not use sequence.field in cross partition update case "
+            "(primary keys {} do not include all partition fields "
+            "{}).".format(table.primary_keys, table.partition_keys)
+        )
 
 
 def check_supported(table) -> None:
     """Raise ``NotImplementedError`` if the table's merge-engine
-    configuration is outside what pypaimon's read path implements.
+    configuration is outside what pypaimon's read path implements, or
+    ``ValueError`` if it is an outright-invalid configuration that Java
+    rejects at schema validation.
 
     Non-PK tables are always fine (no merge function involved).
     """
     if not table.is_primary_key_table:
         return
+    # ``nested-sequence-field`` is unimplemented on every engine; reject it
+    # before per-engine dispatch so it can't be silently ignored by the
+    # top-level ``sequence.field`` comparator.
+    nested_seq = _nested_sequence_field_options(table)
+    if nested_seq:
+        raise NotImplementedError(
+            "nested-sequence-field is not implemented in pypaimon yet: {}. "
+            "Top-level 'sequence.field' is supported; open an issue to track "
+            "nested sequence field support.".format(", ".join(sorted(nested_seq)))
+        )
+    # ``sequence.field`` validity is engine-independent in Java
+    # (SchemaValidation.validateSequenceField). pypaimon has no
+    # schema-creation validation, so enforce the same invariants here on
+    # the read path, before per-engine dispatch.
+    check_sequence_field_valid(table)
     engine = table.options.merge_engine()
     if engine == MergeEngine.DEDUPLICATE:
         return
@@ -108,7 +200,7 @@ def check_supported(table) -> None:
                 "supported subset is per-key field aggregation with the "
                 "built-in aggregators ({}); retract opt-ins "
                 "(aggregation.remove-record-on-delete, "
-                "fields.<f>.ignore-retract), sequence-field handling "
+                "fields.<f>.ignore-retract) "
                 "and other aggregators (product / listagg / collect / "
                 "merge_map* / nested_update* / theta_sketch / "
                 "hll_sketch / roaring_bitmap_*) are not yet supported. "
@@ -156,11 +248,9 @@ def aggregation_unsupported_options(table) -> Set[str]:
        ``fields.<f>.ignore-retract`` only make sense in conjunction
        with DELETE / UPDATE_BEFORE handling, which the engine does not
        implement.
-    2. Sequence-field configuration: ``sequence.field`` /
-       ``fields.<f>.sequence-group`` are not supported; the merge
-       function does not special-case sequence fields, so we refuse
-       the table rather than silently merge them as ordinary value
-       columns.
+    2. Sequence-group configuration: ``fields.<f>.sequence-group`` is not
+       supported (top-level ``sequence.field`` is honored, see
+       ``builtin_seq_comparator``).
     3. Out-of-scope aggregator selections: ``fields.<f>.aggregate-
        function`` and ``fields.default-aggregate-function`` set to an
        identifier this engine doesn't support yet (e.g. ``collect``,
@@ -171,8 +261,6 @@ def aggregation_unsupported_options(table) -> Set[str]:
     for key, value in raw.items():
         if (key in _AGGREGATION_UNSUPPORTED_BOOLEAN_OPTIONS
                 and _option_is_truthy(value)):
-            flagged.add(key)
-        elif key == _SEQUENCE_FIELD_KEY and value:
             flagged.add(key)
         elif key == _DEFAULT_AGGREGATE_FUNCTION_KEY:
             if value not in _AGGREGATION_SUPPORTED_AGG_FUNCS:
