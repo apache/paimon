@@ -333,6 +333,55 @@ class RayIntegrationTest(unittest.TestCase):
         result = read_paimon(identifier, self.catalog_options)
         self.assertEqual(result.count(), 0)
 
+    def test_table_write_ray_builder_partition_overwrite(self):
+        """Builder-level partition overwrite is honored by write_ray()."""
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+            ('dt', pa.string()),
+        ])
+        identifier = 'default.test_write_ray_partition_overwrite'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['dt'],
+            options={'dynamic-partition-overwrite': 'false'},
+        )
+        catalog.create_table(identifier, schema, False)
+        table = catalog.get_table(identifier)
+
+        initial = pa.Table.from_pydict(
+            {
+                'id': [1, 2, 3],
+                'val': ['old-p1-a', 'old-p1-b', 'old-p2'],
+                'dt': ['p1', 'p1', 'p2'],
+            },
+            schema=pa_schema,
+        )
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        replacement = ray.data.from_arrow(
+            pa.Table.from_pydict(
+                {'id': [4], 'val': ['new-p1'], 'dt': ['p1']},
+                schema=pa_schema,
+            )
+        )
+        writer = table.new_batch_write_builder().overwrite({'dt': 'p1'}).new_write()
+        writer.write_ray(replacement, concurrency=1)
+        writer.close()
+
+        result = read_paimon(identifier, self.catalog_options)
+        df = result.to_pandas().sort_values('id').reset_index(drop=True)
+        self.assertEqual(list(df['id']), [3, 4])
+        self.assertEqual(list(df['val']), ['old-p2', 'new-p1'])
+        self.assertEqual(list(df['dt']), ['p2', 'p1'])
+
     def test_read_paimon_primary_key(self):
         """read_paimon() merges PK rows correctly after an upsert."""
         from pypaimon.ray import read_paimon
