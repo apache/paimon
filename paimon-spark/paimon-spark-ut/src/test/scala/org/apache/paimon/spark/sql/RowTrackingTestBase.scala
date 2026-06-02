@@ -334,6 +334,21 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Row Tracking: delete preserves row tracking metadata for update") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+      sql("DELETE FROM t WHERE id = 2")
+      sql("UPDATE t SET data = 33 WHERE _ROW_ID = 2")
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 1, 0, 1), Row(3, 33, 2, 3))
+      )
+    }
+  }
+
   test("Row Tracking: update table") {
     withTable("t") {
       // only enable row tracking

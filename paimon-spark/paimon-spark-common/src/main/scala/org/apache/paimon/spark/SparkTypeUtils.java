@@ -99,6 +99,23 @@ public class SparkTypeUtils {
         return SparkToPaimonTypeVisitor.visit(dataType);
     }
 
+    public static boolean containsCharType(org.apache.paimon.types.DataType type) {
+        if (type instanceof CharType) {
+            return true;
+        } else if (type instanceof RowType) {
+            return ((RowType) type).getFields().stream()
+                    .anyMatch(field -> containsCharType(field.type()));
+        } else if (type instanceof ArrayType) {
+            return containsCharType(((ArrayType) type).getElementType());
+        } else if (type instanceof MapType) {
+            MapType mapType = (MapType) type;
+            return containsCharType(mapType.getKeyType()) || containsCharType(mapType.getValueType());
+        } else if (type instanceof MultisetType) {
+            return containsCharType(((MultisetType) type).getElementType());
+        }
+        return false;
+    }
+
     /**
      * Prune Paimon `RowType` by required Spark `StructType`, use this method instead of {@link
      * #toPaimonType(DataType)} when need to retain the field id.
