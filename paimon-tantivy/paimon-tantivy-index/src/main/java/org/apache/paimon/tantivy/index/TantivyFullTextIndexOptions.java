@@ -32,8 +32,10 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /** Options for the Tantivy full-text index. */
 public class TantivyFullTextIndexOptions {
@@ -273,7 +275,7 @@ public class TantivyFullTextIndexOptions {
     }
 
     public String toNativeConfigJson() {
-        return JsonSerdeUtil.toFlatJson(toNativeConfig());
+        return JsonSerdeUtil.toFlatJson(toNativeConfigMap());
     }
 
     public byte[] serialize() throws IOException {
@@ -325,20 +327,46 @@ public class TantivyFullTextIndexOptions {
         }
     }
 
-    private NativeConfig toNativeConfig() {
-        NativeConfig config = new NativeConfig();
-        config.tokenizer = tokenizer;
-        config.ngramMinGram = ngramMinGram;
-        config.ngramMaxGram = ngramMaxGram;
-        config.ngramPrefixOnly = ngramPrefixOnly;
-        config.lowerCase = lowerCase;
-        config.maxTokenLength = maxTokenLength;
-        config.asciiFolding = asciiFolding;
-        config.stem = stem;
-        config.language = language;
-        config.removeStopWords = removeStopWords;
-        config.stopWords = stopWordList();
-        config.withPosition = withPosition;
+    private Map<String, Object> toNativeConfigMap() {
+        Map<String, Object> config = new LinkedHashMap<>();
+        TantivyFullTextIndexOptions defaults = defaults();
+        if (!tokenizer.equals(defaults.tokenizer)) {
+            config.put("tokenizer", tokenizer);
+        }
+        if (ngramMinGram != defaults.ngramMinGram) {
+            config.put("ngramMinGram", ngramMinGram);
+        }
+        if (ngramMaxGram != defaults.ngramMaxGram) {
+            config.put("ngramMaxGram", ngramMaxGram);
+        }
+        if (ngramPrefixOnly != defaults.ngramPrefixOnly) {
+            config.put("ngramPrefixOnly", ngramPrefixOnly);
+        }
+        if (lowerCase != defaults.lowerCase) {
+            config.put("lowerCase", lowerCase);
+        }
+        if (maxTokenLength != defaults.maxTokenLength) {
+            config.put("maxTokenLength", maxTokenLength);
+        }
+        if (asciiFolding != defaults.asciiFolding) {
+            config.put("asciiFolding", asciiFolding);
+        }
+        if (stem != defaults.stem) {
+            config.put("stem", stem);
+        }
+        if (!language.equals(defaults.language)) {
+            config.put("language", language);
+        }
+        if (removeStopWords != defaults.removeStopWords) {
+            config.put("removeStopWords", removeStopWords);
+        }
+        List<String> stopWordList = stopWordList();
+        if (!stopWordList.isEmpty()) {
+            config.put("stopWords", stopWordList);
+        }
+        if (withPosition != defaults.withPosition) {
+            config.put("withPosition", withPosition);
+        }
         return config;
     }
 

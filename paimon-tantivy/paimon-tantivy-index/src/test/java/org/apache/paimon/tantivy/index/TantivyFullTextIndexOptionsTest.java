@@ -52,6 +52,16 @@ public class TantivyFullTextIndexOptionsTest {
     }
 
     @Test
+    public void testDefaultOptionsSerializeSparseJson() throws Exception {
+        TantivyFullTextIndexOptions indexOptions = TantivyFullTextIndexOptions.defaults();
+
+        assertThat(indexOptions.toNativeConfigJson()).isEqualTo("{}");
+        assertThat(indexOptions.serialize()).isEqualTo("{}".getBytes(StandardCharsets.UTF_8));
+        assertThat(TantivyFullTextIndexOptions.deserialize(indexOptions.serialize()).tokenizer())
+                .isEqualTo("default");
+    }
+
+    @Test
     public void testSerializeDeserializeNgramOptions() throws Exception {
         Options options = new Options();
         options.set(TantivyFullTextIndexOptions.TOKENIZER, " NGRAM ");
@@ -69,6 +79,10 @@ public class TantivyFullTextIndexOptionsTest {
         assertThat(indexOptions.ngramMaxGram()).isEqualTo(3);
         assertThat(indexOptions.ngramPrefixOnly()).isTrue();
         assertThat(indexOptions.lowerCase()).isFalse();
+        assertThat(indexOptions.toNativeConfigJson())
+                .isEqualTo(
+                        "{\"tokenizer\":\"ngram\",\"ngramMaxGram\":3,"
+                                + "\"ngramPrefixOnly\":true,\"lowerCase\":false}");
     }
 
     @Test
@@ -99,6 +113,8 @@ public class TantivyFullTextIndexOptionsTest {
         assertThat(indexOptions.stopWordList()).containsExactly("paimon", "lake");
         assertThat(indexOptions.withPosition()).isFalse();
         assertThat(indexOptions.toNativeConfigJson()).contains("\"tokenizer\":\"whitespace\"");
+        assertThat(indexOptions.toNativeConfigJson()).doesNotContain("\"ngramMinGram\"");
+        assertThat(indexOptions.toNativeConfigJson()).doesNotContain("\"ngramMaxGram\"");
         assertThat(indexOptions.serialize())
                 .isEqualTo(indexOptions.toNativeConfigJson().getBytes(StandardCharsets.UTF_8));
     }

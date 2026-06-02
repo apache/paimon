@@ -41,7 +41,10 @@ public class TantivySearcher implements AutoCloseable {
             int maxGram,
             boolean prefixOnly,
             boolean lowerCase) {
-        this(indexPath, defaultConfigJson(tokenizerName, minGram, maxGram, prefixOnly, lowerCase));
+        this.searcherPtr =
+                openIndexWithTokenizer(
+                        indexPath, tokenizerName, minGram, maxGram, prefixOnly, lowerCase);
+        this.closed = false;
     }
 
     public TantivySearcher(String indexPath, String configJson) {
@@ -76,12 +79,18 @@ public class TantivySearcher implements AutoCloseable {
             int maxGram,
             boolean prefixOnly,
             boolean lowerCase) {
-        this(
-                fileNames,
-                fileOffsets,
-                fileLengths,
-                streamInput,
-                defaultConfigJson(tokenizerName, minGram, maxGram, prefixOnly, lowerCase));
+        this.searcherPtr =
+                openFromStreamWithTokenizer(
+                        fileNames,
+                        fileOffsets,
+                        fileLengths,
+                        streamInput,
+                        tokenizerName,
+                        minGram,
+                        maxGram,
+                        prefixOnly,
+                        lowerCase);
+        this.closed = false;
     }
 
     public TantivySearcher(
@@ -171,20 +180,4 @@ public class TantivySearcher implements AutoCloseable {
 
     static native void freeSearcher(long searcherPtr);
 
-    private static String defaultConfigJson(
-            String tokenizerName, int minGram, int maxGram, boolean prefixOnly, boolean lowerCase) {
-        return "{\"tokenizer\":\""
-                + tokenizerName
-                + "\",\"ngramMinGram\":"
-                + minGram
-                + ",\"ngramMaxGram\":"
-                + maxGram
-                + ",\"ngramPrefixOnly\":"
-                + prefixOnly
-                + ",\"lowerCase\":"
-                + lowerCase
-                + ",\"maxTokenLength\":40,\"asciiFolding\":false,\"stem\":false,"
-                + "\"language\":\"english\",\"removeStopWords\":false,"
-                + "\"stopWords\":[],\"withPosition\":true}";
-    }
 }

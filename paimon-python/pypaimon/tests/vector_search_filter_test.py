@@ -155,20 +155,32 @@ def _java_tantivy_json_meta(tokenizer="ngram", min_gram=2, max_gram=2,
                             with_position=True):
     if stop_words is None:
         stop_words = []
-    return json.dumps({
-        "tokenizer": tokenizer,
-        "ngramMinGram": min_gram,
-        "ngramMaxGram": max_gram,
-        "ngramPrefixOnly": prefix_only,
-        "lowerCase": lower_case,
-        "maxTokenLength": max_token_length,
-        "asciiFolding": ascii_folding,
-        "stem": stem,
-        "language": language,
-        "removeStopWords": remove_stop_words,
-        "stopWords": stop_words,
-        "withPosition": with_position,
-    }, separators=(",", ":")).encode("utf-8")
+    config = {}
+    if tokenizer != "default":
+        config["tokenizer"] = tokenizer
+    if min_gram != 2:
+        config["ngramMinGram"] = min_gram
+    if max_gram != 2:
+        config["ngramMaxGram"] = max_gram
+    if prefix_only:
+        config["ngramPrefixOnly"] = prefix_only
+    if not lower_case:
+        config["lowerCase"] = lower_case
+    if max_token_length != 40:
+        config["maxTokenLength"] = max_token_length
+    if ascii_folding:
+        config["asciiFolding"] = ascii_folding
+    if stem:
+        config["stem"] = stem
+    if language != "english":
+        config["language"] = language
+    if remove_stop_words:
+        config["removeStopWords"] = remove_stop_words
+    if stop_words:
+        config["stopWords"] = stop_words
+    if not with_position:
+        config["withPosition"] = with_position
+    return json.dumps(config, separators=(",", ":")).encode("utf-8")
 
 
 class _FakeFileIO:
@@ -377,6 +389,27 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         )
 
         options = TantivyFullTextIndexOptions.deserialize(b"")
+
+        self.assertEqual("default", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(2, options.ngram_max_gram)
+        self.assertFalse(options.ngram_prefix_only)
+        self.assertTrue(options.lower_case)
+        self.assertEqual(40, options.max_token_length)
+        self.assertFalse(options.ascii_folding)
+        self.assertFalse(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertFalse(options.remove_stop_words)
+        self.assertEqual("", options.stop_words)
+        self.assertTrue(options.with_position)
+        self.assertEqual("default", options.tokenizer_name())
+
+    def test_empty_json_metadata_uses_default_tokenizer(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(b"{}")
 
         self.assertEqual("default", options.tokenizer)
         self.assertEqual(2, options.ngram_min_gram)
