@@ -370,7 +370,8 @@ public class TantivyFullTextIndexOptions {
         return config;
     }
 
-    private static TantivyFullTextIndexOptions fromNativeConfigJson(String json) throws IOException {
+    private static TantivyFullTextIndexOptions fromNativeConfigJson(String json)
+            throws IOException {
         try {
             return fromNativeConfig(JsonSerdeUtil.fromJson(json, NativeConfig.class));
         } catch (UncheckedIOException e) {
