@@ -207,6 +207,51 @@ class LimitPushdownTest(unittest.TestCase):
         rows = list(it)
         self.assertEqual(len(rows), 7)
 
+    # ---- SplitRead-level limit pushdown verification ---------------------
+
+    def test_append_only_split_read_creates_limited_reader(self):
+        """Verify that RawFileSplitRead.create_reader() returns a
+        LimitedRecordReader when limit is set, proving SplitRead-level
+        limit pushdown is in effect."""
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+
+        table = self._create_ao_table('limit_ao_split_read')
+        self._write_ao_partitions(table, [('p1', list(range(10)))])
+        rb = table.new_read_builder().with_limit(3)
+        table_read = rb.new_read()
+        splits = rb.new_scan().plan().splits()
+        self.assertGreater(len(splits), 0)
+        for split in splits:
+            split_read = table_read._create_split_read(split)
+            self.assertEqual(split_read.limit, 3)
+            reader = split_read.create_reader()
+            self.assertIsInstance(reader, LimitedRecordReader,
+                                 "RawFileSplitRead.create_reader() should wrap with LimitedRecordReader")
+            reader.close()
+
+    def test_append_only_split_read_limit_truncates_within_split(self):
+        """Directly read from a single split's reader with limit and verify
+        the reader itself stops at the limit boundary, not relying on
+        TableRead-level truncation."""
+        table = self._create_ao_table('limit_ao_split_truncate')
+        self._write_ao_partitions(table, [('p1', list(range(20)))])
+        rb = table.new_read_builder().with_limit(5)
+        table_read = rb.new_read()
+        splits = rb.new_scan().plan().splits()
+        self.assertEqual(len(splits), 1)
+        split_read = table_read._create_split_read(splits[0])
+        reader = split_read.create_reader()
+        # Drain the reader directly, bypassing TableRead-level control
+        total_rows = 0
+        while True:
+            batch = reader.read_arrow_batch()
+            if batch is None:
+                break
+            total_rows += batch.num_rows
+        reader.close()
+        self.assertEqual(total_rows, 5,
+                         "SplitRead-level reader should stop at limit=5, got %d" % total_rows)
+
 
 if __name__ == '__main__':
     unittest.main()

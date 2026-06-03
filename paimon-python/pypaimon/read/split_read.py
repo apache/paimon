@@ -109,7 +109,8 @@ class SplitRead(ABC):
             read_type: List[DataField],
             split: Split,
             row_tracking_enabled: bool,
-            nested_name_paths: Optional[List[List[str]]] = None):
+            nested_name_paths: Optional[List[List[str]]] = None,
+            limit: Optional[int] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -119,6 +120,7 @@ class SplitRead(ABC):
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
         self.nested_name_paths = nested_name_paths
+        self.limit = limit
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
         # flags to merge functions that mirror Java's NOT-NULL check.
@@ -572,21 +574,6 @@ class SplitRead(ABC):
 
 
 class RawFileSplitRead(SplitRead):
-    def __init__(
-            self,
-            table,
-            predicate: Optional[Predicate],
-            read_type: List[DataField],
-            split: Split,
-            row_tracking_enabled: bool,
-            nested_name_paths: Optional[List[List[str]]] = None,
-            limit: Optional[int] = None):
-        super().__init__(
-            table, predicate, read_type, split, row_tracking_enabled,
-            nested_name_paths=nested_name_paths,
-        )
-        self.limit = limit
-
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
         # Check if this is a SlicedSplit to get shard_file_idx_map
@@ -670,9 +657,9 @@ class MergeFileSplitRead(SplitRead):
             split=split,
             row_tracking_enabled=row_tracking_enabled,
             nested_name_paths=None,
+            limit=limit,
         )
         self.outer_extract_name_paths = outer_extract_name_paths
-        self.limit = limit
         # Built once per split-read (value_fields and options are constant
         # for the object's life), not per section. ``None`` when
         # ``sequence.field`` is unset, in which case the heap falls back to
@@ -805,8 +792,8 @@ class DataEvolutionSplitRead(SplitRead):
         super().__init__(
             table, predicate, read_type, actual_split, row_tracking_enabled,
             nested_name_paths=nested_name_paths,
+            limit=limit,
         )
-        self.limit = limit
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         # Data evolution: files may have different schemas, so we don't push predicate
