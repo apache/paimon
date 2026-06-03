@@ -846,11 +846,18 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
+        if self.limit is not None:
+            reader = LimitedRecordBatchReader(reader, self.limit)
+
         return reader
 
     def _create_prescan_reader(self, field_names):
         """Create a prescan reader by constructing a new DataEvolutionSplitRead
-        instance that only projects the specified field names."""
+        instance that only projects the specified field names.
+        
+        Align with Java's configureBlobViewPrescanRead: pass limit to prescan reader
+        to avoid scanning entire split when there's a LIMIT clause.
+        """
         from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
 
         prescan_fields = [f for f in self.read_fields if f.name in field_names]
@@ -863,6 +870,7 @@ class DataEvolutionSplitRead(SplitRead):
             read_type=prescan_fields,
             split=self.split,
             row_tracking_enabled=False,
+            limit=self.limit,  # Pass limit to prescan reader
         )
         prescan_read.row_ranges = self.row_ranges
         return prescan_read._create_raw_reader()

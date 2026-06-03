@@ -1690,6 +1690,183 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 'test_db.blob_unknown_reject', unknown_schema, False)
         self.assertIn("must be blob fields", str(unknown_context.exception))
 
+    def test_blob_view_prescan_with_limit(self):
+        """Test that limit is correctly pushed down to prescan reader.
+        
+        Regression test for: prescan should only scan up to limit rows,
+        not the entire split.
+        """
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        # Create source table with multiple rows
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_limit_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_limit_source')
+
+        # Write 10 rows
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_limit_source', picture_field_id, i).serialize()
+            for i in range(num_rows)
+        ]
+
+        # Create target table with blob-view-field
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_limit_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_limit_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # Test with limit: should only return first 3 rows
+        read_builder = target_table.new_read_builder()
+        read_builder.with_limit(3)
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(result.num_rows, 3, "LIMIT should be respected in blob view prescan")
+        self.assertEqual(result.column('id').to_pylist(), [0, 1, 2])
+
+    def test_blob_view_prescan_only_collects_limited_view_structs(self):
+        """Verify that the prescan stage only collects as many BlobViewStructs as
+        the limit allows, instead of scanning the entire split.
+
+        Unlike test_blob_view_prescan_with_limit (which only checks the final
+        output), this test patches BlobViewLookup.preload to capture the exact
+        list of view structs collected during prescan and asserts its length
+        equals the limit.
+        """
+        from unittest import mock
+
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_prescan_count_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_prescan_count_source')
+
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_prescan_count_source', picture_field_id, i).serialize()
+            for i in range(num_rows)
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_prescan_count_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_prescan_count_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        captured_view_structs = []
+        original_preload = BlobViewLookup.preload
+
+        def capturing_preload(lookup_self, view_structs):
+            captured_view_structs.append(list(view_structs))
+            return original_preload(lookup_self, view_structs)
+
+        limit = 3
+        read_builder = target_table.new_read_builder()
+        read_builder.with_limit(limit)
+        with mock.patch.object(BlobViewLookup, 'preload', autospec=True,
+                               side_effect=capturing_preload):
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits()
+            )
+
+        self.assertEqual(result.num_rows, limit)
+        self.assertEqual(len(captured_view_structs), 1,
+                         "preload should be invoked exactly once during prescan")
+        self.assertEqual(
+            len(captured_view_structs[0]), limit,
+            "prescan should only collect as many view structs as the limit allows")
+
     def test_to_arrow_batch_reader(self):
         import random
         from pypaimon import Schema
@@ -3504,7 +3681,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         total_split_row_count = sum([s.row_count for s in splits])
         self.assertEqual(total_split_row_count, num_rows * 2,
                          f"Total split row count should be {num_rows}, got {total_split_row_count}")
-        
+
         total_merged_count = 0
         for split in splits:
             merged_count = split.merged_row_count()
@@ -3513,7 +3690,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 self.assertLessEqual(
                     merged_count, split.row_count,
                     f"merged_row_count ({merged_count}) should be <= row_count ({split.row_count})")
-        
+
         if total_merged_count > 0:
             self.assertEqual(
                 total_merged_count, num_rows,

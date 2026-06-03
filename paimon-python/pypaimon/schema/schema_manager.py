@@ -53,7 +53,7 @@ def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
 
 
 def _handle_update_column_comment(
-        change: UpdateColumnComment, new_fields: List[DataField]
+    change: UpdateColumnComment, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -66,7 +66,7 @@ def _handle_update_column_comment(
 
 
 def _handle_update_column_nullability(
-        change: UpdateColumnNullability, new_fields: List[DataField]
+    change: UpdateColumnNullability, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -83,7 +83,7 @@ def _handle_update_column_nullability(
 
 
 def _handle_update_column_type(
-        change: UpdateColumnType, new_fields: List[DataField]
+    change: UpdateColumnType, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -135,7 +135,7 @@ def _get_type_root(data_type) -> str:
 
 
 def _assert_not_updating_partition_keys(
-        schema: 'TableSchema', field_names: List[str], operation: str):
+    schema: 'TableSchema', field_names: List[str], operation: str):
     if len(field_names) > 1:
         return
     field_name = field_names[0]
@@ -146,7 +146,7 @@ def _assert_not_updating_partition_keys(
 
 
 def _assert_not_updating_primary_keys(
-        schema: 'TableSchema', field_names: List[str], operation: str):
+    schema: 'TableSchema', field_names: List[str], operation: str):
     if len(field_names) > 1:
         return
     field_name = field_names[0]
@@ -155,7 +155,7 @@ def _assert_not_updating_primary_keys(
 
 
 def _assert_not_renaming_blob_column(
-        new_fields: List[DataField], field_names: List[str]):
+    new_fields: List[DataField], field_names: List[str]):
     if len(field_names) > 1:
         return
     field_name = field_names[0]
@@ -319,12 +319,12 @@ def _apply_move(fields: List[DataField], new_field: Optional[DataField], move):
 
 
 def _handle_add_column(
-        change: AddColumn,
-        new_fields: List[DataField],
-        highest_field_id: AtomicInteger,
-        partition_keys: List[str],
-        add_column_before_partition: bool,
-        new_options: dict
+    change: AddColumn,
+    new_fields: List[DataField],
+    highest_field_id: AtomicInteger,
+    partition_keys: List[str],
+    add_column_before_partition: bool,
+    new_options: dict
 ):
     if not change.data_type.nullable:
         raise ValueError(
@@ -351,9 +351,9 @@ def _handle_add_column(
     if change.move:
         _apply_move(new_fields, new_field, change.move)
     elif (
-            add_column_before_partition
-            and partition_keys
-            and len(change.field_names) == 1
+        add_column_before_partition
+        and partition_keys
+        and len(change.field_names) == 1
     ):
         insert_index = len(new_fields)
         for i, field in enumerate(new_fields):
@@ -436,6 +436,7 @@ class SchemaManager:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
+        _validate_blob_fields(new_schema.fields, new_schema.options, new_schema.primary_keys)
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
@@ -494,7 +495,7 @@ class SchemaManager:
                 raise RuntimeError(f"Failed to commit schema changes: {e}") from e
 
     def _generate_table_schema(
-            self, old_table_schema: TableSchema, changes: List[SchemaChange]
+        self, old_table_schema: TableSchema, changes: List[SchemaChange]
     ) -> TableSchema:
         new_options = dict(old_table_schema.options)
         new_fields = []
@@ -586,13 +587,13 @@ class SchemaManager:
 
     @staticmethod
     def _apply_not_nested_column_rename(
-            columns: List[str], rename_mappings: dict
+        columns: List[str], rename_mappings: dict
     ) -> List[str]:
         return [rename_mappings.get(col, col) for col in columns]
 
     @staticmethod
     def _apply_rename_columns_to_options(
-            options: dict, rename_mappings: dict
+        options: dict, rename_mappings: dict
     ) -> dict:
         if not rename_mappings:
             return options
