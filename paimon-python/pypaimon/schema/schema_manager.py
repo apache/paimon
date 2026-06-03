@@ -172,7 +172,8 @@ def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: 
         options = {}
 
     blob_field_names = {
-        field.name for field in fields if 'blob' in str(field.type).lower()
+        field.name for field in fields
+        if getattr(field.type, 'type', None) == 'BLOB'
     }
 
     if len(fields) <= len(blob_field_names):

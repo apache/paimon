@@ -3789,6 +3789,24 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             )
         self.assertIn('Cannot rename BLOB column', str(ctx.exception))
 
+    def test_nested_field_named_blob_not_treated_as_blob(self):
+        """Regression: a ROW field with a nested column whose name contains
+        'blob' must NOT be treated as a top-level BLOB column.  Previously
+        the substring match would falsely classify such fields, causing
+        create_table to require row-tracking and data-evolution options."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.struct([
+                ('blob_name', pa.string()),
+                ('value', pa.int64()),
+            ])),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'test_db.nested_blob_name_no_error', schema, False)
+        table = self.catalog.get_table('test_db.nested_blob_name_no_error')
+        self.assertIsNotNone(table)
+
 
 class GetBlobTest(unittest.TestCase):
 
