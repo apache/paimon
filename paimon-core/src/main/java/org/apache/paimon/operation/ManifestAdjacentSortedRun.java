@@ -30,6 +30,18 @@ import java.util.stream.Collectors;
  * partition field (the configured manifest sort field). The intervals {@code
  * [partitionStats.minValues[k], partitionStats.maxValues[k]]} of these manifests do not overlap on
  * field {@code k}, where {@code k} is the configured sort field index.
+ *
+ * <p><b>Ordering Invariant:</b> The global order of manifests across all SortedRuns must be
+ * maintained by the sort key (partition field). When a section is split due to budget limits
+ * (manifest-sort.max-rewrite-size), the remaining files are appended to the processing queue and
+ * will be handled in subsequent iterations. This tail-appending mechanism preserves the global sort
+ * order because the remaining files naturally have larger key values than the currently processed
+ * ones.
+ *
+ * <p><b>Boundary Equality:</b> Files with boundary-touching intervals (min == previous.max) are
+ * considered non-overlapping and can be placed in the same SortedRun. This reduces the number of
+ * runs and improves compaction efficiency. However, such files may be separated into different
+ * Sections during splitIntoSections to avoid merge-sort overhead.
  */
 public class ManifestAdjacentSortedRun {
 

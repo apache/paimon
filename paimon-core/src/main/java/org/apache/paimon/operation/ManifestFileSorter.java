@@ -550,7 +550,11 @@ public class ManifestFileSorter {
                 // Note: When min == max (boundary equality), files are considered
                 // non-overlapping and can be placed in the same SortedRun. This allows
                 // building fewer SortedRuns, improving compaction efficiency while
-                // maintaining correct sort order.
+                // maintaining correct sort order. However, these files may later be separated
+                // into different Sections during splitIntoSections to avoid merge-sort overhead.
+                //
+                // See ManifestAdjacentSortedRun class comment for the full boundary equality
+                // semantics.
                 earliestRun.add(file);
                 runs.offer(earliestRun);
             } else {
@@ -615,10 +619,19 @@ public class ManifestFileSorter {
         for (int i = 1; i < pickedFiles.size(); i++) {
             ManifestFileMeta file = pickedFiles.get(i);
             // Note: Boundary equality (file.min == sectionMaxBound) results in separate
-            // sections. This avoids merge-sort overhead while maintaining partition filtering
-            // capability. Files with non-overlapping boundaries (including equal boundaries)
-            // can be processed independently without significantly impacting partition pruning
-            // efficiency.
+            // sections. This design choice balances three factors:
+            // 1. Avoid merge-sort overhead: Files with non-overlapping boundaries can be processed
+            //    independently without merge-sort, improving performance.
+            // 2. Maintain partition filtering capability: Each section has a distinct key range,
+            //    enabling efficient partition pruning during queries.
+            // 3. Preserve ordering invariant: Separating boundary-touching files into different
+            // sections
+            //    does not break the global sort order, as they are still processed in ascending
+            // order.
+            //
+            // IMPORTANT: While boundary-touching files are separated into different Sections here,
+            // they may be placed in the same SortedRun during buildLevelSortedRuns (which uses >= 0
+            // comparison). This dual behavior is intentional and documented in class comments.
             if (fieldComparator.compare(file.partitionStats().minValues(), sectionMaxBound) >= 0) {
                 sections.add(new Section(currentFiles, currentTotalSize, currentHasDefault));
                 currentFiles = new ArrayList<>();
@@ -672,7 +685,25 @@ public class ManifestFileSorter {
         return merged;
     }
 
-    /** Rewrite sections with budget control. */
+    /**
+     * Rewrite sections with budget control.
+     *
+     * <p><b>Semantics of manifest-sort.max-rewrite-size:</b> This budget applies only to the sorted
+     * rewrite portion. When the cumulative size reaches the limit:
+     *
+     * <ul>
+     *   <li>First overflow: The current section is split. The rewritable part is sorted and
+     *       rewritten. The remaining part is appended back to the sections queue for later
+     *       processing.
+     *   <li>Subsequent overflows: If the section has files in defaultCompactionMap (needs default
+     *       compaction), rewriteSubSegments is called to process it in smaller chunks. Otherwise,
+     *       the section is skipped.
+     * </ul>
+     *
+     * <p>This design ensures that the budget only limits the aggressive sort rewrite, while still
+     * allowing necessary cleanup operations (delete entry elimination, small file merge) through
+     * the rewriteSubSegments fallback path.
+     */
     private static void rewriteSections(
             List<Section> sections,
             RewriteOutput output,
@@ -761,7 +792,23 @@ public class ManifestFileSorter {
         }
     }
 
-    /** Rewrite sub-segments within a section that exceeded the budget. */
+    /**
+     * Rewrite a section in smaller sub-segments when it exceeds the sort rewrite budget.
+     *
+     * <p><b>Semantics difference from old minor merge:</b> In the old ManifestFileMerger path, the
+     * trailing candidates are kept unchanged when their count is below manifest.merge-min-count. In
+     * this sort path, rewriteSubSegments is triggered when defaultCompactionMap is non-empty,
+     * regardless of the manifest count. This is because files in defaultCompactionMap either:
+     *
+     * <ul>
+     *   <li>Are small files needing consolidation
+     *   <li>Contain delete entries that must be eliminated
+     * </ul>
+     *
+     * <p>The manifest.merge-min-count threshold is still applied to the final sub-segment's tail,
+     * acting as a conservative gate to avoid unnecessary rewrite when there are no delete entries
+     * and the tail is too small.
+     */
     private static void rewriteSubSegments(
             List<ManifestFileMeta> section,
             RewriteOutput output,

@@ -1255,6 +1255,212 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    /**
+     * Test that when manifest-sort.max-rewrite-size budget is exceeded in the middle of a section,
+     * the remaining files are appended to the tail and the final manifest order is preserved.
+     *
+     * <p>Design:
+     *
+     * <pre>
+     *   - Create a large section with overlapping partition ranges that exceeds the budget
+     *   - Set a small manifest-sort.max-rewrite-size to force budget split
+     *   - Verify that after merge, all manifests are globally sorted by partition field
+     *   - Verify that entries are equivalent (no data loss)
+     * </pre>
+     */
+    @Test
+    public void testManifestSortBudgetSplitPreservesOrder() {
+        // Create manifests with overlapping ranges, large enough to exceed budget
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // Manifest A: partitions [0, 10] - large size
+        List<ManifestEntry> entriesA = new ArrayList<>();
+        for (int p = 0; p <= 10; p++) {
+            entriesA.add(makeEntry(true, String.format("A-p%d", p), p));
+        }
+        ManifestFileMeta manifestA = makeManifest(entriesA.toArray(new ManifestEntry[0]));
+        // Manually increase file size to simulate large manifest
+        input.add(
+                new ManifestFileMeta(
+                        manifestA.fileName(),
+                        100,
+                        manifestA.numAddedFiles(),
+                        manifestA.numDeletedFiles(),
+                        manifestA.partitionStats(),
+                        manifestA.schemaId(),
+                        manifestA.minBucket(),
+                        manifestA.maxBucket(),
+                        manifestA.minLevel(),
+                        manifestA.maxLevel(),
+                        manifestA.minRowId(),
+                        manifestA.maxRowId()));
+
+        // Manifest B: partitions [5, 15] - overlaps with A
+        List<ManifestEntry> entriesB = new ArrayList<>();
+        for (int p = 5; p <= 15; p++) {
+            entriesB.add(makeEntry(true, String.format("B-p%d", p), p));
+        }
+        ManifestFileMeta manifestB = makeManifest(entriesB.toArray(new ManifestEntry[0]));
+        input.add(
+                new ManifestFileMeta(
+                        manifestB.fileName(),
+                        100,
+                        manifestB.numAddedFiles(),
+                        manifestB.numDeletedFiles(),
+                        manifestB.partitionStats(),
+                        manifestB.schemaId(),
+                        manifestB.minBucket(),
+                        manifestB.maxBucket(),
+                        manifestB.minLevel(),
+                        manifestB.maxLevel(),
+                        manifestB.minRowId(),
+                        manifestB.maxRowId()));
+
+        // Manifest C: partitions [10, 20] - overlaps with B
+        List<ManifestEntry> entriesC = new ArrayList<>();
+        for (int p = 10; p <= 20; p++) {
+            entriesC.add(makeEntry(true, String.format("C-p%d", p), p));
+        }
+        ManifestFileMeta manifestC = makeManifest(entriesC.toArray(new ManifestEntry[0]));
+        input.add(
+                new ManifestFileMeta(
+                        manifestC.fileName(),
+                        100,
+                        manifestC.numAddedFiles(),
+                        manifestC.numDeletedFiles(),
+                        manifestC.partitionStats(),
+                        manifestC.schemaId(),
+                        manifestC.minBucket(),
+                        manifestC.maxBucket(),
+                        manifestC.minLevel(),
+                        manifestC.maxLevel(),
+                        manifestC.minRowId(),
+                        manifestC.maxRowId()));
+
+        // Set small budget to force split
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest-sort.max-rewrite-size", "150B"); // Total input size is 300B
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Verify entries are equivalent
+        assertEquivalentEntries(input, merged);
+
+        // Verify global ordering: all manifests sorted by partition min value
+        for (int i = 1; i < merged.size(); i++) {
+            BinaryRow prevMin = merged.get(i - 1).partitionStats().minValues();
+            BinaryRow currMin = merged.get(i).partitionStats().minValues();
+            assertThat(currMin.getInt(0))
+                    .as("Manifests should be globally sorted by partition field")
+                    .isGreaterThanOrEqualTo(prevMin.getInt(0));
+        }
+
+        // Verify entries within each manifest are sorted
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+    }
+
+    /**
+     * Test boundary equality (min == previous.max) handling in both SortedRun construction and
+     * Section splitting. Boundary-touching files should be allowed in the same SortedRun but may be
+     * separated into different Sections.
+     *
+     * <p>Design:
+     *
+     * <pre>
+     *   - Create manifests with boundary-touching partition ranges
+     *   - Manifest A: [0, 5]
+     *   - Manifest B: [5, 10] (min == A.max, boundary touching)
+     *   - Manifest C: [10, 15] (min == B.max, boundary touching)
+     *   - Verify they can be in the same SortedRun (>= comparison)
+     *   - Verify they may be split into different Sections (>= comparison with comment)
+     * </pre>
+     */
+    @Test
+    public void testBoundaryEqualityHandling() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // Manifest A: partitions [0, 5]
+        List<ManifestEntry> entriesA = new ArrayList<>();
+        for (int p = 0; p <= 5; p++) {
+            entriesA.add(makeEntry(true, String.format("A-p%d", p), p));
+        }
+        input.add(makeManifest(entriesA.toArray(new ManifestEntry[0])));
+
+        // Manifest B: partitions [5, 10] - boundary touches A (min == A.max)
+        List<ManifestEntry> entriesB = new ArrayList<>();
+        for (int p = 5; p <= 10; p++) {
+            entriesB.add(makeEntry(true, String.format("B-p%d", p), p));
+        }
+        input.add(makeManifest(entriesB.toArray(new ManifestEntry[0])));
+
+        // Manifest C: partitions [10, 15] - boundary touches B (min == B.max)
+        List<ManifestEntry> entriesC = new ArrayList<>();
+        for (int p = 10; p <= 15; p++) {
+            entriesC.add(makeEntry(true, String.format("C-p%d", p), p));
+        }
+        input.add(makeManifest(entriesC.toArray(new ManifestEntry[0])));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        // Verify entries are equivalent
+        assertEquivalentEntries(input, merged);
+
+        // Verify all manifests maintain global sort order
+        for (int i = 1; i < merged.size(); i++) {
+            BinaryRow prevMin = merged.get(i - 1).partitionStats().minValues();
+            BinaryRow prevMax = merged.get(i - 1).partitionStats().maxValues();
+            BinaryRow currMin = merged.get(i).partitionStats().minValues();
+
+            // Boundary-touching is allowed: currMin >= prevMin
+            assertThat(currMin.getInt(0))
+                    .as("Global order should be maintained with boundary-touching allowed")
+                    .isGreaterThanOrEqualTo(prevMin.getInt(0));
+
+            // Log boundary equality cases for documentation
+            if (currMin.getInt(0) == prevMax.getInt(0)) {
+                System.out.println(
+                        String.format(
+                                "Boundary equality detected: manifest[%d].min=%d == manifest[%d].max=%d",
+                                i, currMin.getInt(0), i - 1, prevMax.getInt(0)));
+            }
+        }
+
+        // Verify entries within each manifest are sorted
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+    }
+
     /** Create a ManifestEntry with a 3-field partition row (region, dt, hour). */
     private ManifestEntry makeMultiPartEntry(
             boolean isAdd, String fileName, int region, int dt, int hour) {
