@@ -110,7 +110,7 @@ and token filters as the global index options:
 
 ```java
 String configJson =
-        "{\"tokenizer\":\"simple\",\"stem\":true,\"removeStopWords\":true,"
+        "{\"tokenizer\":\"simple\",\"stem\":true,\"remove-stop-words\":true,"
                 + "\"language\":\"english\"}";
 try (TantivyIndexWriter writer = new TantivyIndexWriter("/tmp/my_index", configJson);
         TantivySearcher searcher = new TantivySearcher("/tmp/my_index", configJson)) {

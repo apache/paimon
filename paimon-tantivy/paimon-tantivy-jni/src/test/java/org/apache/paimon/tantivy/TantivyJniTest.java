@@ -119,7 +119,7 @@ public class TantivyJniTest {
         assumeNativeAvailable();
         String indexPath = tempDir.resolve("config_index").toString();
         String configJson =
-                "{\"tokenizer\":\"simple\",\"stem\":true,\"removeStopWords\":true,"
+                "{\"tokenizer\":\"simple\",\"stem\":true,\"remove-stop-words\":true,"
                         + "\"language\":\"english\"}";
 
         try (TantivyIndexWriter writer = new TantivyIndexWriter(indexPath, configJson)) {

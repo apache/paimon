@@ -62,19 +62,28 @@ struct TantivySearcherHandle {
 }
 
 #[derive(Clone, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default)]
 struct TokenizerConfig {
     tokenizer: String,
+    #[serde(rename = "ngram.min-gram")]
     ngram_min_gram: usize,
+    #[serde(rename = "ngram.max-gram")]
     ngram_max_gram: usize,
+    #[serde(rename = "ngram.prefix-only")]
     ngram_prefix_only: bool,
+    #[serde(rename = "lower-case")]
     lower_case: bool,
+    #[serde(rename = "max-token-length")]
     max_token_length: usize,
+    #[serde(rename = "ascii-folding")]
     ascii_folding: bool,
     stem: bool,
     language: String,
+    #[serde(rename = "remove-stop-words")]
     remove_stop_words: bool,
+    #[serde(rename = "stop-words")]
     stop_words: Vec<String>,
+    #[serde(rename = "with-position")]
     with_position: bool,
 }
 
@@ -136,19 +145,19 @@ impl TokenizerConfig {
             _ => return Err(format!("Unsupported tokenizer: {}", self.tokenizer)),
         }
         if self.ngram_min_gram == 0 {
-            return Err("minGram must be positive, got 0".to_string());
+            return Err("ngram.min-gram must be positive, got 0".to_string());
         }
         if self.ngram_max_gram == 0 {
-            return Err("maxGram must be positive, got 0".to_string());
+            return Err("ngram.max-gram must be positive, got 0".to_string());
         }
         if self.ngram_min_gram > self.ngram_max_gram {
             return Err(format!(
-                "minGram must not be greater than maxGram, got {} > {}",
+                "ngram.min-gram must not be greater than ngram.max-gram, got {} > {}",
                 self.ngram_min_gram, self.ngram_max_gram
             ));
         }
         if self.max_token_length == 0 {
-            return Err("maxTokenLength must be positive, got 0".to_string());
+            return Err("max-token-length must be positive, got 0".to_string());
         }
         self.language()?;
         Ok(())

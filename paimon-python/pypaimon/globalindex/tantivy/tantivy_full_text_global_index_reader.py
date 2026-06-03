@@ -38,7 +38,6 @@ TANTIVY_FULLTEXT_IDENTIFIER = "tantivy-fulltext"
 TANTIVY_NGRAM_TOKENIZER = "paimon_ngram"
 TANTIVY_JIEBA_TOKENIZER = "paimon_jieba"
 TANTIVY_CUSTOM_TOKENIZER = "paimon_custom"
-_META_VERSION = 1
 _SUPPORTED_LANGUAGES = {
     "arabic",
     "danish",
@@ -82,71 +81,29 @@ class TantivyFullTextIndexOptions:
     def deserialize(data):
         if not data:
             return TantivyFullTextIndexOptions()
-        if data.lstrip().startswith(b"{"):
-            return TantivyFullTextIndexOptions._deserialize_json(data)
-
-        offset = 0
-        version, offset = _read_meta_int(data, offset)
-        if version != _META_VERSION:
-            raise ValueError(
-                "Unsupported Tantivy full-text index meta version: %s" % version)
-
-        tokenizer, offset = _read_meta_utf(data, offset)
-        ngram_min_gram, offset = _read_meta_int(data, offset)
-        ngram_max_gram, offset = _read_meta_int(data, offset)
-        ngram_prefix_only, offset = _read_meta_bool(data, offset)
-        lower_case, offset = _read_meta_bool(data, offset)
-        max_token_length = 40
-        ascii_folding = False
-        stem = False
-        language = "english"
-        remove_stop_words = False
-        stop_words = ""
-        with_position = True
-        if offset < len(data):
-            max_token_length, offset = _read_meta_int(data, offset)
-            ascii_folding, offset = _read_meta_bool(data, offset)
-            stem, offset = _read_meta_bool(data, offset)
-            language, offset = _read_meta_utf(data, offset)
-            remove_stop_words, offset = _read_meta_bool(data, offset)
-            stop_words, offset = _read_meta_utf(data, offset)
-            with_position, offset = _read_meta_bool(data, offset)
-
-        return TantivyFullTextIndexOptions(
-            tokenizer=tokenizer,
-            ngram_min_gram=ngram_min_gram,
-            ngram_max_gram=ngram_max_gram,
-            ngram_prefix_only=ngram_prefix_only,
-            lower_case=lower_case,
-            max_token_length=max_token_length,
-            ascii_folding=ascii_folding,
-            stem=stem,
-            language=language,
-            remove_stop_words=remove_stop_words,
-            stop_words=stop_words,
-            with_position=with_position)
+        return TantivyFullTextIndexOptions._deserialize_json(data)
 
     @staticmethod
     def _deserialize_json(data):
         config = json.loads(data.decode("utf-8"))
-        stop_words = config.get("stopWords", [])
+        stop_words = config.get("stop-words", [])
         if isinstance(stop_words, list):
             stop_words = ";".join(
                 word for word in stop_words if word is not None)
 
         return TantivyFullTextIndexOptions(
             tokenizer=config.get("tokenizer", "default"),
-            ngram_min_gram=config.get("ngramMinGram", 2),
-            ngram_max_gram=config.get("ngramMaxGram", 2),
-            ngram_prefix_only=config.get("ngramPrefixOnly", False),
-            lower_case=config.get("lowerCase", True),
-            max_token_length=config.get("maxTokenLength", 40),
-            ascii_folding=config.get("asciiFolding", False),
+            ngram_min_gram=config.get("ngram.min-gram", 2),
+            ngram_max_gram=config.get("ngram.max-gram", 2),
+            ngram_prefix_only=config.get("ngram.prefix-only", False),
+            lower_case=config.get("lower-case", True),
+            max_token_length=config.get("max-token-length", 40),
+            ascii_folding=config.get("ascii-folding", False),
             stem=config.get("stem", False),
             language=config.get("language", "english"),
-            remove_stop_words=config.get("removeStopWords", False),
+            remove_stop_words=config.get("remove-stop-words", False),
             stop_words=stop_words,
-            with_position=config.get("withPosition", True))
+            with_position=config.get("with-position", True))
 
     def __post_init__(self):
         tokenizer = "" if self.tokenizer is None else self.tokenizer.strip().lower()
@@ -638,34 +595,17 @@ def _read_fully(stream, length: int) -> bytes:
     return bytes(buf)
 
 
-def _read_meta_int(data: bytes, offset: int):
-    _check_meta_remaining(data, offset, 4)
-    return struct.unpack_from('>i', data, offset)[0], offset + 4
-
-
-def _read_meta_bool(data: bytes, offset: int):
-    _check_meta_remaining(data, offset, 1)
-    return data[offset] != 0, offset + 1
-
-
-def _read_meta_utf(data: bytes, offset: int):
-    _check_meta_remaining(data, offset, 2)
-    utf_len = struct.unpack_from('>H', data, offset)[0]
-    offset += 2
-    _check_meta_remaining(data, offset, utf_len)
-    return data[offset:offset + utf_len].decode('utf-8'), offset + utf_len
-
-
 def _normalize_stop_words(stop_words):
     if stop_words is None:
         return ""
+    if isinstance(stop_words, list):
+        return ";".join(
+            word.strip()
+            for word in stop_words
+            if word is not None and word.strip()
+        )
     return ";".join(
         word.strip()
         for word in stop_words.split(";")
         if word.strip()
     )
-
-
-def _check_meta_remaining(data: bytes, offset: int, length: int):
-    if len(data) - offset < length:
-        raise ValueError("Malformed Tantivy full-text index metadata.")

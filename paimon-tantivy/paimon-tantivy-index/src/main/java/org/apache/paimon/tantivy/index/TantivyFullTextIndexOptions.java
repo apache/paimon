@@ -20,18 +20,17 @@ package org.apache.paimon.tantivy.index;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
-import java.io.EOFException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -40,7 +39,7 @@ import java.util.Map;
 /** Options for the Tantivy full-text index. */
 public class TantivyFullTextIndexOptions {
 
-    private static final int META_VERSION = 1;
+    static final String TANTIVY_PREFIX = "tantivy.";
 
     public static final ConfigOption<String> TOKENIZER =
             ConfigOptions.key("tantivy.tokenizer")
@@ -128,154 +127,71 @@ public class TantivyFullTextIndexOptions {
                                     + "usage scales with this value times the index size per shard. "
                                     + "Set to 0 to disable pooling.");
 
-    private final String tokenizer;
-    private final int ngramMinGram;
-    private final int ngramMaxGram;
-    private final boolean ngramPrefixOnly;
-    private final boolean lowerCase;
-    private final int maxTokenLength;
-    private final boolean asciiFolding;
-    private final boolean stem;
-    private final String language;
-    private final boolean removeStopWords;
-    private final String stopWords;
-    private final boolean withPosition;
+    private final Map<String, Object> config;
 
-    public TantivyFullTextIndexOptions(
-            String tokenizer,
-            int ngramMinGram,
-            int ngramMaxGram,
-            boolean ngramPrefixOnly,
-            boolean lowerCase) {
-        this(
-                tokenizer,
-                ngramMinGram,
-                ngramMaxGram,
-                ngramPrefixOnly,
-                lowerCase,
-                40,
-                false,
-                false,
-                "english",
-                false,
-                "",
-                true);
-    }
-
-    public TantivyFullTextIndexOptions(
-            String tokenizer,
-            int ngramMinGram,
-            int ngramMaxGram,
-            boolean ngramPrefixOnly,
-            boolean lowerCase,
-            int maxTokenLength,
-            boolean asciiFolding,
-            boolean stem,
-            String language,
-            boolean removeStopWords,
-            String stopWords,
-            boolean withPosition) {
-        this.tokenizer = normalizeTokenizer(tokenizer);
-        this.ngramMinGram = ngramMinGram;
-        this.ngramMaxGram = ngramMaxGram;
-        this.ngramPrefixOnly = ngramPrefixOnly;
-        this.lowerCase = lowerCase;
-        this.maxTokenLength = maxTokenLength;
-        this.asciiFolding = asciiFolding;
-        this.stem = stem;
-        this.language = normalizeLanguage(language);
-        this.removeStopWords = removeStopWords;
-        this.stopWords = normalizeStopWords(stopWords);
-        this.withPosition = withPosition;
-        validate();
+    public TantivyFullTextIndexOptions(Map<String, Object> options) {
+        this.config =
+                Collections.unmodifiableMap(toNativeConfigMap(Preconditions.checkNotNull(options)));
     }
 
     public static TantivyFullTextIndexOptions defaults() {
-        return new TantivyFullTextIndexOptions(
-                "default", 2, 2, false, true, 40, false, false, "english", false, "", true);
-    }
-
-    public static TantivyFullTextIndexOptions from(Options options) {
-        return new TantivyFullTextIndexOptions(
-                normalizeTokenizer(options.get(TOKENIZER)),
-                options.get(NGRAM_MIN_GRAM),
-                options.get(NGRAM_MAX_GRAM),
-                options.get(NGRAM_PREFIX_ONLY),
-                options.get(LOWER_CASE),
-                options.get(MAX_TOKEN_LENGTH),
-                options.get(ASCII_FOLDING),
-                options.get(STEM),
-                options.get(LANGUAGE),
-                options.get(REMOVE_STOP_WORDS),
-                options.get(STOP_WORDS),
-                options.get(WITH_POSITION));
+        return new TantivyFullTextIndexOptions(Collections.emptyMap());
     }
 
     public String tokenizer() {
-        return tokenizer;
+        return getString(optionKey(TOKENIZER), TOKENIZER.defaultValue());
     }
 
     public int ngramMinGram() {
-        return ngramMinGram;
+        return getInt(optionKey(NGRAM_MIN_GRAM), NGRAM_MIN_GRAM.defaultValue());
     }
 
     public int ngramMaxGram() {
-        return ngramMaxGram;
+        return getInt(optionKey(NGRAM_MAX_GRAM), NGRAM_MAX_GRAM.defaultValue());
     }
 
     public boolean ngramPrefixOnly() {
-        return ngramPrefixOnly;
+        return getBoolean(optionKey(NGRAM_PREFIX_ONLY), NGRAM_PREFIX_ONLY.defaultValue());
     }
 
     public boolean lowerCase() {
-        return lowerCase;
+        return getBoolean(optionKey(LOWER_CASE), LOWER_CASE.defaultValue());
     }
 
     public int maxTokenLength() {
-        return maxTokenLength;
+        return getInt(optionKey(MAX_TOKEN_LENGTH), MAX_TOKEN_LENGTH.defaultValue());
     }
 
     public boolean asciiFolding() {
-        return asciiFolding;
+        return getBoolean(optionKey(ASCII_FOLDING), ASCII_FOLDING.defaultValue());
     }
 
     public boolean stem() {
-        return stem;
+        return getBoolean(optionKey(STEM), STEM.defaultValue());
     }
 
     public String language() {
-        return language;
+        return getString(optionKey(LANGUAGE), LANGUAGE.defaultValue());
     }
 
     public boolean removeStopWords() {
-        return removeStopWords;
+        return getBoolean(optionKey(REMOVE_STOP_WORDS), REMOVE_STOP_WORDS.defaultValue());
     }
 
     public String stopWords() {
-        return stopWords;
+        return joinStopWords(stopWordList());
     }
 
     public boolean withPosition() {
-        return withPosition;
+        return getBoolean(optionKey(WITH_POSITION), WITH_POSITION.defaultValue());
     }
 
     public List<String> stopWordList() {
-        if (stopWords.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        List<String> words = new ArrayList<>();
-        for (String word : stopWords.split(";")) {
-            String trimmed = word.trim();
-            if (!trimmed.isEmpty()) {
-                words.add(trimmed);
-            }
-        }
-        return words;
+        return getStringList(optionKey(STOP_WORDS));
     }
 
     public String toNativeConfigJson() {
-        return JsonSerdeUtil.toFlatJson(toNativeConfigMap());
+        return JsonSerdeUtil.toFlatJson(config);
     }
 
     public byte[] serialize() throws IOException {
@@ -287,85 +203,72 @@ public class TantivyFullTextIndexOptions {
             return defaults();
         }
 
-        if (isJsonConfig(data)) {
-            return fromNativeConfigJson(new String(data, StandardCharsets.UTF_8));
-        }
-
-        return deserializeLegacyBinary(data);
+        return fromNativeConfigJson(new String(data, StandardCharsets.UTF_8));
     }
 
-    private static TantivyFullTextIndexOptions deserializeLegacyBinary(byte[] data)
-            throws IOException {
-        DataInputStream in = new DataInputStream(new ByteArrayInputStream(data));
-        int version = in.readInt();
-        Preconditions.checkArgument(
-                version == META_VERSION,
-                "Unsupported Tantivy full-text index meta version: %s",
-                version);
-        String tokenizer = normalizeTokenizer(in.readUTF());
-        int ngramMinGram = in.readInt();
-        int ngramMaxGram = in.readInt();
-        boolean ngramPrefixOnly = in.readBoolean();
-        boolean lowerCase = in.readBoolean();
-        try {
-            return new TantivyFullTextIndexOptions(
-                    tokenizer,
-                    ngramMinGram,
-                    ngramMaxGram,
-                    ngramPrefixOnly,
-                    lowerCase,
-                    in.readInt(),
-                    in.readBoolean(),
-                    in.readBoolean(),
-                    in.readUTF(),
-                    in.readBoolean(),
-                    in.readUTF(),
-                    in.readBoolean());
-        } catch (EOFException e) {
-            return new TantivyFullTextIndexOptions(
-                    tokenizer, ngramMinGram, ngramMaxGram, ngramPrefixOnly, lowerCase);
-        }
-    }
-
-    private Map<String, Object> toNativeConfigMap() {
+    private static Map<String, Object> toNativeConfigMap(Map<String, Object> options) {
         Map<String, Object> config = new LinkedHashMap<>();
-        TantivyFullTextIndexOptions defaults = defaults();
-        if (!tokenizer.equals(defaults.tokenizer)) {
-            config.put("tokenizer", tokenizer);
+        String tokenizer =
+                normalizeTokenizer(
+                        getString(options, optionKey(TOKENIZER), TOKENIZER.defaultValue()));
+        validateTokenizer(tokenizer);
+        if (!tokenizer.equals(TOKENIZER.defaultValue())) {
+            config.put(optionKey(TOKENIZER), tokenizer);
         }
-        if (ngramMinGram != defaults.ngramMinGram) {
-            config.put("ngramMinGram", ngramMinGram);
+        int ngramMinGram =
+                getInt(options, optionKey(NGRAM_MIN_GRAM), NGRAM_MIN_GRAM.defaultValue());
+        int ngramMaxGram =
+                getInt(options, optionKey(NGRAM_MAX_GRAM), NGRAM_MAX_GRAM.defaultValue());
+        validateNgramGrams(ngramMinGram, ngramMaxGram);
+        if (ngramMinGram != NGRAM_MIN_GRAM.defaultValue()) {
+            config.put(optionKey(NGRAM_MIN_GRAM), ngramMinGram);
         }
-        if (ngramMaxGram != defaults.ngramMaxGram) {
-            config.put("ngramMaxGram", ngramMaxGram);
+        if (ngramMaxGram != NGRAM_MAX_GRAM.defaultValue()) {
+            config.put(optionKey(NGRAM_MAX_GRAM), ngramMaxGram);
         }
-        if (ngramPrefixOnly != defaults.ngramPrefixOnly) {
-            config.put("ngramPrefixOnly", ngramPrefixOnly);
+        boolean ngramPrefixOnly =
+                getBoolean(options, optionKey(NGRAM_PREFIX_ONLY), NGRAM_PREFIX_ONLY.defaultValue());
+        if (ngramPrefixOnly != NGRAM_PREFIX_ONLY.defaultValue()) {
+            config.put(optionKey(NGRAM_PREFIX_ONLY), ngramPrefixOnly);
         }
-        if (lowerCase != defaults.lowerCase) {
-            config.put("lowerCase", lowerCase);
+        boolean lowerCase = getBoolean(options, optionKey(LOWER_CASE), LOWER_CASE.defaultValue());
+        if (lowerCase != LOWER_CASE.defaultValue()) {
+            config.put(optionKey(LOWER_CASE), lowerCase);
         }
-        if (maxTokenLength != defaults.maxTokenLength) {
-            config.put("maxTokenLength", maxTokenLength);
+        int maxTokenLength =
+                getInt(options, optionKey(MAX_TOKEN_LENGTH), MAX_TOKEN_LENGTH.defaultValue());
+        validateMaxTokenLength(maxTokenLength);
+        if (maxTokenLength != MAX_TOKEN_LENGTH.defaultValue()) {
+            config.put(optionKey(MAX_TOKEN_LENGTH), maxTokenLength);
         }
-        if (asciiFolding != defaults.asciiFolding) {
-            config.put("asciiFolding", asciiFolding);
+        boolean asciiFolding =
+                getBoolean(options, optionKey(ASCII_FOLDING), ASCII_FOLDING.defaultValue());
+        if (asciiFolding != ASCII_FOLDING.defaultValue()) {
+            config.put(optionKey(ASCII_FOLDING), asciiFolding);
         }
-        if (stem != defaults.stem) {
-            config.put("stem", stem);
+        boolean stem = getBoolean(options, optionKey(STEM), STEM.defaultValue());
+        if (stem != STEM.defaultValue()) {
+            config.put(optionKey(STEM), stem);
         }
-        if (!language.equals(defaults.language)) {
-            config.put("language", language);
+        String language =
+                normalizeLanguage(getString(options, optionKey(LANGUAGE), LANGUAGE.defaultValue()));
+        validateLanguage(language);
+        if (!language.equals(LANGUAGE.defaultValue())) {
+            config.put(optionKey(LANGUAGE), language);
         }
-        if (removeStopWords != defaults.removeStopWords) {
-            config.put("removeStopWords", removeStopWords);
+        boolean removeStopWords =
+                getBoolean(options, optionKey(REMOVE_STOP_WORDS), REMOVE_STOP_WORDS.defaultValue());
+        if (removeStopWords != REMOVE_STOP_WORDS.defaultValue()) {
+            config.put(optionKey(REMOVE_STOP_WORDS), removeStopWords);
         }
-        List<String> stopWordList = stopWordList();
+        List<String> stopWordList = getStopWordList(options, optionKey(STOP_WORDS));
         if (!stopWordList.isEmpty()) {
-            config.put("stopWords", stopWordList);
+            config.put(optionKey(STOP_WORDS), Collections.unmodifiableList(stopWordList));
         }
-        if (withPosition != defaults.withPosition) {
-            config.put("withPosition", withPosition);
+        boolean withPosition =
+                getBoolean(options, optionKey(WITH_POSITION), WITH_POSITION.defaultValue());
+        if (withPosition != WITH_POSITION.defaultValue()) {
+            config.put(optionKey(WITH_POSITION), withPosition);
         }
         return config;
     }
@@ -373,35 +276,36 @@ public class TantivyFullTextIndexOptions {
     private static TantivyFullTextIndexOptions fromNativeConfigJson(String json)
             throws IOException {
         try {
-            return fromNativeConfig(JsonSerdeUtil.fromJson(json, NativeConfig.class));
+            Map<String, Object> config =
+                    JsonSerdeUtil.fromJson(json, new TypeReference<Map<String, Object>>() {});
+            return new TantivyFullTextIndexOptions(config);
         } catch (UncheckedIOException e) {
             throw e.getCause();
         }
     }
 
-    private static TantivyFullTextIndexOptions fromNativeConfig(NativeConfig config) {
-        return new TantivyFullTextIndexOptions(
-                config.tokenizer,
-                config.ngramMinGram,
-                config.ngramMaxGram,
-                config.ngramPrefixOnly,
-                config.lowerCase,
-                config.maxTokenLength,
-                config.asciiFolding,
-                config.stem,
-                config.language,
-                config.removeStopWords,
-                joinStopWords(config.stopWords),
-                config.withPosition);
+    private String getString(String key, String defaultValue) {
+        Object value = config.get(key);
+        return value == null ? defaultValue : (String) value;
     }
 
-    private static boolean isJsonConfig(byte[] data) {
-        for (byte datum : data) {
-            if (!Character.isWhitespace((char) datum)) {
-                return datum == '{';
-            }
+    private int getInt(String key, int defaultValue) {
+        Object value = config.get(key);
+        return value == null ? defaultValue : (int) value;
+    }
+
+    private boolean getBoolean(String key, boolean defaultValue) {
+        Object value = config.get(key);
+        return value == null ? defaultValue : (boolean) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> getStringList(String key) {
+        Object value = config.get(key);
+        if (value == null) {
+            return new ArrayList<>();
         }
-        return false;
+        return new ArrayList<>((List<String>) value);
     }
 
     private static String joinStopWords(List<String> stopWords) {
@@ -418,6 +322,65 @@ public class TantivyFullTextIndexOptions {
         return String.join(";", words);
     }
 
+    private static List<String> toStopWordList(Object value) {
+        if (value == null) {
+            return new ArrayList<>();
+        }
+        if (value instanceof List) {
+            List<String> words = new ArrayList<>();
+            for (Object word : (List<?>) value) {
+                if (word != null) {
+                    words.add(word.toString());
+                }
+            }
+            return words;
+        }
+        return normalizeStopWordList(value.toString());
+    }
+
+    private static String getString(Map<String, Object> options, String key, String defaultValue) {
+        Object value = options.get(key);
+        return value == null ? defaultValue : value.toString();
+    }
+
+    private static int getInt(Map<String, Object> options, String key, int defaultValue) {
+        Object value = options.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return Integer.parseInt(value.toString());
+    }
+
+    private static boolean getBoolean(
+            Map<String, Object> options, String key, boolean defaultValue) {
+        Object value = options.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean) {
+            return (boolean) value;
+        }
+        return Boolean.parseBoolean(value.toString());
+    }
+
+    private static List<String> getStopWordList(Map<String, Object> options, String key) {
+        Object value = options.get(key);
+        if (value == null) {
+            return new ArrayList<>();
+        }
+        if (value instanceof List) {
+            return toStopWordList(value);
+        }
+        return normalizeStopWordList(value.toString());
+    }
+
+    private static String optionKey(ConfigOption<?> option) {
+        return option.key().substring(TANTIVY_PREFIX.length());
+    }
+
     private static String normalizeTokenizer(String tokenizer) {
         return tokenizer == null ? "" : tokenizer.trim().toLowerCase();
     }
@@ -426,21 +389,21 @@ public class TantivyFullTextIndexOptions {
         return language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static String normalizeStopWords(String stopWords) {
-        if (stopWords == null) {
-            return "";
-        }
+    private static List<String> normalizeStopWordList(String stopWords) {
         List<String> words = new ArrayList<>();
+        if (stopWords == null) {
+            return words;
+        }
         for (String word : stopWords.split(";")) {
             String trimmed = word.trim();
             if (!trimmed.isEmpty()) {
                 words.add(trimmed);
             }
         }
-        return String.join(";", words);
+        return words;
     }
 
-    private void validate() {
+    private static void validateTokenizer(String tokenizer) {
         Preconditions.checkArgument(
                 "default".equals(tokenizer)
                         || "simple".equals(tokenizer)
@@ -450,11 +413,20 @@ public class TantivyFullTextIndexOptions {
                         || "jieba".equals(tokenizer),
                 "Unsupported Tantivy tokenizer: %s",
                 tokenizer);
+    }
+
+    private static void validateNgramGrams(int ngramMinGram, int ngramMaxGram) {
         Preconditions.checkArgument(ngramMinGram > 0, "ngram min gram must be positive.");
         Preconditions.checkArgument(ngramMaxGram > 0, "ngram max gram must be positive.");
         Preconditions.checkArgument(
                 ngramMinGram <= ngramMaxGram, "ngram min gram must not be greater than max gram.");
+    }
+
+    private static void validateMaxTokenLength(int maxTokenLength) {
         Preconditions.checkArgument(maxTokenLength > 0, "max token length must be positive.");
+    }
+
+    private static void validateLanguage(String language) {
         Preconditions.checkArgument(
                 supportedLanguages().contains(language),
                 "Unsupported Tantivy language: %s",
@@ -481,21 +453,5 @@ public class TantivyFullTextIndexOptions {
                 "swedish",
                 "tamil",
                 "turkish");
-    }
-
-    /** Native JSON config consumed by both Java metadata readers and the Rust Tantivy writer. */
-    private static class NativeConfig {
-        public String tokenizer = "default";
-        public int ngramMinGram = 2;
-        public int ngramMaxGram = 2;
-        public boolean ngramPrefixOnly = false;
-        public boolean lowerCase = true;
-        public int maxTokenLength = 40;
-        public boolean asciiFolding = false;
-        public boolean stem = false;
-        public String language = "english";
-        public boolean removeStopWords = false;
-        public List<String> stopWords = new ArrayList<>();
-        public boolean withPosition = true;
     }
 }

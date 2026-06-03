@@ -167,7 +167,9 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer =
                 new TantivyFullTextGlobalIndexWriter(
-                        fileWriter, TantivyFullTextIndexOptions.from(options));
+                        fileWriter,
+                        new TantivyFullTextIndexOptions(
+                                TantivyFullTextGlobalIndexerFactory.removeTantivyPrefix(options)));
 
         writer.write(BinaryString.fromString("Apache Paimon supports Chinese text"));
         List<ResultEntry> results = writer.finish();
@@ -188,7 +190,9 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer =
                 new TantivyFullTextGlobalIndexWriter(
-                        fileWriter, TantivyFullTextIndexOptions.from(options));
+                        fileWriter,
+                        new TantivyFullTextIndexOptions(
+                                TantivyFullTextGlobalIndexerFactory.removeTantivyPrefix(options)));
 
         writer.write(BinaryString.fromString("张华在百货公司当售货员"));
         writer.write(BinaryString.fromString("Apache Paimon supports full text search"));

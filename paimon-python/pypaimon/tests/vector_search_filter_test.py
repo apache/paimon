@@ -130,56 +130,31 @@ def _java_tantivy_meta(tokenizer="ngram", min_gram=2, max_gram=2,
                        stem=False, language="english",
                        remove_stop_words=False, stop_words="",
                        with_position=True):
-    tokenizer_bytes = tokenizer.encode("utf-8")
-    language_bytes = language.encode("utf-8")
-    stop_words_bytes = stop_words.encode("utf-8")
-    return (
-        struct.pack(">iH", 1, len(tokenizer_bytes)) +
-        tokenizer_bytes +
-        struct.pack(">ii??i??H", min_gram, max_gram, prefix_only,
-                    lower_case, max_token_length, ascii_folding, stem,
-                    len(language_bytes)) +
-        language_bytes +
-        struct.pack(">?", remove_stop_words) +
-        struct.pack(">H", len(stop_words_bytes)) +
-        stop_words_bytes +
-        struct.pack(">?", with_position)
-    )
-
-
-def _java_tantivy_json_meta(tokenizer="ngram", min_gram=2, max_gram=2,
-                            prefix_only=False, lower_case=True,
-                            max_token_length=40, ascii_folding=False,
-                            stem=False, language="english",
-                            remove_stop_words=False, stop_words=None,
-                            with_position=True):
-    if stop_words is None:
-        stop_words = []
     config = {}
     if tokenizer != "default":
         config["tokenizer"] = tokenizer
     if min_gram != 2:
-        config["ngramMinGram"] = min_gram
+        config["ngram.min-gram"] = min_gram
     if max_gram != 2:
-        config["ngramMaxGram"] = max_gram
+        config["ngram.max-gram"] = max_gram
     if prefix_only:
-        config["ngramPrefixOnly"] = prefix_only
+        config["ngram.prefix-only"] = prefix_only
     if not lower_case:
-        config["lowerCase"] = lower_case
+        config["lower-case"] = lower_case
     if max_token_length != 40:
-        config["maxTokenLength"] = max_token_length
+        config["max-token-length"] = max_token_length
     if ascii_folding:
-        config["asciiFolding"] = ascii_folding
+        config["ascii-folding"] = ascii_folding
     if stem:
         config["stem"] = stem
     if language != "english":
         config["language"] = language
     if remove_stop_words:
-        config["removeStopWords"] = remove_stop_words
+        config["remove-stop-words"] = remove_stop_words
     if stop_words:
-        config["stopWords"] = stop_words
+        config["stop-words"] = stop_words
     if not with_position:
-        config["withPosition"] = with_position
+        config["with-position"] = with_position
     return json.dumps(config, separators=(",", ":")).encode("utf-8")
 
 
@@ -450,7 +425,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         )
 
         options = TantivyFullTextIndexOptions.deserialize(
-            _java_tantivy_json_meta(
+            _java_tantivy_meta(
                 tokenizer=" NGRAM ", min_gram=2, max_gram=3,
                 prefix_only=True, lower_case=False))
 
@@ -491,7 +466,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
         )
 
         options = TantivyFullTextIndexOptions.deserialize(
-            _java_tantivy_json_meta(
+            _java_tantivy_meta(
                 tokenizer=" WHITESPACE ", lower_case=False, max_token_length=12,
                 ascii_folding=True, stem=True, language="English",
                 remove_stop_words=True, stop_words=["paimon", "lake"],
