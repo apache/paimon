@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 import ray
@@ -107,6 +108,36 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         table = self.catalog.get_table(target)
         snap = table.snapshot_manager().get_latest_snapshot()
         return snap.id if snap is not None else None
+
+    def test_paimon_source_table_pins_snapshot(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        source = self._create_table()
+        self._write(source, self._source(ids=(1,)))
+        expected_snapshot_id = self._snapshot_id(source)
+
+        fake_ds = Mock()
+        fake_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=fake_ds,
+        ) as mock_read_paimon:
+            m._prepare(
+                target, source, self.catalog_options,
+                [WhenMatched(update='*')], [], ['id'],
+            )
+
+        mock_read_paimon.assert_called_once_with(
+            source,
+            self.catalog_options,
+            snapshot_id=expected_snapshot_id,
+        )
 
     def test_no_clause_raises(self):
         target = self._create_table()
