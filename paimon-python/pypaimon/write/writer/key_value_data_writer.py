@@ -184,6 +184,9 @@ class KeyValueDataWriter(DataWriter):
         #   but ``get_result`` snapshots key + sequence into a fresh
         #   tuple before returning, so the consumed result is decoupled
         #   from any later ``replace`` on the pooled kv.
+        # - ``FirstRowMergeFunction.add`` ``copy()``s the first kv, so it
+        #   keeps the first row rather than tracking later ``replace``s on
+        #   the pooled kv (which would otherwise yield the last row).
         # This drops per-row ``KeyValue``/``OffsetRow`` allocations and
         # the resulting GC churn on large buffers.
         pooled_kv = KeyValue(key_arity, value_arity)
