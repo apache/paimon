@@ -135,7 +135,7 @@ def _get_type_root(data_type) -> str:
 
 
 def _assert_not_updating_partition_keys(
-    schema: 'TableSchema', field_names: List[str], operation: str):
+        schema: 'TableSchema', field_names: List[str], operation: str):
     if len(field_names) > 1:
         return
     field_name = field_names[0]
@@ -146,7 +146,7 @@ def _assert_not_updating_partition_keys(
 
 
 def _assert_not_updating_primary_keys(
-    schema: 'TableSchema', field_names: List[str], operation: str):
+        schema: 'TableSchema', field_names: List[str], operation: str):
     if len(field_names) > 1:
         return
     field_name = field_names[0]
@@ -155,7 +155,7 @@ def _assert_not_updating_primary_keys(
 
 
 def _assert_not_renaming_blob_column(
-    new_fields: List[DataField], field_names: List[str]):
+        new_fields: List[DataField], field_names: List[str]):
     if len(field_names) > 1:
         return
     field_name = field_names[0]
