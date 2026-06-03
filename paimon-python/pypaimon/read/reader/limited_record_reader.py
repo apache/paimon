@@ -53,18 +53,6 @@ class LimitedRecordReader(RecordReader):
             return None
         return _LimitedRecordIterator(batch, self)
 
-    def read_arrow_batch(self) -> Optional[RecordBatch]:
-        if self.count >= self._limit:
-            return None
-        batch = self._inner.read_arrow_batch()
-        if batch is None:
-            return None
-        remaining = self._limit - self.count
-        if batch.num_rows > remaining:
-            batch = batch.slice(0, remaining)
-        self.count += batch.num_rows
-        return batch
-
     def close(self) -> None:
         self._inner.close()
 
