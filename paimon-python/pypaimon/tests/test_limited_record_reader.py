@@ -19,9 +19,6 @@
 import unittest
 from typing import List, Optional
 
-import pyarrow as pa
-
-from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordReader

@@ -326,7 +326,7 @@ class SplitRead(ABC):
         effective_first_row_id = file.first_row_id
         if (shard_range is not None and file.first_row_id is not None
                 and file_format in (
-                        CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
+                    CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
             effective_first_row_id = file.first_row_id + shard_range[0]
 
         if for_merge_read:
