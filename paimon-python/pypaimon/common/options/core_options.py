@@ -761,6 +761,10 @@ class CoreOptions:
         value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
+    def blob_field(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
     def blob_view_resolve_enabled(self, default=True):
         return self.options.get(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED, default)
 
