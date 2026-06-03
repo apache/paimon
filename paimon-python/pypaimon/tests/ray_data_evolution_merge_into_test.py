@@ -162,6 +162,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         self.assertIn("'id'", str(ctx.exception))
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_not_matched_condition_rejects_target_refs(self):
         target = self._create_table()
         with self.assertRaises(ValueError) as ctx:
