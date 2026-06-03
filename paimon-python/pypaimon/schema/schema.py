@@ -130,22 +130,22 @@ class Schema:
                 "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
                 "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
             )
+        if blob_field_names:
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+            }
 
-        required_options = {
-            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-        }
+            missing_options = []
+            for key, expected_value in required_options.items():
+                if key not in options or options[key] != expected_value:
+                    missing_options.append(f"{key}='{expected_value}'")
 
-        missing_options = []
-        for key, expected_value in required_options.items():
-            if key not in options or options[key] != expected_value:
-                missing_options.append(f"{key}='{expected_value}'")
+            if missing_options:
+                raise ValueError(
+                    f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                    f"Please add these options to the schema."
+                )
 
-        if missing_options:
-            raise ValueError(
-                f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
-                f"Please add these options to the schema."
-            )
-
-        if primary_keys is not None:
-            raise ValueError("Blob type is not supported with primary key.")
+            if primary_keys is not None:
+                raise ValueError("Blob type is not supported with primary key.")
