@@ -310,13 +310,30 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 file_names, file_offsets, file_lengths = self._parse_archive_header(stream)
                 directory = StreamDirectory(stream, file_names, file_offsets, file_lengths)
 
-                schema_builder = tantivy.SchemaBuilder()
-                schema_builder.add_unsigned_field("row_id", stored=False, indexed=True, fast=True)
-                self._add_text_field(schema_builder)
-                schema = schema_builder.build()
-
+                schema_candidates = [
+                    self._build_schema(tantivy,
+                                       row_id_stored=False,
+                                       text_stored=False),
+                    self._build_schema(tantivy,
+                                       row_id_stored=True,
+                                       text_stored=False),
+                    self._build_schema(tantivy,
+                                       row_id_stored=True,
+                                       text_stored=True),
+                ]
+                last_err = None
+                for schema in schema_candidates:
+                    try:
+                        self._index = tantivy.Index(
+                            schema, directory=directory,
+                        )
+                        last_err = None
+                        break
+                    except ValueError as e:
+                        last_err = e
+                if last_err is not None:
+                    raise last_err
                 self._schema = schema
-                self._index = tantivy.Index(schema, directory=directory)
                 self._register_tokenizer(tantivy, self._index)
                 self._index.reload()
                 self._searcher = self._index.searcher()
@@ -325,17 +342,27 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 stream.close()
                 raise
 
-    def _add_text_field(self, schema_builder):
+    def _build_schema(
+        self, tantivy, row_id_stored=False, text_stored=False,
+    ):
+        schema_builder = tantivy.SchemaBuilder()
+        schema_builder.add_unsigned_field(
+            "row_id", stored=row_id_stored, indexed=True, fast=True,
+        )
         tokenizer_name = self._index_options.tokenizer_name()
         field_kwargs = {}
         if not self._index_options.with_position:
             field_kwargs["index_option"] = "freq"
         if tokenizer_name == "default":
-            schema_builder.add_text_field("text", stored=False, **field_kwargs)
+            schema_builder.add_text_field(
+                "text", stored=text_stored, **field_kwargs,
+            )
         else:
             schema_builder.add_text_field(
-                "text", stored=False, tokenizer_name=tokenizer_name,
-                **field_kwargs)
+                "text", stored=text_stored,
+                tokenizer_name=tokenizer_name, **field_kwargs,
+            )
+        return schema_builder.build()
 
     def _register_tokenizer(self, tantivy, index):
         if (self._index_options.tokenizer == "default"
