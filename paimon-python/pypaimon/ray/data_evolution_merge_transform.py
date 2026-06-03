@@ -147,4 +147,4 @@ def _resolve_spec_array(
         return batch.column(col_name) if col_name in available else pa.nulls(
             batch.num_rows, type=out_type
         )
-    return pa.array([val] * batch.num_rows, type=out_type)
+    raise TypeError(f"unexpected spec value type: {type(val).__name__}")
