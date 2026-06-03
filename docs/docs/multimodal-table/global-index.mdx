@@ -187,6 +187,63 @@ CALL sys.create_global_index(
 );
 ```
 
+For other content where users often search by short character fragments, build the
+index with Tantivy's `ngram` tokenizer:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext',
+    options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2'
+);
+```
+
+For Chinese word segmentation, build the index with the `jieba` tokenizer:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext',
+    options => 'tantivy.tokenizer=jieba'
+);
+```
+
+For LanceDB-style analyzer customization, choose a base tokenizer and compose token filters:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext',
+    options => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true'
+);
+```
+
+Supported tokenizer options:
+
+| Option | Default | Description |
+|---|---|---|
+| `tantivy.tokenizer` | `default` | Tokenizer used by the full-text index. Supported values: `default`, `simple`, `whitespace`, `raw`, `ngram`, `jieba`. |
+| `tantivy.ngram.min-gram` | `2` | Minimum gram length for the `ngram` tokenizer. |
+| `tantivy.ngram.max-gram` | `2` | Maximum gram length for the `ngram` tokenizer. |
+| `tantivy.ngram.prefix-only` | `false` | Whether the `ngram` tokenizer only emits prefix ngrams. |
+| `tantivy.lower-case` | `true` | Whether configurable tokenizers lowercase emitted tokens. |
+| `tantivy.max-token-length` | `40` | Maximum token length kept by configurable tokenizers. |
+| `tantivy.ascii-folding` | `false` | Whether to normalize non-ASCII Latin characters to ASCII. |
+| `tantivy.stem` | `false` | Whether to apply stemming to emitted tokens. |
+| `tantivy.language` | `english` | Language used by stemming and built-in stop word filters. |
+| `tantivy.remove-stop-words` | `false` | Whether to remove built-in stop words for the configured language. |
+| `tantivy.stop-words` | ` ` | Semicolon-separated custom stop words to remove. |
+| `tantivy.with-position` | `true` | Whether to store term positions for phrase queries. Disable it to reduce index size when phrase queries are not needed. |
+
+Tokenizer settings are persisted in global index metadata. Existing index files keep using the
+tokenizer they were built with, even if later index builds use different options.
+Paimon does not load arbitrary Rust tokenizer plugins from configuration; custom analysis is
+provided by composing the supported tokenizer and filter options above. PyPaimon can query
+`jieba` indexes when the Python `jieba` package is installed.
+
 **Full-Text Search**
 
 <Tabs groupId="fulltext-search">
@@ -208,6 +265,7 @@ Table table = catalog.getTable(identifier);
 // Step 1: Build full-text search
 GlobalIndexResult result = table.newFullTextSearchBuilder()
         .withQueryText("paimon lake format")
+        .withQueryOperator("and")
         .withLimit(10)
         .withTextColumn("content")
         .executeLocal();
@@ -233,6 +291,7 @@ table = catalog.get_table('db.my_table')
 builder = table.new_full_text_search_builder()
 builder.with_text_column('content')
 builder.with_query_text('paimon lake format')
+builder.with_query_operator('and')
 builder.with_limit(10)
 result = builder.execute_local()
 
