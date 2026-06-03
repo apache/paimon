@@ -23,8 +23,8 @@ from typing import Dict, List, Optional
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
 from pypaimon.common.options.config_option import ConfigOption
-from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.options.config_options import ConfigOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 
 
 class ExternalPathStrategy(str, Enum):
@@ -34,6 +34,8 @@ class ExternalPathStrategy(str, Enum):
     NONE = "none"
     ROUND_ROBIN = "round-robin"
     SPECIFIC_FS = "specific-fs"
+    ENTROPY_INJECT = "entropy-inject"
+    WEIGHTED = "weight-robin"
 
 
 class ChangelogProducer(str, Enum):
@@ -497,7 +499,7 @@ class CoreOptions:
         ConfigOptions.key("data-file.external-paths.strategy")
         .string_type()
         .default_value(ExternalPathStrategy.NONE)
-        .with_description("Strategy for selecting external paths. Options: none, round-robin, specific-fs.")
+        .with_description("Strategy for selecting external paths. Options: none, round-robin, specific-fs, entropy-inject, weight-robin.")
     )
 
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS: ConfigOption[str] = (
@@ -505,6 +507,16 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Specific filesystem for external paths when using specific-fs strategy.")
+    )
+
+    DATA_FILE_EXTERNAL_PATHS_WEIGHTS: ConfigOption[str] = (
+        ConfigOptions.key("data-file.external-paths.weights")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Weights for external paths when strategy is weight-robin. "
+            "Format: comma-separated positive integers corresponding to paths in order."
+        )
     )
 
     # Global Index options
@@ -884,6 +896,12 @@ class CoreOptions:
 
     def data_file_external_paths_specific_fs(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
+
+    def data_file_external_paths_weights(self, default=None):
+        value = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_WEIGHTS, default)
+        if not value:
+            return None
+        return [int(w.strip()) for w in value.split(",") if w.strip()]
 
     def commit_max_retries(self) -> int:
         return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)
