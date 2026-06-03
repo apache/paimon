@@ -22,8 +22,7 @@ import tempfile
 import pyarrow as pa
 import pytest
 
-mosaic = pytest.importorskip("mosaic")
-
+import mosaic
 from pypaimon.read.reader.format_mosaic_reader import FormatMosaicReader
 from pypaimon.schema.data_types import AtomicType, DataField
 

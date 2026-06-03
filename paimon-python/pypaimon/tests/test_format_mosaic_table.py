@@ -23,9 +23,6 @@ import tempfile
 import unittest
 
 import pyarrow as pa
-import pytest
-
-mosaic = pytest.importorskip("mosaic")
 
 from pypaimon import CatalogFactory, Schema
 
