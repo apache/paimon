@@ -75,7 +75,9 @@ pipeline can be composed of three layers:
 Chunk shuffle is a scan planning feature for append tables, including
 Data Evolution append tables. For Data Evolution tables, chunk shuffle keeps
 row-id-aligned data files and sidecar files together while slicing by row-id
-range. Primary-key tables and deletion-vector scans are not supported by
+range. Chunk shuffle should be used with file formats that **support random
+access**. Currently, the random-access file formats are Lance, Vortex, Row, and
+Blob. Primary-key tables and deletion-vector scans are not supported by
 `with_chunk_shuffle`.
 
 The second and third layers are Dataset features. They work on the splits you
