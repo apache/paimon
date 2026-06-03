@@ -28,6 +28,7 @@ import org.apache.paimon.utils.Range;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -239,15 +240,15 @@ public class IndexManifestFileHandler {
 
                 for (IndexManifestEntry added : addedIndexFiles) {
                     GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
-                    if (addedMeta == null) {
-                        continue;
-                    }
-                    if (retainedMeta.indexFieldId() != addedMeta.indexFieldId()
-                            || !Range.intersect(
-                                    retainedMeta.rowRangeStart(),
-                                    retainedMeta.rowRangeEnd(),
-                                    addedMeta.rowRangeStart(),
-                                    addedMeta.rowRangeEnd())) {
+                    if (addedMeta == null
+                            || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
+                            || (Arrays.equals(
+                                            retainedMeta.extraFieldIds(), addedMeta.extraFieldIds())
+                                    && !Range.intersect(
+                                            retainedMeta.rowRangeStart(),
+                                            retainedMeta.rowRangeEnd(),
+                                            addedMeta.rowRangeStart(),
+                                            addedMeta.rowRangeEnd()))) {
                         continue;
                     }
 

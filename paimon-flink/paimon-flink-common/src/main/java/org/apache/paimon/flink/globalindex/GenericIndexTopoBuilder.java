@@ -658,15 +658,10 @@ public class GenericIndexTopoBuilder {
                         // Only write rows within this shard's range
                         if (currentRowId >= task.shardRange.from) {
                             if (multiColumn) {
-                                // Pass the row through, including null fields; each index type
-                                // decides how to handle nulls. A null field advances the logical
-                                // row id without indexing a value, so it must not end the shard:
-                                // later non-null rows still need to be indexed and row-id alignment
-                                // must be preserved.
+                                long rowId = currentRowId - task.shardRange.from;
                                 ((GlobalIndexMultiColumnWriter) indexWriter)
-                                        .write(writerProjection.replaceRow(row));
+                                        .write(rowId, writerProjection.replaceRow(row));
                             } else {
-                                // A null value advances the logical row id without indexing.
                                 Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
                                 ((GlobalIndexSingletonWriter) indexWriter).write(fieldData);
                             }

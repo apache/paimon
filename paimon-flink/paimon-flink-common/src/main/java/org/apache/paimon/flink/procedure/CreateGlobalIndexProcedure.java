@@ -98,11 +98,6 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 indexColumns.size() == new HashSet<>(indexColumns).size(),
                 "Duplicate index columns are not allowed: %s",
                 indexColumns);
-        // No hard cap on the number of index columns: unlike row-store B-tree indexes
-        // (e.g. MySQL 16, PostgreSQL 32) whose limit comes from composing columns into a
-        // single key, the global index is built on per-type index frameworks. Whether
-        // multiple columns are supported, and any practical limit, is decided by each
-        // index type (single-column types reject multi-column via UnsupportedOperationException).
         for (String col : indexColumns) {
             checkArgument(
                     rowType.containsField(col),

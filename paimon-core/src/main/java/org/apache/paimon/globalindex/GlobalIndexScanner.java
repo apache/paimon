@@ -75,44 +75,71 @@ public class GlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
-        Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
-        Map<Integer, List<Integer>> fieldIdToIndexFields = new HashMap<>();
+        Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
+        Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             String indexType = indexFile.indexType();
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            int fieldId = meta.indexFieldId();
-            List<Integer> indexFields = meta.getIndexedFieldIds();
-            List<Integer> existing = fieldIdToIndexFields.get(fieldId);
-            if (existing == null) {
-                fieldIdToIndexFields.put(fieldId, indexFields);
+            int indexFieldId = meta.indexFieldId();
+            List<Integer> fieldIds = meta.getIndexedFieldIds();
+            IndexMetaFileGroup group = indexMetas.get(indexFieldId);
+            if (group == null) {
+                group = new IndexMetaFileGroup(indexFieldId, fieldIds);
+                indexMetas.put(indexFieldId, group);
+                if (meta.extraFieldIds() != null) {
+                    for (int extra : meta.extraFieldIds()) {
+                        extraIndexMetas.computeIfAbsent(extra, k -> new ArrayList<>()).add(group);
+                    }
+                }
             } else {
                 checkArgument(
-                        existing.equals(indexFields),
+                        group.fieldIds.equals(fieldIds),
                         "Primary field %s owns multiple indexes with different columns %s and %s; "
                                 + "a primary column can own at most one index.",
-                        fieldId,
-                        existing,
-                        indexFields);
+                        indexFieldId,
+                        group.fieldIds,
+                        fieldIds);
             }
-            indexMetas
-                    .computeIfAbsent(fieldId, k -> new HashMap<>())
-                    .computeIfAbsent(indexType, k -> new HashMap<>())
-                    .computeIfAbsent(range, k -> new ArrayList<>())
-                    .add(indexFile);
+            group.addFile(indexType, range, indexFile);
         }
 
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
-                    List<Integer> group = fieldIdToIndexFields.get(fId);
+                    IndexMetaFileGroup group = indexMetas.get(fId);
                     if (group == null) {
-                        return Collections.emptyList();
+                        List<IndexMetaFileGroup> extraGroups = extraIndexMetas.get(fId);
+                        if (extraGroups == null || extraGroups.isEmpty()) {
+                            return Collections.emptyList();
+                        }
+                        group = extraGroups.get(0);
                     }
                     List<DataField> fields =
-                            group.stream().map(rowType::getField).collect(Collectors.toList());
-                    return createReaders(indexFileReader, indexMetas.get(fId), fields);
+                            group.fieldIds.stream()
+                                    .map(rowType::getField)
+                                    .collect(Collectors.toList());
+                    return createReaders(indexFileReader, group.metas, fields);
                 };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
+    }
+
+    /** All index files of one global index (single- or multi-column), grouped for reading. */
+    private static class IndexMetaFileGroup {
+
+        private final int indexFieldId;
+        private final List<Integer> fieldIds;
+        private final Map<String, Map<Range, List<IndexFileMeta>>> metas = new HashMap<>();
+
+        IndexMetaFileGroup(int indexFieldId, List<Integer> fieldIds) {
+            this.indexFieldId = indexFieldId;
+            this.fieldIds = fieldIds;
+        }
+
+        void addFile(String indexType, Range range, IndexFileMeta indexFile) {
+            metas.computeIfAbsent(indexType, k -> new HashMap<>())
+                    .computeIfAbsent(range, k -> new ArrayList<>())
+                    .add(indexFile);
+        }
     }
 
     public static Optional<GlobalIndexScanner> create(
@@ -145,6 +172,8 @@ public class GlobalIndexScanner implements Closeable {
                     if (globalIndex == null) {
                         return false;
                     }
+                    // Collect indexes whose primary column is filtered, and also multi-column
+                    // indexes that have a filtered column as an extra (used as a fallback).
                     if (filterFieldIds.contains(globalIndex.indexFieldId())) {
                         return true;
                     }

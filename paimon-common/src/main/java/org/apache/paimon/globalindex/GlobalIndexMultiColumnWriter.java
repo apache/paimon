@@ -26,9 +26,13 @@ import javax.annotation.Nullable;
 public interface GlobalIndexMultiColumnWriter extends GlobalIndexWriter {
 
     /**
-     * Write a projected row containing all indexed columns for one record. The row layout matches
-     * the fields order passed to {@link GlobalIndexerFactory#create(java.util.List,
-     * org.apache.paimon.options.Options)}.
+     * Write one record's indexed columns at the given relative row id.
+     *
+     * @param rowId the record's row id relative to the current shard (0 to rowCnt - 1); a null row
+     *     still advances the row id without indexing a value
+     * @param row a projected row containing only the indexed columns, whose layout matches the
+     *     fields order passed to {@link GlobalIndexerFactory#create(java.util.List,
+     *     org.apache.paimon.options.Options)}
      */
-    void write(@Nullable InternalRow row);
+    void write(long rowId, @Nullable InternalRow row);
 }

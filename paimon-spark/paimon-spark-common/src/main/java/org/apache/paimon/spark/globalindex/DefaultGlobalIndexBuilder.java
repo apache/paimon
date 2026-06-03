@@ -29,6 +29,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
@@ -134,13 +135,14 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                     projection[i] = readType.getFieldIndex(field.name());
                 }
                 ProjectedRow projectedRow = ProjectedRow.from(projection);
+                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
                 while (rows.hasNext()) {
                     InternalRow row = rows.next();
-                    // Pass the row through, including null fields; each index type decides how to
-                    // handle nulls. A null field advances the logical row id without indexing a
-                    // value, so it must not end the shard: later non-null rows still need to be
-                    // indexed and row-id alignment must be preserved.
-                    multiWriter.write(projectedRow.replaceRow(row));
+                    long absRowId = row.getLong(rowIdIndex);
+                    if (absRowId < rowRange.from || absRowId > rowRange.to) {
+                        continue;
+                    }
+                    multiWriter.write(absRowId - rowRange.from, projectedRow.replaceRow(row));
                     rowCounter.add(1);
                 }
             } else {
