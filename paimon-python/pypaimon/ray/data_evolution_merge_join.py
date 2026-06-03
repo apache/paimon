@@ -94,12 +94,31 @@ def build_matched_update_ds(
         f"build_matched_update_ds expected 1 clause, got {len(clauses)}"
     )
     spec = clauses[0].spec
+    condition = clauses[0].condition
     captured_update_cols = list(update_cols)
     captured_row_id_name = row_id_name
     captured_on_pairs = list(zip(source_on, target_on))
     captured_schema = update_schema
 
+    captured_apply = None
+    captured_rewritten = None
+    if condition is not None:
+        from pypaimon.ray.merge_condition import (
+            apply_condition, remap_source_on_keys, rewrite_condition,
+        )
+        on_map = dict(zip(source_on, target_on))
+        captured_rewritten = remap_source_on_keys(
+            rewrite_condition(condition), on_map,
+        )
+        captured_apply = apply_condition
+
     def _transform(batch: pa.Table) -> pa.Table:
+        if captured_apply is not None:
+            batch = captured_apply(
+                batch, captured_rewritten, captured_schema,
+            )
+            if batch.num_rows == 0:
+                return batch
         return vectorized_matched_transform(
             batch, spec, captured_on_pairs,
             captured_update_cols, captured_row_id_name,
@@ -311,8 +330,21 @@ def build_not_matched_insert_ds(
         f"build_not_matched_insert_ds expected 1 clause, got {len(clauses)}"
     )
     spec = clauses[0].spec
+    condition = clauses[0].condition
+    captured_apply = None
+    captured_rewritten = None
+    if condition is not None:
+        from pypaimon.ray.merge_condition import apply_condition, rewrite_condition
+        captured_rewritten = rewrite_condition(condition)
+        captured_apply = apply_condition
 
     def _transform(batch: pa.Table) -> pa.Table:
+        if captured_apply is not None:
+            batch = captured_apply(
+                batch, captured_rewritten, out_schema,
+            )
+            if batch.num_rows == 0:
+                return _coerce_large_string_types(batch)
         return _coerce_large_string_types(
             vectorized_insert_transform(
                 batch, spec, captured_field_names, out_schema

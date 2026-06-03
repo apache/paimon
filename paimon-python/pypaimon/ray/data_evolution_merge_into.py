@@ -96,12 +96,6 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             "WhenNotMatched clause; multi-clause fall-through will be added "
             "in a follow-up PR."
         )
-    for clause in list(when_matched) + list(when_not_matched):
-        if clause.condition is not None:
-            raise NotImplementedError(
-                "merge_into does not yet support condition expressions; "
-                "this will be added in a follow-up PR."
-            )
     target_on_cols, source_on_cols = _normalize_on(on)
 
     from pypaimon.catalog.catalog_factory import CatalogFactory
@@ -136,14 +130,41 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             spec=_normalize_set_spec(
                 c.update, settable_field_names, on_map,
             ),
+            condition=c.condition,
         )
         for c in when_matched
     ]
+    has_condition = any(
+        c.condition is not None
+        for c in list(when_matched) + list(when_not_matched)
+    )
+    if has_condition:
+        from pypaimon.ray.merge_condition import (
+            _require_datafusion, extract_target_columns,
+        )
+        _require_datafusion()
+        for c in when_not_matched:
+            if c.condition is not None:
+                t_refs = extract_target_columns(c.condition)
+                if t_refs:
+                    raise ValueError(
+                        f"WhenNotMatched condition must not reference "
+                        f"target columns (t.*), but found: {sorted(t_refs)}"
+                    )
+        for c in list(when_matched) + list(when_not_matched):
+            if c.condition is not None:
+                blob_refs = extract_target_columns(c.condition) & blob_cols
+                if blob_refs:
+                    raise ValueError(
+                        f"condition must not reference blob columns, "
+                        f"but found: {sorted(blob_refs)}"
+                    )
     not_matched_specs = [
         _NormalizedClause(
             spec=_normalize_set_spec(
                 c.insert, settable_field_names, on_map,
             ),
+            condition=c.condition,
         )
         for c in when_not_matched
     ]
@@ -153,6 +174,25 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     _validate_source_has_target_cols(
         source_ds, settable_field_names, on_map,
     )
+
+    if has_condition:
+        from pypaimon.ray.merge_condition import extract_columns
+        source_names = set(_source_schema_or_raise(source_ds).names)
+        target_names = set(full_target_field_names)
+        for c in list(when_matched) + list(when_not_matched):
+            if c.condition is not None:
+                for ref in extract_columns(c.condition):
+                    prefix, col = ref.split(".", 1)
+                    if prefix == "s" and col not in source_names:
+                        raise ValueError(
+                            f"condition references unknown source "
+                            f"column '{col}'"
+                        )
+                    if prefix == "t" and col not in target_names:
+                        raise ValueError(
+                            f"condition references unknown target "
+                            f"column '{col}'"
+                        )
 
     from pypaimon.schema.data_types import PyarrowFieldParser
     full_pa_schema = PyarrowFieldParser.from_paimon_schema(
@@ -272,8 +312,7 @@ def _execute_and_commit(
         tc.commit(all_msgs)
         tc.close()
 
-    # MVP has no condition, so every matched row is updated; num_unchanged
-    # is always 0. Kept in the dict for API stability when condition lands.
+    # num_matched = rows that passed the condition and were updated
     return {
         "num_matched": num_updated,
         "num_inserted": num_inserted,
@@ -375,6 +414,12 @@ def _resolve_target_projection(
     needed = set(_needed_target_cols(
         clauses, target_on, update_cols, target_field_names,
     ))
+    if any(c.condition is not None for c in clauses):
+        from pypaimon.ray.merge_condition import extract_target_columns
+        target_set = set(target_field_names)
+        for clause in clauses:
+            if clause.condition is not None:
+                needed |= extract_target_columns(clause.condition) & target_set
     return [c for c in target_field_names if c in needed]
 
 

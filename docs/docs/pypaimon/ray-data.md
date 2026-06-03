@@ -357,12 +357,29 @@ metrics = merge_into(
 print(metrics)   # {"num_matched": 3, "num_inserted": 2, "num_unchanged": 0}
 ```
 
+Conditional clauses filter which matched/unmatched rows are acted on:
+
+```python
+merge_into(
+    target="db.table",
+    source=source_ds,
+    catalog_options=catalog_options,
+    on=["id"],
+    when_matched=[WhenMatched(update="*", condition="s.age > t.age")],
+    when_not_matched=[WhenNotMatched(insert="*", condition="s.age > 18")],
+)
+```
+
+Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
+column prefixes. `WhenNotMatched` conditions may only reference source
+columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
+
 - `update` / `insert`: only `"*"` is supported in this PR. A future follow-up
   will add mapping-based SET (e.g. `{"col": "s.col"}`) where values are
   analyzable string expressions (`"s.<col>"`, `"t.<col>"`, or literals),
   not Python callables.
-- `condition`: reserved for a future follow-up; passing a non-None value
-  currently raises `NotImplementedError`.
+- `condition`: an optional SQL-style boolean expression. Use `s.<col>` and
+  `t.<col>` to reference source and target columns.
 
 **Parameters:**
 - `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or a
@@ -375,10 +392,9 @@ print(metrics)   # {"num_matched": 3, "num_inserted": 2, "num_unchanged": 0}
   tasks (update transform, group write, insert transform).
 - `concurrency`: scheduling for the insert sink.
 
-**Returns:** `{"num_matched", "num_inserted", "num_unchanged"}`. In this PR
-every matched row is updated, so `num_matched` always equals `num_updated`
-and `num_unchanged` is always `0`; conditional clauses (added later) can
-make `num_unchanged > 0`.
+**Returns:** `{"num_matched", "num_inserted", "num_unchanged"}`. `num_matched`
+counts the rows actually updated (after condition filtering). `num_unchanged`
+is `0` in the current implementation.
 
 **Notes:**
 - Partition key columns cannot be updated by matched clauses. If the target

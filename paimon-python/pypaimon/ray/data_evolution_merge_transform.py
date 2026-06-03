@@ -40,6 +40,7 @@ class WhenNotMatched:
 @dataclass
 class _NormalizedClause:
     spec: Dict[str, Any]
+    condition: Optional[str] = None
 
 
 def vectorized_matched_transform(

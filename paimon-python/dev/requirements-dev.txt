@@ -28,5 +28,7 @@ requests
 parameterized
 # Vortex 0.71.0 regresses native predicate pushdown on single-row files.
 vortex-data==0.70.0; python_version >= "3.11"
+# merge_into condition expressions (optional, for condition tests)
+datafusion>=52; python_version >= "3.10"
 # Lumina vector search (optional, for lumina index tests)
 lumina-data>=0.1.0
