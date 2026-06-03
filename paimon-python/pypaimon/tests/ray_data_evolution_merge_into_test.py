@@ -1119,7 +1119,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         source = pa.Table.from_pydict(
             {
                 'uid': pa.array([1], type=pa.int32()),
-                'id': pa.array([999], type=pa.int32()),
+                'id': pa.array([42], type=pa.int32()),
                 'name': ['new'],
                 'age': pa.array([99], type=pa.int32()),
             },
@@ -1132,15 +1132,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on={'id': 'uid'},
             when_matched=[WhenMatched(update={
-                'id': source_col('id'),
-                'name': source_col('name'),
+                'age': source_col('id'),
             })],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
         out = self._read_sorted(target)
-        self.assertEqual(out['id'], [999])
-        self.assertEqual(out['name'], ['new'])
+        self.assertEqual(out['age'], [42])
+        self.assertEqual(out['name'], ['old'])
 
     def test_renamed_on_key_missing_source_col_rejected(self):
         target = self._create_table()
