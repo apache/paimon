@@ -153,13 +153,6 @@ class DataFileBatchReader(RecordBatchReader):
             out_fields.append(target_field)
         return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))
 
-    def _convert_inline_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
-    def _convert_descriptor_stored_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
-        if isinstance(self.format_reader, FormatBlobReader):
-            return record_batch
-        if not self.descriptor_blob_fields:
-            return record_batch
-
     def _assign_row_tracking(self, record_batch: RecordBatch) -> RecordBatch:
         """Assign row tracking meta fields (_ROW_ID and _SEQUENCE_NUMBER)."""
         arrays = list(record_batch.columns)
