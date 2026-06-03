@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 from pypaimon.table.row.generic_row import GenericRow, RowKind
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
+from pypaimon.table.row.blob import Blob, BlobConsumer, BlobData, BlobDescriptor
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
@@ -32,11 +32,16 @@ class BlobFileWriter:
     Writes rows one by one and tracks file size.
     """
 
-    def __init__(self, file_io, file_path: Path):
+    def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None):
         self.file_io = file_io
         self.file_path = file_path
+        self._blob_consumer = blob_consumer
         self.output_stream = file_io.new_output_stream(file_path)
-        self.writer = BlobFormatWriter(self.output_stream)
+        self.writer = BlobFormatWriter(
+            self.output_stream,
+            blob_consumer=blob_consumer,
+            file_path=str(file_path),
+        )
         self.row_count = 0
         self.closed = False
 
@@ -118,7 +123,7 @@ class BlobFileWriter:
         return file_size
 
     def abort(self):
-        """Abort the writer and delete the file."""
+        """Abort the writer and delete the file (unless a blob consumer holds references)."""
         if not self.closed:
             try:
                 if hasattr(self.output_stream, 'close'):
@@ -127,5 +132,5 @@ class BlobFileWriter:
                 pass
             self.closed = True
 
-        # Delete the file
-        self.file_io.delete_quietly(self.file_path)
+        if self._blob_consumer is None:
+            self.file_io.delete_quietly(self.file_path)

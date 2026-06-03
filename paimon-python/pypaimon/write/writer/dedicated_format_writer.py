@@ -26,6 +26,7 @@ from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import VectorType
+from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.data_writer import DataWriter
 
@@ -50,7 +51,7 @@ class DedicatedFormatWriter(DataWriter):
     CHECK_ROLLING_RECORD_CNT = 1000
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
-                 write_cols: Optional[List[str]] = None):
+                 write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None):
         super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols)
 
         # Determine blob columns from table schema
@@ -123,7 +124,8 @@ class DedicatedFormatWriter(DataWriter):
                 bucket=self.bucket,
                 max_seq_number=max_seq_number,
                 blob_column=blob_column,
-                options=options
+                options=options,
+                blob_consumer=blob_consumer,
             )
 
         # Initialize vector writer when vector.file.format is configured.
