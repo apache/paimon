@@ -864,13 +864,17 @@ class DataEvolutionSplitRead(SplitRead):
         if not prescan_fields:
             return EmptyRecordBatchReader()
 
+        # When there's a normal field predicate, don't push down limit to prescan reader
+        # because the outer reader will apply predicate+limit filtering,
+        # while prescan reader would only apply limit without normal field predicate
+        # TODO support limit+predicate push down
         prescan_read = DataEvolutionSplitRead(
             table=self.table,
             predicate=self.predicate,
             read_type=prescan_fields,
             split=self.split,
             row_tracking_enabled=False,
-            limit=self.limit,  # Pass limit to prescan reader
+            limit=None if self.predicate else self.limit,
         )
         prescan_read.row_ranges = self.row_ranges
         return prescan_read._create_raw_reader()
