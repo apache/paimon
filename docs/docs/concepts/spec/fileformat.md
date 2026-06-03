@@ -24,9 +24,10 @@ under the License.
 
 # File Format
 
-Currently, supports Parquet, Avro, ORC, CSV, JSON, Lance, and Row file formats.
+Currently, supports Parquet, Avro, ORC, CSV, JSON, Lance, Vortex, Mosaic, and Row file formats.
 - Recommended column format is Parquet, which has a high compression rate and fast column projection queries.
 - Recommended row based format is Avro, which has good performance on reading and writing full row (all columns).
+- Recommended format for wide tables is [Mosaic](https://paimon.apache.org/docs/mosaic/), a columnar-bucket hybrid format with column bucketing for parallel I/O.
 - Recommended format for row-number based O(1) lookups is Row, which stores data in row-oriented blocks with ZSTD compression and supports fast random access by row number.
 - Recommended testing format is CSV, which has better readability but the worst read-write performance.
 - Recommended format for ML workloads is Lance, which is optimized for vector search and machine learning use cases.
@@ -754,6 +755,203 @@ The following table lists the type mapping from Paimon type to Lance (Arrow) typ
 Limitations:
 1. Lance file format does not support `MAP` type.
 2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.
+
+## VORTEX
+
+[Vortex](https://github.com/spiraldb/vortex) is a columnar file format that uses adaptive, data-dependent encodings to achieve high compression ratios while maintaining fast scan performance. It supports native predicate pushdown and efficient column projection.
+
+Key features:
+- **Adaptive Encoding**: Automatically selects the best encoding per column based on data distribution
+- **Native Predicate Pushdown**: Supports filter expressions pushed down to the scan layer
+- **Column Projection**: Only reads requested columns from disk
+
+The following table lists the supported Paimon types (mapped to Arrow types):
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Paimon Type</th>
+        <th class="text-center">Arrow type</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td>CHAR / VARCHAR / STRING</td>
+      <td>UTF8</td>
+    </tr>
+    <tr>
+      <td>BOOLEAN</td>
+      <td>BOOL</td>
+    </tr>
+    <tr>
+      <td>BINARY / VARBINARY</td>
+      <td>BINARY</td>
+    </tr>
+    <tr>
+      <td>DECIMAL(P, S)</td>
+      <td>DECIMAL128(P, S)</td>
+    </tr>
+    <tr>
+      <td>TINYINT</td>
+      <td>INT8</td>
+    </tr>
+    <tr>
+      <td>SMALLINT</td>
+      <td>INT16</td>
+    </tr>
+    <tr>
+      <td>INT</td>
+      <td>INT32</td>
+    </tr>
+    <tr>
+      <td>BIGINT</td>
+      <td>INT64</td>
+    </tr>
+    <tr>
+      <td>FLOAT</td>
+      <td>FLOAT</td>
+    </tr>
+    <tr>
+      <td>DOUBLE</td>
+      <td>DOUBLE</td>
+    </tr>
+    <tr>
+      <td>DATE</td>
+      <td>DATE32</td>
+    </tr>
+    <tr>
+      <td>TIME</td>
+      <td>TIME32 / TIME64</td>
+    </tr>
+    <tr>
+      <td>TIMESTAMP(P)</td>
+      <td>TIMESTAMP (unit based on precision)</td>
+    </tr>
+    <tr>
+      <td>ARRAY</td>
+      <td>LIST</td>
+    </tr>
+    <tr>
+      <td>ROW</td>
+      <td>STRUCT</td>
+    </tr>
+    </tbody>
+</table>
+
+Limitations:
+1. Vortex requires Python >= 3.11.
+2. Vortex does not support `MAP` or `MULTISET` types.
+
+## MOSAIC
+
+[Mosaic](https://paimon.apache.org/docs/mosaic/) is a columnar-bucket hybrid format optimized for wide tables. It groups columns into buckets and compresses each bucket independently with ZSTD, enabling efficient column projection that only reads the buckets containing requested columns.
+
+Key features:
+- **Column Bucketing**: Columns are grouped into configurable buckets for parallel I/O, significantly reducing read amplification on wide tables
+- **Row Group Statistics**: Per-row-group min/max/null_count statistics enable row group skipping during scan
+- **ZSTD Compression**: All data is compressed with ZSTD (configurable level)
+- **Arrow-native**: Uses Apache Arrow as the in-memory representation for zero-copy integration
+
+The following table lists the supported Paimon types (mapped to Arrow types):
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Paimon Type</th>
+        <th class="text-center">Arrow type</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td>CHAR / VARCHAR / STRING</td>
+      <td>UTF8</td>
+    </tr>
+    <tr>
+      <td>BOOLEAN</td>
+      <td>BOOL</td>
+    </tr>
+    <tr>
+      <td>BINARY / VARBINARY</td>
+      <td>BINARY</td>
+    </tr>
+    <tr>
+      <td>DECIMAL(P, S)</td>
+      <td>DECIMAL128(P, S)</td>
+    </tr>
+    <tr>
+      <td>TINYINT</td>
+      <td>INT8</td>
+    </tr>
+    <tr>
+      <td>SMALLINT</td>
+      <td>INT16</td>
+    </tr>
+    <tr>
+      <td>INT</td>
+      <td>INT32</td>
+    </tr>
+    <tr>
+      <td>BIGINT</td>
+      <td>INT64</td>
+    </tr>
+    <tr>
+      <td>FLOAT</td>
+      <td>FLOAT</td>
+    </tr>
+    <tr>
+      <td>DOUBLE</td>
+      <td>DOUBLE</td>
+    </tr>
+    <tr>
+      <td>DATE</td>
+      <td>DATE32</td>
+    </tr>
+    <tr>
+      <td>TIME</td>
+      <td>TIME32(ms)</td>
+    </tr>
+    <tr>
+      <td>TIMESTAMP(P)</td>
+      <td>TIMESTAMP (unit based on precision)</td>
+    </tr>
+    <tr>
+      <td>TIMESTAMP_LOCAL_ZONE(P)</td>
+      <td>TIMESTAMP with timezone</td>
+    </tr>
+    </tbody>
+</table>
+
+Format Options:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left" style="width: 25%">Option</th>
+        <th class="text-center" style="width: 7%">Default</th>
+        <th class="text-center" style="width: 10%">Type</th>
+        <th class="text-center" style="width: 42%">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>mosaic.num-buckets</h5></td>
+      <td style="word-wrap: break-word;">auto</td>
+      <td>Integer</td>
+      <td>Number of column buckets for parallel I/O. When set to 0 or not specified, the format auto-determines the bucket count.</td>
+    </tr>
+    <tr>
+      <td><h5>mosaic.stats-columns</h5></td>
+      <td style="word-wrap: break-word;">(empty)</td>
+      <td>String</td>
+      <td>Comma-separated column names to collect min/max statistics for filter pushdown. Empty means no statistics are collected.</td>
+    </tr>
+    </tbody>
+</table>
+
+Limitations:
+1. Mosaic does not support complex types: ARRAY, MAP, MULTISET, ROW, VARIANT, BLOB, VECTOR.
+
+For more details, see the [Mosaic documentation](https://paimon.apache.org/docs/mosaic/).
 
 ## ROW
 

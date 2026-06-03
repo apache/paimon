@@ -50,3 +50,34 @@ pip3 install dist/*.tar.gz
 ```
 
 The command will install the package and core dependencies to your local Python environment.
+
+## Optional Dependencies
+
+PyPaimon supports multiple file formats via optional extras:
+
+```shell
+# Mosaic format (columnar-bucket hybrid, optimized for wide tables)
+pip install pypaimon[mosaic]
+
+# Lance format (optimized for ML / vector search)
+pip install pypaimon[lance]
+
+# Vortex format (requires Python >= 3.11)
+pip install pypaimon[vortex]
+```
+
+### Mosaic Format
+
+[Mosaic](https://paimon.apache.org/docs/mosaic/) is a columnar-bucket hybrid format optimized for wide tables. It groups
+columns into buckets for parallel I/O and supports row group statistics for filter pushdown.
+
+To use Mosaic as the storage format:
+
+```python
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={'file.format': 'mosaic'}
+)
+```
+
+For more details on the Mosaic format, see the [Mosaic documentation](https://paimon.apache.org/docs/mosaic/).
