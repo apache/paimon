@@ -106,26 +106,15 @@ class Schema:
     @staticmethod
     def _validate_blob_fields(fields, options, primary_keys):
         """Validate blob field configurations in the schema."""
-        blob_names = [
-            field.name for field in fields
-            if 'blob' in str(field.type).lower()
-        ]
-
-        if not blob_names:
-            return
 
         if options is None:
             options = {}
-
-        if len(fields) <= len(blob_names):
-            raise ValueError(
-                "Table with BLOB type column must have other normal columns."
-            )
 
         blob_field_names = {
             field.name for field in fields if 'blob' in str(field.type).lower()
         }
         core_options = CoreOptions.from_dict(options)
+
         descriptor_fields = core_options.blob_descriptor_fields()
         view_fields = core_options.blob_view_fields()
         unknown_inline_fields = descriptor_fields.union(view_fields).difference(blob_field_names)

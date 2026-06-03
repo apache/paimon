@@ -66,9 +66,16 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._blob_view_lookup = None
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        # Ensure prescan is done before reading (only needed for view fields)
+        # Align with Java: only enter blob view resolution when catalog_loader is available
+        # If catalog_loader is None, skip both Stage 1 (view resolution) and Stage 2 (descriptor resolution)
+        # This matches Java's behavior in DataEvolutionTableRead.createReader where blob view reader
+        # is only created when catalogContext != null
         if self._view_fields and not self._prescan_done:
-            self._prescan_view_structs()
+            if self._table.catalog_environment.catalog_loader is None:
+                # No catalog_loader available, skip view resolution
+                self._prescan_done = True
+            else:
+                self._prescan_view_structs()
 
         batch = self._inner.read_arrow_batch()
         if batch is None:
