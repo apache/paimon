@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import io
 import os
 import tempfile
 
@@ -183,11 +182,6 @@ class TestFormatMosaicReaderWriter:
             os.unlink(path)
 
     def test_column_projection(self):
-        fields_all = [
-            DataField(0, "id", AtomicType("INT")),
-            DataField(1, "name", AtomicType("STRING")),
-            DataField(2, "value", AtomicType("DOUBLE")),
-        ]
         data = pa.table({
             "id": pa.array([1, 2, 3], type=pa.int32()),
             "name": pa.array(["a", "b", "c"], type=pa.string()),
@@ -213,10 +207,6 @@ class TestFormatMosaicReaderWriter:
 
     def test_schema_evolution_missing_field(self):
         """Reading a file that doesn't have a column added later (schema evolution)."""
-        fields_write = [
-            DataField(0, "id", AtomicType("INT")),
-            DataField(1, "name", AtomicType("STRING")),
-        ]
         data = pa.table({
             "id": pa.array([1, 2], type=pa.int32()),
             "name": pa.array(["a", "b"], type=pa.string()),
