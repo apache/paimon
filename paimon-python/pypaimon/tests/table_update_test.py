@@ -440,7 +440,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 bad = pa.Table.from_pydict({'_ROW_ID': row_ids, 'age': ages})
                 with self.assertRaises(ValueError) as ctx:
                     self._apply_update(tu, bad, self._next_commit_id())
-                self.assertIn('out of valid range', str(ctx.exception))
+                self.assertIn('does not belong to any valid range', str(ctx.exception))
 
     def test_duplicate_row_id_raises(self):
         table = self._create_seeded_table()
