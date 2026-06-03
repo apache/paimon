@@ -45,7 +45,6 @@ class _FilesInfo:
     first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
         field(default_factory=dict)
     )
-    total_row_count: int = 0
     valid_row_id_ranges: List[Range] = field(default_factory=list)
 
 
@@ -73,7 +72,6 @@ class TableUpdateByRowId:
         self.snapshot_id = info.snapshot_id
         self.first_row_ids = info.first_row_ids
         self._first_row_id_index = info.first_row_id_index
-        self.total_row_count = info.total_row_count
         self.valid_row_id_ranges = info.valid_row_id_ranges
 
         self.commit_messages: List[CommitMessage] = []
@@ -84,7 +82,6 @@ class TableUpdateByRowId:
             snapshot_id=self.snapshot_id,
             first_row_ids=self.first_row_ids,
             first_row_id_index=self._first_row_id_index,
-            total_row_count=self.total_row_count,
             valid_row_id_ranges=self.valid_row_id_ranges,
         )
 
@@ -114,17 +111,14 @@ class TableUpdateByRowId:
 
         if row_id_ranges:
             merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
-            total_row_count = max(r.to for r in merged) + 1
         else:
             merged = []
-            total_row_count = 0
 
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         return _FilesInfo(
             snapshot_id=snapshot_id,
             first_row_ids=sorted(index.keys()),
             first_row_id_index=index,
-            total_row_count=total_row_count,
             valid_row_id_ranges=merged,
         )
 
