@@ -30,8 +30,11 @@ from pypaimon.ray.data_evolution_merge_join import (
     distributed_write_collect_msgs,
 )
 from pypaimon.ray.data_evolution_merge_transform import (
+    LiteralValue,
     OnSpec,
     SetSpec,
+    SourceColumnRef,
+    TargetColumnRef,
     WhenMatched,
     WhenNotMatched,
     _NormalizedClause,
@@ -163,6 +166,7 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         _NormalizedClause(
             spec=_normalize_set_spec(
                 c.insert, settable_field_names, on_map,
+                allow_target_refs=False,
             ),
             condition=c.condition,
         )
@@ -172,7 +176,7 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     source_ds = _normalize_source(source, catalog_options)
     _validate_source_on_cols(source_ds, source_on_cols)
     _validate_source_has_target_cols(
-        source_ds, settable_field_names, on_map,
+        source_ds, matched_specs + not_matched_specs,
     )
 
     if has_condition:
@@ -398,8 +402,8 @@ def _needed_target_cols(
     set_by_all = set(update_cols)
     for clause in clauses:
         for value in clause.spec.values():
-            if isinstance(value, str) and value.startswith("t."):
-                needed.add(value[2:])
+            if isinstance(value, TargetColumnRef):
+                needed.add(value.column)
         set_by_all &= set(clause.spec.keys())
     needed |= set(update_cols) - set_by_all
     return [c for c in all_target_cols if c in needed]
@@ -427,15 +431,66 @@ def _normalize_set_spec(
     spec: SetSpec,
     target_field_names: Sequence[str],
     on_map: Optional[Mapping[str, str]] = None,
+    allow_target_refs: bool = True,
 ) -> Dict[str, Any]:
     on_map = on_map or {}
-    if spec != "*":
-        raise NotImplementedError(
-            "merge_into currently only supports '*' for update/insert; "
-            "partial SET will be added in a follow-up PR."
+    if spec == "*":
+        return {
+            col: SourceColumnRef(on_map.get(col, col))
+            for col in target_field_names
+        }
+    if not isinstance(spec, Mapping):
+        raise TypeError(
+            f"SET spec must be '*' or a mapping, got {type(spec).__name__}"
         )
-    # A renamed ON key resolves via the source's ON column, not its own name.
-    return {col: f"s.{on_map.get(col, col)}" for col in target_field_names}
+    if not spec:
+        raise ValueError("SET spec must not be empty")
+    target_set = set(target_field_names)
+    for key in spec:
+        if key not in target_set:
+            raise ValueError(
+                f"SET spec references unknown target column '{key}'"
+            )
+    result: Dict[str, Any] = {}
+    for key, val in spec.items():
+        if callable(val) and not isinstance(val, type):
+            raise TypeError(
+                "SET values must be source_col(), target_col(), "
+                "lit(), or literals, not callables"
+            )
+        if isinstance(val, SourceColumnRef):
+            result[key] = val
+        elif isinstance(val, TargetColumnRef):
+            if not allow_target_refs:
+                raise ValueError(
+                    "INSERT spec must not reference target columns "
+                    f"(t.*), but found: 't.{val.column}'"
+                )
+            if val.column not in target_set:
+                raise ValueError(
+                    f"SET spec references unknown target column "
+                    f"'{val.column}'"
+                )
+            result[key] = val
+        elif isinstance(val, LiteralValue):
+            result[key] = val
+        elif isinstance(val, str) and val.startswith("s."):
+            result[key] = SourceColumnRef(val[2:])
+        elif isinstance(val, str) and val.startswith("t."):
+            if not allow_target_refs:
+                raise ValueError(
+                    "INSERT spec must not reference target columns "
+                    f"(t.*), but found: '{val}'"
+                )
+            ref = val[2:]
+            if ref not in target_set:
+                raise ValueError(
+                    f"SET spec references unknown target column '{ref}'"
+                )
+            result[key] = TargetColumnRef(ref)
+        else:
+            result[key] = LiteralValue(val)
+    return result
 
 
 def _normalize_source(source: Any, catalog_options: Dict[str, str]):
@@ -483,17 +538,16 @@ def _validate_source_on_cols(source_ds, on: Sequence[str]) -> None:
 
 def _validate_source_has_target_cols(
     source_ds,
-    target_field_names: Sequence[str],
-    on_map: Mapping[str, str],
+    specs: List[_NormalizedClause],
 ) -> None:
-    """For update='*'/insert='*', source must carry every (non-blob) target
-    column; otherwise the SET spec resolves to null and silently overwrites."""
     names = set(_source_schema_or_raise(source_ds).names)
-    expected = {on_map.get(c, c) for c in target_field_names}
-    missing = sorted(expected - names)
+    needed = set()
+    for clause in specs:
+        for val in clause.spec.values():
+            if isinstance(val, SourceColumnRef):
+                needed.add(val.column)
+    missing = sorted(needed - names)
     if missing:
         raise ValueError(
-            f"source is missing target columns {missing}; "
-            f"update='*'/insert='*' requires the source to carry every "
-            f"(non-blob) target column."
+            f"source is missing columns {missing} referenced by SET spec"
         )
