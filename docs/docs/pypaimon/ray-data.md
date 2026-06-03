@@ -382,13 +382,8 @@ columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
   WhenMatched(update={"age": source_col("age"), "name": target_col("name")})
   WhenNotMatched(insert={"id": source_col("id"), "status": lit("new")})
   ```
-  Shorthand strings `"s.<col>"` are accepted for both update and insert.
-  `"t.<col>"` and `target_col()` are only accepted in `WhenMatched(update=...)`;
-  insert specs cannot reference target columns. For literals starting with
-  `s.` or `t.`, use `lit()` to avoid ambiguity. Matched update specs that omit
-  a column preserve the target's original value; not-matched insert specs that
-  omit non-key columns write NULL, and omitted ON key columns are auto-filled
-  from the source. Python callables are not supported.
+  `"s.<col>"` / `"t.<col>"` shorthands also work (`t.*` only in update).
+  Use `lit()` for literals starting with `s.` or `t.`.
 - `condition`: an optional SQL-style boolean expression. Use `s.<col>` and
   `t.<col>` to reference source and target columns.
 
