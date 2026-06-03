@@ -143,6 +143,14 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             _require_datafusion, extract_target_columns,
         )
         _require_datafusion()
+        for c in when_not_matched:
+            if c.condition is not None:
+                t_refs = extract_target_columns(c.condition)
+                if t_refs:
+                    raise ValueError(
+                        f"WhenNotMatched condition must not reference "
+                        f"target columns (t.*), but found: {sorted(t_refs)}"
+                    )
         for c in list(when_matched) + list(when_not_matched):
             if c.condition is not None:
                 blob_refs = extract_target_columns(c.condition) & blob_cols
@@ -151,15 +159,6 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
                         f"condition must not reference blob columns, "
                         f"but found: {sorted(blob_refs)}"
                     )
-    for c in when_not_matched:
-        if c.condition is not None:
-            from pypaimon.ray.merge_condition import extract_target_columns
-            t_refs = extract_target_columns(c.condition)
-            if t_refs:
-                raise ValueError(
-                    f"WhenNotMatched condition must not reference target "
-                    f"columns (t.*), but found: {sorted(t_refs)}"
-                )
     not_matched_specs = [
         _NormalizedClause(
             spec=_normalize_set_spec(
@@ -294,6 +293,7 @@ def _execute_and_commit(
         tc.commit(all_msgs)
         tc.close()
 
+    # num_matched = rows that passed the condition and were updated
     return {
         "num_matched": num_updated,
         "num_inserted": num_inserted,
@@ -395,11 +395,12 @@ def _resolve_target_projection(
     needed = set(_needed_target_cols(
         clauses, target_on, update_cols, target_field_names,
     ))
-    from pypaimon.ray.merge_condition import extract_target_columns
-    target_set = set(target_field_names)
-    for clause in clauses:
-        if clause.condition is not None:
-            needed |= extract_target_columns(clause.condition) & target_set
+    if any(c.condition is not None for c in clauses):
+        from pypaimon.ray.merge_condition import extract_target_columns
+        target_set = set(target_field_names)
+        for clause in clauses:
+            if clause.condition is not None:
+                needed |= extract_target_columns(clause.condition) & target_set
     return [c for c in target_field_names if c in needed]
 
 

@@ -68,29 +68,17 @@ def remap_source_on_keys(
     return rewritten
 
 
-_SESSION_CTX = None
-
-
-def _get_session_context():
-    global _SESSION_CTX
-    if _SESSION_CTX is None:
-        datafusion = _require_datafusion()
-        _SESSION_CTX = datafusion.SessionContext()
-    return _SESSION_CTX
-
-
 def filter_batch(
     batch: pa.Table, condition: str, _pre_rewritten: bool = False,
 ) -> pa.Table:
     if batch.num_rows == 0:
         return batch
+    datafusion = _require_datafusion()
     rewritten = condition if _pre_rewritten else rewrite_condition(condition)
-    ctx = _get_session_context()
-    if ctx.table_exist("_merge_batch"):
-        ctx.deregister_table("_merge_batch")
-    ctx.register_record_batches("_merge_batch", [batch.to_batches()])
+    ctx = datafusion.SessionContext()
+    ctx.register_record_batches("_batch", [batch.to_batches()])
     result = ctx.sql(
-        f'SELECT * FROM _merge_batch WHERE {rewritten}'
+        f'SELECT * FROM _batch WHERE {rewritten}'
     )
     return result.to_arrow_table()
 
