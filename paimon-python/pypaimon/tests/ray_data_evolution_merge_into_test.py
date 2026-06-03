@@ -28,6 +28,15 @@ import ray
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import WhenMatched, WhenNotMatched, merge_into
 
+try:
+    import datafusion  # noqa: F401
+    _HAS_DATAFUSION = True
+except ImportError:
+    _HAS_DATAFUSION = False
+
+_SKIP_CONDITION = not _HAS_DATAFUSION
+_SKIP_REASON = "datafusion not installed"
+
 _TEST_NUM_PARTITIONS = 2
 
 
@@ -168,6 +177,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         self.assertIn('t.', str(ctx.exception))
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_condition_unknown_source_col_rejected(self):
         target = self._create_table()
         self._write(target, self._source())
@@ -184,6 +194,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         self.assertIn('nonexistent', str(ctx.exception))
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_condition_unknown_target_col_rejected(self):
         target = self._create_table()
         self._write(target, self._source())
@@ -566,6 +577,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2])
         self.assertEqual(out['pt'], ['a', 'b'])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_matched_update_with_condition(self):
         target = self._create_table()
         self._write(
@@ -603,6 +615,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['a', 'b', 'c2'])
         self.assertEqual(out['age'], [10, 20, 45])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_matched_condition_with_source_on_key(self):
         target = self._create_table()
         self._write(
@@ -640,6 +653,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['a', 'b2', 'c2'])
         self.assertEqual(out['age'], [10, 25, 35])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_not_matched_insert_with_condition(self):
         target = self._create_table()
         self._write(
@@ -679,6 +693,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['a', 'b', 'c'])
         self.assertEqual(out['age'], [10, 15, 25])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_combined_with_conditions(self):
         target = self._create_table()
         self._write(
@@ -721,6 +736,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(metrics['num_matched'], 1)
         self.assertEqual(metrics['num_inserted'], 1)
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_condition_no_rows_match_is_noop(self):
         target = self._create_table()
         self._write(
@@ -758,6 +774,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['a', 'b'])
         self.assertEqual(out['age'], [10, 20])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_duplicate_source_filtered_by_condition(self):
         target = self._create_table()
         self._write(
@@ -886,11 +903,8 @@ class MergeConditionUnitTest(unittest.TestCase):
             {'s.id', 't.id', 's.age', 't.age'},
         )
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_filter_batch(self):
-        try:
-            import datafusion  # noqa: F401
-        except ImportError:
-            self.skipTest("datafusion not installed")
         from pypaimon.ray.merge_condition import filter_batch
         batch = pa.table({
             's.id': pa.array([1, 2, 3], type=pa.int32()),
