@@ -34,7 +34,7 @@ under the License.
     <repositories>
         <repository>
             <id>lumina</id>
-            <url>https://lumina-release.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+            <url>https://dlf-mvn-repo.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
         </repository>
         <repository>
             <id>jindodata</id>
