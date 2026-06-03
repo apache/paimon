@@ -168,6 +168,38 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         self.assertIn('t.', str(ctx.exception))
 
+    def test_condition_unknown_source_col_rejected(self):
+        target = self._create_table()
+        self._write(target, self._source())
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched(update='*', condition='s.nonexistent > 0')
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('nonexistent', str(ctx.exception))
+
+    def test_condition_unknown_target_col_rejected(self):
+        target = self._create_table()
+        self._write(target, self._source())
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched(update='*', condition='s.age > t.nonexistent')
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('nonexistent', str(ctx.exception))
+
     def test_matched_update_star(self):
         target = self._create_table()
         self._write(

@@ -175,6 +175,25 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         source_ds, settable_field_names, on_map,
     )
 
+    if has_condition:
+        from pypaimon.ray.merge_condition import extract_columns
+        source_names = set(_source_schema_or_raise(source_ds).names)
+        target_names = set(full_target_field_names)
+        for c in list(when_matched) + list(when_not_matched):
+            if c.condition is not None:
+                for ref in extract_columns(c.condition):
+                    prefix, col = ref.split(".", 1)
+                    if prefix == "s" and col not in source_names:
+                        raise ValueError(
+                            f"condition references unknown source "
+                            f"column '{col}'"
+                        )
+                    if prefix == "t" and col not in target_names:
+                        raise ValueError(
+                            f"condition references unknown target "
+                            f"column '{col}'"
+                        )
+
     from pypaimon.schema.data_types import PyarrowFieldParser
     full_pa_schema = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields
