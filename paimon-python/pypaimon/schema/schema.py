@@ -62,9 +62,6 @@ class Schema:
                 if field.name in pk_set:
                     field.type.nullable = False
 
-        # Validate Blob type fields in the schema
-        Schema._validate_blob_fields(fields, options, primary_keys)
-
         # Check if Vector type with dedicated file format
         vector_names = [
             field.name for field in fields
@@ -102,73 +99,3 @@ class Schema:
                 )
 
         return Schema(fields, partition_keys, primary_keys, options, comment)
-
-    @staticmethod
-    def _validate_blob_fields(fields, options, primary_keys):
-        """Validate blob field configurations in the schema."""
-
-        if options is None:
-            options = {}
-
-        blob_field_names = {
-            field.name for field in fields if 'blob' in str(field.type).lower()
-        }
-
-        if len(fields) <= len(blob_field_names):
-            raise ValueError(
-                "Table with BLOB type column must have other normal columns."
-            )
-
-        core_options = CoreOptions.from_dict(options)
-
-        # Validate blob-field configuration
-        configured_blob_fields = core_options.blob_field()
-        for field in configured_blob_fields:
-            if field not in blob_field_names:
-                raise ValueError(
-                    "Field '{}' in '{}' must be a BLOB field in table schema.".format(
-                        field, CoreOptions.BLOB_FIELD.key()
-                    )
-                )
-
-        # Validate blob-descriptor-field and blob-view-field configuration
-        descriptor_fields = core_options.blob_descriptor_fields()
-        view_fields = core_options.blob_view_fields()
-
-        # Check that configured fields are BLOB type
-        all_inline_fields = descriptor_fields.union(view_fields)
-        non_blob_inline_fields = all_inline_fields.difference(blob_field_names)
-        if non_blob_inline_fields:
-            raise ValueError(
-                "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
-                "in schema. Non-BLOB fields: {}".format(sorted(non_blob_inline_fields))
-            )
-
-        # Check for overlap between descriptor and view fields
-        overlapping_inline_fields = descriptor_fields.intersection(view_fields)
-        if overlapping_inline_fields:
-            raise ValueError(
-                "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
-                "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
-            )
-
-        # Apply BLOB-specific table constraints only when BLOB fields exist
-        if blob_field_names:
-            required_options = {
-                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-            }
-
-            missing_options = []
-            for key, expected_value in required_options.items():
-                if key not in options or options[key] != expected_value:
-                    missing_options.append(f"{key}='{expected_value}'")
-
-            if missing_options:
-                raise ValueError(
-                    f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
-                    f"Please add these options to the schema."
-                )
-
-            if primary_keys is not None:
-                raise ValueError("Blob type is not supported with primary key.")

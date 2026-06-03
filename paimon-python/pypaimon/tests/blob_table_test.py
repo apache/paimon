@@ -1676,14 +1676,18 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             'blob-descriptor-field': 'picture',
             'blob-view-field': 'picture',
         })
+        overlap_schema = Schema.from_pyarrow_schema(pa_schema, options=overlap_options)
         with self.assertRaises(ValueError) as overlap_context:
-            Schema.from_pyarrow_schema(pa_schema, options=overlap_options)
+            self.catalog.create_table(
+                'test_db.blob_overlap_reject', overlap_schema, False)
         self.assertIn("must not overlap", str(overlap_context.exception))
 
         unknown_options = dict(base_options)
         unknown_options.update({'blob-view-field': 'missing_picture'})
+        unknown_schema = Schema.from_pyarrow_schema(pa_schema, options=unknown_options)
         with self.assertRaises(ValueError) as unknown_context:
-            Schema.from_pyarrow_schema(pa_schema, options=unknown_options)
+            self.catalog.create_table(
+                'test_db.blob_unknown_reject', unknown_schema, False)
         self.assertIn("must be blob fields", str(unknown_context.exception))
 
     def test_to_arrow_batch_reader(self):

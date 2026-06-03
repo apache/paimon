@@ -166,6 +166,70 @@ def _assert_not_renaming_blob_column(
             )
 
 
+def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: List[str]):
+    """Validate blob field configurations in the schema."""
+    if options is None:
+        options = {}
+
+    blob_field_names = {
+        field.name for field in fields if 'blob' in str(field.type).lower()
+    }
+
+    if len(fields) <= len(blob_field_names):
+        raise ValueError(
+            "Table with BLOB type column must have other normal columns."
+        )
+
+    core_options = CoreOptions(Options(options))
+
+    configured_blob_fields = core_options.blob_field()
+    for field in configured_blob_fields:
+        if field not in blob_field_names:
+            raise ValueError(
+                "Field '{}' in '{}' must be a BLOB field in table schema.".format(
+                    field, CoreOptions.BLOB_FIELD.key()
+                )
+            )
+
+    descriptor_fields = core_options.blob_descriptor_fields()
+    view_fields = core_options.blob_view_fields()
+
+    all_inline_fields = descriptor_fields.union(view_fields)
+    non_blob_inline_fields = all_inline_fields.difference(blob_field_names)
+    if non_blob_inline_fields:
+        raise ValueError(
+            "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
+            "in schema. Non-BLOB fields: {}".format(sorted(non_blob_inline_fields))
+        )
+
+    overlapping_inline_fields = descriptor_fields.intersection(view_fields)
+    if overlapping_inline_fields:
+        raise ValueError(
+            "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
+            "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
+        )
+
+    if blob_field_names:
+        required_options = {
+            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+        }
+
+        missing_options = []
+        for key, expected_value in required_options.items():
+            if key not in options or options[key] != expected_value:
+                missing_options.append(f"{key}='{expected_value}'")
+
+        if missing_options:
+            raise ValueError(
+                f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                f"Please add these options to the schema."
+            )
+
+        if primary_keys:
+            raise ValueError("Blob type is not supported with primary key.")
+
+
 def _validate_blob_external_storage_fields(fields: List[DataField], options: dict):
     """Validate blob-external-storage-field configuration.
 
@@ -255,12 +319,12 @@ def _apply_move(fields: List[DataField], new_field: Optional[DataField], move):
 
 
 def _handle_add_column(
-    change: AddColumn,
-    new_fields: List[DataField],
-    highest_field_id: AtomicInteger,
-    partition_keys: List[str],
-    add_column_before_partition: bool,
-    new_options: dict
+        change: AddColumn,
+        new_fields: List[DataField],
+        highest_field_id: AtomicInteger,
+        partition_keys: List[str],
+        add_column_before_partition: bool,
+        new_options: dict
 ):
     if not change.data_type.nullable:
         raise ValueError(
@@ -287,9 +351,9 @@ def _handle_add_column(
     if change.move:
         _apply_move(new_fields, new_field, change.move)
     elif (
-        add_column_before_partition
-        and partition_keys
-        and len(change.field_names) == 1
+            add_column_before_partition
+            and partition_keys
+            and len(change.field_names) == 1
     ):
         insert_index = len(new_fields)
         for i, field in enumerate(new_fields):
@@ -364,6 +428,7 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
+            _validate_blob_fields(schema.fields, schema.options, schema.primary_keys)
             _validate_blob_external_storage_fields(schema.fields, schema.options)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
@@ -429,7 +494,7 @@ class SchemaManager:
                 raise RuntimeError(f"Failed to commit schema changes: {e}") from e
 
     def _generate_table_schema(
-        self, old_table_schema: TableSchema, changes: List[SchemaChange]
+            self, old_table_schema: TableSchema, changes: List[SchemaChange]
     ) -> TableSchema:
         new_options = dict(old_table_schema.options)
         new_fields = []
@@ -521,13 +586,13 @@ class SchemaManager:
 
     @staticmethod
     def _apply_not_nested_column_rename(
-        columns: List[str], rename_mappings: dict
+            columns: List[str], rename_mappings: dict
     ) -> List[str]:
         return [rename_mappings.get(col, col) for col in columns]
 
     @staticmethod
     def _apply_rename_columns_to_options(
-        options: dict, rename_mappings: dict
+            options: dict, rename_mappings: dict
     ) -> dict:
         if not rename_mappings:
             return options
