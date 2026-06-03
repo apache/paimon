@@ -28,6 +28,7 @@ Currently, supports Parquet, Avro, ORC, CSV, JSON, Lance, Vortex, Mosaic, and Ro
 - Recommended column format is Parquet, which has a high compression rate and fast column projection queries.
 - Recommended row based format is Avro, which has good performance on reading and writing full row (all columns).
 - Recommended format for wide tables is [Mosaic](https://paimon.apache.org/docs/mosaic/), a columnar-bucket hybrid format with column bucketing for parallel I/O.
+- Recommended columnar format for point lookups is [Vortex](https://github.com/spiraldb/vortex), which uses adaptive encoding for excellent point-query performance and efficient vector data compression.
 - Recommended format for row-number based O(1) lookups is Row, which stores data in row-oriented blocks with ZSTD compression and supports fast random access by row number.
 - Recommended testing format is CSV, which has better readability but the worst read-write performance.
 - Recommended format for ML workloads is Lance, which is optimized for vector search and machine learning use cases.
