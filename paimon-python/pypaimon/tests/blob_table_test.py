@@ -3735,7 +3735,7 @@ class BlobConsumerTest(unittest.TestCase):
 
     def test_blob_consumer_abort_preserves_files(self):
         """Abort with consumer must not delete blob files that descriptors point to."""
-        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        from pypaimon.table.row.blob import Blob
         from pypaimon.common.uri_reader import FileUriReader
 
         pa_schema = pa.schema([
