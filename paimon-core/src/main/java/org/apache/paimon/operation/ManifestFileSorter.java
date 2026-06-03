@@ -773,6 +773,7 @@ public class ManifestFileSorter {
                 if (!remainingFiles.isEmpty()) {
                     Section remainingSection =
                             new Section(remainingFiles, remainingSize, remainingHasDefault);
+                    // global manifest file metas order by sort key is not a required invariant
                     sections.add(remainingSection);
                 }
                 reachedLimit = true;

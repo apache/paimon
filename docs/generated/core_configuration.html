@@ -937,7 +937,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td><h5>manifest-sort.max-rewrite-size</h5></td>
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
-            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting.</td>
+            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>

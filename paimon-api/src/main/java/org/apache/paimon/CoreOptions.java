@@ -493,7 +493,7 @@ public class CoreOptions implements Serializable {
                             "Maximum total size of manifest files to rewrite in a single"
                                     + " sort rewrite pass. Sections exceeding this limit are"
                                     + " skipped. Set to a larger value to allow more aggressive"
-                                    + " sort rewriting.");
+                                    + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
     public static final ConfigOption<String> UPSERT_KEY =
             key("upsert-key")
