@@ -47,7 +47,7 @@ class _FilesInfo:
     first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
         field(default_factory=dict)
     )
-    total_row_count: int = 0
+    valid_row_id_ranges: List[Range] = field(default_factory=list)
 
 
 class TableUpdateByRowId:
@@ -74,7 +74,7 @@ class TableUpdateByRowId:
         self.snapshot_id = info.snapshot_id
         self.first_row_ids = info.first_row_ids
         self._first_row_id_index = info.first_row_id_index
-        self.total_row_count = info.total_row_count
+        self.valid_row_id_ranges = info.valid_row_id_ranges
 
         self.commit_messages: List[CommitMessage] = []
 
@@ -84,7 +84,7 @@ class TableUpdateByRowId:
             snapshot_id=self.snapshot_id,
             first_row_ids=self.first_row_ids,
             first_row_id_index=self._first_row_id_index,
-            total_row_count=self.total_row_count,
+            valid_row_id_ranges=self.valid_row_id_ranges,
         )
 
     def _load_existing_files_info(self) -> _FilesInfo:
@@ -131,21 +131,17 @@ class TableUpdateByRowId:
                         if target_file.file_name not in existing_names
                     )
 
-        # Multiple physical files may share the same first_row_id (data evolution);
-        # summing row_count per file would over-count logical rows and widen
-        # the _ROW_ID validation range incorrectly.
         if row_id_ranges:
             merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
-            total_row_count = sum(r.count() for r in merged)
         else:
-            total_row_count = 0
+            merged = []
 
         snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         return _FilesInfo(
             snapshot_id=snapshot_id,
             first_row_ids=sorted(index.keys()),
             first_row_id_index=index,
-            total_row_count=total_row_count,
+            valid_row_id_ranges=merged,
         )
 
     @staticmethod
@@ -183,8 +179,8 @@ class TableUpdateByRowId:
     def _calculate_first_row_id(self, data: pa.Table) -> pa.Table:
         """Append ``_FIRST_ROW_ID`` to *data* by looking up each ``_ROW_ID``.
 
-        Validates that every input ``_ROW_ID`` is unique and falls in
-        ``[0, total_row_count)``. Supports partial / non-consecutive updates.
+        Validates that every input ``_ROW_ID`` is unique and belongs to
+        a valid row_id range. Supports partial / non-consecutive updates.
         """
         row_id_arr = data[SpecialFields.ROW_ID.name]
         row_ids = row_id_arr.to_pylist()
@@ -197,15 +193,12 @@ class TableUpdateByRowId:
                 self.FIRST_ROW_ID_COLUMN, pa.array([], type=pa.int64()),
             )
 
-        # Vectorised range check (avoids a Python-level per-row loop).
-        min_id = pc.min(row_id_arr).as_py()
-        max_id = pc.max(row_id_arr).as_py()
-        if min_id < 0 or max_id >= self.total_row_count:
-            offending = min_id if min_id < 0 else max_id
-            raise ValueError(
-                f"Row ID {offending} is out of valid range "
-                f"[0, {self.total_row_count})"
-            )
+        for row_id in row_ids:
+            if not any(r.contains(row_id) for r in self.valid_row_id_ranges):
+                raise ValueError(
+                    f"Row ID {row_id} does not belong to any valid range "
+                    f"{[f'[{r.from_}, {r.to}]' for r in self.valid_row_id_ranges]}"
+                )
 
         if not self.first_row_ids:
             raise ValueError("The input sorted sequence is empty.")
