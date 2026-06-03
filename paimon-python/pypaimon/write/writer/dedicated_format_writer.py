@@ -382,6 +382,8 @@ class DedicatedFormatWriter(DataWriter):
             self.file_io.write_lance(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
             self.file_io.write_vortex(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            self.file_io.write_mosaic(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
             self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
         else:

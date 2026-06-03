@@ -80,6 +80,7 @@ class CoreOptions:
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
+    FILE_FORMAT_MOSAIC: str = "mosaic"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (

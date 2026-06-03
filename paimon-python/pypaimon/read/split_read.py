@@ -47,6 +47,7 @@ from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.reader.format_row_reader import FormatRowReader
+from pypaimon.read.reader.format_mosaic_reader import FormatMosaicReader
 from pypaimon.read.reader.format_vortex_reader import FormatVortexReader
 from pypaimon.read.reader.iface.record_batch_reader import (RecordBatchReader,
                                                             RowPositionReader, EmptyRecordBatchReader)
@@ -269,6 +270,13 @@ class SplitRead(ABC):
                                                row_indices=row_indices,
                                                shard_range=shard_range,
                                                predicate_fields=predicate_fields)
+        elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            if has_nested:
+                raise NotImplementedError(
+                    "Nested-field projection is not supported on Mosaic files")
+            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            format_reader = FormatMosaicReader(self.table.file_io, file_path, ordered_read_fields,
+                                               read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             ordered_nested_paths = (
@@ -303,7 +311,7 @@ class SplitRead(ABC):
         elif file_format in ('json', 'csv'):
             raise NotImplementedError(
                 f"Reading '{file_format}' format is not yet supported in Python SDK. "
-                f"Supported formats: parquet, orc, avro, lance, blob, row.")
+                f"Supported formats: parquet, orc, avro, lance, vortex, mosaic, blob, row.")
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
