@@ -3369,6 +3369,22 @@ class GetBlobTest(unittest.TestCase):
         self.assertEqual(results[1], (2, b'img_data_2'))
         self.assertEqual(results[2], (3, b'img_data_3'))
 
+    def test_get_blob_access_with_limit(self):
+        read_builder = self.table.new_read_builder().with_limit(2)
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        results = []
+        for row in read.to_iterator(splits):
+            blob = row.get_blob(2)
+            self.assertIsNotNone(blob)
+            results.append((row.get_field(0), blob.to_data()))
+
+        self.assertEqual(len(results), 2)
+        for row_id, data in results:
+            self.assertIn(row_id, (1, 2, 3))
+            self.assertIn(data, (b'img_data_1', b'img_data_2', b'img_data_3'))
+
     def test_get_blob_streaming(self):
         read_builder = self.table.new_read_builder()
         splits = read_builder.new_scan().plan().splits()

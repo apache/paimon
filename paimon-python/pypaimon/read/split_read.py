@@ -42,6 +42,7 @@ from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.blob_descriptor_convert_reader import BlobDescriptorConvertReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
+from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader, LimitedRecordReader
 from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
@@ -110,7 +111,8 @@ class SplitRead(ABC):
             read_type: List[DataField],
             split: Split,
             row_tracking_enabled: bool,
-            nested_name_paths: Optional[List[List[str]]] = None):
+            nested_name_paths: Optional[List[List[str]]] = None,
+            limit: Optional[int] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -120,6 +122,7 @@ class SplitRead(ABC):
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
         self.nested_name_paths = nested_name_paths
+        self.limit = limit
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
         # flags to merge functions that mirror Java's NOT-NULL check.
@@ -145,8 +148,8 @@ class SplitRead(ABC):
         # the space FilterRecordReader actually evaluates against.
         read_type_names = {f.name for f in read_type}
         if (
-            self.predicate is not None
-            and _get_all_fields(self.predicate).issubset(read_type_names)
+                self.predicate is not None
+                and _get_all_fields(self.predicate).issubset(read_type_names)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
                 self.predicate, read_type
@@ -628,9 +631,14 @@ class RawFileSplitRead(SplitRead):
             vector_field_indices=_vector_field_indices(self.read_fields))
         # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
         if self.table.is_primary_key_table and self.predicate_for_reader:
-            return FilterRecordReader(concat_reader, self.predicate_for_reader)
+            reader = FilterRecordReader(concat_reader, self.predicate_for_reader)
+            if self.limit is not None:
+                reader = LimitedRecordReader(reader, self.limit)
         else:
-            return concat_reader
+            reader = concat_reader
+            if self.limit is not None:
+                reader = LimitedRecordBatchReader(reader, self.limit)
+        return reader
 
     def _get_all_data_fields(self):
         if self.row_tracking_enabled:
@@ -658,9 +666,9 @@ class MergeFileSplitRead(SplitRead):
             split=split,
             row_tracking_enabled=row_tracking_enabled,
             nested_name_paths=None,
+            limit=limit,
         )
         self.outer_extract_name_paths = outer_extract_name_paths
-        self.limit = limit
         # Built once per split-read (value_fields and options are constant
         # for the object's life), not per section. ``None`` when
         # ``sequence.field`` is unset, in which case the heap falls back to
@@ -765,8 +773,6 @@ class MergeFileSplitRead(SplitRead):
                 blob_field_indices=_blob_field_indices(inner_value_fields),
                 vector_field_indices=_vector_field_indices(inner_value_fields))
         if self.limit is not None:
-            from pypaimon.read.reader.limited_record_reader import \
-                LimitedRecordReader
             reader = LimitedRecordReader(reader, self.limit)
         return reader
 
@@ -783,7 +789,8 @@ class DataEvolutionSplitRead(SplitRead):
             read_type: List[DataField],
             split: Split,
             row_tracking_enabled: bool,
-            nested_name_paths: Optional[List[List[str]]] = None):
+            nested_name_paths: Optional[List[List[str]]] = None,
+            limit: Optional[int] = None):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -792,6 +799,7 @@ class DataEvolutionSplitRead(SplitRead):
         super().__init__(
             table, predicate, read_type, actual_split, row_tracking_enabled,
             nested_name_paths=nested_name_paths,
+            limit=limit,
         )
 
     def _push_down_predicate(self) -> Optional[Predicate]:
@@ -834,6 +842,9 @@ class DataEvolutionSplitRead(SplitRead):
         if (not CoreOptions.blob_as_descriptor(self.table.options)
                 and CoreOptions.blob_descriptor_fields(self.table.options)):
             reader = BlobDescriptorConvertReader(reader, self.table)
+
+        if self.limit is not None:
+            reader = LimitedRecordBatchReader(reader, self.limit)
 
         return reader
 
