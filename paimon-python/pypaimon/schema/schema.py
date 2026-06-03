@@ -113,6 +113,12 @@ class Schema:
         blob_field_names = {
             field.name for field in fields if 'blob' in str(field.type).lower()
         }
+
+        if len(fields) <= len(blob_field_names):
+            raise ValueError(
+                "Table with BLOB type column must have other normal columns."
+            )
+
         core_options = CoreOptions.from_dict(options)
 
         descriptor_fields = core_options.blob_descriptor_fields()
