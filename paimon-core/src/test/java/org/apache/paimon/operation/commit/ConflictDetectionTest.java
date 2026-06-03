@@ -26,12 +26,10 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,10 +39,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
@@ -54,8 +50,6 @@ import static org.apache.paimon.manifest.FileKind.DELETE;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildBaseEntriesWithDV;
 import static org.apache.paimon.operation.commit.ConflictDetection.buildDeltaEntriesWithDV;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
 
@@ -339,13 +333,19 @@ class ConflictDetectionTest {
                         DELETION_VECTORS_INDEX, fileName, 11, dvRanges.size(), dvRanges, null));
     }
 
-    private IndexManifestEntry createIndexEntry(
-            String fileName, FileKind kind, BinaryRow partition) {
+    private IndexManifestEntry createGlobalIndexEntry(
+            String fileName, FileKind kind, BinaryRow partition, long from, long to) {
         return new IndexManifestEntry(
                 kind,
                 partition,
                 0,
-                new IndexFileMeta("btree", fileName, 11, 1, (GlobalIndexMeta) null, null));
+                new IndexFileMeta(
+                        "btree",
+                        fileName,
+                        11,
+                        1,
+                        new GlobalIndexMeta(from, to, 0, null, null),
+                        null));
     }
 
     private void assertConflict(
@@ -391,6 +391,18 @@ class ConflictDetectionTest {
         detection.setRowIdCheckFromSnapshot(1L);
         assertThat(detection.shouldBeOverwriteCommit(addOnlyEntries, Collections.emptyList()))
                 .isFalse();
+    }
+
+    @Test
+    void testChangedPartitionsIncludesGlobalIndexFiles() {
+        BinaryRow partition = BinaryRow.singleColumn(1);
+
+        assertThat(
+                        ManifestEntryChanges.changedPartitions(
+                                Collections.emptyList(),
+                                Collections.singletonList(
+                                        createGlobalIndexEntry("idx", ADD, partition, 0, 99))))
+                .containsExactly(partition);
     }
 
     @Test
@@ -508,123 +520,64 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDetectsOverwriteBarrierSnapshotConflict() {
-        SnapshotManager snapshotManager = mock(SnapshotManager.class);
-        Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
-        when(snapshotManager.snapshot(2L))
-                .thenReturn(snapshot(2, Snapshot.CommitKind.OVERWRITE, barrierProperties));
-
-        ConflictDetection detection = createConflictDetection(snapshotManager);
-        detection.setOverwriteConflictWithIndexCheckFromSnapshot(1L);
+    void testCheckGlobalIndexRowIdExistenceNoConflict() {
+        ConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
-                        snapshot(3, null),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonList(
-                                createIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW)),
-                        null,
-                        Snapshot.CommitKind.COMPACT);
-
-        assertThat(exception).isPresent();
-        assertThat(exception.get())
-                .hasMessageContaining("Overwrite barrier snapshot 2")
-                .hasMessageContaining("task planned from snapshot 1");
-    }
-
-    @Test
-    void testIgnoresOverwriteBarrierPropertyOnNonOverwriteSnapshot() {
-        SnapshotManager snapshotManager = mock(SnapshotManager.class);
-        Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
-        when(snapshotManager.snapshot(2L))
-                .thenReturn(snapshot(2, Snapshot.CommitKind.APPEND, barrierProperties));
-
-        ConflictDetection detection = createConflictDetection(snapshotManager);
-        detection.setOverwriteConflictWithIndexCheckFromSnapshot(1L);
-
-        Optional<RuntimeException> exception =
-                detection.checkConflicts(
-                        snapshot(2, null),
-                        Collections.emptyList(),
+                        snapshot(1),
+                        Arrays.asList(
+                                createFileEntryWithRowId("f1", ADD, 0L, 100L),
+                                createFileEntryWithRowId("f2", ADD, 100L, 50L)),
                         Collections.emptyList(),
                         Collections.singletonList(
-                                createIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW)),
+                                createGlobalIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW, 0, 149)),
                         null,
-                        Snapshot.CommitKind.COMPACT);
+                        Snapshot.CommitKind.APPEND);
 
         assertThat(exception).isNotPresent();
     }
 
     @Test
-    void testDetectsOverlappedOverwriteSnapshotForIndexCommit() {
-        SnapshotManager snapshotManager = mock(SnapshotManager.class);
-        CommitScanner commitScanner = mock(CommitScanner.class);
-        Snapshot overwriteSnapshot = snapshot(2, Snapshot.CommitKind.OVERWRITE, null);
-        when(snapshotManager.snapshot(2L)).thenReturn(overwriteSnapshot);
-
-        BinaryRow partition = BinaryRow.singleColumn(1);
-        when(commitScanner.readIncrementalEntries(
-                        overwriteSnapshot, Collections.singletonList(partition)))
-                .thenReturn(Collections.singletonList(mock(ManifestEntry.class)));
-
-        ConflictDetection detection = createConflictDetection(snapshotManager, commitScanner);
-        detection.setOverwriteConflictWithIndexCheckFromSnapshot(1L);
+    void testCheckGlobalIndexRowIdExistenceBaseFileRemoved() {
+        ConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
-                        snapshot(2, null),
+                        snapshot(1),
+                        Collections.singletonList(createFileEntryWithRowId("f1", ADD, 0L, 100L)),
                         Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonList(createIndexEntry("idx", ADD, partition)),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW, 0, 149)),
                         null,
-                        Snapshot.CommitKind.COMPACT);
+                        Snapshot.CommitKind.APPEND);
 
         assertThat(exception).isPresent();
         assertThat(exception.get())
-                .hasMessageContaining("Overwrite snapshot 2")
-                .hasMessageContaining("task planned from snapshot 1");
+                .hasMessageContaining("Global index row ID existence conflict")
+                .hasMessageContaining("idx")
+                .hasMessageContaining("[0, 149]");
     }
 
     @Test
-    void testIgnoresNonOverlappedOverwriteSnapshotForIndexCommit() {
-        SnapshotManager snapshotManager = mock(SnapshotManager.class);
-        CommitScanner commitScanner = mock(CommitScanner.class);
-        Snapshot overwriteSnapshot = snapshot(2, Snapshot.CommitKind.OVERWRITE, null);
-        when(snapshotManager.snapshot(2L)).thenReturn(overwriteSnapshot);
-
-        BinaryRow partition = BinaryRow.singleColumn(1);
-        when(commitScanner.readIncrementalEntries(
-                        overwriteSnapshot, Collections.singletonList(partition)))
-                .thenReturn(Collections.emptyList());
-
-        ConflictDetection detection = createConflictDetection(snapshotManager, commitScanner);
-        detection.setOverwriteConflictWithIndexCheckFromSnapshot(1L);
+    void testCheckGlobalIndexRowIdExistenceSkipsDeleteIndexEntry() {
+        ConflictDetection detection = createConflictDetection();
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
-                        snapshot(2, null),
+                        snapshot(1),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.singletonList(createIndexEntry("idx", ADD, partition)),
+                        Collections.singletonList(
+                                createGlobalIndexEntry(
+                                        "idx", DELETE, BinaryRow.EMPTY_ROW, 0, 149)),
                         null,
-                        Snapshot.CommitKind.COMPACT);
+                        Snapshot.CommitKind.APPEND);
 
         assertThat(exception).isNotPresent();
     }
 
     private ConflictDetection createConflictDetection() {
-        return createConflictDetection(null);
-    }
-
-    private ConflictDetection createConflictDetection(@Nullable SnapshotManager snapshotManager) {
-        return createConflictDetection(snapshotManager, null);
-    }
-
-    private ConflictDetection createConflictDetection(
-            @Nullable SnapshotManager snapshotManager, @Nullable CommitScanner commitScanner) {
         return new ConflictDetection(
                 "test-table",
                 "test-user",
@@ -636,16 +589,11 @@ class ConflictDetectionTest {
                 true,
                 false,
                 null,
-                snapshotManager,
-                commitScanner);
+                null,
+                null);
     }
 
-    private Snapshot snapshot(long id, @Nullable Map<String, String> properties) {
-        return snapshot(id, Snapshot.CommitKind.APPEND, properties);
-    }
-
-    private Snapshot snapshot(
-            long id, Snapshot.CommitKind commitKind, @Nullable Map<String, String> properties) {
+    private Snapshot snapshot(long id) {
         return new Snapshot(
                 id,
                 0,
@@ -658,14 +606,14 @@ class ConflictDetectionTest {
                 null,
                 "commit-user",
                 id,
-                commitKind,
+                Snapshot.CommitKind.APPEND,
                 id,
                 0,
                 0,
                 null,
                 null,
                 null,
-                properties,
+                null,
                 null);
     }
 }

@@ -95,7 +95,6 @@ public class BTreeIndexTopoBuilder {
             Options userOptions)
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
-        Long overwriteConflictCheckFromSnapshot = null;
         for (String indexColumn : indexColumns) {
             BTreeGlobalIndexBuilder indexBuilder =
                     indexBuilderSupplier.get().withIndexField(indexColumn);
@@ -107,12 +106,6 @@ public class BTreeIndexTopoBuilder {
                     indexBuilder.scan();
             if (!indexRangeAndSplits.isPresent()) {
                 continue;
-            }
-            if (indexBuilder.scanSnapshotId().isPresent()) {
-                overwriteConflictCheckFromSnapshot =
-                        minSnapshot(
-                                overwriteConflictCheckFromSnapshot,
-                                indexBuilder.scanSnapshotId().get());
             }
 
             Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
@@ -201,24 +194,11 @@ public class BTreeIndexTopoBuilder {
             @SuppressWarnings("unchecked")
             DataStream<Committable>[] rest =
                     allStreams.subList(1, allStreams.size()).toArray(new DataStream[0]);
-            FileStoreTable commitTable =
-                    overwriteConflictCheckFromSnapshot == null
-                            ? table
-                            : table.copy(
-                                    Collections.singletonMap(
-                                            CoreOptions
-                                                    .COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT
-                                                    .key(),
-                                            String.valueOf(overwriteConflictCheckFromSnapshot)));
-            commit(commitTable, allStreams.get(0).union(rest));
+            commit(table, allStreams.get(0).union(rest));
             return true;
         }
 
         return false;
-    }
-
-    private static Long minSnapshot(Long left, long right) {
-        return left == null ? right : Math.min(left, right);
     }
 
     public static void buildIndexAndExecute(

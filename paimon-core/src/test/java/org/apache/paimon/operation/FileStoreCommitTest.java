@@ -60,7 +60,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -1013,186 +1012,44 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testReplaceManifestListWithOverwriteBarrierProperty() throws Exception {
-        TestFileStore store = createStore(false);
+    public void testGlobalIndexCommitChecksExistingRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
-        Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
-
-        Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put("keep", "v1");
-        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            assertThat(
-                            commit.replaceManifestList(
-                                    latest,
-                                    latest.totalRecordCount(),
-                                    baseManifestList(latest),
-                                    deltaManifestList(latest),
-                                    latest.indexManifest(),
-                                    latest.nextRowId(),
-                                    barrierProperties))
-                    .isTrue();
-        }
-
-        Snapshot barrierSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(barrierSnapshot.properties()).isEqualTo(barrierProperties);
+        Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+        assertThat(dataSnapshot.nextRowId()).isEqualTo(1L);
 
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            assertThat(
-                            commit.replaceManifestList(
-                                    barrierSnapshot,
-                                    barrierSnapshot.totalRecordCount(),
-                                    baseManifestList(barrierSnapshot),
-                                    deltaManifestList(barrierSnapshot),
-                                    barrierSnapshot.indexManifest(),
-                                    barrierSnapshot.nextRowId()))
-                    .isTrue();
+            commit.commit(indexCommittable(partition, "existing-index", 0, 0), false);
         }
 
-        Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(normalSnapshot.properties())
-                .containsEntry("keep", "v1")
-                .doesNotContainKey(Snapshot.OVERWRITE_BARRIER_PROPERTY);
+        Snapshot latest = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(latest.indexManifest()).isNotNull();
     }
 
     @Test
-    public void testCompactManifestWithOverwriteBarrierProperty() throws Exception {
-        TestFileStore store = createStore(false);
+    public void testGlobalIndexCommitFailsForMissingRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
-        store.commitData(keyValues, s -> partition, kv -> 0);
-        store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap());
-        Snapshot latest =
-                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
-                        .get(0);
+        Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+        long missingRowId = checkNotNull(dataSnapshot.nextRowId());
 
-        long deleteNum =
-                store.manifestListFactory().create().readDataManifests(latest).stream()
-                        .mapToLong(ManifestFileMeta::numDeletedFiles)
-                        .sum();
-        assertThat(deleteNum).isGreaterThan(0);
-
-        Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put("keep", "v1");
-        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
         try (FileStoreCommitImpl commit = store.newCommit()) {
-            assertThat(
-                            commit.replaceManifestList(
-                                    latest,
-                                    latest.totalRecordCount(),
-                                    baseManifestList(latest),
-                                    deltaManifestList(latest),
-                                    latest.indexManifest(),
-                                    latest.nextRowId(),
-                                    barrierProperties))
-                    .isTrue();
-        }
-
-        Snapshot barrierSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(barrierSnapshot.properties()).isEqualTo(barrierProperties);
-
-        try (FileStoreCommit commit = store.newCommit()) {
-            commit.compactManifest();
-        }
-
-        Snapshot normalSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
-        assertThat(normalSnapshot.id()).isGreaterThan(barrierSnapshot.id());
-        assertThat(normalSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
-        assertThat(normalSnapshot.properties())
-                .containsEntry("keep", "v1")
-                .doesNotContainKey(Snapshot.OVERWRITE_BARRIER_PROPERTY);
-    }
-
-    @Test
-    public void testOverwriteConflictWithIndexFromOptions() throws Exception {
-        TestFileStore store = createStore(false);
-
-        List<KeyValue> keyValues = generateDataList(1);
-        BinaryRow partition = gen.getPartition(keyValues.get(0));
-        Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
-
-        Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            assertThat(
-                            commit.replaceManifestList(
-                                    latest,
-                                    latest.totalRecordCount(),
-                                    baseManifestList(latest),
-                                    deltaManifestList(latest),
-                                    latest.indexManifest(),
-                                    latest.nextRowId(),
-                                    barrierProperties))
-                    .isTrue();
-        }
-
-        Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
-        dynamicOptions.put(
-                CoreOptions.COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT.key(), "1");
-        try (FileStoreCommitImpl commit =
-                newCommitWithSnapshotCommit(
-                        store,
-                        "overwrite-barrier-check",
-                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
-                        new CoreOptions(dynamicOptions),
-                        true)) {
             assertThatThrownBy(
                             () ->
                                     commit.commit(
-                                            indexCommittable(partition, "barrier-index"), false))
-                    .hasMessageContaining("Overwrite barrier snapshot 2")
-                    .hasMessageContaining("task planned from snapshot 1");
-        }
-    }
-
-    @Test
-    public void testOverwriteConflictWithIndexIgnoresDataOnlyDelta() throws Exception {
-        TestFileStore store = createStore(false);
-
-        List<KeyValue> keyValues = generateDataList(1);
-        BinaryRow partition = gen.getPartition(keyValues.get(0));
-        Snapshot latest = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
-
-        Map<String, String> barrierProperties = new HashMap<>();
-        barrierProperties.put(Snapshot.OVERWRITE_BARRIER_PROPERTY, "true");
-        try (FileStoreCommitImpl commit = store.newCommit()) {
-            assertThat(
-                            commit.replaceManifestList(
-                                    latest,
-                                    latest.totalRecordCount(),
-                                    baseManifestList(latest),
-                                    deltaManifestList(latest),
-                                    latest.indexManifest(),
-                                    latest.nextRowId(),
-                                    barrierProperties))
-                    .isTrue();
-        }
-
-        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
-        store.commitDataImpl(
-                generateDataList(1),
-                gen::getPartition,
-                kv -> 0,
-                false,
-                null,
-                null,
-                Collections.emptyList(),
-                (commit, committable) -> committableRef.set(committable));
-
-        Map<String, String> dynamicOptions = new HashMap<>(store.options().toMap());
-        dynamicOptions.put(
-                CoreOptions.COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT.key(), "1");
-        try (FileStoreCommitImpl commit =
-                newCommitWithSnapshotCommit(
-                        store,
-                        "overwrite-barrier-data-only-check",
-                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
-                        new CoreOptions(dynamicOptions),
-                        true)) {
-            commit.commit(checkNotNull(committableRef.get()), false);
+                                            indexCommittable(
+                                                    partition,
+                                                    "missing-index",
+                                                    missingRowId,
+                                                    missingRowId),
+                                            false))
+                    .hasMessageContaining("Global index row ID existence conflict")
+                    .hasMessageContaining("missing-index")
+                    .hasMessageContaining("[" + missingRowId + ", " + missingRowId + "]");
         }
     }
 
@@ -1320,7 +1177,8 @@ public class FileStoreCommitTest {
                 null);
     }
 
-    private ManifestCommittable indexCommittable(BinaryRow partition, String fileName) {
+    private ManifestCommittable indexCommittable(
+            BinaryRow partition, String fileName, long rowRangeStart, long rowRangeEnd) {
         ManifestCommittable committable = new ManifestCommittable(0);
         committable.addFileCommittable(
                 new CommitMessageImpl(
@@ -1334,7 +1192,12 @@ public class FileStoreCommitTest {
                                                 fileName,
                                                 1,
                                                 1,
-                                                (GlobalIndexMeta) null,
+                                                new GlobalIndexMeta(
+                                                        rowRangeStart,
+                                                        rowRangeEnd,
+                                                        0,
+                                                        null,
+                                                        null),
                                                 null))),
                         CompactIncrement.emptyIncrement()));
         return committable;
@@ -1375,12 +1238,11 @@ public class FileStoreCommitTest {
         return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
     }
 
-    private Pair<String, Long> baseManifestList(Snapshot snapshot) {
-        return Pair.of(snapshot.baseManifestList(), snapshot.baseManifestListSize());
-    }
-
-    private Pair<String, Long> deltaManifestList(Snapshot snapshot) {
-        return Pair.of(snapshot.deltaManifestList(), snapshot.deltaManifestListSize());
+    private TestFileStore createRowTrackingDataEvolutionStore() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return createStore(false, options);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

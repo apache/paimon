@@ -2207,17 +2207,6 @@ public class CoreOptions implements Serializable {
                                     + "APPEND snapshot which committed files to fixed bucket, commit will be aborted."
                                     + "If the value of this option is -1, committer will not check for its first commit.");
 
-    public static final ConfigOption<Long> COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT =
-            ConfigOptions.key("commit.overwrite-conflict-with-index.last-safe-snapshot")
-                    .longType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "If set, committer will check OVERWRITE snapshots against index file "
-                                    + "changes starting from the "
-                                    + "snapshot after this one. If an overwrite barrier snapshot "
-                                    + "or an ordinary overwrite snapshot which changed target index partitions "
-                                    + "is found, commit will be aborted.");
-
     public static final ConfigOption<String> CLUSTERING_COLUMNS =
             key("clustering.columns")
                     .stringType()
@@ -3882,10 +3871,6 @@ public class CoreOptions implements Serializable {
 
     public Optional<Long> commitStrictModeLastSafeSnapshot() {
         return options.getOptional(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT);
-    }
-
-    public Optional<Long> commitOverwriteConflictWithIndexLastSafeSnapshot() {
-        return options.getOptional(COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT);
     }
 
     public List<String> clusteringColumns() {

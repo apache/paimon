@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -37,6 +38,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -95,7 +97,6 @@ public class ConflictDetection {
 
     private @Nullable PartitionExpire partitionExpire;
     private @Nullable Long rowIdCheckFromSnapshot = null;
-    private @Nullable Long overwriteConflictWithIndexCheckFromSnapshot = null;
 
     public ConflictDetection(
             String tableName,
@@ -132,16 +133,6 @@ public class ConflictDetection {
         return rowIdCheckFromSnapshot != null;
     }
 
-    public void setOverwriteConflictWithIndexCheckFromSnapshot(
-            @Nullable Long overwriteConflictWithIndexCheckFromSnapshot) {
-        this.overwriteConflictWithIndexCheckFromSnapshot =
-                overwriteConflictWithIndexCheckFromSnapshot;
-    }
-
-    public boolean hasOverwriteConflictWithIndexCheckFromSnapshot() {
-        return overwriteConflictWithIndexCheckFromSnapshot != null;
-    }
-
     @Nullable
     public Comparator<InternalRow> keyComparator() {
         return keyComparator;
@@ -160,6 +151,15 @@ public class ConflictDetection {
         }
         for (IndexManifestEntry appendIndexFile : appendIndexFiles) {
             if (appendIndexFile.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean hasGlobalIndexFileAddition(List<IndexManifestEntry> indexFileChanges) {
+        for (IndexManifestEntry entry : indexFileChanges) {
+            if (entry.kind() == FileKind.ADD && entry.indexFile().globalIndexMeta() != null) {
                 return true;
             }
         }
@@ -248,7 +248,7 @@ public class ConflictDetection {
             return exception;
         }
 
-        exception = checkOverwriteConflicts(latestSnapshot, deltaIndexEntries);
+        exception = checkGlobalIndexRowIdExistence(baseEntries, deltaIndexEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -560,69 +560,85 @@ public class ConflictDetection {
         return Optional.empty();
     }
 
-    private Optional<RuntimeException> checkOverwriteConflicts(
-            Snapshot latestSnapshot, List<IndexManifestEntry> deltaIndexEntries) {
+    private Optional<RuntimeException> checkGlobalIndexRowIdExistence(
+            List<SimpleFileEntry> baseEntries, List<IndexManifestEntry> deltaIndexEntries) {
         if (!dataEvolutionEnabled) {
             return Optional.empty();
         }
-        if (overwriteConflictWithIndexCheckFromSnapshot == null) {
-            return Optional.empty();
-        }
-        if (latestSnapshot.id() <= overwriteConflictWithIndexCheckFromSnapshot) {
+
+        List<IndexManifestEntry> indexesToCheck = globalIndexFileAdditions(deltaIndexEntries);
+        if (indexesToCheck.isEmpty()) {
             return Optional.empty();
         }
 
-        List<BinaryRow> changedPartitions = changedIndexPartitions(deltaIndexEntries);
-        if (changedPartitions.isEmpty()) {
-            return Optional.empty();
+        Map<PartitionBucketKey, List<Range>> dataRanges = new HashMap<>();
+        for (SimpleFileEntry entry : baseEntries) {
+            if (entry.kind() == FileKind.ADD && entry.firstRowId() != null) {
+                dataRanges
+                        .computeIfAbsent(
+                                new PartitionBucketKey(entry.partition(), entry.bucket()),
+                                ignored -> new ArrayList<>())
+                        .add(entry.nonNullRowIdRange());
+            }
+        }
+        for (Map.Entry<PartitionBucketKey, List<Range>> entry : dataRanges.entrySet()) {
+            entry.setValue(Range.sortAndMergeOverlap(entry.getValue(), true));
         }
 
-        for (long id = overwriteConflictWithIndexCheckFromSnapshot + 1;
-                id <= latestSnapshot.id();
-                id++) {
-            Snapshot snapshot = snapshotManager.snapshot(id);
-            if (snapshot.commitKind() != CommitKind.OVERWRITE) {
-                continue;
-            }
-            if (hasOverwriteBarrierProperty(snapshot.properties())) {
+        for (IndexManifestEntry indexEntry : indexesToCheck) {
+            GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
+            checkState(globalIndex != null, "Global index meta must not be null.");
+            Range indexRange = globalIndex.rowRange();
+            List<Range> currentRanges =
+                    dataRanges.get(
+                            new PartitionBucketKey(indexEntry.partition(), indexEntry.bucket()));
+            if (!containsRange(currentRanges, indexRange)) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
-                                        "Overwrite barrier snapshot %s was committed after the "
-                                                + "task planned from snapshot %s. The task must "
-                                                + "be retried with the latest row ids.",
-                                        id, overwriteConflictWithIndexCheckFromSnapshot)));
-            }
-            if (overwriteChangedTargetPartitions(snapshot, changedPartitions)) {
-                return Optional.of(
-                        new RuntimeException(
-                                String.format(
-                                        "Overwrite snapshot %s changed partitions after the "
-                                                + "task planned from snapshot %s. The task must "
-                                                + "be retried with the latest row ids.",
-                                        id, overwriteConflictWithIndexCheckFromSnapshot)));
+                                        "Global index row ID existence conflict: index file '%s' "
+                                                + "references row range %s in bucket %d, but this "
+                                                + "range is not fully covered by current data "
+                                                + "files. The referenced row IDs may have been "
+                                                + "reassigned or removed by a concurrent commit.",
+                                        indexEntry.indexFile().fileName(),
+                                        indexRange,
+                                        indexEntry.bucket())));
             }
         }
         return Optional.empty();
     }
 
-    private boolean hasOverwriteBarrierProperty(@Nullable Map<String, String> properties) {
-        return properties != null
-                && Boolean.parseBoolean(properties.get(Snapshot.OVERWRITE_BARRIER_PROPERTY));
-    }
-
-    private boolean overwriteChangedTargetPartitions(
-            Snapshot snapshot, List<BinaryRow> changedPartitions) {
-        return !changedPartitions.isEmpty()
-                && !commitScanner.readIncrementalEntries(snapshot, changedPartitions).isEmpty();
-    }
-
-    private List<BinaryRow> changedIndexPartitions(List<IndexManifestEntry> indexFileChanges) {
-        Set<BinaryRow> changedPartitions = new HashSet<>();
-        for (IndexManifestEntry file : indexFileChanges) {
-            changedPartitions.add(file.partition());
+    private List<IndexManifestEntry> globalIndexFileAdditions(
+            List<IndexManifestEntry> indexFileChanges) {
+        List<IndexManifestEntry> result = new ArrayList<>();
+        for (IndexManifestEntry entry : indexFileChanges) {
+            if (entry.kind() == FileKind.ADD && entry.indexFile().globalIndexMeta() != null) {
+                result.add(entry);
+            }
         }
-        return new ArrayList<>(changedPartitions);
+        return result;
+    }
+
+    private boolean containsRange(@Nullable List<Range> ranges, Range target) {
+        if (ranges == null || ranges.isEmpty()) {
+            return false;
+        }
+
+        long next = target.from;
+        for (Range range : ranges) {
+            if (range.to < next) {
+                continue;
+            }
+            if (range.from > next) {
+                return false;
+            }
+            if (range.to >= target.to) {
+                return true;
+            }
+            next = range.to + 1;
+        }
+        return false;
     }
 
     Optional<RuntimeException> checkRowIdExistence(
@@ -715,6 +731,33 @@ public class ConflictDetection {
         @Override
         public int hashCode() {
             return Objects.hash(partition, bucket, firstRowId, rowCount);
+        }
+    }
+
+    private static class PartitionBucketKey {
+        private final BinaryRow partition;
+        private final int bucket;
+
+        PartitionBucketKey(BinaryRow partition, int bucket) {
+            this.partition = partition;
+            this.bucket = bucket;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            PartitionBucketKey that = (PartitionBucketKey) o;
+            return bucket == that.bucket && Objects.equals(partition, that.partition);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket);
         }
     }
 

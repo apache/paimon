@@ -29,7 +29,6 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -41,7 +40,6 @@ public class GenericGlobalIndexBuilder implements Serializable {
     protected final FileStoreTable table;
 
     @Nullable protected PartitionPredicate partitionPredicate;
-    @Nullable protected Long scanSnapshotId;
 
     public GenericGlobalIndexBuilder(FileStoreTable table) {
         this.table = table;
@@ -54,10 +52,6 @@ public class GenericGlobalIndexBuilder implements Serializable {
 
     public FileStoreTable table() {
         return table;
-    }
-
-    public Optional<Long> scanSnapshotId() {
-        return Optional.ofNullable(scanSnapshotId);
     }
 
     /**
@@ -81,10 +75,8 @@ public class GenericGlobalIndexBuilder implements Serializable {
 
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
-            scanSnapshotId = null;
             return Collections.emptyList();
         }
-        scanSnapshotId = snapshot.id();
 
         return table.store()
                 .newScan()

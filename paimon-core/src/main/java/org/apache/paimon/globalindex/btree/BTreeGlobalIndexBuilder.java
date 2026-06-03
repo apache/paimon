@@ -97,7 +97,6 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     // readRowType is composed by partition fields, indexed field and _ROW_ID field
     private RowType readRowType;
     @Nullable private Snapshot snapshot;
-    @Nullable private Long scanSnapshotId;
 
     @Nullable private PartitionPredicate partitionPredicate;
 
@@ -132,10 +131,6 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     public BTreeGlobalIndexBuilder withSnapshot(Snapshot snapshot) {
         this.snapshot = snapshot;
         return this;
-    }
-
-    public Optional<Long> scanSnapshotId() {
-        return Optional.ofNullable(scanSnapshotId);
     }
 
     public Optional<Pair<RowRangeIndex, List<DataSplit>>> scan() {

@@ -220,8 +220,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
-        options.commitOverwriteConflictWithIndexLastSafeSnapshot()
-                .ifPresent(this.conflictDetection::setOverwriteConflictWithIndexCheckFromSnapshot);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -329,8 +327,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
-                if (conflictDetection.hasOverwriteConflictWithIndexCheckFromSnapshot()
-                        && !changes.appendIndexFiles.isEmpty()) {
+                if (conflictDetection.hasGlobalIndexFileAddition(changes.appendIndexFiles)) {
                     checkAppendFiles = true;
                 }
 
@@ -1122,8 +1119,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 baseManifestList,
                 deltaManifestList,
                 latest.indexManifest(),
-                latest.nextRowId(),
-                withoutOverwriteBarrierProperty(latest.properties()));
+                latest.nextRowId());
     }
 
     public boolean replaceManifestList(
@@ -1133,24 +1129,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId) {
-        return replaceManifestList(
-                latest,
-                totalRecordCount,
-                baseManifestList,
-                deltaManifestList,
-                indexManifest,
-                nextRowId,
-                withoutOverwriteBarrierProperty(latest.properties()));
-    }
-
-    public boolean replaceManifestList(
-            Snapshot latest,
-            long totalRecordCount,
-            Pair<String, Long> baseManifestList,
-            Pair<String, Long> deltaManifestList,
-            @Nullable String indexManifest,
-            @Nullable Long nextRowId,
-            @Nullable Map<String, String> properties) {
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1172,7 +1150,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.watermark(),
                         latest.statistics(),
                         // if empty properties, just set to null
-                        properties,
+                        latest.properties(),
                         nextRowId);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
@@ -1251,23 +1229,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null,
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
-                        withoutOverwriteBarrierProperty(latestSnapshot.properties()),
+                        latestSnapshot.properties(),
                         latestSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
-    }
-
-    // The overwrite barrier is a one-shot marker for the snapshot that rewrites row IDs. Derived
-    // snapshots, such as manifest compaction snapshots, must not inherit it and become barriers.
-    private static @Nullable Map<String, String> withoutOverwriteBarrierProperty(
-            @Nullable Map<String, String> properties) {
-        if (properties == null || !properties.containsKey(Snapshot.OVERWRITE_BARRIER_PROPERTY)) {
-            return properties;
-        }
-
-        Map<String, String> copied = new HashMap<>(properties);
-        copied.remove(Snapshot.OVERWRITE_BARRIER_PROPERTY);
-        return copied.isEmpty() ? null : copied;
     }
 
     private boolean commitSnapshotImpl(Snapshot newSnapshot, List<PartitionEntry> deltaStatistics) {

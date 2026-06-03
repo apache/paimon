@@ -179,21 +179,10 @@ public class GenericIndexTopoBuilder {
 
         List<ManifestEntry> entries = indexBuilder.scan();
         List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
-        Long overwriteConflictCheckFromSnapshot = indexBuilder.scanSnapshotId().orElse(null);
-        FileStoreTable commitTable =
-                overwriteConflictCheckFromSnapshot == null
-                        ? table
-                        : table.copy(
-                                Collections.singletonMap(
-                                        CoreOptions
-                                                .COMMIT_OVERWRITE_CONFLICT_WITH_INDEX_LAST_SAFE_SNAPSHOT
-                                                .key(),
-                                        String.valueOf(overwriteConflictCheckFromSnapshot)));
 
         return buildTopology(
                 env,
                 table,
-                commitTable,
                 indexColumn,
                 indexType,
                 userOptions,
@@ -214,7 +203,6 @@ public class GenericIndexTopoBuilder {
     private static boolean buildTopology(
             StreamExecutionEnvironment env,
             FileStoreTable table,
-            FileStoreTable commitTable,
             String indexColumn,
             String indexType,
             Options userOptions,
@@ -306,7 +294,7 @@ public class GenericIndexTopoBuilder {
             built = built.union(deletes);
         }
 
-        commit(commitTable, indexType, built);
+        commit(table, indexType, built);
         return true;
     }
 
