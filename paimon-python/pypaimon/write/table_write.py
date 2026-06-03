@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -70,6 +71,14 @@ class TableWrite:
         if len(write_cols) == len(self.table_pyarrow_schema.names):
             write_cols = None
         self.file_store_write.write_cols = write_cols
+        return self
+
+    def with_blob_consumer(self, blob_consumer: BlobConsumer):
+        if self.file_store_write.data_writers:
+            raise RuntimeError(
+                "with_blob_consumer must be called before any write operation."
+            )
+        self.file_store_write.blob_consumer = blob_consumer
         return self
 
     def write_ray(

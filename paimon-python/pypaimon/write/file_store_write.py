@@ -40,6 +40,7 @@ class FileStoreWrite:
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self.max_seq_numbers: dict = {}
         self.write_cols = None
+        self.blob_consumer = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
@@ -72,6 +73,7 @@ class FileStoreWrite:
                 max_seq_number=0,
                 options=options,
                 write_cols=self.write_cols,
+                blob_consumer=self.blob_consumer,
             )
         elif self._has_vector_columns() and options.with_vector_format():
             return DataVectorWriter(

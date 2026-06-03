@@ -18,7 +18,7 @@
 import io
 import struct
 from abc import ABC, abstractmethod
-from typing import BinaryIO, Optional, Union
+from typing import BinaryIO, Callable, Optional, Union
 from urllib.parse import urlparse
 
 from pypaimon.common.uri_reader import UriReader, FileUriReader
@@ -382,3 +382,6 @@ class BlobRef(Blob):
 
     def __hash__(self) -> int:
         return hash(self._descriptor)
+
+
+BlobConsumer = Callable[[str, Optional[BlobDescriptor]], bool]
