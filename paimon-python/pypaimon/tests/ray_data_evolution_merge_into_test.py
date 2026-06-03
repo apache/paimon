@@ -1142,6 +1142,34 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [999])
         self.assertEqual(out['name'], ['new'])
 
+    def test_renamed_on_key_missing_source_col_rejected(self):
+        target = self._create_table()
+        source_schema = pa.schema([
+            ('uid', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+        source = pa.Table.from_pydict(
+            {
+                'uid': pa.array([1], type=pa.int32()),
+                'name': ['a'],
+                'age': pa.array([10], type=pa.int32()),
+            },
+            schema=source_schema,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on={'id': 'uid'},
+                when_matched=[WhenMatched(update={
+                    'id': source_col('id'),
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('id', str(ctx.exception))
+
     def test_lit_prevents_column_ref_interpretation(self):
         target = self._create_table()
         self._write(
