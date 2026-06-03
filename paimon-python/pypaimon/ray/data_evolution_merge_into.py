@@ -162,16 +162,18 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
                         f"condition must not reference blob columns, "
                         f"but found: {sorted(blob_refs)}"
                     )
-    not_matched_specs = [
-        _NormalizedClause(
-            spec=_normalize_set_spec(
-                c.insert, settable_field_names, on_map,
-                allow_target_refs=False,
-            ),
-            condition=c.condition,
+    not_matched_specs = []
+    for c in when_not_matched:
+        spec = _normalize_set_spec(
+            c.insert, settable_field_names, on_map,
+            allow_target_refs=False,
         )
-        for c in when_not_matched
-    ]
+        for tk, sk in on_map.items():
+            if tk in settable_field_names and tk not in spec:
+                spec[tk] = SourceColumnRef(sk)
+        not_matched_specs.append(
+            _NormalizedClause(spec=spec, condition=c.condition)
+        )
 
     source_ds = _normalize_source(source, catalog_options)
     _validate_source_on_cols(source_ds, source_on_cols)
@@ -459,6 +461,8 @@ def _normalize_set_spec(
                 "lit(), or literals, not callables"
             )
         if isinstance(val, SourceColumnRef):
+            if key in on_map and val.column == key:
+                val = SourceColumnRef(on_map[key])
             result[key] = val
         elif isinstance(val, TargetColumnRef):
             if not allow_target_refs:
@@ -475,7 +479,10 @@ def _normalize_set_spec(
         elif isinstance(val, LiteralValue):
             result[key] = val
         elif isinstance(val, str) and val.startswith("s."):
-            result[key] = SourceColumnRef(val[2:])
+            ref = val[2:]
+            if key in on_map and ref == key:
+                ref = on_map[key]
+            result[key] = SourceColumnRef(ref)
         elif isinstance(val, str) and val.startswith("t."):
             if not allow_target_refs:
                 raise ValueError(
