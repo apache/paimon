@@ -468,14 +468,43 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(30)
                     .withDescription(
-                            "To avoid frequent manifest merges, this parameter specifies the minimum number "
-                                    + "of ManifestFileMeta to merge.");
+                            Description.builder()
+                                    .text(
+                                            "To avoid frequent manifest merges, this parameter specifies the minimum number "
+                                                    + "of ManifestFileMeta to merge.")
+                                    .linebreak()
+                                    .text(
+                                            "Note: when '"
+                                                    + "manifest-sort.enabled"
+                                                    + "' is true, this minimum-count gate is only "
+                                                    + "applied to the trailing sub-segment of a "
+                                                    + "section that exceeds '"
+                                                    + "manifest-sort.max-rewrite-size"
+                                                    + "'. Small under-budget sections are sorted "
+                                                    + "and rewritten directly, so two small manifest "
+                                                    + "files may be merged into one even when their "
+                                                    + "count is below this threshold and full "
+                                                    + "compaction is not triggered.")
+                                    .build());
 
     public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLED =
             key("manifest-sort.enabled")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to invoke manifest sort rewrite during commit.");
+                    .withDescription(
+                            Description.builder()
+                                    .text("Whether to invoke manifest sort rewrite during commit.")
+                                    .linebreak()
+                                    .text(
+                                            "Note: enabling this changes the semantics of '"
+                                                    + "manifest.merge-min-count"
+                                                    + "'. In the sort rewrite path, small manifest "
+                                                    + "files within the rewrite budget are sorted "
+                                                    + "and merged directly, so the minimum-count "
+                                                    + "gate no longer prevents merging a small "
+                                                    + "number of under-budget manifest files when "
+                                                    + "full compaction is not triggered.")
+                                    .build());
 
     public static final ConfigOption<String> MANIFEST_SORT_PARTITION_FIELD =
             key("manifest-sort.partition-field")
