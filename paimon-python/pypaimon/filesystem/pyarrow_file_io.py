@@ -329,26 +329,13 @@ class PyArrowFileIO(FileIO):
 
     @staticmethod
     def _kerberos_login_from_keytab(principal: str, keytab: str):
-        if not os.path.isfile(keytab):
-            raise FileNotFoundError(f"Kerberos keytab file not found: {keytab}")
-        if not os.access(keytab, os.R_OK):
-            raise PermissionError(f"Kerberos keytab file is not readable: {keytab}")
-        subprocess.run(
-            ['kinit', '-kt', keytab, principal],
-            check=True, capture_output=True, text=True
-        )
+        from pypaimon.filesystem import _kerberos
+        _kerberos.kerberos_login_from_keytab(principal, keytab)
 
     @staticmethod
     def _get_ticket_cache_path() -> Optional[str]:
-        cc = os.environ.get('KRB5CCNAME')
-        if cc:
-            if cc.startswith('FILE:'):
-                return cc[5:]
-            return cc
-        default_path = f'/tmp/krb5cc_{os.getuid()}'
-        if os.path.exists(default_path):
-            return default_path
-        return None
+        from pypaimon.filesystem import _kerberos
+        return _kerberos.get_ticket_cache_path()
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -654,6 +641,15 @@ class PyArrowFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
+
+    def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import mosaic
+            with self.new_output_stream(path) as output_stream:
+                mosaic.write_table(data, output_stream)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
 
     def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
         try:

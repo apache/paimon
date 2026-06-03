@@ -18,7 +18,7 @@
 import sys
 from datetime import timedelta
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -56,6 +56,15 @@ class MergeEngine(str, Enum):
     FIRST_ROW = "first-row"
 
 
+class SortOrder(str, Enum):
+    """
+    Specifies the order of ``sequence.field``. Mirrors Java
+    ``CoreOptions.SortOrder``.
+    """
+    ASCENDING = "ascending"
+    DESCENDING = "descending"
+
+
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
@@ -71,6 +80,7 @@ class CoreOptions:
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
+    FILE_FORMAT_MOSAIC: str = "mosaic"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -409,6 +419,22 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description("Whether to ignore delete records.")
+    )
+
+    SEQUENCE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("sequence.field")
+        .string_type()
+        .no_default_value()
+        .with_description("The field that generates the sequence number for "
+                          "primary key table, the sequence number determines "
+                          "which data is the most recent.")
+    )
+
+    SEQUENCE_FIELD_SORT_ORDER: ConfigOption[SortOrder] = (
+        ConfigOptions.key("sequence.field.sort-order")
+        .enum_type(SortOrder)
+        .default_value(SortOrder.ASCENDING)
+        .with_description("Specify the order of sequence.field.")
     )
 
     # Commit options
@@ -807,6 +833,33 @@ class CoreOptions:
 
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
+
+    def sequence_field(self) -> List[str]:
+        """User-defined sequence fields, in declaration order. Empty list
+        when ``sequence.field`` is unset. Mirrors Java
+        ``CoreOptions.sequenceField()``.
+        """
+        raw = self.options.get(CoreOptions.SEQUENCE_FIELD)
+        if not raw:
+            return []
+        # Mirror Java ``CoreOptions.sequenceField()``
+        # (``Arrays.stream(s.split(',')).map(String::trim)``): Java's
+        # ``String.split(",")`` drops *trailing* empty segments (so ``'ts,'``
+        # yields ``['ts']``) but keeps interior ones, and each segment is
+        # then trimmed. So an interior empty segment (``'ts,,ts2'``) survives
+        # as an empty field name that ``check_sequence_field_valid`` rejects,
+        # while a trailing comma is tolerated.
+        segments = raw.split(",")
+        while segments and segments[-1] == "":
+            segments.pop()
+        return [name.strip() for name in segments]
+
+    def sequence_field_sort_order_is_ascending(self) -> bool:
+        """Whether ``sequence.field.sort-order`` is ascending (the default).
+        Mirrors Java ``CoreOptions.sequenceFieldSortOrderIsAscending()``.
+        """
+        return (self.options.get(CoreOptions.SEQUENCE_FIELD_SORT_ORDER)
+                == SortOrder.ASCENDING)
 
     def ignore_delete(self) -> bool:
         raw = self.options.to_map()

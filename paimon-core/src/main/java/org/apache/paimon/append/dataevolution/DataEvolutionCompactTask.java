@@ -45,6 +45,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
@@ -191,7 +192,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         CoreOptions options = table.coreOptions();
         List<DataFileMeta> sortedCompactBefore = sortedByFirstRowId(compactBefore);
         DataField blobField = blobField(table, options, sortedCompactBefore);
-        checkRowIdsContinuous(sortedCompactBefore);
+        Range compactBeforeRange = checkContiguousRowRange(sortedCompactBefore);
         checkArgument(
                 sortedCompactBefore.size() > 1,
                 "Blob compaction task %s should contain at least two files to compact.",
@@ -232,12 +233,11 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             throw e;
         }
 
-        long firstRowId = sortedCompactBefore.get(0).nonNullFirstRowId();
         long minSequenceId = minSequenceId(sortedCompactBefore);
         long maxSequenceId = maxSequenceId(sortedCompactBefore);
         DataFileMeta compactedFile =
                 writer.result()
-                        .assignFirstRowId(firstRowId)
+                        .assignFirstRowId(compactBeforeRange.from)
                         .assignSequenceNumber(minSequenceId, maxSequenceId);
         compactAfter.add(compactedFile);
         checkArgument(compactAfter.size() == 1, "Blob file compaction should produce one file.");
@@ -326,46 +326,30 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
         return field;
     }
 
-    private void checkRowIdsContinuous(List<DataFileMeta> files) {
-        checkArgument(!files.isEmpty(), "%s should not be empty.", "Blob compact before files");
-        long expectedFirstRowId = files.get(0).nonNullFirstRowId();
-        for (DataFileMeta file : files) {
-            long firstRowId = file.nonNullFirstRowId();
-            checkArgument(
-                    firstRowId == expectedFirstRowId,
-                    "%s should be continuous and sorted by row id, expected %s but got %s in file %s.",
-                    "Blob compact before files",
-                    expectedFirstRowId,
-                    firstRowId,
-                    file);
-            expectedFirstRowId += file.rowCount();
-        }
+    private Range checkContiguousRowRange(List<DataFileMeta> files) {
+        checkArgument(!files.isEmpty(), "%s should not be empty.", "Blob compact files");
+        List<Range> ranges =
+                files.stream().map(DataFileMeta::nonNullRowIdRange).collect(Collectors.toList());
+        List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
+        checkArgument(
+                merged.size() == 1,
+                "%s should have a contiguous row range, but got %s.",
+                "Blob compact files",
+                merged);
+        return merged.get(0);
     }
 
     private void checkSameRowRange(
             List<DataFileMeta> compactBefore, List<DataFileMeta> compactAfter) {
+        Range beforeRange = checkContiguousRowRange(compactBefore);
+        Range afterRange = checkContiguousRowRange(compactAfter);
         checkArgument(
-                !compactBefore.isEmpty(),
-                "%s compact before files should not be empty.",
-                "Blob compact files");
-        checkArgument(
-                !compactAfter.isEmpty(),
-                "%s compact after files should not be empty.",
-                "Blob compact files");
-        long beforeFirstRowId = compactBefore.get(0).nonNullFirstRowId();
-        long afterFirstRowId = compactAfter.get(0).nonNullFirstRowId();
-        long beforeRowCount = compactBefore.stream().mapToLong(DataFileMeta::rowCount).sum();
-        long afterRowCount = compactAfter.stream().mapToLong(DataFileMeta::rowCount).sum();
-        checkArgument(
-                beforeFirstRowId == afterFirstRowId && beforeRowCount == afterRowCount,
+                beforeRange.equals(afterRange),
                 "%s compact after files should have the same row range as compact before files, "
-                        + "before first row id is %s with row count %s, "
-                        + "but after first row id is %s with row count %s.",
+                        + "before range is %s, but after range is %s.",
                 "Blob compact files",
-                beforeFirstRowId,
-                beforeRowCount,
-                afterFirstRowId,
-                afterRowCount);
+                beforeRange,
+                afterRange);
     }
 
     private long minSequenceId(List<DataFileMeta> files) {

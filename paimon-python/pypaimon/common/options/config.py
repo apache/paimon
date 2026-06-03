@@ -104,6 +104,41 @@ class CatalogOptions:
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
 
 
+class HdfsOptions:
+    HDFS_CLIENT_IMPL = (
+        ConfigOptions.key("hdfs.client.impl")
+        .string_type()
+        .default_value("native")
+        .with_description(
+            "HDFS FileIO backend. Supported values: 'native' (default, uses "
+            "hdfs-native protocol client, no Hadoop install required), "
+            "'pyarrow' (legacy, requires HADOOP_HOME / libhdfs / JVM)."
+        )
+    )
+    HDFS_CLIENT_FALLBACK_TO_PYARROW = (
+        ConfigOptions.key("hdfs.client.fallback-to-pyarrow")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "When the native backend fails to initialise (e.g. missing wheel "
+            "or unsupported platform), fall back to the pyarrow backend "
+            "instead of raising."
+        )
+    )
+    HDFS_CONF_DIR = (
+        ConfigOptions.key("hdfs.conf-dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory containing core-site.xml / hdfs-site.xml that the "
+            "native client should load. Defaults to $HADOOP_CONF_DIR."
+        )
+    )
+
+    HDFS_CONFIG_PREFIX = "hdfs.config."
+    HDFS_NATIVE_CONFIG_KEY_PREFIXES = ("dfs.", "fs.", "hadoop.", "ipc.", "io.")
+
+
 class SecurityOptions:
     KERBEROS_PRINCIPAL = (
         ConfigOptions.key("security.kerberos.login.principal")

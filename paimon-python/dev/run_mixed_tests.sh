@@ -373,6 +373,11 @@ run_tantivy_fulltext_test() {
         return 1
     fi
     cd "$PAIMON_PYTHON_DIR"
+    echo "Installing Python jieba tokenizer dependency for Tantivy jieba index reads..."
+    if ! python -m pip install 'jieba>=0.42,<1'; then
+        echo -e "${RED}✗ Failed to install jieba${NC}"
+        return 1
+    fi
     echo "Running Python test for JavaPyReadWriteTest.test_read_tantivy_full_text_index..."
     if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_tantivy_full_text_index -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"

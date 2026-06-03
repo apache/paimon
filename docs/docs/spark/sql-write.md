@@ -325,6 +325,10 @@ Notes:
 
 `COPY INTO` provides a SQL command for bulk loading data files into Paimon tables and exporting table data to files. Supported formats: **CSV**, **JSON**, and **Parquet**.
 
+:::info
+**SQL dialect:** Paimon's `COPY INTO` is a Snowflake-style extension (`FILE_FORMAT = (TYPE = ...)`, `PATTERN`, `FORCE`, `ON_ERROR`), not the Databricks `COPY INTO` form (`FILEFORMAT` + `FORMAT_OPTIONS (...)` / `COPY_OPTIONS (...)`). It implements only a subset of the Snowflake syntax. In particular, `ON_ERROR` supports `ABORT_STATEMENT` (default), `CONTINUE`, and `SKIP_FILE`; the Snowflake variants `SKIP_FILE_<num>` and `SKIP_FILE_<num>%` are **not** supported.
+:::
+
 #### CSV Import
 
 ```sql
@@ -333,7 +337,7 @@ FROM 'source_path'
 FILE_FORMAT = (TYPE = CSV [, option = value, ...])
 [PATTERN = 'regex']
 [FORCE = TRUE|FALSE]
-[ON_ERROR = ABORT_STATEMENT]
+[ON_ERROR = { ABORT_STATEMENT | CONTINUE | SKIP_FILE }]
 ```
 
 **Basic import:**
@@ -371,7 +375,7 @@ FROM 'source_path'
 FILE_FORMAT = (TYPE = JSON [, option = value, ...])
 [PATTERN = 'regex']
 [FORCE = TRUE|FALSE]
-[ON_ERROR = ABORT_STATEMENT]
+[ON_ERROR = { ABORT_STATEMENT | CONTINUE | SKIP_FILE }]
 ```
 
 **Basic import:**
@@ -400,7 +404,7 @@ FROM 'source_path'
 FILE_FORMAT = (TYPE = PARQUET [, option = value, ...])
 [PATTERN = 'regex']
 [FORCE = TRUE|FALSE]
-[ON_ERROR = ABORT_STATEMENT]
+[ON_ERROR = { ABORT_STATEMENT | CONTINUE | SKIP_FILE }]
 ```
 
 **Basic import:**
@@ -553,7 +557,7 @@ OVERWRITE = TRUE;
 |--------|-------------|---------|
 | PATTERN | Regex to filter source files by base file name. Only matching files are loaded. | (all files) |
 | FORCE | `FALSE`: skip files already loaded (idempotent). `TRUE`: reload all files. | `FALSE` |
-| ON_ERROR | Error handling strategy. Only `ABORT_STATEMENT` is supported. | `ABORT_STATEMENT` |
+| ON_ERROR | Error handling strategy. `ABORT_STATEMENT`: abort on any error. `CONTINUE`: skip bad rows and continue loading. `SKIP_FILE`: skip files that contain errors. | `ABORT_STATEMENT` |
 
 #### File Write Options
 
@@ -592,9 +596,11 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 | Column | Type | Description |
 |--------|------|-------------|
 | file_name | STRING | Source file name |
-| status | STRING | `LOADED` or `SKIPPED` |
+| status | STRING | `LOADED`, `PARTIALLY_LOADED`, `LOAD_FAILED`, or `SKIPPED` |
 | rows_loaded | BIGINT | Number of rows written |
 | rows_parsed | BIGINT | Number of rows parsed from the file |
+| errors_seen | BIGINT | Number of error rows (parse or cast failures) |
+| first_error | STRING | First error message encountered (NULL if no errors) |
 
 **File write** returns a single row:
 
@@ -606,9 +612,9 @@ By default (`FORCE = FALSE`), COPY INTO tracks which files have been successfull
 
 #### Limitations
 
+- **CSV column-count mismatch**: Rows with fewer or more columns than the target schema are treated as malformed records. With `ON_ERROR = CONTINUE`, these rows are skipped and counted as errors.
 - Only **CSV**, **JSON**, and **Parquet** formats are supported.
 - Writing files only supports `FROM table_name`; `FROM (SELECT ...)` is not supported.
-- `ON_ERROR = CONTINUE` is not supported; any parse or cast error aborts the entire command.
 - `SINGLE = TRUE` (single-file output) is not supported.
 - File format options must be specified inline in `FILE_FORMAT = (...)`.
 - File listing is **non-recursive**: only direct files under the source path are processed. Subdirectories are ignored.

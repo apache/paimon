@@ -532,6 +532,32 @@ class TableRead:
                 # the requested sub-paths back to the user's flat schema.
                 inner_read_type = self._widen_to_top_level_for_merge()
                 outer_extract_name_paths = self.nested_name_paths
+
+            # When the user's projection drops a ``sequence.field``, the merge
+            # heap can't compare it. Inject the missing sequence field(s) into
+            # the value row so the comparator resolves, then project them back
+            # out after merging (mirrors Java MergeFileSplitRead.withReadType +
+            # projectOuter). Reuses the OuterProjectionRecordReader machinery.
+            seq_fields = self.table.options.sequence_field()
+            if seq_fields:
+                present = {f.name for f in inner_read_type}
+                missing = [name for name in seq_fields if name not in present]
+                if missing:
+                    table_fields_by_name = {f.name: f for f in self.table.fields}
+                    extra = []
+                    for name in missing:
+                        field = table_fields_by_name.get(name)
+                        if field is None:
+                            raise ValueError(
+                                "sequence.field %r not found in table schema"
+                                % (name,))
+                        extra.append(field)
+                    inner_read_type = list(inner_read_type) + extra
+                    if outer_extract_name_paths is None:
+                        # Drop the injected seq columns: project back to the
+                        # user's requested (flat) columns in order.
+                        outer_extract_name_paths = [
+                            [f.name] for f in self.read_type]
             return MergeFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,

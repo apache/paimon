@@ -10,4 +10,6 @@ crate-type = ["cdylib"]
 [dependencies]
 jni = "0.21"
 tantivy = "0.22"
+tantivy-jieba = "0.11.0"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"

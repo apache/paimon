@@ -28,12 +28,12 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.tantivy.NativeLoader;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,11 +55,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 public class TantivyFullTextGlobalIndexTest {
 
-    @BeforeAll
-    static void checkNativeLibrary() {
-        assumeTrue(isNativeAvailable(), "Tantivy native library not available, skipping tests");
-    }
-
     private static boolean isNativeAvailable() {
         try {
             NativeLoader.loadJni();
@@ -78,6 +73,7 @@ public class TantivyFullTextGlobalIndexTest {
 
     @BeforeEach
     public void setup() {
+        assumeTrue(isNativeAvailable(), "Tantivy native library not available, skipping tests");
         fileIO = new LocalFileIO();
         indexPath = new Path(tempDir.toString());
         layoutCache = new ConcurrentHashMap<>();
@@ -158,6 +154,66 @@ public class TantivyFullTextGlobalIndexTest {
             float score2 = scored.scoreGetter().score(2L);
             assertThat(score0).isGreaterThan(0);
             assertThat(score2).isGreaterThan(0);
+        }
+    }
+
+    @Test
+    public void testWriterPersistsTokenizerMeta() throws IOException {
+        Options options = new Options();
+        options.set(TantivyFullTextIndexOptions.TOKENIZER, "ngram");
+        options.set(TantivyFullTextIndexOptions.NGRAM_MIN_GRAM, 2);
+        options.set(TantivyFullTextIndexOptions.NGRAM_MAX_GRAM, 2);
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        TantivyFullTextGlobalIndexWriter writer =
+                new TantivyFullTextGlobalIndexWriter(
+                        fileWriter,
+                        new TantivyFullTextIndexOptions(
+                                TantivyFullTextGlobalIndexerFactory.removeTantivyPrefix(options)));
+
+        writer.write(BinaryString.fromString("Apache Paimon supports Chinese text"));
+        List<ResultEntry> results = writer.finish();
+
+        assertThat(results).hasSize(1);
+        TantivyFullTextIndexOptions indexOptions =
+                TantivyFullTextIndexOptions.deserialize(results.get(0).meta());
+        assertThat(indexOptions.tokenizer()).isEqualTo("ngram");
+        assertThat(indexOptions.ngramMinGram()).isEqualTo(2);
+        assertThat(indexOptions.ngramMaxGram()).isEqualTo(2);
+    }
+
+    @Test
+    public void testJiebaTokenizerFindsChineseWord() throws IOException {
+        Options options = new Options();
+        options.set(TantivyFullTextIndexOptions.TOKENIZER, "jieba");
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        TantivyFullTextGlobalIndexWriter writer =
+                new TantivyFullTextGlobalIndexWriter(
+                        fileWriter,
+                        new TantivyFullTextIndexOptions(
+                                TantivyFullTextGlobalIndexerFactory.removeTantivyPrefix(options)));
+
+        writer.write(BinaryString.fromString("张华在百货公司当售货员"));
+        writer.write(BinaryString.fromString("Apache Paimon supports full text search"));
+
+        List<ResultEntry> results = writer.finish();
+        TantivyFullTextIndexOptions indexOptions =
+                TantivyFullTextIndexOptions.deserialize(results.get(0).meta());
+        assertThat(indexOptions.tokenizer()).isEqualTo("jieba");
+
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
+
+        try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
+            FullTextSearch search = new FullTextSearch("售货员", 10, "text");
+            Optional<ScoredGlobalIndexResult> searchResult =
+                    reader.visitFullTextSearch(search).join();
+            assertThat(searchResult).isPresent();
+
+            RoaringNavigableMap64 rowIds = searchResult.get().results();
+            assertThat(rowIds.getLongCardinality()).isEqualTo(1);
+            assertThat(rowIds.contains(0L)).isTrue();
         }
     }
 

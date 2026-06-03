@@ -436,6 +436,48 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         self.assertEqual('Carol', names[idx3])
         self.assertEqual('US',    regions[idx3])
 
+    def test_upsert_after_truncate_partition(self):
+        table = self._create_table(
+            pa_schema=self.partitioned_pa_schema,
+            partition_keys=['region'],
+        )
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': pa.array([1, 2, 3], type=pa.int32()),
+            'name': ['A', 'B', 'C'],
+            'age': pa.array([10, 20, 30], type=pa.int32()),
+            'region': ['US', 'US', 'US'],
+        }, schema=self.partitioned_pa_schema))
+
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': pa.array([4, 5], type=pa.int32()),
+            'name': ['D', 'E'],
+            'age': pa.array([40, 50], type=pa.int32()),
+            'region': ['EU', 'EU'],
+        }, schema=self.partitioned_pa_schema))
+
+        wb = table.new_batch_write_builder()
+        tc = wb.new_commit()
+        tc.truncate_partitions([{'region': 'US'}])
+
+        upsert_data = pa.Table.from_pydict({
+            'id': pa.array([4], type=pa.int32()),
+            'name': ['D_v2'],
+            'age': pa.array([41], type=pa.int32()),
+            'region': ['EU'],
+        }, schema=self.partitioned_pa_schema)
+        self._upsert(table, upsert_data, upsert_keys=['id'])
+
+        result = self._read_all(table)
+        self.assertEqual(2, result.num_rows)
+        rows = sorted(zip(
+            result['id'].to_pylist(),
+            result['name'].to_pylist(),
+            result['age'].to_pylist(),
+            result['region'].to_pylist(),
+        ))
+        self.assertEqual((4, 'D_v2', 41, 'EU'), rows[0])
+        self.assertEqual((5, 'E', 50, 'EU'), rows[1])
+
     # ==================================================================
     # update_cols partial update (non-partitioned)
     # ==================================================================

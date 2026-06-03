@@ -523,7 +523,10 @@ This section introduce all available spark procedures about paimon.
       </td>
       <td>
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree')<br/><br/>
-         CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1;pt=p2')
+         CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1;pt=p2')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=jieba')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true')
       </td>
    </tr>
    <tr>

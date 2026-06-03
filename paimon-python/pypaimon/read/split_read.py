@@ -29,8 +29,9 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import rewrite_predicate_indices, trim_predicate_by_fields
-from pypaimon.read.reader.concat_batch_reader import (ConcatBatchReader,
-                                                      MergeAllBatchReader, DataEvolutionMergeReader)
+from pypaimon.read.reader.concat_batch_reader import (
+    BlobFallbackBatchReader, ConcatBatchReader,
+    MergeAllBatchReader, DataEvolutionMergeReader)
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
@@ -46,6 +47,7 @@ from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.reader.format_row_reader import FormatRowReader
+from pypaimon.read.reader.format_mosaic_reader import FormatMosaicReader
 from pypaimon.read.reader.format_vortex_reader import FormatVortexReader
 from pypaimon.read.reader.iface.record_batch_reader import (RecordBatchReader,
                                                             RowPositionReader, EmptyRecordBatchReader)
@@ -61,7 +63,8 @@ from pypaimon.read.reader.partial_update_merge_function import \
 from pypaimon.read.reader.first_row_merge_function import \
     FirstRowMergeFunction
 from pypaimon.read.reader.sort_merge_reader import (DeduplicateMergeFunction,
-                                                    SortMergeReaderWithMinHeap)
+                                                    SortMergeReaderWithMinHeap,
+                                                    builtin_seq_comparator)
 from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
@@ -267,6 +270,13 @@ class SplitRead(ABC):
                                                row_indices=row_indices,
                                                shard_range=shard_range,
                                                predicate_fields=predicate_fields)
+        elif file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            if has_nested:
+                raise NotImplementedError(
+                    "Nested-field projection is not supported on Mosaic files")
+            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            format_reader = FormatMosaicReader(self.table.file_io, file_path, ordered_read_fields,
+                                               read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             ordered_nested_paths = (
@@ -301,7 +311,7 @@ class SplitRead(ABC):
         elif file_format in ('json', 'csv'):
             raise NotImplementedError(
                 f"Reading '{file_format}' format is not yet supported in Python SDK. "
-                f"Supported formats: parquet, orc, avro, lance, blob, row.")
+                f"Supported formats: parquet, orc, avro, lance, vortex, mosaic, blob, row.")
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
@@ -651,6 +661,15 @@ class MergeFileSplitRead(SplitRead):
         )
         self.outer_extract_name_paths = outer_extract_name_paths
         self.limit = limit
+        # Built once per split-read (value_fields and options are constant
+        # for the object's life), not per section. ``None`` when
+        # ``sequence.field`` is unset, in which case the heap falls back to
+        # the file-level sequence number.
+        self.seq_comparator = builtin_seq_comparator(
+            self.value_fields,
+            self.table.options.sequence_field(),
+            self.table.options.sequence_field_sort_order_is_ascending(),
+        )
 
     def kv_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> RecordReader:
         file_batch_reader = self.file_reader_supplier(file, True, self._get_final_read_data_fields(), False)
@@ -672,7 +691,8 @@ class MergeFileSplitRead(SplitRead):
             readers.append(ConcatRecordReader(data_readers))
         merge_function = self._build_merge_function()
         return SortMergeReaderWithMinHeap(
-            readers, self.table.table_schema, merge_function=merge_function)
+            readers, self.table.table_schema, merge_function=merge_function,
+            seq_comparator=self.seq_comparator)
 
     def _build_merge_function(self):
         """Pick the right MergeFunction implementation for the table's
@@ -939,6 +959,27 @@ class DataEvolutionSplitRead(SplitRead):
                         bunch.files()[0], read_field_names
                     ): r]
                     file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
+                elif DataFileMeta.is_blob_file(first_file.file_name):
+                    file_reader_suppliers = [
+                        (
+                            file,
+                            partial(
+                                self._create_raw_blob_file_reader,
+                                file=file,
+                                read_fields=read_field_names,
+                            ),
+                        )
+                        for file in bunch.files()
+                    ]
+                    file_record_readers[i] = BlobFallbackBatchReader(
+                        file_reader_suppliers,
+                        read_fields[0].name,
+                        PyarrowFieldParser.from_paimon_schema(
+                            [read_fields[0]]
+                        ).field(0).type,
+                        self.row_ranges,
+                        CoreOptions.blob_as_descriptor(self.table.options),
+                    )
                 else:
                     # Create concatenated reader for multiple files
                     suppliers = [
@@ -965,6 +1006,30 @@ class DataEvolutionSplitRead(SplitRead):
             read_fields=read_fields,
             row_tracking_enabled=True,
             row_ranges=self.row_ranges)
+
+    def _create_raw_blob_file_reader(
+            self, file: DataFileMeta, read_fields: [str]) -> Optional[FormatBlobReader]:
+        row_indices = None
+        if self.row_ranges is not None:
+            row_indices = [
+                row_id - file.first_row_id
+                for row_range in Range.and_([file.row_id_range()], self.row_ranges)
+                for row_id in range(row_range.from_, row_range.to + 1)
+            ]
+            if not row_indices:
+                return None
+
+        file_path = file.external_path if file.external_path else file.file_path
+        return FormatBlobReader(
+            self.table.file_io,
+            file_path,
+            read_fields,
+            self.read_fields,
+            None,
+            CoreOptions.blob_as_descriptor(self.table.options),
+            batch_size=self.table.options.read_batch_size(),
+            row_indices=row_indices,
+        )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""

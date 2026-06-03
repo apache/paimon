@@ -18,7 +18,6 @@
 
 package org.apache.paimon.tantivy;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -28,10 +27,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Smoke test for Tantivy JNI. */
-class TantivyJniTest {
+public class TantivyJniTest {
 
-    @BeforeAll
-    static void checkNativeLibrary() {
+    private static void assumeNativeAvailable() {
         assumeTrue(isNativeAvailable(), "Tantivy native library not available, skipping tests");
     }
 
@@ -45,7 +43,8 @@ class TantivyJniTest {
     }
 
     @Test
-    void testWriteAndSearch(@TempDir Path tempDir) {
+    public void testWriteAndSearch(@TempDir Path tempDir) {
+        assumeNativeAvailable();
         String indexPath = tempDir.resolve("test_index").toString();
 
         try (TantivyIndexWriter writer = new TantivyIndexWriter(indexPath)) {
@@ -72,6 +71,71 @@ class TantivyJniTest {
             if (result.size() > 1) {
                 assertTrue(result.getScores()[0] >= result.getScores()[1]);
             }
+        }
+    }
+
+    @Test
+    public void testNgramTokenizerFindsChineseFragment(@TempDir Path tempDir) {
+        assumeNativeAvailable();
+        String indexPath = tempDir.resolve("ngram_index").toString();
+
+        try (TantivyIndexWriter writer =
+                new TantivyIndexWriter(indexPath, "ngram", 2, 2, false, true)) {
+            writer.addDocument(1L, "Apache Paimon 支持中文全文检索");
+            writer.addDocument(2L, "Tantivy full text search engine");
+            writer.commit();
+        }
+
+        try (TantivySearcher searcher =
+                new TantivySearcher(indexPath, "ngram", 2, 2, false, true)) {
+            SearchResult result = searcher.search("中文", 10);
+            assertEquals(1, result.size());
+            assertEquals(1L, result.getRowIds()[0]);
+        }
+    }
+
+    @Test
+    public void testJiebaTokenizerFindsChineseWord(@TempDir Path tempDir) {
+        assumeNativeAvailable();
+        String indexPath = tempDir.resolve("jieba_index").toString();
+
+        try (TantivyIndexWriter writer =
+                new TantivyIndexWriter(indexPath, "jieba", 2, 2, false, true)) {
+            writer.addDocument(1L, "张华在百货公司当售货员");
+            writer.addDocument(2L, "Apache Paimon supports full text search");
+            writer.commit();
+        }
+
+        try (TantivySearcher searcher =
+                new TantivySearcher(indexPath, "jieba", 2, 2, false, true)) {
+            SearchResult result = searcher.search("售货员", 10);
+            assertEquals(1, result.size());
+            assertEquals(1L, result.getRowIds()[0]);
+        }
+    }
+
+    @Test
+    public void testTokenizerConfigAndQueryOperator(@TempDir Path tempDir) {
+        assumeNativeAvailable();
+        String indexPath = tempDir.resolve("config_index").toString();
+        String configJson =
+                "{\"tokenizer\":\"simple\",\"stem\":true,\"remove-stop-words\":true,"
+                        + "\"language\":\"english\"}";
+
+        try (TantivyIndexWriter writer = new TantivyIndexWriter(indexPath, configJson)) {
+            writer.addDocument(1L, "Apache Paimon runs streaming jobs");
+            writer.addDocument(2L, "Apache Spark runs batch jobs");
+            writer.addDocument(3L, "Paimon lake stores data");
+            writer.commit();
+        }
+
+        try (TantivySearcher searcher = new TantivySearcher(indexPath, configJson)) {
+            SearchResult orResult = searcher.search("paimon spark", 10);
+            assertEquals(3, orResult.size());
+
+            SearchResult andResult = searcher.search("paimon run", 10, "and");
+            assertEquals(1, andResult.size());
+            assertEquals(1L, andResult.getRowIds()[0]);
         }
     }
 }

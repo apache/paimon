@@ -78,6 +78,16 @@ class DataFileBatchReader(RecordBatchReader):
             return None
 
         if self.partition_info is None and self.index_mapping is None:
+            # A file written under an older schema (e.g. before an INT -> BIGINT
+            # promotion or a DECIMAL precision change) yields columns in the
+            # data file's original types. Without reordering or partition padding
+            # to rebuild the batch, those old types would otherwise leak through
+            # here -- returning a type that depends on whether this read happens
+            # to span newer-schema files, and failing to concatenate when it
+            # does. Align them to the current read schema, mirroring the rebuild
+            # path below.
+            record_batch = self._align_batch_to_read_schema(
+                record_batch.schema.names, record_batch.columns)
             if self.row_tracking_enabled and self.system_fields:
                 record_batch = self._assign_row_tracking(record_batch)
             return record_batch
@@ -122,16 +132,9 @@ class DataFileBatchReader(RecordBatchReader):
             inter_arrays = mapped_arrays
             inter_names = mapped_names
 
-        # to contains 'not null' property
-        final_fields = []
-        for i, name in enumerate(inter_names):
-            array = inter_arrays[i]
-            target_field = self.schema_map.get(name)
-            if not target_field:
-                target_field = pa.field(name, array.type)
-            final_fields.append(target_field)
-        final_schema = pa.schema(final_fields)
-        record_batch = pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
+        # Rebuild the batch typed by the read schema (carries 'not null' and
+        # aligns old-schema column types).
+        record_batch = self._align_batch_to_read_schema(inter_names, inter_arrays)
 
         # Handle row tracking fields
         if self.row_tracking_enabled and self.system_fields:
@@ -140,6 +143,32 @@ class DataFileBatchReader(RecordBatchReader):
         record_batch = self._convert_descriptor_stored_blob_columns(record_batch)
 
         return record_batch
+
+    def _align_batch_to_read_schema(self, names: List[str], arrays: list) -> RecordBatch:
+        """Build a record batch for ``names``/``arrays`` typed by the read schema.
+
+        Each known field is cast to the current read schema's type, which also
+        carries the 'not null' property; unknown columns keep the array's own
+        type. Columns whose type already matches are reused as-is, keeping the
+        common (non-evolution) path zero-copy.
+
+        Casts use ``safe=False`` to match Java ``CastExecutors`` semantics for
+        the read-time conversions a user-approved schema evolution implies
+        (e.g. DECIMAL scale-down or DOUBLE -> INT truncate rather than raise).
+        Evolution legality is the writer's concern (``DataTypeCasts``); the read
+        path only materializes the result.
+        """
+        out_arrays = []
+        out_fields = []
+        for name, array in zip(names, arrays):
+            target_field = self.schema_map.get(name)
+            if target_field is None:
+                target_field = pa.field(name, array.type)
+            elif array.type != target_field.type:
+                array = array.cast(target_field.type, safe=False)
+            out_arrays.append(array)
+            out_fields.append(target_field)
+        return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))
 
     def _convert_descriptor_stored_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
         if isinstance(self.format_reader, FormatBlobReader):
