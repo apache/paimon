@@ -138,6 +138,7 @@ jobs:
             if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
               python -m pip install vortex-data==0.70.0
             fi
+            python -m pip install paimon-mosaic>=0.1.0
           fi
           df -h
 
