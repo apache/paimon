@@ -169,8 +169,9 @@ def distributed_update_apply(
     frid_col = "_FIRST_ROW_ID"
     captured_sorted = sorted_first_row_ids
     captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
-    first = captured_sorted_arr[0]
-    total_row_count = planner.total_row_count
+    valid_ranges = planner.valid_row_id_ranges
+    range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
+    range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
 
     def _assign_frid(batch: pa.Table) -> pa.Table:
         if batch.num_rows == 0:
@@ -184,15 +185,17 @@ def distributed_update_apply(
                 "or matched rows come from a different table."
             )
         rids = rid_col.to_numpy(zero_copy_only=False)
-        # Out-of-range _ROW_IDs would silently map via searchsorted wrap-around.
-        out_of_range = (rids < first) | (rids >= total_row_count)
-        if out_of_range.any():
-            bad = rids[out_of_range][0]
+        # Check each row_id belongs to a valid range (vectorized).
+        in_range = np.zeros(len(rids), dtype=bool)
+        for s, e in zip(range_starts, range_ends):
+            in_range |= (rids >= s) & (rids <= e)
+        if not in_range.all():
+            bad = rids[~in_range][0]
             raise ValueError(
-                f"_ROW_ID {bad} is out of valid range "
-                f"[{first}, {total_row_count}); planner snapshot "
-                f"is stale or matched rows come from a different "
-                f"table."
+                f"_ROW_ID {bad} does not belong to any valid range "
+                f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; "
+                f"planner snapshot is stale or matched rows come "
+                f"from a different table."
             )
         idx = np.searchsorted(
             captured_sorted_arr, rids, side="right"
