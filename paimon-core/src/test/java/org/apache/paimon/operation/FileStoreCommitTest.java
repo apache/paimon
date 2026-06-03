@@ -1193,11 +1193,7 @@ public class FileStoreCommitTest {
                                                 1,
                                                 1,
                                                 new GlobalIndexMeta(
-                                                        rowRangeStart,
-                                                        rowRangeEnd,
-                                                        0,
-                                                        null,
-                                                        null),
+                                                        rowRangeStart, rowRangeEnd, 0, null, null),
                                                 null))),
                         CompactIncrement.emptyIncrement()));
         return committable;

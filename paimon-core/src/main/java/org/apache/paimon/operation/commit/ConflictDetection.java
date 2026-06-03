@@ -40,6 +40,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -572,18 +573,19 @@ public class ConflictDetection {
                         .add(entry.nonNullRowIdRange());
             }
         }
+        Map<PartitionBucketKey, RowRangeIndex> rowRangeIndexes = new HashMap<>();
         for (Map.Entry<PartitionBucketKey, List<Range>> entry : dataRanges.entrySet()) {
-            entry.setValue(Range.sortAndMergeOverlap(entry.getValue(), true));
+            rowRangeIndexes.put(entry.getKey(), RowRangeIndex.create(entry.getValue()));
         }
 
         for (IndexManifestEntry indexEntry : indexesToCheck) {
             GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
             checkState(globalIndex != null, "Global index meta must not be null.");
             Range indexRange = globalIndex.rowRange();
-            List<Range> currentRanges =
-                    dataRanges.get(
+            RowRangeIndex currentRanges =
+                    rowRangeIndexes.get(
                             new PartitionBucketKey(indexEntry.partition(), indexEntry.bucket()));
-            if (!containsRange(currentRanges, indexRange)) {
+            if (currentRanges == null || !currentRanges.contains(indexRange)) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
@@ -609,27 +611,6 @@ public class ConflictDetection {
             }
         }
         return result;
-    }
-
-    private boolean containsRange(@Nullable List<Range> ranges, Range target) {
-        if (ranges == null || ranges.isEmpty()) {
-            return false;
-        }
-
-        long next = target.from;
-        for (Range range : ranges) {
-            if (range.to < next) {
-                continue;
-            }
-            if (range.from > next) {
-                return false;
-            }
-            if (range.to >= target.to) {
-                return true;
-            }
-            next = range.to + 1;
-        }
-        return false;
     }
 
     Optional<RuntimeException> checkRowIdExistence(

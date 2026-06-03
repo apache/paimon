@@ -569,8 +569,7 @@ class ConflictDetectionTest {
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.singletonList(
-                                createGlobalIndexEntry(
-                                        "idx", DELETE, BinaryRow.EMPTY_ROW, 0, 149)),
+                                createGlobalIndexEntry("idx", DELETE, BinaryRow.EMPTY_ROW, 0, 149)),
                         null,
                         Snapshot.CommitKind.APPEND);
 
