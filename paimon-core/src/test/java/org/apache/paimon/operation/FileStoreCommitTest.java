@@ -1238,7 +1238,7 @@ public class FileStoreCommitTest {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        return createStore(false, options);
+        return createStore(false, -1, CoreOptions.ChangelogProducer.NONE, options);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {
@@ -1267,14 +1267,18 @@ public class FileStoreCommitTest {
                         ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
                         : TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
+        List<String> primaryKeys =
+                Boolean.parseBoolean(options.get(CoreOptions.ROW_TRACKING_ENABLED.key()))
+                        ? Collections.emptyList()
+                        : TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(new LocalFileIO(), path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
-                                TestKeyValueGenerator.getPrimaryKeys(
-                                        TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                                primaryKeys,
                                 options,
                                 null));
         return new TestFileStore.Builder(

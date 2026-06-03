@@ -563,40 +563,28 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        Map<PartitionBucketKey, List<Range>> dataRanges = new HashMap<>();
+        List<Range> dataRanges = new ArrayList<>();
         for (SimpleFileEntry entry : baseEntries) {
             if (entry.kind() == FileKind.ADD && entry.firstRowId() != null) {
-                dataRanges
-                        .computeIfAbsent(
-                                new PartitionBucketKey(entry.partition(), entry.bucket()),
-                                ignored -> new ArrayList<>())
-                        .add(entry.nonNullRowIdRange());
+                dataRanges.add(entry.nonNullRowIdRange());
             }
         }
-        Map<PartitionBucketKey, RowRangeIndex> rowRangeIndexes = new HashMap<>();
-        for (Map.Entry<PartitionBucketKey, List<Range>> entry : dataRanges.entrySet()) {
-            rowRangeIndexes.put(entry.getKey(), RowRangeIndex.create(entry.getValue()));
-        }
+        RowRangeIndex rowRangeIndex = RowRangeIndex.create(dataRanges);
 
         for (IndexManifestEntry indexEntry : indexesToCheck) {
             GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
             checkState(globalIndex != null, "Global index meta must not be null.");
             Range indexRange = globalIndex.rowRange();
-            RowRangeIndex currentRanges =
-                    rowRangeIndexes.get(
-                            new PartitionBucketKey(indexEntry.partition(), indexEntry.bucket()));
-            if (currentRanges == null || !currentRanges.contains(indexRange)) {
+            if (!rowRangeIndex.contains(indexRange)) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
                                         "Global index row ID existence conflict: index file '%s' "
-                                                + "references row range %s in bucket %d, but this "
-                                                + "range is not fully covered by current data "
+                                                + "references row range %s, but this range "
+                                                + "is not fully covered by current data "
                                                 + "files. The referenced row IDs may have been "
                                                 + "reassigned or removed by a concurrent commit.",
-                                        indexEntry.indexFile().fileName(),
-                                        indexRange,
-                                        indexEntry.bucket())));
+                                        indexEntry.indexFile().fileName(), indexRange)));
             }
         }
         return Optional.empty();
@@ -703,33 +691,6 @@ public class ConflictDetection {
         @Override
         public int hashCode() {
             return Objects.hash(partition, bucket, firstRowId, rowCount);
-        }
-    }
-
-    private static class PartitionBucketKey {
-        private final BinaryRow partition;
-        private final int bucket;
-
-        PartitionBucketKey(BinaryRow partition, int bucket) {
-            this.partition = partition;
-            this.bucket = bucket;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            PartitionBucketKey that = (PartitionBucketKey) o;
-            return bucket == that.bucket && Objects.equals(partition, that.partition);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(partition, bucket);
         }
     }
 
