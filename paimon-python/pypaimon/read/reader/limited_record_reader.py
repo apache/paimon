@@ -28,6 +28,7 @@ from typing import Optional
 
 from pyarrow import RecordBatch
 
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 
@@ -82,3 +83,35 @@ class _LimitedRecordIterator(RecordIterator):
             return None
         self._limiter.count += 1
         return row
+
+
+class LimitedRecordBatchReader(RecordBatchReader):
+    """Stop emitting rows once ``limit`` rows have been delivered.
+
+    Unlike ``LimitedRecordReader`` (which inherits ``RecordReader``),
+    this class inherits ``RecordBatchReader`` so that the
+    ``isinstance(..., RecordBatchReader)`` gate in TableRead picks the
+    arrow-batch code path.
+    """
+
+    def __init__(self, inner: RecordBatchReader, limit: int):
+        if limit < 0:
+            raise ValueError("limit must be non-negative, got %d" % limit)
+        self._inner = inner
+        self._limit = limit
+        self.count = 0
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        if self.count >= self._limit:
+            return None
+        batch = self._inner.read_arrow_batch()
+        if batch is None:
+            return None
+        remaining = self._limit - self.count
+        if batch.num_rows > remaining:
+            batch = batch.slice(0, remaining)
+        self.count += batch.num_rows
+        return batch
+
+    def close(self) -> None:
+        self._inner.close()

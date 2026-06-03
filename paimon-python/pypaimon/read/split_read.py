@@ -42,6 +42,7 @@ from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
 from pypaimon.read.reader.blob_descriptor_convert_reader import BlobDescriptorConvertReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
+from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader, LimitedRecordReader
 from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
@@ -146,8 +147,8 @@ class SplitRead(ABC):
         # the space FilterRecordReader actually evaluates against.
         read_type_names = {f.name for f in read_type}
         if (
-            self.predicate is not None
-            and _get_all_fields(self.predicate).issubset(read_type_names)
+                self.predicate is not None
+                and _get_all_fields(self.predicate).issubset(read_type_names)
         ):
             self.predicate_for_reader = rewrite_predicate_indices(
                 self.predicate, read_type
@@ -325,7 +326,7 @@ class SplitRead(ABC):
         effective_first_row_id = file.first_row_id
         if (shard_range is not None and file.first_row_id is not None
                 and file_format in (
-                    CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
+                        CoreOptions.FILE_FORMAT_VORTEX, CoreOptions.FILE_FORMAT_LANCE)):
             effective_first_row_id = file.first_row_id + shard_range[0]
 
         if for_merge_read:
@@ -623,12 +624,12 @@ class RawFileSplitRead(SplitRead):
         # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
         if self.table.is_primary_key_table and self.predicate_for_reader:
             reader = FilterRecordReader(concat_reader, self.predicate_for_reader)
+            if self.limit is not None:
+                reader = LimitedRecordReader(reader, self.limit)
         else:
             reader = concat_reader
-        if self.limit is not None:
-            from pypaimon.read.reader.limited_record_reader import \
-                LimitedRecordReader
-            reader = LimitedRecordReader(reader, self.limit)
+            if self.limit is not None:
+                reader = LimitedRecordBatchReader(reader, self.limit)
         return reader
 
     def _get_all_data_fields(self):
@@ -764,8 +765,6 @@ class MergeFileSplitRead(SplitRead):
                 blob_field_indices=_blob_field_indices(inner_value_fields),
                 vector_field_indices=_vector_field_indices(inner_value_fields))
         if self.limit is not None:
-            from pypaimon.read.reader.limited_record_reader import \
-                LimitedRecordReader
             reader = LimitedRecordReader(reader, self.limit)
         return reader
 
@@ -837,9 +836,7 @@ class DataEvolutionSplitRead(SplitRead):
             reader = BlobDescriptorConvertReader(reader, self.table)
 
         if self.limit is not None:
-            from pypaimon.read.reader.limited_record_reader import \
-                LimitedRecordReader
-            reader = LimitedRecordReader(reader, self.limit)
+            reader = LimitedRecordBatchReader(reader, self.limit)
 
         return reader
 

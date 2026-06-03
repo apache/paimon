@@ -110,8 +110,8 @@ class LimitPushdownTest(unittest.TestCase):
         exactly 3 rows — even though each partition split has 5 rows."""
         table = self._create_ao_table('limit_ao_within_split')
         self._write_ao_partitions(table, [
-            ('p1', list(range(5))),       # 5 rows
-            ('p2', list(range(5, 10))),   # 5 rows
+            ('p1', list(range(5))),  # 5 rows
+            ('p2', list(range(5, 10))),  # 5 rows
         ])
         rb = table.new_read_builder().with_limit(3)
         result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
@@ -209,11 +209,12 @@ class LimitPushdownTest(unittest.TestCase):
 
     # ---- SplitRead-level limit pushdown verification ---------------------
 
-    def test_append_only_split_read_creates_limited_reader(self):
+    def test_append_only_split_read_creates_limited_batch_reader(self):
         """Verify that RawFileSplitRead.create_reader() returns a
-        LimitedRecordReader when limit is set, proving SplitRead-level
-        limit pushdown is in effect."""
-        from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
+        LimitedRecordBatchReader (inherits RecordBatchReader) when limit
+        is set, so the arrow-batch read path is taken."""
+        from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+        from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 
         table = self._create_ao_table('limit_ao_split_read')
         self._write_ao_partitions(table, [('p1', list(range(10)))])
@@ -225,8 +226,10 @@ class LimitPushdownTest(unittest.TestCase):
             split_read = table_read._create_split_read(split)
             self.assertEqual(split_read.limit, 3)
             reader = split_read.create_reader()
-            self.assertIsInstance(reader, LimitedRecordReader,
-                                 "RawFileSplitRead.create_reader() should wrap with LimitedRecordReader")
+            self.assertIsInstance(reader, LimitedRecordBatchReader,
+                                  "RawFileSplitRead.create_reader() should wrap with LimitedRecordBatchReader")
+            self.assertIsInstance(reader, RecordBatchReader,
+                                  "LimitedRecordBatchReader should be a RecordBatchReader")
             reader.close()
 
     def test_append_only_split_read_limit_truncates_within_split(self):
