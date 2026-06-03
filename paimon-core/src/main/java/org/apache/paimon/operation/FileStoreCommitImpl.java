@@ -327,7 +327,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     checkAppendFiles = true;
                     allowRollback = true;
                 }
-                if (conflictDetection.hasGlobalIndexFileAddition(changes.appendIndexFiles)) {
+                if (changes.appendIndexFiles.stream()
+                        .anyMatch(
+                                entry ->
+                                        entry.kind() == FileKind.ADD
+                                                && entry.indexFile().globalIndexMeta() != null)) {
                     checkAppendFiles = true;
                 }
 

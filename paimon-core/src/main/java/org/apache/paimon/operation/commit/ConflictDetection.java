@@ -157,15 +157,6 @@ public class ConflictDetection {
         return false;
     }
 
-    public boolean hasGlobalIndexFileAddition(List<IndexManifestEntry> indexFileChanges) {
-        for (IndexManifestEntry entry : indexFileChanges) {
-            if (entry.kind() == FileKind.ADD && entry.indexFile().globalIndexMeta() != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public Optional<RuntimeException> checkConflicts(
             Snapshot latestSnapshot,
             List<SimpleFileEntry> baseEntries,
