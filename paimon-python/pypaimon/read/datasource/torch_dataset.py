@@ -30,6 +30,12 @@ from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 
 
+def _share_epoch_with_torch_workers(value):
+    if isinstance(value, torch.Tensor):
+        return value.share_memory_()
+    return torch.tensor(value, dtype=torch.long).share_memory_()
+
+
 class TorchDataset(Dataset):
     """
     PyTorch Dataset implementation for reading Paimon table data.
@@ -246,7 +252,20 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         self.buffer_size = self._require_positive_int(buffer_size, "buffer_size")
         self.max_buffer_input_splits = self._require_positive_int(
             max_buffer_input_splits, "max_buffer_input_splits")
-        self.epoch = 0
+        self._epoch = _share_epoch_with_torch_workers(0)
+
+    def __setstate__(self, state):
+        self.__dict__ = state
+        self._epoch = _share_epoch_with_torch_workers(self._epoch)
+
+    @property
+    def epoch(self) -> int:
+        return int(self._epoch)
+
+    @epoch.setter
+    def epoch(self, epoch: int) -> None:
+        epoch = self._require_int(epoch, "epoch")
+        self._epoch += epoch - self._epoch
 
     @staticmethod
     def _require_int(value: int, name: str) -> int:
@@ -261,7 +280,7 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         return value
 
     def set_epoch(self, epoch: int) -> "TorchShuffledIterDataset":
-        self.epoch = self._require_int(epoch, "epoch")
+        self.epoch = epoch
         return self
 
     def __iter__(self):

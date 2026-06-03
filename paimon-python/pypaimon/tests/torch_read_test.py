@@ -705,6 +705,36 @@ class TorchReadTest(unittest.TestCase):
             self._collect_torch_user_ids(other_seed_dataset, num_workers=0),
         )
 
+    def test_torch_streaming_shuffle_epoch_with_persistent_workers(self):
+        table = self._create_shuffle_append_table('default.test_torch_shuffle_persistent_epoch')
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        dataset = table_read.to_torch(
+            splits,
+            streaming=True,
+            shuffle=True,
+            seed=23,
+            buffer_size=11,
+            max_buffer_input_splits=4,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=8,
+            num_workers=2,
+            persistent_workers=True,
+            shuffle=False,
+        )
+
+        epoch0 = self._collect_torch_user_ids_from_dataloader(dataloader)
+        self.assertEqual(epoch0, self._collect_torch_user_ids_from_dataloader(dataloader))
+
+        dataset.set_epoch(1)
+        epoch1 = self._collect_torch_user_ids_from_dataloader(dataloader)
+        self.assertEqual(sorted(epoch1), list(range(80)))
+        self.assertNotEqual(epoch0, epoch1)
+
     def test_torch_streaming_shuffle_multi_worker(self):
         table = self._create_shuffle_append_table('default.test_torch_shuffle_multi')
         read_builder = table.new_read_builder().with_projection(['user_id'])
@@ -833,6 +863,13 @@ class TorchReadTest(unittest.TestCase):
             num_workers=num_workers,
             shuffle=False,
         )
+        all_user_ids = []
+        for batch_data in dataloader:
+            all_user_ids.extend(batch_data['user_id'].tolist())
+        return all_user_ids
+
+    @staticmethod
+    def _collect_torch_user_ids_from_dataloader(dataloader):
         all_user_ids = []
         for batch_data in dataloader:
             all_user_ids.extend(batch_data['user_id'].tolist())
