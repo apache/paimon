@@ -499,7 +499,10 @@ class CoreOptions:
         ConfigOptions.key("data-file.external-paths.strategy")
         .string_type()
         .default_value(ExternalPathStrategy.NONE)
-        .with_description("Strategy for selecting external paths. Options: none, round-robin, specific-fs, entropy-inject, weight-robin.")
+        .with_description(
+            "Strategy for selecting external paths. "
+            "Options: none, round-robin, specific-fs, entropy-inject, weight-robin."
+        )
     )
 
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS: ConfigOption[str] = (
