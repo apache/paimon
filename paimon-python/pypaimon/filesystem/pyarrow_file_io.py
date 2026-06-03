@@ -642,6 +642,15 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
 
+    def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import mosaic
+            with self.new_output_stream(path) as output_stream:
+                mosaic.write_table(data, output_stream)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
+
     def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import vortex

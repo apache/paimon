@@ -174,6 +174,9 @@ setup(
         'vortex': [
             'vortex-data==0.70.0; python_version>="3.11"',
         ],
+        'mosaic': [
+            'paimon-mosaic>=0.1.0',
+        ],
         'lumina': [
             'lumina-data>=0.1.0'
         ],

@@ -446,6 +446,9 @@ class CachingFileIO(FileIO):
     def write_blob(self, *args, **kwargs):
         return self._delegate.write_blob(*args, **kwargs)
 
+    def write_mosaic(self, *args, **kwargs):
+        return self._delegate.write_mosaic(*args, **kwargs)
+
     def write_vortex(self, *args, **kwargs):
         return self._delegate.write_vortex(*args, **kwargs)
 
