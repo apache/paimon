@@ -901,10 +901,21 @@ class CoreOptions:
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
 
     def data_file_external_paths_weights(self, default=None):
-        value = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_WEIGHTS, default)
-        if not value:
+        value = self.options.get(
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS_WEIGHTS, default
+        )
+        if value is None:
             return None
-        return [int(w.strip()) for w in value.split(",") if w.strip()]
+        parts = value.split(",")
+        weights = []
+        for part in parts:
+            parsed = int(part.strip())
+            if parsed <= 0:
+                raise ValueError(
+                    f"Weight must be positive, got: {parsed}"
+                )
+            weights.append(parsed)
+        return weights
 
     def commit_max_retries(self) -> int:
         return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)

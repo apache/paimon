@@ -262,6 +262,45 @@ class WeightedExternalPathProviderTest(unittest.TestCase):
             )
 
 
+class WeightsParsingTest(unittest.TestCase):
+    """Test CoreOptions.data_file_external_paths_weights() parsing and validation."""
+
+    def test_valid_weights(self):
+        """Normal comma-separated positive integers."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,5,15"})
+        self.assertEqual(opts.data_file_external_paths_weights(), [10, 5, 15])
+
+    def test_none_when_not_configured(self):
+        """Returns None when option is not set."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({})
+        self.assertIsNone(opts.data_file_external_paths_weights())
+
+    def test_zero_weight_raises(self):
+        """Zero weight should raise ValueError."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,0,5"})
+        with self.assertRaises(ValueError) as ctx:
+            opts.data_file_external_paths_weights()
+        self.assertIn("positive", str(ctx.exception))
+
+    def test_negative_weight_raises(self):
+        """Negative weight should raise ValueError."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,-5"})
+        with self.assertRaises(ValueError) as ctx:
+            opts.data_file_external_paths_weights()
+        self.assertIn("positive", str(ctx.exception))
+
+    def test_empty_element_raises(self):
+        """Empty element like '10,,5' should raise ValueError (align with Java NumberFormatException)."""
+        from pypaimon.common.options.core_options import CoreOptions
+        opts = CoreOptions.from_dict({"data-file.external-paths.weights": "10,,5"})
+        with self.assertRaises(ValueError):
+            opts.data_file_external_paths_weights()
+
+
 class ExternalPathsConfigTest(unittest.TestCase):
     """Test external paths configuration parsing through FileStoreTable._create_external_paths()."""
 
