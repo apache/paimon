@@ -181,6 +181,9 @@ setup(
             'pypaimon-rust; python_version>="3.10"',
             'datafusion>=52; python_version>="3.10"',
         ],
+        'hdfs': [
+            'hdfs-native>=0.13,<1; python_version >= "3.10" and platform_system != "Windows"',
+        ],
     },
     description="Apache Paimon Python API",
     long_description=long_description,
