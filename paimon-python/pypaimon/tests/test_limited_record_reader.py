@@ -19,6 +19,9 @@
 import unittest
 from typing import List, Optional
 
+import pyarrow as pa
+
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.iface.record_iterator import RecordIterator
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordReader
@@ -135,6 +138,101 @@ class LimitedRecordReaderTest(unittest.TestCase):
         self.assertEqual(_drain(reader), [1, 2, 3])
         # Only the first batch was fetched; the second is never asked for.
         self.assertEqual(inner.read_batch_calls, 1)
+
+
+class _StaticBatchReader(RecordBatchReader):
+    """Hands back arrow batches one at a time for testing
+    ``read_arrow_batch`` on ``LimitedRecordReader``."""
+
+    def __init__(self, batches: List[pa.RecordBatch]):
+        self._batches = batches
+        self._idx = 0
+        self.closed = False
+        self.read_arrow_batch_calls = 0
+
+    def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
+        self.read_arrow_batch_calls += 1
+        if self._idx >= len(self._batches):
+            return None
+        batch = self._batches[self._idx]
+        self._idx += 1
+        return batch
+
+    def close(self):
+        self.closed = True
+
+
+def _make_batch(values: List[int]) -> pa.RecordBatch:
+    return pa.RecordBatch.from_arrays(
+        [pa.array(values, type=pa.int64())], names=["v"])
+
+
+def _drain_arrow(reader) -> List[int]:
+    out = []
+    while True:
+        batch = reader.read_arrow_batch()
+        if batch is None:
+            break
+        out.extend(batch.column("v").to_pylist())
+    return out
+
+
+class LimitedRecordReaderArrowBatchTest(unittest.TestCase):
+
+    def test_arrow_batch_limit_within_single_batch(self):
+        inner = _StaticBatchReader([_make_batch([1, 2, 3, 4, 5])])
+        reader = LimitedRecordReader(inner, limit=3)
+        self.assertEqual(_drain_arrow(reader), [1, 2, 3])
+
+    def test_arrow_batch_limit_spans_multiple_batches(self):
+        inner = _StaticBatchReader([
+            _make_batch([1, 2]),
+            _make_batch([3, 4]),
+            _make_batch([5, 6]),
+        ])
+        reader = LimitedRecordReader(inner, limit=5)
+        self.assertEqual(_drain_arrow(reader), [1, 2, 3, 4, 5])
+
+    def test_arrow_batch_limit_larger_than_total(self):
+        inner = _StaticBatchReader([_make_batch([1, 2, 3])])
+        reader = LimitedRecordReader(inner, limit=999)
+        self.assertEqual(_drain_arrow(reader), [1, 2, 3])
+
+    def test_arrow_batch_limit_zero(self):
+        inner = _StaticBatchReader([_make_batch([1, 2, 3])])
+        reader = LimitedRecordReader(inner, limit=0)
+        self.assertEqual(_drain_arrow(reader), [])
+        self.assertIsNone(reader.read_arrow_batch())
+
+    def test_arrow_batch_and_read_batch_share_count(self):
+        """Verify that consuming rows via ``read_arrow_batch`` advances
+        the shared ``count`` so ``read_batch`` respects the limit too."""
+        batches = [_make_batch([10, 20, 30])]
+        row_batches = [[100, 200]]
+        inner = _StaticBatchReader(batches)
+        # Patch read_batch onto the batch reader so we can test the
+        # shared counter across both paths.
+        inner_row_batches = list(row_batches)
+        original_read_batch = inner.read_batch
+
+        def patched_read_batch():
+            if not inner_row_batches:
+                return None
+            items = inner_row_batches.pop(0)
+            return _ListIterator(items)
+
+        inner.read_batch = patched_read_batch
+
+        reader = LimitedRecordReader(inner, limit=4)
+        # Consume 3 rows via arrow batch
+        batch = reader.read_arrow_batch()
+        self.assertEqual(batch.column("v").to_pylist(), [10, 20, 30])
+        self.assertEqual(reader.count, 3)
+        # Only 1 more row allowed via read_batch
+        it = reader.read_batch()
+        self.assertIsNotNone(it)
+        self.assertEqual(it.next(), 100)
+        self.assertIsNone(it.next())  # limit reached
 
 
 if __name__ == '__main__':

@@ -580,6 +580,7 @@ class TableRead:
                 split=split,
                 row_tracking_enabled=True,
                 nested_name_paths=self.nested_name_paths,
+                limit=self.limit,
             )
         else:
             return RawFileSplitRead(
@@ -589,6 +590,7 @@ class TableRead:
                 split=split,
                 row_tracking_enabled=self.table.options.row_tracking_enabled(),
                 nested_name_paths=self.nested_name_paths,
+                limit=self.limit,
             )
 
     def _widen_to_top_level_for_merge(self) -> List[DataField]:

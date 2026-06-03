@@ -572,6 +572,21 @@ class SplitRead(ABC):
 
 
 class RawFileSplitRead(SplitRead):
+    def __init__(
+            self,
+            table,
+            predicate: Optional[Predicate],
+            read_type: List[DataField],
+            split: Split,
+            row_tracking_enabled: bool,
+            nested_name_paths: Optional[List[List[str]]] = None,
+            limit: Optional[int] = None):
+        super().__init__(
+            table, predicate, read_type, split, row_tracking_enabled,
+            nested_name_paths=nested_name_paths,
+        )
+        self.limit = limit
+
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
         # Check if this is a SlicedSplit to get shard_file_idx_map
@@ -620,9 +635,14 @@ class RawFileSplitRead(SplitRead):
             vector_field_indices=_vector_field_indices(self.read_fields))
         # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
         if self.table.is_primary_key_table and self.predicate_for_reader:
-            return FilterRecordReader(concat_reader, self.predicate_for_reader)
+            reader = FilterRecordReader(concat_reader, self.predicate_for_reader)
         else:
-            return concat_reader
+            reader = concat_reader
+        if self.limit is not None:
+            from pypaimon.read.reader.limited_record_reader import \
+                LimitedRecordReader
+            reader = LimitedRecordReader(reader, self.limit)
+        return reader
 
     def _get_all_data_fields(self):
         if self.row_tracking_enabled:
@@ -775,7 +795,8 @@ class DataEvolutionSplitRead(SplitRead):
             read_type: List[DataField],
             split: Split,
             row_tracking_enabled: bool,
-            nested_name_paths: Optional[List[List[str]]] = None):
+            nested_name_paths: Optional[List[List[str]]] = None,
+            limit: Optional[int] = None):
         self.row_ranges = None
         actual_split = split
         if isinstance(split, IndexedSplit):
@@ -785,6 +806,7 @@ class DataEvolutionSplitRead(SplitRead):
             table, predicate, read_type, actual_split, row_tracking_enabled,
             nested_name_paths=nested_name_paths,
         )
+        self.limit = limit
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         # Data evolution: files may have different schemas, so we don't push predicate
@@ -826,6 +848,11 @@ class DataEvolutionSplitRead(SplitRead):
         if (not CoreOptions.blob_as_descriptor(self.table.options)
                 and CoreOptions.blob_descriptor_fields(self.table.options)):
             reader = BlobDescriptorConvertReader(reader, self.table)
+
+        if self.limit is not None:
+            from pypaimon.read.reader.limited_record_reader import \
+                LimitedRecordReader
+            reader = LimitedRecordReader(reader, self.limit)
 
         return reader
 
