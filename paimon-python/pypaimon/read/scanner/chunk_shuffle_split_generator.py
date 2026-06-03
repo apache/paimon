@@ -351,11 +351,17 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
 
         Mirrors :meth:`DataEvolutionSplitGenerator._split_by_row_id` but
         also returns the merged row_id range per group, which the chunk
-        slicer needs to drive row-count accumulation. Files without
-        ``first_row_id`` are skipped (DE invariant guarantees presence;
-        defensive in case stray entries sneak in).
+        slicer needs to drive row-count accumulation.
         """
-        list_ranges = [f.row_id_range() for f in files if f.row_id_range() is not None]
+        list_ranges = []
+        for f in files:
+            file_range = f.row_id_range()
+            if file_range is None:
+                raise ValueError(
+                    "chunk_shuffle for data evolution tables requires row tracking; "
+                    f"file {f.file_name} is missing first_row_id"
+                )
+            list_ranges.append(file_range)
         if not list_ranges:
             return []
         sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
@@ -363,8 +369,6 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
         range_to_files: "dict[Range, List[DataFileMeta]]" = {}
         for f in files:
             file_range = f.row_id_range()
-            if file_range is None:
-                continue
             for r in sorted_ranges:
                 if r.overlaps(file_range):
                     range_to_files.setdefault(r, []).append(f)
