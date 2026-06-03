@@ -3568,10 +3568,6 @@ class GetBlobNonBlobColumnSecurityTest(unittest.TestCase):
             mock_create.assert_not_called()
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class BlobConsumerTest(unittest.TestCase):
     """Tests for BlobConsumer callback functionality."""
 
@@ -3769,10 +3765,10 @@ class BlobConsumerTest(unittest.TestCase):
 
         self.assertGreater(len(received), 0)
 
-        # Force abort — simulates a failure after some blobs were already
-        # committed (rolled) and their descriptors returned to the consumer.
-        writer.file_store_write.close()
-        for dw in writer.file_store_write.data_writers.values():
+        # Capture data writers before close() clears them, then abort each one.
+        data_writers = list(writer.file_store_write.data_writers.values())
+        self.assertGreater(len(data_writers), 0)
+        for dw in data_writers:
             dw.abort()
 
         # Every descriptor returned to the consumer must still be readable.
@@ -3806,3 +3802,7 @@ class BlobConsumerTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             writer.with_blob_consumer(lambda f, d: False)
         writer.close()
+
+
+if __name__ == '__main__':
+    unittest.main()
