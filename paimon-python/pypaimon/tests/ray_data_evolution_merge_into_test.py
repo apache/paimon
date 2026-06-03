@@ -1096,6 +1096,52 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2])
         self.assertEqual(out['name'], ['a', 'b'])
 
+    def test_explicit_source_ref_not_remapped_by_on_key(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['old'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source_schema = pa.schema([
+            ('uid', pa.int32()),
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+        ])
+        source = pa.Table.from_pydict(
+            {
+                'uid': pa.array([1], type=pa.int32()),
+                'id': pa.array([999], type=pa.int32()),
+                'name': ['new'],
+                'age': pa.array([99], type=pa.int32()),
+            },
+            schema=source_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on={'id': 'uid'},
+            when_matched=[WhenMatched(update={
+                'id': source_col('id'),
+                'name': source_col('name'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [999])
+        self.assertEqual(out['name'], ['new'])
+
     def test_lit_prevents_column_ref_interpretation(self):
         target = self._create_table()
         self._write(

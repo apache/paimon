@@ -461,8 +461,6 @@ def _normalize_set_spec(
                 "lit(), or literals, not callables"
             )
         if isinstance(val, SourceColumnRef):
-            if key in on_map and val.column == key:
-                val = SourceColumnRef(on_map[key])
             result[key] = val
         elif isinstance(val, TargetColumnRef):
             if not allow_target_refs:
@@ -479,10 +477,7 @@ def _normalize_set_spec(
         elif isinstance(val, LiteralValue):
             result[key] = val
         elif isinstance(val, str) and val.startswith("s."):
-            ref = val[2:]
-            if key in on_map and ref == key:
-                ref = on_map[key]
-            result[key] = SourceColumnRef(ref)
+            result[key] = SourceColumnRef(val[2:])
         elif isinstance(val, str) and val.startswith("t."):
             if not allow_target_refs:
                 raise ValueError(
