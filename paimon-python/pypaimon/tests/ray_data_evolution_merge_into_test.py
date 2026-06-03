@@ -153,6 +153,21 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         self.assertIn("'id'", str(ctx.exception))
 
+    def test_not_matched_condition_rejects_target_refs(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[
+                    WhenNotMatched(insert='*', condition='t.age > 10')
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('t.', str(ctx.exception))
+
     def test_matched_update_star(self):
         target = self._create_table()
         self._write(
@@ -519,12 +534,204 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2])
         self.assertEqual(out['pt'], ['a', 'b'])
 
+    def test_matched_update_with_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([15, 25, 45], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched(update='*', condition='s.age > t.age + 10')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b', 'c2'])
+        self.assertEqual(out['age'], [10, 20, 45])
+
+    def test_matched_condition_with_source_on_key(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([15, 25, 35], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched(update='*', condition='s.id >= 2')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b2', 'c2'])
+        self.assertEqual(out['age'], [10, 25, 35])
+
+    def test_not_matched_insert_with_condition(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'age': pa.array([10], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([2, 3, 4], type=pa.int32()),
+                'name': ['b', 'c', 'd'],
+                'age': pa.array([15, 25, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[
+                WhenNotMatched(insert='*', condition='s.age >= 10')
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a', 'b', 'c'])
+        self.assertEqual(out['age'], [10, 15, 25])
+
+    def test_combined_with_conditions(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3, 4], type=pa.int32()),
+                'name': ['a2', 'b2', 'c', 'd'],
+                'age': pa.array([50, 5, 30, 8], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        metrics = merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched(update='*', condition='s.age > t.age')],
+            when_not_matched=[
+                WhenNotMatched(insert='*', condition='s.age > 10')
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a2', 'b', 'c'])
+        self.assertEqual(out['age'], [50, 20, 30])
+        self.assertEqual(metrics['num_matched'], 1)
+        self.assertEqual(metrics['num_inserted'], 1)
+
+    def test_condition_no_rows_match_is_noop(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['a2', 'b2'],
+                'age': pa.array([5, 5], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched(update='*', condition='s.age > t.age')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2])
+        self.assertEqual(out['name'], ['a', 'b'])
+        self.assertEqual(out['age'], [10, 20])
+
 
 class TargetProjectionTest(unittest.TestCase):
 
-    def _clause(self, spec):
+    def _clause(self, spec, condition=None):
         from pypaimon.ray import data_evolution_merge_into as m
-        return m._NormalizedClause(spec=spec)
+        return m._NormalizedClause(spec=spec, condition=condition)
 
     def test_unconditional_set_excludes_target_update_col(self):
         from pypaimon.ray import data_evolution_merge_into as m
@@ -533,6 +740,94 @@ class TargetProjectionTest(unittest.TestCase):
             ['id'], ['feature'], ['id', 'feature', 'image'],
         )
         self.assertEqual(['id'], cols)
+
+    def test_condition_adds_referenced_target_cols(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+        cols = m._resolve_target_projection(
+            [self._clause({'feature': 's.feature'}, condition='s.age > t.age')],
+            ['id'], ['feature'], ['id', 'feature', 'age', 'image'],
+        )
+        self.assertIn('age', cols)
+        self.assertIn('id', cols)
+
+
+class MergeConditionUnitTest(unittest.TestCase):
+
+    def test_rewrite_condition(self):
+        from pypaimon.ray.merge_condition import rewrite_condition
+        self.assertEqual(
+            rewrite_condition('s.age > t.age + 10'),
+            '"s.age" > "t.age" + 10',
+        )
+
+    def test_rewrite_condition_preserves_string_literals(self):
+        from pypaimon.ray.merge_condition import rewrite_condition
+        self.assertEqual(
+            rewrite_condition("s.status = 't.active' AND s.age > t.age"),
+            '"s.status" = \'t.active\' AND "s.age" > "t.age"',
+        )
+
+    def test_remap_source_on_keys(self):
+        from pypaimon.ray.merge_condition import (
+            remap_source_on_keys, rewrite_condition,
+        )
+        rewritten = rewrite_condition('s.id > 1 AND s.age > t.age')
+        remapped = remap_source_on_keys(rewritten, {'id': 'id'})
+        self.assertEqual(remapped, '"t.id" > 1 AND "s.age" > "t.age"')
+
+    def test_remap_source_on_keys_renamed(self):
+        from pypaimon.ray.merge_condition import (
+            remap_source_on_keys, rewrite_condition,
+        )
+        rewritten = rewrite_condition('s.uid > 1')
+        remapped = remap_source_on_keys(rewritten, {'uid': 'id'})
+        self.assertEqual(remapped, '"t.id" > 1')
+
+    def test_remap_preserves_string_literals(self):
+        from pypaimon.ray.merge_condition import (
+            remap_source_on_keys, rewrite_condition,
+        )
+        rewritten = rewrite_condition("s.note = '\"s.id\"' AND s.id = 1")
+        remapped = remap_source_on_keys(rewritten, {'id': 'id'})
+        self.assertEqual(
+            remapped,
+            '"s.note" = \'\"s.id\"\' AND "t.id" = 1',
+        )
+
+    def test_extract_target_columns(self):
+        from pypaimon.ray.merge_condition import extract_target_columns
+        self.assertEqual(
+            extract_target_columns('s.name = t.name AND s.age > t.age'),
+            {'name', 'age'},
+        )
+
+    def test_extract_target_columns_ignores_string_literals(self):
+        from pypaimon.ray.merge_condition import extract_target_columns
+        self.assertEqual(
+            extract_target_columns("s.name = 't.fake' AND s.age > t.age"),
+            {'age'},
+        )
+
+    def test_extract_columns(self):
+        from pypaimon.ray.merge_condition import extract_columns
+        self.assertEqual(
+            extract_columns('s.id = t.id AND s.age > t.age'),
+            {'s.id', 't.id', 's.age', 't.age'},
+        )
+
+    def test_filter_batch(self):
+        try:
+            import datafusion  # noqa: F401
+        except ImportError:
+            self.skipTest("datafusion not installed")
+        from pypaimon.ray.merge_condition import filter_batch
+        batch = pa.table({
+            's.id': pa.array([1, 2, 3], type=pa.int32()),
+            's.age': pa.array([10, 25, 30], type=pa.int32()),
+            't.age': pa.array([20, 20, 20], type=pa.int32()),
+        })
+        result = filter_batch(batch, 's.age > t.age')
+        self.assertEqual(result.column('s.id').to_pylist(), [2, 3])
 
 
 if __name__ == '__main__':
