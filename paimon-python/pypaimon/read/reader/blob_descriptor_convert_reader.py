@@ -58,7 +58,8 @@ class BlobInlineConvertReader(RecordBatchReader):
         self.blob_field_indices = inner.blob_field_indices
         # Preserve original BlobViewStruct bytes when resolve disabled: skip both
         # view resolution (Stage 1) and descriptor-to-data resolution (Stage 2).
-        resolve_enabled = CoreOptions.blob_view_resolve_enabled(table.options)
+        resolve_enabled = CoreOptions.blob_view_resolve_enabled(
+            table.options) and self._table.catalog_environment.catalog_loader is not None
         self._view_fields = CoreOptions.blob_view_fields(table.options) if resolve_enabled else set()
         self._descriptor_fields = CoreOptions.blob_descriptor_fields(table.options)
         self._blob_as_descriptor = CoreOptions.blob_as_descriptor(table.options)
@@ -71,11 +72,7 @@ class BlobInlineConvertReader(RecordBatchReader):
         # This matches Java's behavior in DataEvolutionTableRead.createReader where blob view reader
         # is only created when catalogContext != null
         if self._view_fields and not self._prescan_done:
-            if self._table.catalog_environment.catalog_loader is None:
-                # No catalog_loader available, skip view resolution
-                self._prescan_done = True
-            else:
-                self._prescan_view_structs()
+            self._prescan_view_structs()
 
         batch = self._inner.read_arrow_batch()
         if batch is None:
