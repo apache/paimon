@@ -293,6 +293,22 @@ class RESTApi:
             self.rest_auth_function,
         )
 
+    def get_table_via(self, table: Identifier, via: Identifier) -> GetTableResponse:
+        """Get table via a view (view penetration).
+
+        This API can only be called by trusted engines. The server must authenticate
+        whether the caller is a trusted engine.
+        """
+        table_db, table_name = self.__validate_identifier(table)
+        via_db, via_object = self.__validate_identifier(via)
+
+        return self.client.post_with_response_type(
+            self.resource_paths.table_via(table_db, table_name, via_db, via_object),
+            ForwardBranchRequest(),
+            GetTableResponse,
+            self.rest_auth_function,
+        )
+
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
         database_name, table_name = self.__validate_identifier(identifier)
 
