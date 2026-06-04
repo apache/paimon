@@ -137,7 +137,6 @@ def build_matched_update_ds(
                         captured_schema,
                     ))
                 if matched.num_rows < remaining.num_rows:
-                    row_id_col = f"t.{captured_row_id_name}"
                     mask = pc.invert(pc.is_in(
                         remaining.column(row_id_col),
                         matched.column(row_id_col),
