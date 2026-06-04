@@ -21,6 +21,11 @@ from pypaimon.ray.data_evolution_merge_into import (
     WhenNotMatched,
     merge_into,
 )
+from pypaimon.ray.data_evolution_merge_transform import (
+    source_col,
+    target_col,
+    lit,
+)
 
 __all__ = [
     "read_paimon",
@@ -28,4 +33,7 @@ __all__ = [
     "merge_into",
     "WhenMatched",
     "WhenNotMatched",
+    "source_col",
+    "target_col",
+    "lit",
 ]

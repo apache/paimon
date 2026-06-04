@@ -25,6 +25,33 @@ SetSpec = Union[str, Mapping[str, Any]]
 OnSpec = Union[Sequence[str], Mapping[str, str]]
 
 
+@dataclass(frozen=True)
+class SourceColumnRef:
+    column: str
+
+
+@dataclass(frozen=True)
+class TargetColumnRef:
+    column: str
+
+
+@dataclass(frozen=True)
+class LiteralValue:
+    value: Any
+
+
+def source_col(name: str) -> SourceColumnRef:
+    return SourceColumnRef(name)
+
+
+def target_col(name: str) -> TargetColumnRef:
+    return TargetColumnRef(name)
+
+
+def lit(value: Any) -> LiteralValue:
+    return LiteralValue(value)
+
+
 @dataclass
 class WhenMatched:
     update: SetSpec
@@ -105,18 +132,19 @@ def _resolve_spec_array(
     on_pairs: Sequence[Tuple[str, str]],
     out_type: pa.DataType,
 ):
-    if isinstance(val, str) and val.startswith("s."):
-        ref = val[2:]
+    if isinstance(val, LiteralValue):
+        return pa.array([val.value] * batch.num_rows, type=out_type)
+    if isinstance(val, SourceColumnRef):
+        ref = val.column
         if f"s.{ref}" in available:
             return batch.column(f"s.{ref}")
         for sk, tk in on_pairs:
             if sk == ref and f"t.{tk}" in available:
                 return batch.column(f"t.{tk}")
         return pa.nulls(batch.num_rows, type=out_type)
-    if isinstance(val, str) and val.startswith("t."):
-        ref = val[2:]
-        col_name = f"t.{ref}"
+    if isinstance(val, TargetColumnRef):
+        col_name = f"t.{val.column}"
         return batch.column(col_name) if col_name in available else pa.nulls(
             batch.num_rows, type=out_type
         )
-    return pa.array([val] * batch.num_rows, type=out_type)
+    raise TypeError(f"unexpected spec value type: {type(val).__name__}")

@@ -374,10 +374,16 @@ Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
 column prefixes. `WhenNotMatched` conditions may only reference source
 columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
 
-- `update` / `insert`: only `"*"` is supported in this PR. A future follow-up
-  will add mapping-based SET (e.g. `{"col": "s.col"}`) where values are
-  analyzable string expressions (`"s.<col>"`, `"t.<col>"`, or literals),
-  not Python callables.
+- `update` / `insert`: `"*"` updates/inserts all non-blob columns from source.
+  A mapping selects specific columns:
+  ```python
+  from pypaimon.ray import source_col, target_col, lit
+
+  WhenMatched(update={"age": source_col("age"), "name": target_col("name")})
+  WhenNotMatched(insert={"id": source_col("id"), "status": lit("new")})
+  ```
+  `"s.<col>"` / `"t.<col>"` shorthands also work (`t.*` only in update).
+  Use `lit()` for literals starting with `s.` or `t.`.
 - `condition`: an optional SQL-style boolean expression. Use `s.<col>` and
   `t.<col>` to reference source and target columns.
 
