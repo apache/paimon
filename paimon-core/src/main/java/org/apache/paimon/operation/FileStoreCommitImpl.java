@@ -985,6 +985,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 deltaFiles = assigned.assignedEntries;
             }
 
+            if (options.snapshotSequenceOrdering()) {
+                deltaFiles = stampSequenceWithSnapshotId(newSnapshotId, commitKind, deltaFiles);
+            }
+
             // the added records subtract the deleted records from
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
@@ -1260,5 +1264,32 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         IOUtils.closeAllQuietly(commitPreCallbacks);
         IOUtils.closeAllQuietly(commitCallbacks);
         IOUtils.closeQuietly(snapshotCommit);
+    }
+
+    /**
+     * Stamps the commit snapshot id into {@link DataFileMeta#minSequenceNumber()} / {@link
+     * DataFileMeta#maxSequenceNumber()} of APPEND files, reusing these fields instead of adding a
+     * new one (same pattern as {@link RowTrackingCommitUtils#assignRowTracking}). COMPACT files are
+     * returned unchanged: their input was read through the override path, so their per-record
+     * {@code _SEQUENCE_NUMBER} already carries the snapshot id.
+     *
+     * <p>All records of a snapshot share one id, so intra-snapshot order is not preserved. This is
+     * accepted: the default spillable writer collapses a commit's writes through the merge function
+     * to one record per key before flush, and the feature targets cross-snapshot ordering only.
+     */
+    private static List<ManifestEntry> stampSequenceWithSnapshotId(
+            long snapshotId, CommitKind commitKind, List<ManifestEntry> files) {
+        if (commitKind == CommitKind.COMPACT) {
+            return files;
+        }
+        List<ManifestEntry> result = new ArrayList<>(files.size());
+        for (ManifestEntry entry : files) {
+            if (entry.kind() == FileKind.ADD) {
+                result.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            } else {
+                result.add(entry);
+            }
+        }
+        return result;
     }
 }

@@ -1362,6 +1362,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Specify the order of sequence.field.<br /><br />Possible values:<ul><li>"ascending": specifies sequence.field sort order is ascending.</li><li>"descending": specifies sequence.field sort order is descending.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>sequence.snapshot-ordering</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, merge uses the commit snapshot id as the ordering key for primary-key conflicts: records from later snapshots always win. Designed for multi-writer scenarios on the same primary-key table where wall-clock sequence numbers cannot be globally ordered. The order of records within the same snapshot is not guaranteed. Mutually exclusive with sequence.field. Requires a primary-key table with write-only=true. Inline compaction is not allowed because snapshot ids are assigned only after commit. To compact such tables, run a dedicated compaction job/action with write-only=false.</td>
+        </tr>
+        <tr>
             <td><h5>sink.process-time-zone</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

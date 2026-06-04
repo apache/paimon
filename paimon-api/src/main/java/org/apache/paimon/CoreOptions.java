@@ -1021,6 +1021,24 @@ public class CoreOptions implements Serializable {
                     .withDescription("Specify the order of sequence.field.");
 
     @Immutable
+    public static final ConfigOption<Boolean> SEQUENCE_SNAPSHOT_ORDERING =
+            key("sequence.snapshot-ordering")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When enabled, merge uses the commit snapshot id as the ordering key "
+                                    + "for primary-key conflicts: records from later snapshots "
+                                    + "always win. Designed for multi-writer scenarios on the same "
+                                    + "primary-key table where wall-clock sequence numbers cannot "
+                                    + "be globally ordered. The order of records within the same "
+                                    + "snapshot is not guaranteed. Mutually exclusive with "
+                                    + "sequence.field. Requires a primary-key table with "
+                                    + "write-only=true. Inline compaction is not allowed because "
+                                    + "snapshot ids are assigned only after commit. To compact such "
+                                    + "tables, run a dedicated compaction job/action with "
+                                    + "write-only=false.");
+
+    @Immutable
     public static final ConfigOption<Boolean> AGGREGATION_REMOVE_RECORD_ON_DELETE =
             key("aggregation.remove-record-on-delete")
                     .booleanType()
@@ -3490,6 +3508,10 @@ public class CoreOptions implements Serializable {
 
     public boolean sequenceFieldSortOrderIsAscending() {
         return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
+    }
+
+    public boolean snapshotSequenceOrdering() {
+        return options.get(SEQUENCE_SNAPSHOT_ORDERING);
     }
 
     public Optional<String> rowkindField() {
