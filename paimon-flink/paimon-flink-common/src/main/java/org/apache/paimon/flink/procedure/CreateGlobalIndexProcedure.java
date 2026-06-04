@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -114,10 +115,13 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
 
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
-        if ("btree".equals(indexType)) {
+        if (indexColumns.size() > 1) {
+            // Whether multi-column is supported is decided by each index type's factory; fail fast
+            // up front instead of failing later in the build job.
             checkArgument(
-                    indexColumns.size() == 1,
-                    "BTree index only supports single column, got: %s",
+                    GlobalIndexerFactoryUtils.load(indexType).supportsMultiColumn(),
+                    "Index type '%s' does not support multi-column index, got columns: %s",
+                    indexType,
                     indexColumns);
         }
         try {

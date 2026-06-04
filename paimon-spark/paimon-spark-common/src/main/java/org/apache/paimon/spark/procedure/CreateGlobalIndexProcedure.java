@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
@@ -157,12 +158,6 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                     col,
                                     tableIdent);
                         }
-                        if ("btree".equalsIgnoreCase(indexType)) {
-                            checkArgument(
-                                    indexColumns.size() == 1,
-                                    "BTree index only supports single column, got: %s",
-                                    indexColumns);
-                        }
                         DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                         PartitionPredicate partitionPredicate =
                                 SparkProcedureUtils.convertToPartitionPredicate(
@@ -179,6 +174,17 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
 
                         Options userOptions = createUserOptions(table, optionString);
+
+                        if (indexColumns.size() > 1) {
+                            // Whether multi-column is supported is decided by each index type's
+                            // factory; fail fast up front instead of failing later in the build
+                            // job.
+                            checkArgument(
+                                    GlobalIndexerFactoryUtils.load(indexType).supportsMultiColumn(),
+                                    "Index type '%s' does not support multi-column index, got columns: %s",
+                                    indexType,
+                                    indexColumns);
+                        }
 
                         GlobalIndexTopologyBuilder topoBuilder =
                                 GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);

@@ -31,6 +31,14 @@ public interface GlobalIndexerFactory {
 
     GlobalIndexer create(DataField dataField, Options options);
 
+    /**
+     * Whether this index type supports multi-column indexes. A factory that returns {@code true}
+     * must override {@link #create(List, Options)} to handle more than one column.
+     */
+    default boolean supportsMultiColumn() {
+        return false;
+    }
+
     default GlobalIndexer create(List<DataField> fields, Options options) {
         if (fields.size() > 1) {
             throw new UnsupportedOperationException(
