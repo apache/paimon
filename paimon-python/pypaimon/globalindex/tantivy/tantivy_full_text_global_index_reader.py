@@ -316,7 +316,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                         schema, directory=directory,
                     )
                 except ValueError as e:
-                    if "schema" not in str(e).lower():
+                    if "schema does not match" not in str(e):
                         raise
                     schema = self._build_schema(
                         tantivy, row_id_stored=True,
