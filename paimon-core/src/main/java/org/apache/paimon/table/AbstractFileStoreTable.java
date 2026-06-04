@@ -296,6 +296,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         coreOptions(),
                         newSnapshotReader(),
                         catalogEnvironment.tableQueryAuth(coreOptions()));
+        Integer scanBucket = coreOptions().scanBucket();
+        if (scanBucket != null) {
+            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
+            scan.withBucket(scanBucket);
+        }
         if (coreOptions().dataEvolutionEnabled()) {
             return new DataEvolutionBatchScan(this, scan);
         }
@@ -304,15 +309,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        return new DataTableStreamScan(
-                tableSchema,
-                coreOptions(),
-                newSnapshotReader(),
-                snapshotManager(),
-                changelogManager(),
-                supportStreamingReadOverwrite(),
-                catalogEnvironment.tableQueryAuth(coreOptions()),
-                !tableSchema.primaryKeys().isEmpty());
+        DataTableStreamScan scan =
+                new DataTableStreamScan(
+                        tableSchema,
+                        coreOptions(),
+                        newSnapshotReader(),
+                        snapshotManager(),
+                        changelogManager(),
+                        supportStreamingReadOverwrite(),
+                        catalogEnvironment.tableQueryAuth(coreOptions()),
+                        !tableSchema.primaryKeys().isEmpty());
+        Integer scanBucket = coreOptions().scanBucket();
+        if (scanBucket != null) {
+            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
+            scan.withBucket(scanBucket);
+        }
+        return scan;
     }
 
     protected abstract SplitGenerator splitGenerator();
