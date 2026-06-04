@@ -1390,6 +1390,483 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
         self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
 
+    def test_blob_view_fields_resolve_upstream_blob(self):
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_source')
+        payloads = [b'view-source-0', b'view-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        all_target_files = [f for msg in target_commit_messages for f in msg.new_files]
+        self.assertFalse(
+            any(f.file_name.endswith('.blob') for f in all_target_files),
+            "Blob view fields should be stored inline without writing new blob files",
+        )
+
+        result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('picture').to_pylist(), payloads)
+
+        descriptor_table = target_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'})
+        descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
+            descriptor_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        # With blob-as-descriptor=true, view fields return BlobDescriptor bytes
+        from pypaimon.table.row.blob import BlobDescriptor
+        for value in descriptor_result.column('picture').to_pylist():
+            self.assertTrue(
+                BlobDescriptor.is_blob_descriptor(value),
+                "Expected BlobDescriptor bytes when blob-as-descriptor=true"
+            )
+
+    def test_blob_view_resolve_disabled_preserves_references(self):
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_resolve_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_resolve_source')
+        payloads = [b'resolve-source-0', b'resolve-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_resolve_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_resolve_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # Default (resolve enabled): view fields are resolved to real blob data.
+        resolved_result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(resolved_result.column('picture').to_pylist(), payloads)
+
+        # resolve disabled: view fields keep the original BlobViewStruct bytes.
+        preserve_table = target_table.copy(
+            {CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(): 'false'}
+        )
+        preserve_result = preserve_table.new_read_builder().new_read().to_arrow(
+            preserve_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        preserved_values = preserve_result.column('picture').to_pylist()
+        self.assertEqual(preserved_values, view_values)
+        for value in preserved_values:
+            self.assertTrue(
+                BlobViewStruct.is_blob_view_struct(value),
+                "Expected original BlobViewStruct bytes when resolve disabled"
+            )
+
+    def test_blob_view_resolves_null_upstream_value(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_null_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_null_source')
+        # Row 0 has a real blob value, row 1 has a null blob value.
+        payloads = [b'null-source-0', None]
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_null_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_null_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # View referencing a real upstream value resolves to data; view
+        # referencing a null upstream value resolves to None (not an error).
+        result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('picture').to_pylist(), [b'null-source-0', None])
+
+    def test_blob_view_fields_rejects_non_view_input(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_reject_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_view_reject_test')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        bad_data = pa.Table.from_pydict({
+            'id': [1],
+            'picture': [b'not-a-view-struct'],
+        }, schema=pa_schema)
+
+        with self.assertRaises(ValueError) as context:
+            writer.write_arrow(bad_data)
+        self.assertIn("blob-view-field", str(context.exception))
+
+    def test_blob_inline_fields_reject_overlap_and_unknown_fields(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        base_options = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        }
+
+        overlap_options = dict(base_options)
+        overlap_options.update({
+            'blob-descriptor-field': 'picture',
+            'blob-view-field': 'picture',
+        })
+        overlap_schema = Schema.from_pyarrow_schema(pa_schema, options=overlap_options)
+        with self.assertRaises(ValueError) as overlap_context:
+            self.catalog.create_table(
+                'test_db.blob_overlap_reject', overlap_schema, False)
+        self.assertIn("must not overlap", str(overlap_context.exception))
+
+        unknown_options = dict(base_options)
+        unknown_options.update({'blob-view-field': 'missing_picture'})
+        unknown_schema = Schema.from_pyarrow_schema(pa_schema, options=unknown_options)
+        with self.assertRaises(ValueError) as unknown_context:
+            self.catalog.create_table(
+                'test_db.blob_unknown_reject', unknown_schema, False)
+        self.assertIn("must be blob fields", str(unknown_context.exception))
+
+    def test_blob_view_prescan_with_limit(self):
+        """Test that limit is correctly pushed down to prescan reader.
+        
+        Regression test for: prescan should only scan up to limit rows,
+        not the entire split.
+        """
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        # Create source table with multiple rows
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_limit_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_limit_source')
+
+        # Write 10 rows
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_limit_source', picture_field_id, i).serialize()
+            for i in range(num_rows)
+        ]
+
+        # Create target table with blob-view-field
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_limit_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_limit_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # Test with limit: should only return first 3 rows
+        read_builder = target_table.new_read_builder()
+        read_builder.with_limit(3)
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(result.num_rows, 3, "LIMIT should be respected in blob view prescan")
+        self.assertEqual(result.column('id').to_pylist(), [0, 1, 2])
+
+    def test_blob_view_prescan_only_collects_limited_view_structs(self):
+        """Verify that the prescan stage only collects as many BlobViewStructs as
+        the limit allows, instead of scanning the entire split.
+
+        Unlike test_blob_view_prescan_with_limit (which only checks the final
+        output), this test patches BlobViewLookup.preload to capture the exact
+        list of view structs collected during prescan and asserts its length
+        equals the limit.
+        """
+        from unittest import mock
+
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_prescan_count_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_prescan_count_source')
+
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_prescan_count_source', picture_field_id, i).serialize()
+            for i in range(num_rows)
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_prescan_count_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_prescan_count_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        captured_view_structs = []
+        original_preload = BlobViewLookup.preload
+
+        def capturing_preload(lookup_self, view_structs):
+            captured_view_structs.append(list(view_structs))
+            return original_preload(lookup_self, view_structs)
+
+        limit = 3
+        read_builder = target_table.new_read_builder()
+        read_builder.with_limit(limit)
+        with mock.patch.object(BlobViewLookup, 'preload', autospec=True,
+                               side_effect=capturing_preload):
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits()
+            )
+
+        self.assertEqual(result.num_rows, limit)
+        self.assertEqual(len(captured_view_structs), 1,
+                         "preload should be invoked exactly once during prescan")
+        self.assertEqual(
+            len(captured_view_structs[0]), limit,
+            "prescan should only collect as many view structs as the limit allows")
+
     def test_to_arrow_batch_reader(self):
         import random
         from pypaimon import Schema
@@ -3204,7 +3681,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         total_split_row_count = sum([s.row_count for s in splits])
         self.assertEqual(total_split_row_count, num_rows * 2,
                          f"Total split row count should be {num_rows}, got {total_split_row_count}")
-        
+
         total_merged_count = 0
         for split in splits:
             merged_count = split.merged_row_count()
@@ -3213,7 +3690,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 self.assertLessEqual(
                     merged_count, split.row_count,
                     f"merged_row_count ({merged_count}) should be <= row_count ({split.row_count})")
-        
+
         if total_merged_count > 0:
             self.assertEqual(
                 total_merged_count, num_rows,
@@ -3311,6 +3788,24 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 False
             )
         self.assertIn('Cannot rename BLOB column', str(ctx.exception))
+
+    def test_nested_field_named_blob_not_treated_as_blob(self):
+        """Regression: a ROW field with a nested column whose name contains
+        'blob' must NOT be treated as a top-level BLOB column.  Previously
+        the substring match would falsely classify such fields, causing
+        create_table to require row-tracking and data-evolution options."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.struct([
+                ('blob_name', pa.string()),
+                ('value', pa.int64()),
+            ])),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'test_db.nested_blob_name_no_error', schema, False)
+        table = self.catalog.get_table('test_db.nested_blob_name_no_error')
+        self.assertIsNotNone(table)
 
 
 class GetBlobTest(unittest.TestCase):

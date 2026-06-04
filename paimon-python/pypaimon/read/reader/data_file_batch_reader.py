@@ -25,7 +25,6 @@ from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.blob import Blob
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -40,8 +39,6 @@ class DataFileBatchReader(RecordBatchReader):
                  first_row_id: int,
                  row_tracking_enabled: bool,
                  system_fields: dict,
-                 blob_as_descriptor: bool = False,
-                 blob_descriptor_fields: Optional[set] = None,
                  file_io: Optional[FileIO] = None,
                  row_id_offsets: Optional[List[int]] = None):
         self.format_reader = format_reader
@@ -55,19 +52,7 @@ class DataFileBatchReader(RecordBatchReader):
         self._row_id_cursor = 0
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
-        self.blob_as_descriptor = blob_as_descriptor
-        self.blob_descriptor_fields = blob_descriptor_fields or set()
         self.file_io = file_io
-        self.blob_field_names = {
-            field.name
-            for field in fields
-            if hasattr(field.type, 'type') and field.type.type == 'BLOB'
-        }
-        self.descriptor_blob_fields = {
-            field_name
-            for field_name in self.blob_descriptor_fields
-            if field_name in self.blob_field_names
-        }
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -140,8 +125,6 @@ class DataFileBatchReader(RecordBatchReader):
         if self.row_tracking_enabled and self.system_fields:
             record_batch = self._assign_row_tracking(record_batch)
 
-        record_batch = self._convert_descriptor_stored_blob_columns(record_batch)
-
         return record_batch
 
     def _align_batch_to_read_schema(self, names: List[str], arrays: list) -> RecordBatch:
@@ -169,50 +152,6 @@ class DataFileBatchReader(RecordBatchReader):
             out_arrays.append(array)
             out_fields.append(target_field)
         return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))
-
-    def _convert_descriptor_stored_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
-        if isinstance(self.format_reader, FormatBlobReader):
-            return record_batch
-        if not self.descriptor_blob_fields:
-            return record_batch
-
-        schema_names = set(record_batch.schema.names)
-        target_fields = [f for f in self.descriptor_blob_fields if f in schema_names]
-        if not target_fields:
-            return record_batch
-
-        arrays = list(record_batch.columns)
-        for field_name in target_fields:
-            field_idx = record_batch.schema.get_field_index(field_name)
-            values = record_batch.column(field_idx).to_pylist()
-
-            if self.blob_as_descriptor:
-                converted = [self._normalize_blob_cell(v) for v in values]
-            else:
-                converted = [self._blob_cell_to_data(v) for v in values]
-            arrays[field_idx] = pa.array(converted, type=pa.large_binary())
-
-        return pa.RecordBatch.from_arrays(arrays, schema=record_batch.schema)
-
-    @staticmethod
-    def _normalize_blob_cell(value):
-        if value is None:
-            return None
-        if hasattr(value, 'as_py'):
-            value = value.as_py()
-        if isinstance(value, str):
-            value = value.encode('utf-8')
-        if isinstance(value, bytearray):
-            value = bytes(value)
-        return value
-
-    def _blob_cell_to_data(self, value):
-        value = self._normalize_blob_cell(value)
-        if value is None:
-            return None
-        if not isinstance(value, bytes):
-            return value
-        return Blob.from_bytes(value, self.file_io).to_data()
 
     def _assign_row_tracking(self, record_batch: RecordBatch) -> RecordBatch:
         """Assign row tracking meta fields (_ROW_ID and _SEQUENCE_NUMBER)."""

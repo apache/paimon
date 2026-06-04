@@ -57,6 +57,8 @@ class DedicatedFormatWriter(DataWriter):
         # Determine blob columns from table schema
         self.blob_column_names = self._get_blob_columns_from_schema()
         self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
+        self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
+        self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
 
         unknown_descriptor_fields = self.blob_descriptor_fields.difference(
             set(self.blob_column_names)
@@ -68,10 +70,10 @@ class DedicatedFormatWriter(DataWriter):
             )
 
         # Blob fields that should still be written to `.blob` files.
-        full_blob_file_column_names = [
-            col for col in self.blob_column_names if col not in self.blob_descriptor_fields
+        self.blob_file_column_names = [
+            col for col in self.blob_column_names if col not in self.blob_inline_fields
         ]
-        full_blob_file_set = set(full_blob_file_column_names)
+        full_blob_file_set = set(self.blob_file_column_names)
         all_column_names = self.table.field_names
 
         # Detect vector columns that should be written to dedicated files.
@@ -87,7 +89,7 @@ class DedicatedFormatWriter(DataWriter):
         if write_cols is not None:
             write_col_set = set(write_cols)
             self.blob_file_column_names = [
-                col for col in full_blob_file_column_names if col in write_col_set
+                col for col in self.blob_file_column_names if col in write_col_set
             ]
             self.vector_write_columns = [
                 col for col in full_vector_column_names if col in write_col_set
@@ -96,7 +98,6 @@ class DedicatedFormatWriter(DataWriter):
                 col for col in write_cols if col not in dedicated_set
             ]
         else:
-            self.blob_file_column_names = list(full_blob_file_column_names)
             self.vector_write_columns = list(full_vector_column_names) if has_dedicated_vector else []
             self.normal_column_names = [
                 col for col in all_column_names if col not in dedicated_set
@@ -159,12 +160,13 @@ class DedicatedFormatWriter(DataWriter):
 
         logger.info(
             "Initialized DedicatedFormatWriter with blob columns: %s, blob file columns: %s, "
-            "vector columns: %s, descriptor stored columns: %s, external storage fields: %s",
+            "vector columns: %s, descriptor stored columns: %s, external storage fields: %s, view stored columns: %s",
             self.blob_column_names,
             self.blob_file_column_names,
             self.vector_write_columns,
             sorted(self.blob_descriptor_fields),
             sorted(external_storage_fields) if external_storage_fields else [],
+            sorted(self.blob_view_fields)
         )
 
     def _get_blob_columns_from_schema(self) -> List[str]:
@@ -200,7 +202,7 @@ class DedicatedFormatWriter(DataWriter):
 
             # Split data into normal, blob, and vector parts
             normal_data, blob_data_map, vector_data = self._split_data(data)
-            self._validate_descriptor_stored_fields_input(data)
+            self._validate_inline_stored_fields_input(data)
 
             # Process and accumulate normal data (may be None for partial writes)
             processed_normal = self._process_normal_data(normal_data)
@@ -278,11 +280,11 @@ class DedicatedFormatWriter(DataWriter):
         )
         return normal_data, blob_data_map, vector_data
 
-    def _validate_descriptor_stored_fields_input(self, data: pa.RecordBatch):
-        if not self.blob_descriptor_fields:
+    def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
+        if not self.blob_inline_fields:
             return
 
-        from pypaimon.table.row.blob import BlobDescriptor
+        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 
         for field_name in self.blob_descriptor_fields:
             if field_name not in data.schema.names:
@@ -309,6 +311,33 @@ class DedicatedFormatWriter(DataWriter):
                     raise ValueError(
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
+                    ) from e
+
+        for field_name in self.blob_view_fields:
+            if field_name not in data.schema.names:
+                continue
+            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
+            for value in values:
+                if value is None:
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if not isinstance(value, (bytes, bytearray)):
+                    raise ValueError(
+                        "blob-view-field requires blob field value to be a serialized "
+                        "BlobViewStruct."
+                    )
+                try:
+                    view_bytes = bytes(value)
+                    view_struct = BlobViewStruct.deserialize(view_bytes)
+                    if view_struct.serialize() != view_bytes:
+                        raise ValueError("BlobViewStruct payload contains trailing bytes.")
+                except Exception as e:
+                    raise ValueError(
+                        "blob-view-field requires blob field value to be a serialized "
+                        "BlobViewStruct."
                     ) from e
 
     @staticmethod

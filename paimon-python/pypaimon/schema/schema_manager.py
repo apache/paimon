@@ -53,7 +53,7 @@ def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
 
 
 def _handle_update_column_comment(
-        change: UpdateColumnComment, new_fields: List[DataField]
+    change: UpdateColumnComment, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -66,7 +66,7 @@ def _handle_update_column_comment(
 
 
 def _handle_update_column_nullability(
-        change: UpdateColumnNullability, new_fields: List[DataField]
+    change: UpdateColumnNullability, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -83,7 +83,7 @@ def _handle_update_column_nullability(
 
 
 def _handle_update_column_type(
-        change: UpdateColumnType, new_fields: List[DataField]
+    change: UpdateColumnType, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -164,6 +164,71 @@ def _assert_not_renaming_blob_column(
             raise ValueError(
                 f"Cannot rename BLOB column: [{field_name}]"
             )
+
+
+def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: List[str]):
+    """Validate blob field configurations in the schema."""
+    if options is None:
+        options = {}
+
+    blob_field_names = {
+        field.name for field in fields
+        if getattr(field.type, 'type', None) == 'BLOB'
+    }
+
+    if len(fields) <= len(blob_field_names):
+        raise ValueError(
+            "Table with BLOB type column must have other normal columns."
+        )
+
+    core_options = CoreOptions(Options(options))
+
+    configured_blob_fields = core_options.blob_field()
+    for field in configured_blob_fields:
+        if field not in blob_field_names:
+            raise ValueError(
+                "Field '{}' in '{}' must be a BLOB field in table schema.".format(
+                    field, CoreOptions.BLOB_FIELD.key()
+                )
+            )
+
+    descriptor_fields = core_options.blob_descriptor_fields()
+    view_fields = core_options.blob_view_fields()
+
+    all_inline_fields = descriptor_fields.union(view_fields)
+    non_blob_inline_fields = all_inline_fields.difference(blob_field_names)
+    if non_blob_inline_fields:
+        raise ValueError(
+            "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
+            "in schema. Non-BLOB fields: {}".format(sorted(non_blob_inline_fields))
+        )
+
+    overlapping_inline_fields = descriptor_fields.intersection(view_fields)
+    if overlapping_inline_fields:
+        raise ValueError(
+            "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
+            "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
+        )
+
+    if blob_field_names:
+        required_options = {
+            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+        }
+
+        missing_options = []
+        for key, expected_value in required_options.items():
+            if key not in options or options[key] != expected_value:
+                missing_options.append(f"{key}='{expected_value}'")
+
+        if missing_options:
+            raise ValueError(
+                f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                f"Please add these options to the schema."
+            )
+
+        if primary_keys:
+            raise ValueError("Blob type is not supported with primary key.")
 
 
 def _validate_blob_external_storage_fields(fields: List[DataField], options: dict):
@@ -364,6 +429,7 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
+            _validate_blob_fields(schema.fields, schema.options, schema.primary_keys)
             _validate_blob_external_storage_fields(schema.fields, schema.options)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
@@ -371,6 +437,7 @@ class SchemaManager:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
+        _validate_blob_fields(new_schema.fields, new_schema.options, new_schema.primary_keys)
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))

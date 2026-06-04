@@ -274,6 +274,17 @@ class CoreOptions:
         .with_description("Comma-separated field names to treat as BLOB view fields.")
     )
 
+    BLOB_VIEW_RESOLVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("blob-view.resolve.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to resolve blob-view-field values from upstream tables at "
+            "read time. Set to false to preserve BlobViewStruct references when "
+            "forwarding blob view values to another blob-view table."
+        )
+    )
+
     VECTOR_FIELD: ConfigOption[str] = (
         ConfigOptions.key("vector-field")
         .string_type()
@@ -744,6 +755,21 @@ class CoreOptions:
 
     def blob_descriptor_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_field(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_resolve_enabled(self, default=True):
+        return self.options.get(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED, default)
+
+    @staticmethod
+    def _parse_field_set(value):
         if value is None:
             return set()
         if isinstance(value, str):

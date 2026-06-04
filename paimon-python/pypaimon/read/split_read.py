@@ -41,7 +41,7 @@ from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch, VectorBunch
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
-from pypaimon.read.reader.blob_descriptor_convert_reader import BlobDescriptorConvertReader
+from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader, LimitedRecordReader
 from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
@@ -314,9 +314,6 @@ class SplitRead(ABC):
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
-        blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
-        blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
-
         index_mapping = self.create_index_mapping()
         partition_info = self._create_partition_info()
         system_fields = SpecialFields.find_system_fields(self.read_fields)
@@ -344,8 +341,6 @@ class SplitRead(ABC):
                 effective_first_row_id,
                 row_tracking_enabled,
                 system_fields,
-                blob_as_descriptor=blob_as_descriptor,
-                blob_descriptor_fields=blob_descriptor_fields,
                 file_io=self.table.file_io,
                 row_id_offsets=row_indices)
         else:
@@ -359,8 +354,6 @@ class SplitRead(ABC):
                 effective_first_row_id,
                 row_tracking_enabled,
                 system_fields,
-                blob_as_descriptor=blob_as_descriptor,
-                blob_descriptor_fields=blob_descriptor_fields,
                 file_io=self.table.file_io,
                 row_id_offsets=row_indices)
 
@@ -799,6 +792,20 @@ class DataEvolutionSplitRead(SplitRead):
         return None
 
     def create_reader(self) -> RecordReader:
+        reader = self._create_raw_reader()
+
+        if ((CoreOptions.blob_view_fields(self.table.options) and CoreOptions.blob_view_resolve_enabled(
+                self.table.options))
+                or (not CoreOptions.blob_as_descriptor(self.table.options)
+                    and CoreOptions.blob_descriptor_fields(self.table.options))):
+            reader = BlobInlineConvertReader(
+                reader, self.table,
+                prescan_reader_factory=lambda names: self._create_prescan_reader(names))
+
+        return reader
+
+    def _create_raw_reader(self) -> RecordReader:
+        """Core read logic: split_by_row_id -> suppliers -> ConcatBatchReader -> filter."""
         files = self.split.files
         suppliers = []
 
@@ -830,14 +837,38 @@ class DataEvolutionSplitRead(SplitRead):
         else:
             reader = merge_reader
 
-        if (not CoreOptions.blob_as_descriptor(self.table.options)
-                and CoreOptions.blob_descriptor_fields(self.table.options)):
-            reader = BlobDescriptorConvertReader(reader, self.table)
-
         if self.limit is not None:
             reader = LimitedRecordBatchReader(reader, self.limit)
 
         return reader
+
+    def _create_prescan_reader(self, field_names):
+        """Create a prescan reader by constructing a new DataEvolutionSplitRead
+        instance that only projects the specified field names.
+        
+        Align with Java's configureBlobViewPrescanRead: pass limit to prescan reader
+        to avoid scanning entire split when there's a LIMIT clause.
+        """
+        from pypaimon.read.reader.iface.record_batch_reader import EmptyRecordBatchReader
+
+        prescan_fields = [f for f in self.read_fields if f.name in field_names]
+        if not prescan_fields:
+            return EmptyRecordBatchReader()
+
+        # When there's a normal field predicate, don't push down limit to prescan reader
+        # because the outer reader will apply predicate+limit filtering,
+        # while prescan reader would only apply limit without normal field predicate
+        # TODO support limit+predicate push down
+        prescan_read = DataEvolutionSplitRead(
+            table=self.table,
+            predicate=self.predicate,
+            read_type=prescan_fields,
+            split=self.split,
+            row_tracking_enabled=False,
+            limit=None if self.predicate else self.limit,
+        )
+        prescan_read.row_ranges = self.row_ranges
+        return prescan_read._create_raw_reader()
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """Split files by firstRowId for data evolution."""
