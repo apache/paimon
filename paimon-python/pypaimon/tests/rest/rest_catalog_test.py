@@ -368,7 +368,6 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIsNotNone(table_snapshot)
         self.assertEqual(table_snapshot.snapshot.id, 3)
 
-
     def test_get_table_via(self):
         """Test get table via view (view penetration)."""
         table_name = "default.table_for_via"

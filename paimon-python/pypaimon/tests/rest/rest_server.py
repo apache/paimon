@@ -555,7 +555,7 @@ class RESTCatalogServer:
                 return self._branches_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
-        elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.VIA:
+        elif len(path_parts) == 6 and path_parts[3] == ResourcePaths.VIA:
             return self._table_via_handle(lookup_identifier)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
             tag_name = RESTUtil.decode_string(path_parts[4])
