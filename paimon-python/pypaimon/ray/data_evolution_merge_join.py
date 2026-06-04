@@ -116,7 +116,7 @@ def build_matched_update_ds(
         row_id_col = f"t.{captured_row_id_name}"
         if _is_multi_clause and batch.num_rows > 0:
             ids = batch.column(row_id_col)
-            if pc.count_distinct(ids, mode="all").as_py() < batch.num_rows:
+            if pc.count_distinct(ids).as_py() < batch.num_rows:
                 raise ValueError(
                     "merge_into matched multiple source rows to "
                     "the same target _ROW_ID. Deduplicate the "
@@ -136,7 +136,7 @@ def build_matched_update_ds(
             if matched.num_rows == 0:
                 continue
             ids = matched.column(row_id_col)
-            if pc.count_distinct(ids, mode="all").as_py() < matched.num_rows:
+            if pc.count_distinct(ids).as_py() < matched.num_rows:
                 raise ValueError(
                     "merge_into matched multiple source rows to "
                     "the same target _ROW_ID. Deduplicate the "
