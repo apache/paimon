@@ -169,7 +169,19 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         for c in when_not_matched
     ]
 
-    source_ds = _normalize_source(source, catalog_options)
+    source_snapshot_id = None
+    if isinstance(source, str):
+        source_snapshot = (
+            catalog.get_table(source)
+            .snapshot_manager()
+            .get_latest_snapshot()
+        )
+        if source_snapshot is not None:
+            source_snapshot_id = source_snapshot.id
+
+    source_ds = _normalize_source(
+        source, catalog_options, source_snapshot_id=source_snapshot_id,
+    )
     _validate_source_on_cols(source_ds, source_on_cols)
     _validate_source_has_target_cols(
         source_ds, settable_field_names, on_map,
@@ -438,14 +450,21 @@ def _normalize_set_spec(
     return {col: f"s.{on_map.get(col, col)}" for col in target_field_names}
 
 
-def _normalize_source(source: Any, catalog_options: Dict[str, str]):
+def _normalize_source(
+    source: Any,
+    catalog_options: Dict[str, str],
+    source_snapshot_id: Optional[int] = None,
+):
     import ray.data
 
     if isinstance(source, ray.data.Dataset):
         return source
     if isinstance(source, str):
         from pypaimon.ray.ray_paimon import read_paimon
-        return read_paimon(source, catalog_options)
+        read_kwargs = {}
+        if source_snapshot_id is not None:
+            read_kwargs["snapshot_id"] = source_snapshot_id
+        return read_paimon(source, catalog_options, **read_kwargs)
     if isinstance(source, pa.Table):
         return ray.data.from_arrow(source)
     try:
