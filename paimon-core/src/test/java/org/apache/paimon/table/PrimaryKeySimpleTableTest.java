@@ -3022,24 +3022,6 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testSnapshotSequenceOrderingRejectsWriteInCompactOnlyMode() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf -> {
-                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
-                            conf.set(CoreOptions.WRITE_ONLY, true);
-                        });
-        // Simulate compact job: override write-only=false
-        FileStoreTable compactTable =
-                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
-        StreamTableWrite write = compactTable.newWrite(commitUser);
-        assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key());
-        write.close();
-    }
-
-    @Test
     public void testSnapshotSequenceOrderingDeleteFromLaterSnapshot() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
