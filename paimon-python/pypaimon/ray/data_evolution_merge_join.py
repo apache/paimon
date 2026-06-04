@@ -110,8 +110,6 @@ def build_matched_update_ds(
         from pypaimon.ray.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
-        import pyarrow.compute as pc
-        row_id_col = f"t.{captured_row_id_name}"
         remaining = batch
         parts = []
         for spec, rewritten in prepared_clauses:
@@ -125,24 +123,16 @@ def build_matched_update_ds(
                 matched = remaining
             if matched.num_rows == 0:
                 continue
-            ids = matched.column(row_id_col)
-            if pc.count_distinct(ids).as_py() < matched.num_rows:
-                raise ValueError(
-                    "merge_into matched multiple source rows to "
-                    "the same target _ROW_ID. Deduplicate the "
-                    "source before merging."
-                )
             parts.append(vectorized_matched_transform(
                 matched, spec, captured_on_pairs,
                 captured_update_cols, captured_row_id_name,
                 captured_schema,
             ))
-            if matched.num_rows < remaining.num_rows:
-                mask = pc.invert(pc.is_in(
-                    remaining.column(row_id_col),
-                    matched.column(row_id_col),
-                ))
-                remaining = remaining.filter(mask)
+            if rewritten is not None and matched.num_rows < remaining.num_rows:
+                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
+                remaining = _filter_batch(
+                    remaining, not_cond, _pre_rewritten=True,
+                )
             else:
                 remaining = remaining.slice(0, 0)
         if not parts:
