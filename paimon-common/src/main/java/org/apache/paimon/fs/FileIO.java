@@ -248,7 +248,8 @@ public interface FileIO extends Serializable, Closeable {
     boolean rename(Path src, Path dst) throws IOException;
 
     default Optional<Path> archive(Path path, StorageType type) throws IOException {
-        throw new UnsupportedOperationException(getClass().getName() + " does not support archive.");
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support archive.");
     }
 
     default void restoreArchive(Path path, Duration duration) throws IOException {
