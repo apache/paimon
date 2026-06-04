@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Optional pre-clustering for Ray writes to HASH_FIXED Paimon tables.
+"""Optional pre-clustering and write guards for Ray writes.
 
 The legacy ``map_groups`` strategy groups rows by
 ``(partition_keys..., bucket)`` so every distinct group lands in a
@@ -24,7 +24,8 @@ single Ray task. This can reduce file count, but Ray requires each
 ``map_groups`` group to fit in memory on one node. Keep that strategy
 behind an explicit opt-in.
 
-For any other bucket mode the dataset is returned unchanged.
+For append-only tables in any other bucket mode the dataset is returned
+unchanged.
 """
 
 import uuid
@@ -74,10 +75,9 @@ def maybe_apply_repartition(
     ``auto`` currently behaves like ``off`` for append-only tables
     because the old ``map_groups`` strategy materializes each
     ``(partition, bucket)`` group on one Ray node. For primary-key
-    tables, direct writes are rejected because multiple Ray tasks can
-    write the same bucket with overlapping sequence numbers. Use
-    ``map_groups`` only when both bounds are acceptable for the
-    workload.
+    tables, unsafe Ray write plans are rejected because multiple Ray
+    tasks create independent Paimon writers and can assign overlapping
+    sequence numbers.
     """
     if hash_fixed_precluster not in HASH_FIXED_PRECLUSTER_MODES:
         raise ValueError(
@@ -87,14 +87,28 @@ def maybe_apply_repartition(
             )
         )
 
-    if table.bucket_mode() != BucketMode.HASH_FIXED:
+    bucket_mode = table.bucket_mode()
+    is_primary_key_table = getattr(table, "is_primary_key_table", False)
+
+    if bucket_mode != BucketMode.HASH_FIXED:
+        if is_primary_key_table and bucket_mode in (
+                BucketMode.HASH_DYNAMIC,
+                BucketMode.CROSS_PARTITION,
+        ):
+            raise ValueError(
+                "{} primary-key Ray writes are not supported. Multiple "
+                "Ray tasks create independent Paimon writers, which can "
+                "assign overlapping buckets or sequence numbers.".format(
+                    bucket_mode.name
+                )
+            )
         return dataset
 
     if hash_fixed_precluster in (
             HASH_FIXED_PRECLUSTER_AUTO,
             HASH_FIXED_PRECLUSTER_OFF,
     ):
-        if getattr(table, "is_primary_key_table", False):
+        if is_primary_key_table:
             raise ValueError(
                 "HASH_FIXED primary-key Ray writes require "
                 "hash_fixed_precluster='map_groups'. Direct writes can "

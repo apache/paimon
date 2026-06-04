@@ -1786,7 +1786,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 createFileStoreTable(
                         options -> {
                             options.set("merge-engine", "partial-update");
-                            options.set("fields.a.sequence-group", "c");
+                            options.set("fields.b.sequence-group", "c");
                             options.set("fields.c.aggregate-function", "sum");
                         },
                         rowType);
@@ -1795,32 +1795,32 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
-        // 1. inserts
+        // 1. inserts (b=3 is the sequence field, all rows have same b=3 so all accepted)
         write.write(GenericRow.of(1, 1, 3, 3));
-        write.write(GenericRow.of(1, 1, 1, 1));
-        write.write(GenericRow.of(1, 1, 2, 2));
+        write.write(GenericRow.of(1, 1, 3, 1));
+        write.write(GenericRow.of(1, 1, 3, 2));
         commit.commit(0, write.prepareCommit(true, 0));
         List<String> result =
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 6]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 6]");
 
-        // 2. Update Before
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 2, 2));
+        // 2. Update Before (b=3, same sequence)
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 3, 2));
         commit.commit(1, write.prepareCommit(true, 1));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 4]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 4]");
 
-        // 3. Update After
-        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 2, 3));
+        // 3. Update After (b=3, same sequence)
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 3, 3));
         commit.commit(2, write.prepareCommit(true, 2));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 7]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 7]");
 
-        // 4. Retracts
-        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 2, 3));
+        // 4. Retracts (b=3, same sequence)
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 3, 3));
         commit.commit(3, write.prepareCommit(true, 3));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 4]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 4]");
         write.close();
         commit.close();
     }

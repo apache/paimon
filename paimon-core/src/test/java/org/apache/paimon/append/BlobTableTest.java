@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
@@ -47,6 +48,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -150,6 +152,91 @@ public class BlobTableTest extends TableTestBase {
                 });
 
         assertThat(integer.get()).isEqualTo(1000);
+    }
+
+    @Test
+    public void testUpdateBlobColumn() throws Exception {
+        createTableDefault();
+
+        byte[] blob0 = "blob-0".getBytes();
+        byte[] blob1 = "blob-1".getBytes();
+        byte[] blob2 = "blob-2".getBytes();
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(0, BinaryString.fromString("row-0"), new BlobData(blob0)),
+                        GenericRow.of(1, BinaryString.fromString("row-1"), new BlobData(blob1)),
+                        GenericRow.of(2, BinaryString.fromString("row-2"), new BlobData(blob2))));
+
+        byte[] updatedBlob1 = "updated-blob-1".getBytes();
+        FileStoreTable table = getTableDefault();
+        RowType blobWriteType = table.schema().logicalRowType().project("f2");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+            write.write(GenericRow.of(new BlobData(updatedBlob1)));
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            assignFirstRowId(commitMessages, 0L);
+            commit.commit(commitMessages);
+        }
+
+        Map<Integer, byte[]> actual = new HashMap<>();
+        readDefault(row -> actual.put(row.getInt(0), row.getBlob(2).toData()));
+
+        assertThat(actual.size()).isEqualTo(3);
+        assertThat(actual.get(0)).isEqualTo(blob0);
+        assertThat(actual.get(1)).isEqualTo(updatedBlob1);
+        assertThat(actual.get(2)).isEqualTo(blob2);
+    }
+
+    @Test
+    public void testCompactUpdatedBlobColumn() throws Exception {
+        createTableDefault();
+
+        byte[] blob0 = "blob-0".getBytes();
+        byte[] blob1 = "blob-1".getBytes();
+        byte[] blob2 = "blob-2".getBytes();
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(0, BinaryString.fromString("row-0"), new BlobData(blob0)),
+                        GenericRow.of(1, BinaryString.fromString("row-1"), new BlobData(blob1)),
+                        GenericRow.of(2, BinaryString.fromString("row-2"), new BlobData(blob2))));
+
+        byte[] updatedBlob1 = "updated-blob-1".getBytes();
+        FileStoreTable table = getTableDefault();
+        RowType blobWriteType = table.schema().logicalRowType().project("f2");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+            write.write(GenericRow.of(new BlobData(updatedBlob1)));
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            assignFirstRowId(commitMessages, 0L);
+            commit.commit(commitMessages);
+        }
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, true, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        Map<Integer, byte[]> actual = new HashMap<>();
+        readDefault(row -> actual.put(row.getInt(0), row.getBlob(2).toData()));
+
+        assertThat(actual.size()).isEqualTo(3);
+        assertThat(actual.get(0)).isEqualTo(blob0);
+        assertThat(actual.get(1)).isEqualTo(updatedBlob1);
+        assertThat(actual.get(2)).isEqualTo(blob2);
     }
 
     @Test
@@ -1728,6 +1815,22 @@ public class BlobTableTest extends TableTestBase {
         commit.commit(write.prepareCommit());
         write.close();
         commit.close();
+    }
+
+    private static void assignFirstRowId(List<CommitMessage> commitMessages, long firstRowId) {
+        commitMessages.forEach(
+                commitMessage -> {
+                    CommitMessageImpl impl = (CommitMessageImpl) commitMessage;
+                    List<DataFileMeta> newFiles =
+                            new ArrayList<>(impl.newFilesIncrement().newFiles());
+                    impl.newFilesIncrement().newFiles().clear();
+                    impl.newFilesIncrement()
+                            .newFiles()
+                            .addAll(
+                                    newFiles.stream()
+                                            .map(file -> file.assignFirstRowId(firstRowId))
+                                            .collect(Collectors.toList()));
+                });
     }
 
     private void createThreeTypeBlobTable() throws Exception {

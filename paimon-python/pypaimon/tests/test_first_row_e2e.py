@@ -149,6 +149,52 @@ class FirstRowMergeEngineE2ETest(unittest.TestCase):
             ],
         )
 
+    def test_first_row_intra_batch_duplicate(self):
+        """A single write whose batch already contains duplicate PKs.
+
+        The whole batch is folded in one flush, so this exercises the
+        write-side fold rather than the cross-commit read merge. first-row
+        must keep the first occurrence of each PK.
+        """
+        table = self._create_pk_table('first_row_intra_batch')
+        self._write(table, [
+            {'id': 1, 'a': 'first', 'b': 'B1'},
+            {'id': 1, 'a': 'second', 'b': 'B2'},
+            {'id': 1, 'a': 'third', 'b': 'B3'},
+            {'id': 2, 'a': 'only', 'b': 'B'},
+        ])
+
+        self.assertEqual(
+            self._read(table),
+            [
+                {'id': 1, 'a': 'first', 'b': 'B1'},
+                {'id': 2, 'a': 'only', 'b': 'B'},
+            ],
+        )
+
+    def test_first_row_multiple_writes_one_commit(self):
+        """Several write_arrow calls committed once: the same PK across
+        those writes folds in a single flush. first-row keeps the first.
+        """
+        table = self._create_pk_table('first_row_multi_write_one_commit')
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        c = wb.new_commit()
+        try:
+            w.write_arrow(pa.Table.from_pylist(
+                [{'id': 1, 'a': 'first', 'b': 'B1'}], schema=self.pa_schema))
+            w.write_arrow(pa.Table.from_pylist(
+                [{'id': 1, 'a': 'second', 'b': 'B2'}], schema=self.pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'first', 'b': 'B1'}],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

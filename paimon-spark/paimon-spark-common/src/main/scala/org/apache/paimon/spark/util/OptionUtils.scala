@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.util
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
@@ -113,6 +114,10 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
   }
 
+  def writeMergeSchemaTypeWideningEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.TYPE_WIDENING).toBoolean
+  }
+
   def v1FunctionEnabled(): Boolean = {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
   }
@@ -165,15 +170,41 @@ object OptionUtils extends SQLConfHelper with Logging {
       catalogName: String = null,
       ident: Identifier = null,
       extraOptions: JMap[String, String] = new JHashMap[String, String]()): T = {
-    val mergedOptions = if (catalogName != null && ident != null) {
-      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
-    } else {
-      mergeSQLConf(extraOptions)
-    }
+    val mergedOptions = getMergedOptions(catalogName, ident, extraOptions)
     if (mergedOptions.isEmpty) {
       table
     } else {
       table.copy(mergedOptions).asInstanceOf[T]
     }
+  }
+
+  private def getMergedOptions(
+      catalogName: String = null,
+      ident: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()): JMap[String, String] = {
+    if (catalogName != null && ident != null) {
+      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
+    } else {
+      mergeSQLConf(extraOptions)
+    }
+  }
+
+  def withBranchFromOptions(
+      catalogName: String = null,
+      identifier: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()
+  ): Identifier = {
+    if (identifier != null && !identifier.isSystemTable) {
+      val branch =
+        getMergedOptions(catalogName, identifier, extraOptions).get(CoreOptions.BRANCH.key)
+      if (branch != null && identifier.getBranchName == null) {
+        logWarning(
+          s"Using deprecated 'spark.paimon.branch=$branch' to access table '${identifier.getTableName}'. " +
+            s"Please migrate to '${identifier.getTableName}$$branch_$branch' syntax, as 'spark.paimon.branch' " +
+            s"will be removed in a future version.")
+        return new Identifier(identifier.getDatabaseName, identifier.getTableName, branch)
+      }
+    }
+    identifier
   }
 }

@@ -52,13 +52,24 @@ public class FullTextReadImpl implements FullTextRead {
     private final int limit;
     private final DataField textColumn;
     private final String queryText;
+    private final String queryOperator;
 
     public FullTextReadImpl(
             FileStoreTable table, int limit, DataField textColumn, String queryText) {
+        this(table, limit, textColumn, queryText, "or");
+    }
+
+    public FullTextReadImpl(
+            FileStoreTable table,
+            int limit,
+            DataField textColumn,
+            String queryText,
+            String queryOperator) {
         this.table = table;
         this.limit = limit;
         this.textColumn = textColumn;
         this.queryText = queryText;
+        this.queryOperator = queryOperator;
     }
 
     @Override
@@ -123,7 +134,8 @@ public class FullTextReadImpl implements FullTextRead {
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
-        FullTextSearch fullTextSearch = new FullTextSearch(queryText, limit, textColumn.name());
+        FullTextSearch fullTextSearch =
+                new FullTextSearch(queryText, limit, textColumn.name(), queryOperator);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitFullTextSearch(fullTextSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));

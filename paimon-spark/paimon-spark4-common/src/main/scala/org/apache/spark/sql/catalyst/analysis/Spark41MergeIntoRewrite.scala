@@ -38,9 +38,9 @@ import org.apache.spark.sql.types.IntegerType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /**
- * Spark 4.1-only Resolution-batch rule that rewrites MERGE INTO on pure append-only Paimon tables
- * (no PK / RT / DE / DV) into V2 `ReplaceData` / `AppendData` plans, mirroring Spark's built-in
- * `RewriteMergeIntoTable` for non-`SupportsDelta` row-level tables.
+ * Spark 4.1-only Resolution-batch rule that rewrites MERGE INTO on Paimon tables eligible for V2
+ * copy-on-write (no PK / DE / DV / CHAR) into V2 `ReplaceData` / `AppendData` plans, mirroring
+ * Spark's built-in `RewriteMergeIntoTable` for non-`SupportsDelta` row-level tables.
  *
  * In Spark 4.1, `RewriteMergeIntoTable` runs in the Resolution batch via `resolveOperators`, which
  * short-circuits on `analyzed=true` plans — by the time it would fire, the `MergeIntoTable` is
@@ -52,9 +52,10 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  * We fire before `ResolveAssignments`, so `m.aligned` is `false`. The rule pre-aligns each action
  * list via `PaimonAssignmentUtils.alignActions` (shared with the postHoc `PaimonMergeInto` rule).
  *
- * CHAR columns are excluded — `readSidePadding` races with the rewrite and trips CheckAnalysis;
- * those plans fall back to the postHoc `PaimonMergeInto` V1 path, which also owns PK / RT / DE / DV
- * tables via `RowLevelHelper.shouldFallbackToV1MergeInto`.
+ * Row-tracking-only tables use the same V2 copy-on-write rewrite. CHAR columns are excluded —
+ * `readSidePadding` races with the rewrite and trips CheckAnalysis; those plans fall back to the
+ * postHoc `PaimonMergeInto` V1 path, which also owns PK / DE / DV tables via
+ * `RowLevelHelper.shouldFallbackToV1MergeInto`.
  */
 object Spark41MergeIntoRewrite
   extends RewriteRowLevelCommand
@@ -71,7 +72,7 @@ object Spark41MergeIntoRewrite
       plan.transformDown {
         case m: MergeIntoTable
             if m.resolved && m.rewritable && !m.needSchemaEvolution &&
-              targetsPureAppendOnly(m.targetTable) =>
+              targetsV2CopyOnWriteTable(m.targetTable) =>
           // Pure append-only tables skip postHoc `PaimonMergeInto`, so evolve schema here.
           val evolved = evolveSchemaIfPaimon(m)
           rewrite(alignAllMergeActions(evolved, evolved.targetTable.output))

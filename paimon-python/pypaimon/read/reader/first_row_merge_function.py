@@ -44,7 +44,12 @@ class FirstRowMergeFunction:
             )
 
         if self.first is None:
-            self.first = kv
+            # Snapshot, don't keep the reference: the caller may pool/reuse
+            # a single KeyValue and replace() it for the next row (the write
+            # path's fold does exactly this). Holding the live reference
+            # would make get_result return the LAST row instead of the
+            # first, silently turning first-row into last-row.
+            self.first = kv.copy()
 
     def get_result(self) -> Optional[KeyValue]:
         return self.first

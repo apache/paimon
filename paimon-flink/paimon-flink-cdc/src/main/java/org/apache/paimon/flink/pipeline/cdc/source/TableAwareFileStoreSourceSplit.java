@@ -70,6 +70,12 @@ public class TableAwareFileStoreSourceSplit extends FileStoreSourceSplit {
     }
 
     @Override
+    public TableAwareFileStoreSourceSplit updateWithRecordsToSkip(long recordsToSkip) {
+        return new TableAwareFileStoreSourceSplit(
+                splitId(), split(), recordsToSkip, identifier, lastSchemaId, schemaId);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (!(o instanceof TableAwareFileStoreSourceSplit)) {
             return false;

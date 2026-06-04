@@ -260,6 +260,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
             .writeStream
             .option("checkpointLocation", checkpointDir.getCanonicalPath)
             .option("write.merge-schema", "true")
+            .option("write.merge-schema.type-widening", "true")
             .option("write.merge-schema.explicit-cast", "true")
             .format("paimon")
             .start(location)

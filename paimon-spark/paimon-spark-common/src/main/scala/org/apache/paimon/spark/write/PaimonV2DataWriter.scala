@@ -23,8 +23,11 @@ import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, TableWriteImpl}
+import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.IOUtils
 
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.JoinedRow
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.types.StructType
 
@@ -36,7 +39,10 @@ case class PaimonV2DataWriter(
     dataSchema: StructType,
     coreOptions: CoreOptions,
     catalogContext: CatalogContext,
-    batchId: Option[Long] = None)
+    batchId: Option[Long] = None,
+    paimonWriteType: Option[RowType] = None,
+    metadataSchema: Option[StructType] = None,
+    plainWriteSchema: Option[StructType] = None)
   extends abstractInnerTableDataWrite[InternalRow]
   with InnerTableV2DataWrite {
 
@@ -46,35 +52,79 @@ case class PaimonV2DataWriter(
   val fullCompactionDeltaCommits: Option[Int] =
     Option.apply(coreOptions.fullCompactionDeltaCommits())
 
-  val write: TableWriteImpl[InternalRow] = {
-    writeBuilder
+  private def createTableWrite(writeType: Option[RowType]): TableWriteImpl[InternalRow] = {
+    val w = writeBuilder
       .newWrite()
       .withIOManager(ioManager)
       .withMetricRegistry(metricRegistry)
       .asInstanceOf[TableWriteImpl[InternalRow]]
+    writeType.foreach(w.withWriteType)
+    w
   }
 
-  private val rowConverter: InternalRow => SparkInternalRowWrapper = {
+  val write: TableWriteImpl[InternalRow] = createTableWrite(paimonWriteType)
+
+  private var plainWrite: Option[TableWriteImpl[InternalRow]] = None
+
+  private def getPlainWrite: TableWriteImpl[InternalRow] = {
+    plainWrite.getOrElse {
+      val w = createTableWrite(None)
+      plainWrite = Some(w)
+      w
+    }
+  }
+
+  private def createRowConverter(
+      writeSchema: StructType,
+      schema: StructType): InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
     val reusableWrapper =
-      new SparkInternalRowWrapper(writeSchema, numFields, dataSchema, catalogContext)
+      new SparkInternalRowWrapper(writeSchema, numFields, schema, catalogContext)
     record => reusableWrapper.replace(record)
   }
 
+  private val rowConverter: InternalRow => SparkInternalRowWrapper =
+    createRowConverter(writeSchema, dataSchema)
+
+  private val plainRowConverter: Option[InternalRow => SparkInternalRowWrapper] =
+    plainWriteSchema.map(schema => createRowConverter(schema, dataSchema))
+
+  private val metadataAwareRowConverter: Option[InternalRow => SparkInternalRowWrapper] =
+    metadataSchema.map(
+      schema => createRowConverter(writeSchema, StructType(dataSchema.fields ++ schema.fields)))
+
+  private val joinedRow = new JoinedRow()
+
   override def write(record: InternalRow): Unit = {
-    postWrite(write.writeAndReturn(rowConverter.apply(record)))
+    plainRowConverter match {
+      case Some(converter) =>
+        postWrite(getPlainWrite.writeAndReturn(converter.apply(record)))
+      case _ =>
+        postWrite(write.writeAndReturn(rowConverter.apply(record)))
+    }
+  }
+
+  def writeWithMetadata(metadata: InternalRow, record: InternalRow): Unit = {
+    metadataAwareRowConverter match {
+      case Some(converter) =>
+        postWrite(write.writeAndReturn(converter.apply(joinedRow(record, metadata))))
+      case None =>
+        write(record)
+    }
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    write.prepareCommit().asScala.toSeq
+    val metadataMessages = write.prepareCommit().asScala.toSeq
+    val plainMessages = plainWrite.map(_.prepareCommit().asScala.toSeq).getOrElse(Seq.empty)
+    metadataMessages ++ plainMessages
   }
 
   override def abort(): Unit = close()
 
   override def close(): Unit = {
     try {
-      write.close()
-      ioManager.close()
+      val closeables = Seq[AutoCloseable](write) ++ plainWrite.toSeq ++ Seq(ioManager)
+      IOUtils.closeAll(closeables.asJava)
     } catch {
       case e: Exception => throw new RuntimeException(e)
     }

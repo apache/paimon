@@ -81,3 +81,22 @@ class SpecialFields:
             fields_with_row_tracking.append(SpecialFields.SEQUENCE_NUMBER)
 
         return fields_with_row_tracking
+
+    @staticmethod
+    def row_type_with_row_id(table_fields: List[DataField]) -> List[DataField]:
+        """Add ROW_ID field to the given fields list.
+
+        Args:
+            table_fields: The original table fields
+        """
+        fields_with_row_id = list(table_fields)
+
+        for field in fields_with_row_id:
+            if SpecialFields.ROW_ID.name == field.name:
+                raise ValueError(
+                    "Row tracking field name '{}' conflicts with existing field names."
+                    .format(field.name)
+                )
+
+        fields_with_row_id.append(SpecialFields.ROW_ID)
+        return fields_with_row_id

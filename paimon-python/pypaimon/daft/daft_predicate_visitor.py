@@ -156,7 +156,22 @@ class PaimonPredicateVisitor(PredicateVisitor[Any]):
             return self._builder.or_predicates([left_pred, right_pred])
         return _UNSUPPORTED
 
-    def visit_not(self, expr: Expression) -> _Unsupported:
+    def visit_not(self, expr: Expression) -> Predicate | _Unsupported:
+        predicate = self.visit(expr)
+        if not self._is_predicate(predicate):
+            return _UNSUPPORTED
+
+        if predicate.method == "equal":
+            return self._builder.not_equal(predicate.field, predicate.literals[0])
+        if predicate.method == "in":
+            return self._builder.is_not_in(predicate.field, predicate.literals)
+        if predicate.method == "between":
+            return self._builder.not_between(predicate.field, predicate.literals[0], predicate.literals[1])
+        if predicate.method == "isNull":
+            return self._builder.is_not_null(predicate.field)
+        if predicate.method == "isNotNull":
+            return self._builder.is_null(predicate.field)
+
         return _UNSUPPORTED
 
     # -- Comparison operators --

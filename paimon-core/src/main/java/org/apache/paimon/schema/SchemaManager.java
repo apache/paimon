@@ -750,8 +750,15 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /**
+     * Merge {@code rowType} into the current schema (via {@link SchemaMergingUtils#mergeSchemas})
+     * and persist the result. Returns {@code true} if the schema changed and was committed, {@code
+     * false} if the merge was a no-op. See {@code SchemaMergingUtils} for how {@code typeWidening}
+     * / {@code allowExplicitCast} drive existing-column type evolution.
+     */
     public boolean mergeSchema(
             RowType rowType,
+            boolean typeWidening,
             boolean allowExplicitCast,
             boolean caseSensitive,
             @Nullable SchemaModification schemaModification) {
@@ -761,7 +768,8 @@ public class SchemaManager implements Serializable {
                                         new RuntimeException(
                                                 "It requires that the current schema to exist when calling 'mergeSchema'"));
         TableSchema update =
-                SchemaMergingUtils.mergeSchemas(current, rowType, allowExplicitCast, caseSensitive);
+                SchemaMergingUtils.mergeSchemas(
+                        current, rowType, typeWidening, allowExplicitCast, caseSensitive);
         if (current.equals(update)) {
             return false;
         }

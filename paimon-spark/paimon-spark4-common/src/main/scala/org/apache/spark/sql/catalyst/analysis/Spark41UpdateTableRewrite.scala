@@ -47,8 +47,9 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  * We fire before `ResolveAssignments`, so `u.aligned` is `false`; the rule pre-aligns via
  * `PaimonAssignmentUtils.alignUpdateAssignments` before building the plan.
  *
- * PK tables go through the postHoc rule; RT / DE / DV tables go through Spark's V2 path. DELETE is
- * handled by [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
+ * Row-tracking-only tables use the same V2 copy-on-write rewrite. PK / DE / DV tables go through
+ * the postHoc V1 rule because they do not expose `SupportsRowLevelOperations`. DELETE is handled by
+ * [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
  */
 object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendOnlyScope {
 
@@ -57,7 +58,7 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
         case u @ UpdateTable(aliasedTable, assignments, cond)
-            if u.resolved && u.rewritable && targetsPureAppendOnly(aliasedTable) =>
+            if u.resolved && u.rewritable && targetsV2CopyOnWriteTable(aliasedTable) =>
           EliminateSubqueryAliases(aliasedTable) match {
             case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) =>
               val table = buildOperationTable(tbl, UPDATE, CaseInsensitiveStringMap.empty())

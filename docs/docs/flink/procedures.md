@@ -1019,7 +1019,25 @@ All available procedures are listed below.
             `table` => 'default.T',<br/>
             `index_column` => 'name',<br/>
             `index_type` => 'btree',<br/>
-            `partitions` => 'pt=p1;pt=p2')
+            `partitions` => 'pt=p1;pt=p2')<br/><br/>
+         -- Create Tantivy full-text index with ngram tokenizer<br/>
+         CALL sys.create_global_index(<br/>
+            `table` => 'default.T',<br/>
+            `index_column` => 'content',<br/>
+            `index_type` => 'tantivy-fulltext',<br/>
+            `options` => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2')<br/><br/>
+         -- Create Tantivy full-text index with jieba tokenizer<br/>
+         CALL sys.create_global_index(<br/>
+            `table` => 'default.T',<br/>
+            `index_column` => 'content',<br/>
+            `index_type` => 'tantivy-fulltext',<br/>
+            `options` => 'tantivy.tokenizer=jieba')<br/><br/>
+         -- Create Tantivy full-text index with a custom analyzer<br/>
+         CALL sys.create_global_index(<br/>
+            `table` => 'default.T',<br/>
+            `index_column` => 'content',<br/>
+            `index_type` => 'tantivy-fulltext',<br/>
+            `options` => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true')
       </td>
    </tr>
    <tr>

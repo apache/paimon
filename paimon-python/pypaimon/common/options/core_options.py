@@ -18,13 +18,13 @@
 import sys
 from datetime import timedelta
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
 from pypaimon.common.options.config_option import ConfigOption
-from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.options.config_options import ConfigOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 
 
 class ExternalPathStrategy(str, Enum):
@@ -34,6 +34,8 @@ class ExternalPathStrategy(str, Enum):
     NONE = "none"
     ROUND_ROBIN = "round-robin"
     SPECIFIC_FS = "specific-fs"
+    ENTROPY_INJECT = "entropy-inject"
+    WEIGHTED = "weight-robin"
 
 
 class ChangelogProducer(str, Enum):
@@ -56,6 +58,15 @@ class MergeEngine(str, Enum):
     FIRST_ROW = "first-row"
 
 
+class SortOrder(str, Enum):
+    """
+    Specifies the order of ``sequence.field``. Mirrors Java
+    ``CoreOptions.SortOrder``.
+    """
+    ASCENDING = "ascending"
+    DESCENDING = "descending"
+
+
 class GlobalIndexColumnUpdateAction(str, Enum):
     THROW_ERROR = "THROW_ERROR"
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
@@ -71,6 +82,7 @@ class CoreOptions:
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
+    FILE_FORMAT_MOSAIC: str = "mosaic"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -262,6 +274,17 @@ class CoreOptions:
         .with_description("Comma-separated field names to treat as BLOB view fields.")
     )
 
+    BLOB_VIEW_RESOLVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("blob-view.resolve.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to resolve blob-view-field values from upstream tables at "
+            "read time. Set to false to preserve BlobViewStruct references when "
+            "forwarding blob view values to another blob-view table."
+        )
+    )
+
     VECTOR_FIELD: ConfigOption[str] = (
         ConfigOptions.key("vector-field")
         .string_type()
@@ -411,6 +434,22 @@ class CoreOptions:
         .with_description("Whether to ignore delete records.")
     )
 
+    SEQUENCE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("sequence.field")
+        .string_type()
+        .no_default_value()
+        .with_description("The field that generates the sequence number for "
+                          "primary key table, the sequence number determines "
+                          "which data is the most recent.")
+    )
+
+    SEQUENCE_FIELD_SORT_ORDER: ConfigOption[SortOrder] = (
+        ConfigOptions.key("sequence.field.sort-order")
+        .enum_type(SortOrder)
+        .default_value(SortOrder.ASCENDING)
+        .with_description("Specify the order of sequence.field.")
+    )
+
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
@@ -472,7 +511,10 @@ class CoreOptions:
         ConfigOptions.key("data-file.external-paths.strategy")
         .string_type()
         .default_value(ExternalPathStrategy.NONE)
-        .with_description("Strategy for selecting external paths. Options: none, round-robin, specific-fs.")
+        .with_description(
+            "Strategy for selecting external paths. "
+            "Options: none, round-robin, specific-fs, entropy-inject, weight-robin."
+        )
     )
 
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS: ConfigOption[str] = (
@@ -480,6 +522,16 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Specific filesystem for external paths when using specific-fs strategy.")
+    )
+
+    DATA_FILE_EXTERNAL_PATHS_WEIGHTS: ConfigOption[str] = (
+        ConfigOptions.key("data-file.external-paths.weights")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Weights for external paths when strategy is weight-robin. "
+            "Format: comma-separated positive integers corresponding to paths in order."
+        )
     )
 
     # Global Index options
@@ -703,6 +755,21 @@ class CoreOptions:
 
     def blob_descriptor_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_field(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_resolve_enabled(self, default=True):
+        return self.options.get(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED, default)
+
+    @staticmethod
+    def _parse_field_set(value):
         if value is None:
             return set()
         if isinstance(value, str):
@@ -808,6 +875,33 @@ class CoreOptions:
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
 
+    def sequence_field(self) -> List[str]:
+        """User-defined sequence fields, in declaration order. Empty list
+        when ``sequence.field`` is unset. Mirrors Java
+        ``CoreOptions.sequenceField()``.
+        """
+        raw = self.options.get(CoreOptions.SEQUENCE_FIELD)
+        if not raw:
+            return []
+        # Mirror Java ``CoreOptions.sequenceField()``
+        # (``Arrays.stream(s.split(',')).map(String::trim)``): Java's
+        # ``String.split(",")`` drops *trailing* empty segments (so ``'ts,'``
+        # yields ``['ts']``) but keeps interior ones, and each segment is
+        # then trimmed. So an interior empty segment (``'ts,,ts2'``) survives
+        # as an empty field name that ``check_sequence_field_valid`` rejects,
+        # while a trailing comma is tolerated.
+        segments = raw.split(",")
+        while segments and segments[-1] == "":
+            segments.pop()
+        return [name.strip() for name in segments]
+
+    def sequence_field_sort_order_is_ascending(self) -> bool:
+        """Whether ``sequence.field.sort-order`` is ascending (the default).
+        Mirrors Java ``CoreOptions.sequenceFieldSortOrderIsAscending()``.
+        """
+        return (self.options.get(CoreOptions.SEQUENCE_FIELD_SORT_ORDER)
+                == SortOrder.ASCENDING)
+
     def ignore_delete(self) -> bool:
         raw = self.options.to_map()
         fallback_keys = (
@@ -832,6 +926,23 @@ class CoreOptions:
 
     def data_file_external_paths_specific_fs(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
+
+    def data_file_external_paths_weights(self, default=None):
+        value = self.options.get(
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS_WEIGHTS, default
+        )
+        if value is None:
+            return None
+        parts = value.split(",")
+        weights = []
+        for part in parts:
+            parsed = int(part.strip())
+            if parsed <= 0:
+                raise ValueError(
+                    f"Weight must be positive, got: {parsed}"
+                )
+            weights.append(parsed)
+        return weights
 
     def commit_max_retries(self) -> int:
         return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)

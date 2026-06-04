@@ -19,8 +19,11 @@
 package org.apache.paimon.flink.pipeline.cdc.source;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.source.FileStoreSourceSplit;
+import org.apache.paimon.flink.source.FileStoreSourceSplitState;
 import org.apache.paimon.table.source.DataSplit;
 
+import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -37,18 +40,9 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
     @Test
     public void test() throws Exception {
         Identifier identifier = Identifier.create("test_database", "test_table");
-        DataSplit dataSplit =
-                DataSplit.builder()
-                        .withSnapshot(1)
-                        .withPartition(row(1))
-                        .withBucket(2)
-                        .withDataFiles(Arrays.asList(newFile(0), newFile(1)))
-                        .isStreaming(false)
-                        .rawConvertible(false)
-                        .withBucketPath("/temp/2") // not used
-                        .build();
         TableAwareFileStoreSourceSplit split =
-                new TableAwareFileStoreSourceSplit("split-1", dataSplit, 0L, identifier, null, 1L);
+                new TableAwareFileStoreSourceSplit(
+                        "split-1", newDataSplit(), 0L, identifier, null, 1L);
 
         TableAwareFileStoreSourceSplit.Serializer serializer =
                 new TableAwareFileStoreSourceSplit.Serializer();
@@ -56,5 +50,39 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
         TableAwareFileStoreSourceSplit deserialized =
                 serializer.deserialize(serializer.getVersion(), serialized);
         assertThat(deserialized).isEqualTo(split);
+    }
+
+    @Test
+    public void testUpdateWithRecordsToSkipKeepsTableAwareSplit() {
+        Identifier identifier = Identifier.create("test_database", "test_table");
+        DataSplit dataSplit = newDataSplit();
+        TableAwareFileStoreSourceSplit split =
+                new TableAwareFileStoreSourceSplit("split-1", dataSplit, 0L, identifier, 1L, 2L);
+        FileStoreSourceSplitState state = new FileStoreSourceSplitState(split);
+
+        state.setPosition(new RecordAndPosition<>(null, RecordAndPosition.NO_OFFSET, 10L));
+
+        FileStoreSourceSplit restored = state.toSourceSplit();
+        assertThat(restored).isInstanceOf(TableAwareFileStoreSourceSplit.class);
+        TableAwareFileStoreSourceSplit tableAwareRestored =
+                (TableAwareFileStoreSourceSplit) restored;
+        assertThat(tableAwareRestored.splitId()).isEqualTo(split.splitId());
+        assertThat(tableAwareRestored.split()).isEqualTo(split.split());
+        assertThat(tableAwareRestored.recordsToSkip()).isEqualTo(10L);
+        assertThat(tableAwareRestored.getIdentifier()).isEqualTo(identifier);
+        assertThat(tableAwareRestored.getLastSchemaId()).isEqualTo(1L);
+        assertThat(tableAwareRestored.getSchemaId()).isEqualTo(2L);
+    }
+
+    private static DataSplit newDataSplit() {
+        return DataSplit.builder()
+                .withSnapshot(1)
+                .withPartition(row(1))
+                .withBucket(2)
+                .withDataFiles(Arrays.asList(newFile(0), newFile(1)))
+                .isStreaming(false)
+                .rawConvertible(false)
+                .withBucketPath("/temp/2") // not used
+                .build();
     }
 }

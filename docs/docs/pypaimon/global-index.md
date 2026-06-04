@@ -109,6 +109,13 @@ data = read.to_arrow(scan.plan().splits)
 ## Full-Text Index (Tantivy)
 
 Use `FullTextSearchBuilder` to perform full-text search on a text column, then read the matched rows.
+PyPaimon reads the Tantivy tokenizer settings stored in the global index metadata. Indexes built
+with `tantivy.tokenizer=ngram` can be queried from Python when the installed `tantivy-py` package
+provides custom tokenizer support, including `Tokenizer.ngram`, `Tokenizer.simple`,
+`Tokenizer.whitespace`, `Tokenizer.raw`, `TextAnalyzerBuilder`, tokenizer filters, and
+`Index.register_tokenizer`. Indexes built with `tantivy.tokenizer=jieba` can be queried from Python
+when the `jieba` package is installed. Query terms use OR semantics by default; use
+`with_query_operator("and")` to require all terms.
 
 ```python
 table = catalog.get_table("db.my_table")
@@ -119,6 +126,7 @@ index_result = (
     builder
     .with_text_column("content")
     .with_query_text("search keywords")
+    .with_query_operator("and")
     .with_limit(20)
     .execute_local()
 )

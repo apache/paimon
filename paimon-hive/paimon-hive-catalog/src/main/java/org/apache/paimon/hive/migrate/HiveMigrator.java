@@ -165,20 +165,22 @@ public class HiveMigrator implements Migrator {
             FileStoreTable paimonTable = (FileStoreTable) hiveCatalog.getTable(identifier);
             checkPaimonTable(paimonTable);
 
-            List<Partition> partitions =
-                    client.listPartitions(sourceDatabase, sourceTable, Short.MAX_VALUE);
             checkCompatible(sourceHiveTable, paimonTable);
 
             List<MigrateTask> tasks = new ArrayList<>();
             Map<Path, Path> rollBack = new ConcurrentHashMap<>();
-            if (partitions.isEmpty()) {
+            if (sourceHiveTable.getPartitionKeys().isEmpty()) {
                 tasks.add(
                         importUnPartitionedTableTask(
                                 fileIO, sourceHiveTable, paimonTable, rollBack));
             } else {
-                tasks.addAll(
-                        importPartitionedTableTask(
-                                fileIO, partitions, sourceHiveTable, paimonTable, rollBack));
+                List<Partition> partitions =
+                        client.listPartitions(sourceDatabase, sourceTable, Short.MAX_VALUE);
+                if (!partitions.isEmpty()) {
+                    tasks.addAll(
+                            importPartitionedTableTask(
+                                    fileIO, partitions, sourceHiveTable, paimonTable, rollBack));
+                }
             }
 
             List<Future<CommitMessage>> futures =

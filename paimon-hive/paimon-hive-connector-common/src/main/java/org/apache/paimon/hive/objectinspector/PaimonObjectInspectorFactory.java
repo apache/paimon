@@ -28,6 +28,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
@@ -51,6 +52,7 @@ public class PaimonObjectInspectorFactory {
             case FLOAT:
             case DOUBLE:
             case BINARY:
+            case BLOB:
             case VARBINARY:
                 return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
                         (PrimitiveTypeInfo) HiveTypeUtils.toTypeInfo(logicalType));
@@ -81,6 +83,9 @@ public class PaimonObjectInspectorFactory {
             case ARRAY:
                 ArrayType arrayType = (ArrayType) logicalType;
                 return new PaimonListObjectInspector(arrayType.getElementType());
+            case VECTOR:
+                VectorType vectorType = (VectorType) logicalType;
+                return new PaimonListObjectInspector(vectorType.getElementType());
             case MAP:
                 MapType mapType = (MapType) logicalType;
                 return new PaimonMapObjectInspector(mapType.getKeyType(), mapType.getValueType());

@@ -183,7 +183,7 @@ def test_explain_scan_keeps_limit_above_remaining_filters(catalog_options):
     _write_arrow(table, pa.table({"id": [1, 2], "name": ["a", "b"]}, schema=pa_schema))
 
     result = PaimonTable(table, catalog_options=catalog_options).explain_scan(
-        filters=~(col("id") == 1),
+        filters=~((col("id") == 1) & (col("name") == "a")),
         limit=1,
     )
 
@@ -193,6 +193,34 @@ def test_explain_scan_keeps_limit_above_remaining_filters(catalog_options):
     assert any("id" in remaining for remaining in result.remaining_filters)
     assert result.source_limit is None
     assert result.limit_pushed is False
+    assert result.splits is None
+    assert result.paimon_scan.splits is None
+
+
+def test_explain_scan_pushes_supported_not_and_limit(catalog_options):
+    pa_schema = pa.schema([
+        ("id", pa.int64()),
+        ("name", pa.string()),
+    ])
+    identifier, table = _create_table(
+        catalog_options,
+        "explain_not_filter",
+        pa_schema,
+        options={"bucket": "-1", "file.format": "parquet"},
+    )
+    _write_arrow(table, pa.table({"id": [1, 2], "name": ["a", "b"]}, schema=pa_schema))
+
+    result = PaimonTable(table, catalog_options=catalog_options).explain_scan(
+        filters=~(col("id") == 1),
+        limit=1,
+    )
+
+    assert result.native_parquet_split_count == result.paimon_scan.split_count
+    assert result.pypaimon_fallback_split_count == 0
+    assert any("!=" in pushed or "not" in pushed for pushed in result.pushed_filters)
+    assert result.remaining_filters == []
+    assert result.source_limit == 1
+    assert result.limit_pushed is True
     assert result.splits is None
     assert result.paimon_scan.splits is None
 

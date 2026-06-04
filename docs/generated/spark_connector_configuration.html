@@ -84,13 +84,19 @@ under the License.
             <td><h5>write.merge-schema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, merge the data schema and the table schema automatically before write data.</td>
+            <td>If true, evolve the table schema to accept new columns from the incoming data. Existing column types are preserved and incoming values are cast to them; to also widen existing types, enable 'write.merge-schema.type-widening'.</td>
         </tr>
         <tr>
             <td><h5>write.merge-schema.explicit-cast</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
+            <td>Only effective when 'write.merge-schema.type-widening' is true. If true, also allow lossy type changes between compatible types (e.g. BIGINT -&gt; INT, STRING -&gt; DATE).</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.type-widening</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Only effective when 'write.merge-schema' is true. If true, widen an existing column type when the incoming data has a wider compatible type (e.g. INT -&gt; BIGINT, DECIMAL precision increase). Lossy changes are still rejected unless 'write.merge-schema.explicit-cast' is also true.</td>
         </tr>
         <tr>
             <td><h5>write.use-v2-write</h5></td>

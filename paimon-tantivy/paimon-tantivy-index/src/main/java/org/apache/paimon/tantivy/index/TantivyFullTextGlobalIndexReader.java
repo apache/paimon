@@ -34,6 +34,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,7 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     private final TantivySearcherPool searcherPool;
     private final String poolKey;
     private final ExecutorService executor;
+    private final TantivyFullTextIndexOptions indexOptions;
 
     private volatile TantivySearcherPool.PooledEntry borrowed;
 
@@ -75,7 +77,13 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
         this.ioMeta = ioMetas.get(0);
         this.layoutCache = layoutCache;
         this.searcherPool = searcherPool;
-        this.poolKey = this.ioMeta.filePath().toString() + "@" + this.ioMeta.fileSize();
+        this.poolKey =
+                this.ioMeta.filePath().toString()
+                        + "@"
+                        + this.ioMeta.fileSize()
+                        + "#"
+                        + Arrays.hashCode(this.ioMeta.metadata());
+        this.indexOptions = deserializeIndexOptions(this.ioMeta.metadata());
     }
 
     @Override
@@ -87,7 +95,9 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
                         ensureLoaded();
                         SearchResult result =
                                 borrowed.searcher.search(
-                                        fullTextSearch.queryText(), fullTextSearch.limit());
+                                        fullTextSearch.queryText(),
+                                        fullTextSearch.limit(),
+                                        fullTextSearch.queryOperator());
                         return Optional.of(toScoredResult(result));
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to search Tantivy full-text index", e);
@@ -132,11 +142,24 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
             StreamFileInput streamInput = new SynchronizedStreamFileInput(in);
             TantivySearcher searcher =
                     new TantivySearcher(
-                            layout.fileNames, layout.fileOffsets, layout.fileLengths, streamInput);
+                            layout.fileNames,
+                            layout.fileOffsets,
+                            layout.fileLengths,
+                            streamInput,
+                            indexOptions.toNativeConfigJson());
             return new TantivySearcherPool.PooledEntry(searcher, in);
         } catch (Exception e) {
             in.close();
             throw e;
+        }
+    }
+
+    static TantivyFullTextIndexOptions deserializeIndexOptions(byte[] metadata) {
+        try {
+            return TantivyFullTextIndexOptions.deserialize(metadata);
+        } catch (IOException e) {
+            throw new IllegalArgumentException(
+                    "Failed to deserialize Tantivy full-text index meta", e);
         }
     }
 

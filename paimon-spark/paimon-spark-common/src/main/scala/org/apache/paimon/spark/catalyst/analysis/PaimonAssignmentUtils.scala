@@ -22,9 +22,9 @@ import org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_METADATA_KE
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonOutputResolver.MissingFieldBehavior
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, CreateNamedStruct, Expression, GetStructField, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Expression, GetStructField, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, MergeAction, UpdateStarAction}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
@@ -192,7 +192,7 @@ object PaimonAssignmentUtils extends SQLConfHelper {
 
     col.dataType match {
       case structType: StructType =>
-        val fieldAttrs = toAttributes(structType)
+        val fieldAttrs = PaimonUtils.toAttributes(structType)
         val fieldExprs = structType.fields.zipWithIndex.map {
           case (field, ordinal) => GetStructField(colExpr, ordinal, Some(field.name))
         }
@@ -223,10 +223,6 @@ object PaimonAssignmentUtils extends SQLConfHelper {
 
   private def restoreActualType(attr: Attribute): Attribute = {
     attr.withDataType(CharVarcharUtils.getRawType(attr.metadata).getOrElse(attr.dataType))
-  }
-
-  private def toAttributes(structType: StructType): Seq[Attribute] = {
-    structType.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
   }
 
   /** Parse the column's `CURRENT_DEFAULT` SQL (cast to column type) or fall back to NULL. */

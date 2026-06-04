@@ -49,12 +49,14 @@ class FullTextReadImpl(FullTextRead):
         table: 'FileStoreTable',
         limit: int,
         text_column: 'DataField',
-        query_text: str
+        query_text: str,
+        query_operator: str = "or"
     ):
         self._table = table
         self._limit = limit
         self._text_column = text_column
         self._query_text = query_text
+        self._query_operator = query_operator
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
         if not splits:
@@ -90,7 +92,8 @@ class FullTextReadImpl(FullTextRead):
                 GlobalIndexIOMeta(
                     file_name=index_file.file_name,
                     file_size=index_file.file_size,
-                    metadata=meta.index_meta
+                    metadata=meta.index_meta,
+                    external_path=index_file.external_path,
                 )
             )
 
@@ -106,7 +109,8 @@ class FullTextReadImpl(FullTextRead):
         full_text_search = FullTextSearch(
             query_text=self._query_text,
             limit=self._limit,
-            field_name=self._text_column.name
+            field_name=self._text_column.name,
+            query_operator=self._query_operator
         )
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
