@@ -93,9 +93,9 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
-import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -1287,8 +1287,7 @@ public class FileStoreCommitTest {
         BinaryRow otherPartition = partitionRow("2024-01-02", 2);
 
         long baseSnapshotId =
-                commitFiles(
-                        store, partitionToOverwrite, Arrays.asList("A.parquet", "B.parquet"));
+                commitFiles(store, partitionToOverwrite, Arrays.asList("A.parquet", "B.parquet"));
         commitFiles(store, otherPartition, Collections.singletonList("E.parquet"));
 
         long baseSnapshotIdBeforeConcurrent = store.snapshotManager().latestSnapshotId();
@@ -1336,10 +1335,8 @@ public class FileStoreCommitTest {
 
         Snapshot latest = store.snapshotManager().latestSnapshot();
         assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
-        assertThat(deltaDeletes(latest, store))
-                .containsExactlyInAnyOrder("A.parquet", "B.parquet");
-        assertThat(visibleFileNames(store))
-                .containsExactlyInAnyOrder("X.parquet", "Y.parquet");
+        assertThat(deltaDeletes(latest, store)).containsExactlyInAnyOrder("A.parquet", "B.parquet");
+        assertThat(visibleFileNames(store)).containsExactlyInAnyOrder("X.parquet", "Y.parquet");
         commit.close();
     }
 
@@ -1563,11 +1560,8 @@ public class FileStoreCommitTest {
     }
 
     private static List<String> visibleFileNames(TestAppendFileStore store, BinaryRow partition) {
-        return store.newScan()
-                .withPartitionFilter(Collections.singletonList(partition))
-                .plan()
-                .files()
-                .stream()
+        return store.newScan().withPartitionFilter(Collections.singletonList(partition)).plan()
+                .files().stream()
                 .map(e -> e.file().fileName())
                 .collect(Collectors.toList());
     }

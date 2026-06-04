@@ -218,7 +218,8 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
             java.nio.file.Path tempDir,
             Map<String, String> options,
             List<String> partitionKeys,
-            RowType partitionType) throws Exception {
+            RowType partitionType)
+            throws Exception {
         String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
         FileIO fileIO = FileIOFinder.find(new Path(root));
