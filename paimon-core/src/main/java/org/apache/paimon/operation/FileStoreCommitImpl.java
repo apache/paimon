@@ -1271,30 +1271,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     /**
-     * When {@code sequence.snapshot-ordering} is enabled, we stamp the commit snapshot id into
-     * {@link DataFileMeta#minSequenceNumber()} and {@link DataFileMeta#maxSequenceNumber()} at file
-     * level. This avoids adding a new field to DataFileMeta and follows the same pattern used by
-     * row-tracking tables (see {@link RowTrackingCommitUtils#assignRowTracking}). At read time,
-     * {@code KeyValueFileReaderFactory} reads the snapshot id from {@code minSequenceNumber} and
-     * overrides each record's {@code _SEQUENCE_NUMBER} with it, so the sort-merge readers compare
-     * by snapshot id directly and records from later snapshots always win.
+     * Stamps the commit snapshot id into {@link DataFileMeta#minSequenceNumber()} / {@link
+     * DataFileMeta#maxSequenceNumber()} of APPEND files, reusing these fields instead of adding a
+     * new one (same pattern as {@link RowTrackingCommitUtils#assignRowTracking}). COMPACT files are
+     * returned unchanged: their input was read through the override path, so their per-record
+     * {@code _SEQUENCE_NUMBER} already carries the snapshot id.
      *
-     * <p>For {@link CommitKind#COMPACT} commits, the compaction input records were read through the
-     * same override path, so their per-record {@code _SEQUENCE_NUMBER} already carries the snapshot
-     * id; the merged output keeps it, and the file-level min/maxSequenceNumber (tracked by the
-     * writer from per-record values) already reflects the correct snapshot id range. We return the
-     * files unchanged.
-     *
-     * <p>Because all records of one snapshot share a single snapshot id, the relative order of
-     * records <i>within</i> the same snapshot is intentionally not preserved. We deliberately do
-     * not handle the case where the same key lands in multiple files of one snapshot: the default
-     * writer is spillable ({@code write-buffer-spillable=true}), so a commit's writes pass through
-     * the merge function and collapse to at most one record per key before being flushed. That
-     * covers the common case. The degenerate case (same key in several files of one snapshot with
-     * equal sequence numbers) only arises with {@code write-buffer-spillable=false} or when spilled
-     * data exceeds {@code write-buffer-spill-disk-size}; it affects only intra-snapshot order and
-     * never the cross-snapshot ordering this feature targets, so it is accepted as a documented
-     * limitation.
+     * <p>All records of a snapshot share one id, so intra-snapshot order is not preserved. This is
+     * accepted: the default spillable writer collapses a commit's writes through the merge function
+     * to one record per key before flush, and the feature targets cross-snapshot ordering only.
      */
     private static List<ManifestEntry> stampSequenceWithSnapshotId(
             long snapshotId, CommitKind commitKind, List<ManifestEntry> files) {

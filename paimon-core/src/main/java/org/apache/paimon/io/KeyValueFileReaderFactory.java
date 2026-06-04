@@ -172,12 +172,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
         }
 
-        // When snapshot-ordering is enabled, FileStoreCommitImpl stamps the commit snapshot id
-        // into minSequenceNumber for APPEND files. We override each record's sequence number with
-        // that snapshot id so that records from later snapshots always win during merge. COMPACT
-        // files are left untouched: their per-record _SEQUENCE_NUMBER already carries the snapshot
-        // id (transitively, the input records were read through this same override path), so the
-        // file-level minSequenceNumber already reflects the correct snapshot id range.
+        // In snapshot-ordering mode, APPEND files carry the commit snapshot id in
+        // minSequenceNumber (stamped at commit time); override per-record sequence with it so
+        // later snapshots win during merge. COMPACT files already carry the snapshot id in their
+        // per-record _SEQUENCE_NUMBER and are left untouched.
         boolean overrideSequenceWithSnapshotId = false;
         if (snapshotSequenceOrdering) {
             Preconditions.checkState(
