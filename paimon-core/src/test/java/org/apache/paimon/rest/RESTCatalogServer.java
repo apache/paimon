@@ -414,7 +414,7 @@ public class RESTCatalogServer {
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.SNAPSHOTS.equals(resources[3]);
                         boolean isTableVia =
-                                resources.length == 5
+                                resources.length == 6
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.VIA.equals(resources[3]);
                         boolean isTableAuth =
