@@ -153,6 +153,40 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
 
+    def test_unconditional_non_last_matched_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched(update='*'),
+                    WhenMatched(update={'age': 's.age'}, condition='s.age > 10'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('when_matched', str(ctx.exception))
+        self.assertIn('unreachable', str(ctx.exception))
+
+    def test_unconditional_non_last_not_matched_rejected(self):
+        target = self._create_table()
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=target,
+                source=self._source(),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[
+                    WhenNotMatched(insert='*'),
+                    WhenNotMatched(insert='*', condition='s.age > 10'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+        self.assertIn('when_not_matched', str(ctx.exception))
+        self.assertIn('unreachable', str(ctx.exception))
+
     def test_non_de_table_rejected(self):
         target = self._create_table(options={'row-tracking.enabled': 'true'})
         with self.assertRaises(ValueError) as ctx:
