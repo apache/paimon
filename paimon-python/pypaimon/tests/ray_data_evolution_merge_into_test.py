@@ -1496,7 +1496,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['age'], [10])
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
-    def test_multi_clause_duplicate_source_raises(self):
+    def test_multi_clause_duplicate_source_one_actionable(self):
         target = self._create_table()
         self._write(
             target,
@@ -1519,19 +1519,21 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             schema=self.pa_schema,
         )
 
-        with self.assertRaises(Exception) as ctx:
-            merge_into(
-                target=target,
-                source=source,
-                catalog_options=self.catalog_options,
-                on=['id'],
-                when_matched=[
-                    WhenMatched(update='*', condition='s.age > 50'),
-                    WhenMatched(update='*'),
-                ],
-                num_partitions=_TEST_NUM_PARTITIONS,
-            )
-        self.assertIn('multiple source rows', str(ctx.exception))
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched(update='*', condition='s.age > 50'),
+                WhenMatched(update='*', condition='s.age > 80'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['name'], ['x'])
+        self.assertEqual(out['age'], [99])
 
 
 class TargetProjectionTest(unittest.TestCase):
