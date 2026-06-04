@@ -172,7 +172,7 @@ public class ManifestFileSorter {
     /**
      * Full compaction path: totalDeltaFileSize >= sizeTrigger.
      *
-     * <p>Does not build index mapping. sortAndRewriteSection writes all entries (ADD+DELETE merged)
+     * <p>Does not build index mapping. rewriteSection writes all entries (ADD+DELETE merged)
      * together without separating them.
      */
     private static Optional<List<ManifestFileMeta>> tryFullCompaction(
@@ -274,8 +274,8 @@ public class ManifestFileSorter {
     /**
      * Minor compaction path: totalDeltaFileSize < sizeTrigger.
      *
-     * <p>Builds index mapping to preserve original positions. sortAndRewriteSection separates ADD
-     * and DELETE entries, placing ADD at result[minIdx] and DELETE at result[maxIdx].
+     * <p>Builds index mapping to preserve original positions. rewriteSection separates ADD and
+     * DELETE entries, placing ADD at result[minIdx] and DELETE at result[maxIdx].
      */
     private static List<ManifestFileMeta> tryMinorCompaction(
             List<ManifestFileMeta> input,
@@ -744,7 +744,7 @@ public class ManifestFileSorter {
 
             // A single-file section is always handled directly, regardless of the budget.
             if (section.files.size() == 1) {
-                sortAndRewriteSection(
+                rewriteSection(
                         section.files,
                         output,
                         sortNewFiles,
@@ -760,7 +760,7 @@ public class ManifestFileSorter {
                 // wholly.
                 if (currentRewrittenSize + section.totalSize <= maxRewriteSize) {
                     currentRewrittenSize += section.totalSize;
-                    sortAndRewriteSection(
+                    rewriteSection(
                             section.files,
                             output,
                             sortNewFiles,
@@ -840,8 +840,7 @@ public class ManifestFileSorter {
             }
         }
 
-        sortAndRewriteSection(
-                headFiles, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
+        rewriteSection(headFiles, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
 
         if (tailFiles.isEmpty()) {
             return null;
@@ -914,7 +913,7 @@ public class ManifestFileSorter {
             candidates.add(m);
 
             if (candidatesSize >= suggestedMetaSize) {
-                sortAndRewriteSection(
+                rewriteSection(
                         candidates,
                         output,
                         sortNewFiles,
@@ -928,7 +927,7 @@ public class ManifestFileSorter {
         // Flush tail only if delete entries exist or file count >= minCount.
         if (!candidates.isEmpty()) {
             if (!ctx.deleteEntries.isEmpty() || candidates.size() >= suggestedMinMetaCount) {
-                sortAndRewriteSection(
+                rewriteSection(
                         candidates,
                         output,
                         sortNewFiles,
@@ -942,12 +941,12 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Sort and rewrite a section. Dispatches to full or minor compact path.
+     * Rewrite a section. Dispatches to full or minor compact path.
      *
      * <p>sortNewFiles is the same reference as newFilesForAbort, ensuring newly written files are
      * cleaned up on exception by the caller's catch block.
      */
-    private static void sortAndRewriteSection(
+    private static void rewriteSection(
             List<ManifestFileMeta> section,
             RewriteOutput output,
             List<ManifestFileMeta> sortNewFiles,
@@ -963,11 +962,9 @@ public class ManifestFileSorter {
         }
 
         if (ctx.fullCompaction) {
-            sortAndRewriteFull(
-                    section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
+            rewriteFull(section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
         } else {
-            sortAndRewriteMinor(
-                    section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
+            rewriteMinor(section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
         }
     }
 
@@ -975,7 +972,7 @@ public class ManifestFileSorter {
      * Full compaction path: read all surviving entries (ADD merged with DELETE), sort them
      * together, and write to output as a single sorted stream.
      */
-    private static void sortAndRewriteFull(
+    private static void rewriteFull(
             List<ManifestFileMeta> section,
             RewriteOutput output,
             List<ManifestFileMeta> sortNewFiles,
@@ -1022,7 +1019,7 @@ public class ManifestFileSorter {
      * entries into ADD and DELETE within each file, returning a Pair. Results are merged in the
      * main thread.
      */
-    private static void sortAndRewriteMinor(
+    private static void rewriteMinor(
             List<ManifestFileMeta> section,
             RewriteOutput output,
             List<ManifestFileMeta> sortNewFiles,
